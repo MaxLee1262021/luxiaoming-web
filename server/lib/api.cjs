@@ -33,13 +33,13 @@ const PUBLIC_RPC_NAMES = new Set([
 const PUBLIC_PRIVATE_RPC = new Set([
   "bindPhone", "getMyOrders", "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "updateOrderStatus", "submitAfterSale"
 ]);
-const ADMIN_RPC_ACTIONS = { getDashboard: "view", generateMerchantQR: "shopEdit" };
+const ADMIN_RPC_ACTIONS = { getDashboard: "dashboard", generateMerchantQR: "shopEdit" };
 
 const ROLE_ALIASES = { admin: "super", administrator: "super", photographer: "photo" };
 const ROLE_ACTIONS = {
   super: new Set(["*"]),
-  service: new Set(["view", "orderEdit", "assign", "transfer", "cancelOrder", "export"]),
-  finance: new Set(["view", "financeReview", "export"]),
+  service: new Set(["view", "dashboard", "orderEdit", "assign", "transfer", "cancelOrder", "export"]),
+  finance: new Set(["view", "dashboard", "financeReview", "export"]),
   photo: new Set(["view", "shootUpdate"]),
   merchant: new Set(["view", "export"]),
   distributor: new Set(["view", "export"]),
@@ -137,7 +137,7 @@ function hasAction(session, action) {
   if (!actions.has(action)) return false;
   // Every role's baseline `view` capability remains available even when the
   // staff record lists only extra mutable actions (legacy records omit view).
-  if (action === "view") return true;
+  if (action === "view" || action === "dashboard") return true;
   const custom = Array.isArray(session && session.permissions) ? session.permissions.filter(Boolean) : [];
   if (!custom.length || custom.includes("*")) return true;
   return custom.includes(action) || (ACTION_PERMISSION_ALIAS[action] && custom.includes(ACTION_PERMISSION_ALIAS[action]));
@@ -541,9 +541,12 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       if (parts[0] === "dashboard" || (parts[0] === "orders" && parts[1] === "stats") || parts[0] === "home") {
         const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin"); if (!session) return;
+        if (parts[0] === "dashboard" || parts[0] === "orders") {
+          if (!hasAction(session, "dashboard")) return forbidden(res, session, `/api/${parts.join("/")}`);
+          if (parts[0] === "dashboard") return json(res, 200, await source.dashboard());
+          return json(res, 200, await source.orderStats());
+        }
         if (!hasAction(session, "view")) return forbidden(res, session, `/api/${parts.join("/")}`);
-        if (parts[0] === "dashboard") return json(res, 200, await source.dashboard());
-        if (parts[0] === "orders") return json(res, 200, await source.orderStats());
         return json(res, 200, await source.homeData());
       }
       if (parts[0] === "merchant-code" || parts[0] === "merchant-codes") {
