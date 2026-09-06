@@ -536,6 +536,17 @@ async function runSmoke(options = {}) {
       assert.equal([401, 403].includes(result.status), false, "public browsing RPC must not require admin auth");
       assert.ok(result.status >= 200 && result.status < 500, "public browsing RPC must return a handled response");
     });
+    await check(report, "guide RPC aliases remain compatible", async () => {
+      const result = await requestJson(server.baseUrl, "/api/rpc/listGuides", { method: "POST", body: { data: {} } });
+      assert.equal(result.status, 200);
+      assert.equal(result.body && result.body.success, true);
+      const guide = responseRows(result.body)[0];
+      if (guide && (guide.id || guide._id)) {
+        const detail = await requestJson(server.baseUrl, "/api/rpc/getGuide", { method: "POST", body: { data: { id: guide.id || guide._id } } });
+        assert.equal(detail.status, 200);
+        assert.equal(detail.body && detail.body.success, true);
+      }
+    });
     let publicToken = null;
     await check(report, "public RPC login remains anonymous", async () => {
       const result = await requestJson(server.baseUrl, "/api/rpc/login", { method: "POST", body: {} });

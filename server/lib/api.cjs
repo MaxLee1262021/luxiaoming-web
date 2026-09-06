@@ -74,7 +74,8 @@ const ORDER_SERVICE_FIELDS = new Set([
   "photographerId", "status", "customerStatus", "statusLogs", "followRecords", "sourceName", "sourceType",
   "sourceScene", "shopId", "distributorId", "afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId",
   "totalAmount", "price", "priceAdjustReason", "depositPaid", "finalPaid", "finalDiscountAmount", "finalDiscountReason",
-  "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt", "paymentVerify"
+  "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt", "paymentVerify",
+  "riskBlocked", "riskFlag", "frozen", "freezeReason", "riskReason"
 ]);
 const ORDER_FINANCE_FIELDS = new Set([
   "depositFinanceStatus", "finalFinanceStatus", "depositPaid", "finalPaid", "depositPaidAt", "finalPaidAt",
@@ -389,6 +390,11 @@ module.exports = function createApi(source, mode, options = {}) {
         shopCode: merchant ? String(merchant.shopId || "") : "", distributorId: String(candidate.distributorId || ""), agentId: String(candidate.agentId || "")
       };
       const session = await auth.createSession(sessionPayload);
+      // Migrate legacy demo/plain credentials on successful login without
+      // returning or logging the original password.
+      if (candidate.password && !String(candidate.password).startsWith("lxm1$")) {
+        try { await source.update(merchant ? "shops" : "staff", subjectId, { password: hashPassword(password) }); } catch (_) {}
+      }
       return json(res, 200, {
         ok: true,
         role,
@@ -694,6 +700,7 @@ module.exports = function createApi(source, mode, options = {}) {
         const key = session.subjectType === "merchant" ? "shops" : "staff"; const current = await source.get(key, session.subjectId);
         if (!current || !verifyPassword(current.password, oldPassword)) return json(res, 401, { ok: false, error: "原密码不正确" });
         await source.update(key, session.subjectId, { password: hashPassword(newPassword) });
+        try { await source.create("logs", { action: "修改密码", operator: session.account, operatorId: session.subjectId, targetType: key, targetId: session.subjectId, detail: "账号本人修改登录密码", createTime: new Date().toISOString() }); } catch (_) {}
         try { await auth.revokeSession(parseBearer(req)); } catch (_) {}
         return json(res, 200, { ok: true, reauthenticate: true });
       }

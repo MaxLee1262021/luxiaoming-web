@@ -341,6 +341,9 @@ async function persistAccountToCloud(key, row) {
       res = await window.LXM_CLOUD.create(key, doc);
     }
     if (res && res.error) throw new Error(res.error);
+    // Never retain a newly entered plaintext password in the reactive data pool
+    // after the server has acknowledged the hashed write.
+    if (row.password) delete row.password;
     return true;
   } catch (e) {
     ElMessage.error("服务端保存失败，本地改动未生效：" + (e && e.message ? e.message : e));

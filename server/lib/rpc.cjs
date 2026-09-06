@@ -423,7 +423,7 @@ async function rpcLogin(source, data = {}, ctx = {}) {
   const secret = process.env.WX_APP_SECRET || "";
   if (appid && secret && code) {
     try {
-      const r = await wxGetJson(`/sns/jscode2session?appid=${appid}&secret=${secret}&js_code=${code}&grant_type=authorization_code`);
+      const r = await wxGetJson(`/sns/jscode2session?appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`);
       if (r.openid) {
         await source.upsert("userProfiles", r.openid, { openid: r.openid, updateTime: new Date().toISOString() });
         return { success: true, openid: r.openid };
@@ -451,7 +451,7 @@ async function rpcBindPhone(source, data = {}, ctx = {}) {
   let phone = "";
   if (appid && secret && data.code) {
     try {
-      const tokenRes = await wxGetJson(`/cgi-bin/token?grant_type=client_credential&appid=${appid}&secret=${secret}`);
+      const tokenRes = await wxGetJson(`/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}`);
       if (tokenRes.access_token) {
         const phoneRes = await wxPostJson(`/wxa/business/getuserphonenumber?access_token=${tokenRes.access_token}`, { code: data.code });
         phone = (phoneRes && phoneRes.phone_info && phoneRes.phone_info.phoneNumber) || "";
@@ -1013,6 +1013,8 @@ async function rpcCreateBooking(source, data = {}) {
   if (!String(name || "").trim() || !String(phone || "").trim() || !String(date || "").trim() || !String(timeValue || "").trim()) {
     return { success: false, error: "请完整填写姓名、手机号、预约日期和时间" };
   }
+  if (!/^1[3-9]\d{9}$/.test(String(phone).trim())) return { success: false, error: "手机号格式不正确" };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim()) || Number.isNaN(new Date(`${date}T00:00:00+08:00`).getTime())) return { success: false, error: "预约日期格式不正确" };
   const hasBookingItem = !!packageId || !!data.albumId || !!seriesId || normalizedItems.some(item => item && (item.custom === true || item.packageId || item.albumId || item.seriesId));
   if (!hasBookingItem) return { success: false, error: "请选择预约拍摄项目" };
   const src = buildSource({ shopId, scene, codeId, placementType, placementLabel });
@@ -1021,7 +1023,7 @@ async function rpcCreateBooking(source, data = {}) {
   const now = new Date();
   const dateStr = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, "0")}${now.getDate().toString().padStart(2, "0")}`;
   const rand = Math.floor(Math.random() * 10000).toString().padStart(4, "0");
-  const orderNo = `LS${dateStr}${rand}`;
+  let orderNo = `LS${dateStr}${rand}`;
 
   try {
     const resolvedItems = await resolveBookingItems(source, normalizedItems);
@@ -1093,7 +1095,18 @@ async function rpcCreateBooking(source, data = {}) {
       isDeleted: false,
       createTime: new Date().toISOString()
     };
-    const created = await source.create("orders", doc);
+    let created;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        doc.orderNo = orderNo;
+        created = await source.create("orders", doc);
+        break;
+      } catch (error) {
+        if (!error || !["DUPLICATE_RECORD", "ER_DUP_ENTRY"].includes(error.code)) throw error;
+        orderNo = `LS${dateStr}${Math.floor(Math.random() * 1000000).toString().padStart(6, "0")}`;
+      }
+    }
+    if (!created) return { success: false, error: "订单号生成冲突，请稍后重试" };
     return { success: true, orderId: getItemId(created), orderNo };
   } catch (err) {
     return { success: false, error: err.message };

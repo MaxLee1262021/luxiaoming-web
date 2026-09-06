@@ -32,8 +32,12 @@
       staffId: source.staffId || "",
       menus: Array.isArray(source.menus) ? source.menus.slice() : undefined,
       actions: Array.isArray(source.actions) ? source.actions.slice() : undefined,
+      permissions: Array.isArray(source.permissions) ? source.permissions.slice() : undefined,
       scope: source.scope || "",
-      shopId: source.shopId || ""
+      shopId: source.shopId || "",
+      distributorId: source.distributorId || "",
+      agentId: source.agentId || "",
+      expiresAt: source.expiresAt || 0
     };
   }
 

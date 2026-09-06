@@ -117,11 +117,12 @@ function openOrderExceptionDialog(order = state.currentOrder) {
   };
   state.exceptionDialog = true;
 }
-function confirmOrderException() {
+async function confirmOrderException() {
   const order = state.currentOrder;
   const form = state.exceptionForm;
   if (!canUseOrderExceptionTools(order)) return ElMessage.error("只有超管可以提交异常处理");
   if (!String(form.reason || "").trim()) return ElMessage.warning("请填写异常处理原因，便于后续审计追溯");
+  const original = JSON.parse(JSON.stringify(order));
   const before = {
     status: order.status,
     customerStatus: order.customerStatus,
@@ -160,10 +161,32 @@ function confirmOrderException() {
     riskBlocked: !!(order.riskBlocked || order.riskFlag || order.frozen || order.freezeReason),
   };
   const text = `超管异常处理：状"${statusMeta(before.status).label} -> ${statusMeta(after.status).label}；来"${before.sourceType || "-"} -> ${after.sourceType || "-"}；商"${shopName(before.shopId)} -> ${shopName(after.shopId)}；分销"${distributorName(before.distributorId)} -> ${distributorName(after.distributorId)}；原因：${form.reason}`;
-  addOrderTimeline(order, text, currentOperatorName());
-  log("订单异常处理", order.orderNo, text, currentOperatorName(), { module: "订单履约", level: "", objectType: "订单", objectName: order.orderNo, snapshot: JSON.stringify({ before, after }) });
-  state.exceptionDialog = false;
-  ElMessage.success("异常处理已完成，并写入审计日");
+  try {
+    await persistOrderAction(order, "update", {
+      fields: {
+        status: order.status,
+        customerStatus: order.customerStatus,
+        sourceType: order.sourceType,
+        sourceName: order.sourceName,
+        sourceScene: order.sourceScene,
+        shopId: order.shopId,
+        distributorId: order.distributorId,
+        riskBlocked: order.riskBlocked,
+        riskFlag: order.riskFlag,
+        frozen: order.frozen,
+        freezeReason: order.freezeReason,
+        riskReason: order.riskReason,
+      },
+      reason: form.reason,
+    });
+    addOrderTimeline(order, text, currentOperatorName());
+    log("订单异常处理", order.orderNo, text, currentOperatorName(), { module: "订单履约", level: "", objectType: "订单", objectName: order.orderNo, snapshot: JSON.stringify({ before, after }) });
+    state.exceptionDialog = false;
+    ElMessage.success("异常处理已完成，并写入审计日");
+  } catch (_) {
+    Object.keys(order).forEach((key) => { if (!(key in original)) delete order[key]; });
+    Object.assign(order, original);
+  }
 }
 function addOrderContact(type) {
   const order = state.currentOrder;
@@ -373,6 +396,14 @@ async function confirmMoneyEdit(field) {
   const next = Number(state.moneyDraft || 0);
   if (!state.currentOrder.priceAdjustReason) return ElMessage.warning(`请先填写${meta.reason}`);
   const previous = field === "couponAmount" ? Number(state.currentOrder.finalDiscountAmount || 0) : Number(state.currentOrder[field] || 0);
+  const beforeValues = {
+    totalAmount: state.currentOrder.totalAmount,
+    depositPaid: state.currentOrder.depositPaid,
+    finalPaid: state.currentOrder.finalPaid,
+    finalDiscountAmount: state.currentOrder.finalDiscountAmount,
+    finalDiscountReason: state.currentOrder.finalDiscountReason,
+    priceAdjustReason: state.currentOrder.priceAdjustReason,
+  };
   if (field !== "couponAmount") state.currentOrder[field] = next;
   if (field === "couponAmount") {
     const maxCoupon = Math.max(Number(state.currentOrder.totalAmount || 0) - Number(state.currentOrder.depositPaid || 0), 0);
@@ -404,7 +435,9 @@ async function confirmMoneyEdit(field) {
     await persistOrderAction(order, "update", { fields, reason: order.priceAdjustReason || `${meta.label}调整` });
     addOrderTimeline(order, `确认${meta.label}调整 ${money(previous)} 调整为 ${money(next)}${discountText}；原因：${order.priceAdjustReason}`);
     ElMessage.success(`${meta.label}已确认保存`);
-  } catch (_) {}
+  } catch (_) {
+    Object.assign(order, beforeValues);
+  }
 }
 async function confirmPaymentRegistration(field) {
   const order = state.currentOrder;
@@ -417,6 +450,7 @@ async function confirmPaymentRegistration(field) {
   const timeField = field === "depositPaid" ? "depositPaidAt" : "finalPaidAt";
   if (order[statusField] === "待审") return ElMessage.warning(`${moneyFieldMeta(field).label}已提交财务审核，请等待财务确认`);
   if (order[statusField] === "已审") return ElMessage.warning(`${moneyFieldMeta(field).label}已通过财务审核，如需修改请点击改价并填写原因`);
+  const beforeRegistration = { [field]: order[field], [statusField]: order[statusField], [timeField]: order[timeField] };
   if (field === "finalPaid") {
     order.finalPaid = expectedFinalAmount(order);
   }
@@ -430,7 +464,9 @@ async function confirmPaymentRegistration(field) {
     addOrderTimeline(order, `客服确认登记${moneyFieldMeta(field).label} ${money(amount)}，待财务审核`, currentOperatorName());
     log("登记收款", order.orderNo, `${moneyFieldMeta(field).label} ${money(amount)} 待财务审核`);
     ElMessage.success(`${moneyFieldMeta(field).label}已登记，待财务审核确认`);
-  } catch (_) {}
+  } catch (_) {
+    Object.assign(order, beforeRegistration);
+  }
 }
 function confirmFinalPaymentWithCheck() {
   const order = state.currentOrder;
