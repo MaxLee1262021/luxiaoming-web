@@ -270,7 +270,7 @@ async function restoreSession() {
   }
 }
 
-function handleAuthExpired() {
+function handleAuthExpired(silent = false) {
   if (!state.authed) return;
   state.authed = false;
   state.authSource = "";
@@ -284,7 +284,7 @@ function handleAuthExpired() {
   state.role = "super";
   state.previewRole = "super";
   state.authNotice = "登录已过期，请重新登录";
-  ElMessage.error(state.authNotice);
+  if (!silent) ElMessage.error(state.authNotice);
 }
 
 // 打开自助改密弹窗（顶栏用户菜单入口），清空上一次输入。
@@ -384,8 +384,14 @@ async function changePassword() {
     }
     if (j && j.ok === true) {
       cp.open = false;
+      if (j.reauthenticate) {
+        // Password rotation revokes the old server session; require a fresh
+        // login instead of leaving the shell in a token-less half-auth state.
+        window.LXM_AUTH?.clearSession?.();
+        handleAuthExpired(true);
+      }
       log("修改密码", "后台", "本人通过「修改密码」入口更换登录密码", currentOperatorName(), { level: "中" });
-      return ElMessage.success("密码修改成功，请牢记新密码");
+      return ElMessage.success(j.reauthenticate ? "密码修改成功，请重新登录" : "密码修改成功，请牢记新密码");
     }
     if (isExplicitDemoMode() && !(window.LXM_API_STATE && window.LXM_API_STATE.reachable === true) && !j) {
       // 离线演示模式：直接改本地集合里的明文密码（仅演示，不落库）。
@@ -465,7 +471,7 @@ function switchRole(key) {
   log("切换角色", roleName(key), "超级管理员预览角色后");
 }
 
-window.addEventListener("lxm-auth-expired", handleAuthExpired);
+window.addEventListener("lxm-auth-expired", () => handleAuthExpired(false));
 window.addEventListener("lxm-server-status", (event) => {
   state.serverReachable = !!(event && event.detail && event.detail.reachable);
 });
