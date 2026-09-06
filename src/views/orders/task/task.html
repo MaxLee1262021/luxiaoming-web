@@ -1,0 +1,46 @@
+<div class="table-card">
+  <div class="table-title">
+    <div>
+      <strong>我的拍摄任务</strong>
+      <p>摄影师只能处理分配给自己的任务；开始拍摄、标记完成、取消接单均按订单状态单向推进并写入时间线。</p>
+    </div>
+  </div>
+  <el-table :data="pagedList('tasks', taskOrders)" stripe border max-height="calc(100vh - 420px)" empty-text="暂无待办拍摄任务，有新分配的拍摄会出现在这里" @row-click="(row)=>openOrder(row,{readonly:true})">
+    <el-table-column prop="orderNo" label="订单号" width="140" />
+    <el-table-column prop="customer" label="客户" width="120" />
+    <el-table-column prop="appointmentAt" label="预约时间" width="170" />
+    <el-table-column label="商品" min-width="180">
+      <template #default="{row}">{{ productName(row.products[0]) }}</template>
+    </el-table-column>
+    <el-table-column label="状态" width="150">
+      <template #default="{row}">
+        <span class="status-dot" :style="{background:orderWorkflowStatusMeta(row).color}"></span>{{ orderWorkflowStatusLabel(row) }}
+        <div v-if="afterSaleBadge(row)" class="after-sale-badge">{{ afterSaleBadge(row) }}</div>
+      </template>
+    </el-table-column>
+    <el-table-column fixed="right" label="操作" width="330">
+      <template #default="{row}">
+        <el-button link @click.stop="openOrder(row,{readonly:true})">查看</el-button>
+        <el-tooltip :content="taskActionDisabledReason(row,'start')" placement="top" :disabled="canStartTask(row)">
+          <span class="disabled-tip-wrap">
+            <el-button link :disabled="!canStartTask(row)" @click.stop="updateTaskStatus(row,'shooting')">开始拍摄</el-button>
+          </span>
+        </el-tooltip>
+        <el-tooltip :content="taskActionDisabledReason(row,'complete')" placement="top" :disabled="canCompleteTask(row)">
+          <span class="disabled-tip-wrap">
+            <el-button link :disabled="!canCompleteTask(row)" @click.stop="updateTaskStatus(row,'completed')">标记完成</el-button>
+          </span>
+        </el-tooltip>
+        <el-tooltip :content="taskActionDisabledReason(row,'reject')" placement="top" :disabled="canRejectTask(row)">
+          <span class="disabled-tip-wrap">
+            <el-button link type="warning" :disabled="!canRejectTask(row)" @click.stop="rejectTask(row)">取消接单</el-button>
+          </span>
+        </el-tooltip>
+      </template>
+    </el-table-column>
+  </el-table>
+  <div class="table-pager" v-if="taskOrders.length > 0">
+    <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="taskOrders.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('tasks').size" :current-page="pager('tasks').page" @current-change="pager('tasks').page = $event" @size-change="onListPageSizeChange('tasks', $event)" />
+    <span class="pager-info">第 {{ Math.min(taskOrders.length, (pager('tasks').page-1)*pager('tasks').size+1) }}–{{ Math.min(taskOrders.length, pager('tasks').page*pager('tasks').size) }} 条 / 共 {{ taskOrders.length }} 条</span>
+  </div>
+</div>

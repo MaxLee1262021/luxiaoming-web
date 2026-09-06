@@ -1,0 +1,1661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>鹿小鸣旅拍 · 管理后台 UI 设计稿 v3（权限边界 + 真实订单中心）</title>
+<style>
+  :root{
+    /* 鹿小鸣品牌令牌（暖胶片国风）——后台统一皮肤 */
+    --lxm-cream:#FFF7EF; --lxm-ink:#2A211B; --lxm-red:#EE2C2C; --lxm-orange:#FF8D52;
+    --lxm-gold:#FFD36A; --lxm-surface:#FFFFFF; --lxm-red-ink:#CC1F1F; --lxm-muted:#766459;
+    --lxm-gray-50:#FBF7F2; --lxm-gray-100:#F4ECE3; --lxm-gray-200:#E9DDD0; --lxm-gray-300:#D8C7B5;
+    --lxm-gray-400:#BBA68F; --lxm-gray-650:#8A7765; --lxm-gray-900:#3A2E26;
+    --lxm-brand-grad:linear-gradient(135deg,#EE2C2C 0%,#FF8D52 100%);
+    --lxm-brand-soft:rgba(238,44,44,.08);
+    --lxm-shadow-sm:0 1px 3px rgba(42,33,27,.06); --lxm-shadow-md:0 6px 18px rgba(42,33,27,.10);
+    --lxm-radius:12px; --lxm-radius-sm:8px;
+    --lxm-fz-xs:12px;--lxm-fz-sm:13px;--lxm-fz-base:14px;--lxm-fz-lg:16px;--lxm-fz-xl:20px;--lxm-fz-2xl:24px;
+    --lxm-sidebar-w:248px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'PingFang SC','Microsoft YaHei',system-ui,sans-serif;background:var(--lxm-gray-50);color:var(--lxm-ink);font-size:var(--lxm-fz-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+  /* ===== 登录屏 ===== */
+  .login{position:fixed;inset:0;background:radial-gradient(120% 120% at 50% 0%,#FFF7EF 0%,#F4ECE3 60%,#E9DDD0 100%);display:flex;align-items:center;justify-content:center;z-index:100;overflow-y:auto;padding:24px}
+  .login.hide{display:none}
+  .login-card{width:420px;max-width:94vw;background:var(--lxm-surface);border-radius:18px;box-shadow:var(--lxm-shadow-md);padding:34px 32px 28px;text-align:center;border:1px solid var(--lxm-gray-200)}
+  .login .seal{width:60px;height:60px;border-radius:16px;background:var(--lxm-brand-grad);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:32px;box-shadow:var(--lxm-shadow-sm);margin:0 auto 14px}
+  .login h2{font-size:var(--lxm-fz-2xl);font-weight:700}
+  .login .sub{font-size:13px;color:var(--lxm-muted);margin:6px 0 22px}
+  .login .field{text-align:left;margin-bottom:13px}
+  .login .field label{display:block;font-size:12px;font-weight:600;color:var(--lxm-gray-650);margin-bottom:6px}
+  .login .field input{width:100%;border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:11px 13px;font-size:14px;font-family:inherit;background:var(--lxm-gray-50)}
+  .login .field input:focus{outline:none;border-color:var(--lxm-red);background:#fff}
+  .login .btn-login{width:100%;margin-top:6px;min-height:44px;background:var(--lxm-brand-grad);color:#fff;border:none;border-radius:var(--lxm-radius-sm);font-size:15px;font-weight:700;cursor:pointer;box-shadow:var(--lxm-shadow-sm)}
+  .login .btn-login:hover{filter:brightness(1.05)}
+  .login .wx-tip{margin-top:14px;font-size:12px;color:var(--lxm-muted);display:flex;align-items:center;gap:6px;justify-content:center}
+  .login .foot{margin-top:18px;font-size:11px;color:var(--lxm-gray-400)}
+  .login .role-quick{margin-top:18px;border-top:1px dashed var(--lxm-gray-200);padding-top:16px;text-align:left}
+  .login .role-quick .tt{font-size:12px;font-weight:600;color:var(--lxm-gray-650);margin-bottom:10px}
+  .login .role-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .login .role-btn{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);background:var(--lxm-gray-50);cursor:pointer;font-size:13px;font-weight:600;transition:.15s;text-align:left}
+  .login .role-btn:hover{border-color:var(--lxm-red);background:var(--lxm-brand-soft)}
+  .login .role-btn .d{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  /* ===== 布局骨架 ===== */
+  .app{display:flex;min-height:100vh}
+  .sidebar{width:var(--lxm-sidebar-w);flex:0 0 var(--lxm-sidebar-w);background:var(--lxm-surface);border-right:1px solid var(--lxm-gray-200);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+  .brand{padding:16px 16px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--lxm-gray-100)}
+  .brand .seal{width:34px;height:34px;border-radius:9px;background:var(--lxm-brand-grad);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;box-shadow:var(--lxm-shadow-sm)}
+  .brand .name{font-weight:700;font-size:var(--lxm-fz-lg);letter-spacing:.5px}
+  .brand .sub{font-size:11px;color:var(--lxm-muted)}
+  .nav{padding:8px 10px 20px;flex:1}
+  .nav-group{margin-top:12px}
+  .nav-group>.label{font-size:11px;color:var(--lxm-gray-400);font-weight:600;padding:0 10px 5px;letter-spacing:1px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--lxm-radius-sm);color:var(--lxm-gray-650);cursor:pointer;font-size:var(--lxm-fz-base);transition:.15s;position:relative;margin-bottom:2px;min-height:42px}
+  .nav-item:hover{background:var(--lxm-gray-50);color:var(--lxm-ink)}
+  .nav-item.active{background:var(--lxm-brand-soft);color:var(--lxm-red-ink);font-weight:600}
+  .nav-item.active::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:3px;background:var(--lxm-brand-grad)}
+  .nav-item .ico{width:18px;text-align:center;opacity:.85}
+  .nav-item .dot{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--lxm-red)}
+  .nav-item small{display:block;font-size:11px;color:var(--lxm-muted);font-weight:400;margin-top:1px}
+  /* ===== 主区域 ===== */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:60px;background:var(--lxm-surface);border-bottom:1px solid var(--lxm-gray-200);display:flex;align-items:center;gap:14px;padding:0 24px;position:sticky;top:0;z-index:5}
+  .topbar h1{font-size:var(--lxm-fz-xl);font-weight:700}
+  .topbar .crumb{font-size:12px;color:var(--lxm-muted);margin-top:1px}
+  .topbar .spacer{flex:1}
+  .topbar .wx-badge{display:flex;align-items:center;gap:6px;background:#E6F7EE;color:#1a8a55;border-radius:20px;padding:5px 12px;font-size:12px;font-weight:600}
+  .search{display:flex;align-items:center;gap:8px;background:var(--lxm-gray-50);border:1px solid var(--lxm-gray-200);border-radius:20px;padding:7px 14px;width:220px;color:var(--lxm-muted);font-size:13px}
+  .bell{position:relative;font-size:18px;cursor:pointer}
+  .bell .n{position:absolute;top:-4px;right:-6px;background:var(--lxm-red);color:#fff;font-size:10px;border-radius:10px;padding:1px 5px;font-weight:700}
+  .avatar{width:34px;height:34px;border-radius:50%;background:var(--lxm-gray-200);display:flex;align-items:center;justify-content:center;font-weight:600;color:var(--lxm-gray-650);cursor:pointer}
+  .role-switch{display:flex;align-items:center;gap:6px;background:var(--lxm-gray-50);border:1px solid var(--lxm-gray-200);border-radius:20px;padding:5px 10px;font-size:12px;cursor:pointer;font-weight:600}
+  .role-switch:hover{border-color:var(--lxm-red)}
+  .content{padding:22px;overflow-y:auto}
+  .note{background:#FFF9E8;border:1px solid var(--lxm-gold);border-radius:var(--lxm-radius-sm);padding:11px 15px;font-size:13px;color:#7a5a12;margin-bottom:16px;display:flex;gap:8px;align-items:flex-start}
+  .note b{color:var(--lxm-red-ink)}
+  .note.blue{background:#EAF3FF;border-color:#9CC4F5;color:#1c4f86}
+  .note.blue b{color:#1c4f86}
+  /* ===== 统计卡 ===== */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:18px}
+  .stat{background:var(--lxm-surface);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius);padding:15px;box-shadow:var(--lxm-shadow-sm)}
+  .stat .k{font-size:12px;color:var(--lxm-muted)}
+  .stat .v{font-size:var(--lxm-fz-2xl);font-weight:700;margin-top:3px}
+  .stat .v.red{color:var(--lxm-red-ink)} .stat .v.gold{color:#b8860b} .stat .v.green{color:#1a8a55}
+  .stat .delta{font-size:11px;margin-top:3px;color:var(--lxm-gray-650)}
+  /* ===== 工具栏 ===== */
+  .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:0 16px;min-height:40px;border-radius:var(--lxm-radius-sm);border:1px solid transparent;font-size:13px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
+  .btn-primary{background:var(--lxm-brand-grad);color:#fff;box-shadow:var(--lxm-shadow-sm)}
+  .btn-primary:hover{filter:brightness(1.05);transform:translateY(-1px)}
+  .btn-ghost{background:var(--lxm-surface);border-color:var(--lxm-gray-200);color:var(--lxm-ink)}
+  .btn-ghost:hover{background:var(--lxm-gray-50)}
+  .btn-danger{background:#fff;color:var(--lxm-red-ink);border-color:#F6C3B5}
+  .btn-danger:hover{background:#FDE7E0}
+  .btn-sm{padding:0 12px;min-height:32px;font-size:12px}
+  .btn:disabled{opacity:.45;cursor:not-allowed;pointer-events:none}
+  .input{border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:9px 12px;font-size:13px;font-family:inherit;background:var(--lxm-surface);min-width:160px}
+  .input:focus{outline:none;border-color:var(--lxm-red)}
+  .select{border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:9px 12px;font-size:13px;font-family:inherit;background:var(--lxm-surface)}
+  .select:focus{outline:none;border-color:var(--lxm-red)}
+  /* ===== 表格 ===== */
+  .table{background:var(--lxm-surface);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius);overflow:hidden;box-shadow:var(--lxm-shadow-sm)}
+  .table table{width:100%;border-collapse:collapse}
+  .table th{text-align:left;font-size:12px;color:var(--lxm-muted);font-weight:600;padding:11px 14px;background:var(--lxm-gray-50);border-bottom:1px solid var(--lxm-gray-200);white-space:nowrap}
+  .table td{padding:12px 14px;border-bottom:1px solid var(--lxm-gray-100);font-size:13px;vertical-align:middle}
+  .table tbody tr:last-child td{border-bottom:none}
+  .table tbody tr{cursor:pointer}
+  .table tbody tr:hover td{background:var(--lxm-gray-50)}
+  .cover{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,var(--lxm-gold),var(--lxm-orange));display:flex;align-items:center;justify-content:center;color:#fff;font-size:17px;flex:0 0 auto}
+  .title-cell{font-weight:600}
+  .title-cell small{display:block;color:var(--lxm-muted);font-weight:400;font-size:11px}
+  .tag{display:inline-block;background:#FFF3DA;color:#9a6b08;border:1px solid #F4D79A;border-radius:20px;padding:2px 9px;font-size:11px;margin:2px 4px 2px 0}
+  .tag.series{background:#FDE7E0;color:var(--lxm-red-ink);border-color:#F6C3B5}
+  .tag.blue{background:#EAF3FF;color:#1c4f86;border-color:#9CC4F5}
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+  .badge.on{background:#E6F7EE;color:#1a8a55} .badge.off{background:var(--lxm-gray-100);color:var(--lxm-gray-650)}
+  .badge.warn{background:#FFF3DA;color:#9a6b08} .badge.red{background:#FDE7E0;color:var(--lxm-red-ink)}
+  .badge.blue{background:#EAF3FF;color:#1c4f86}
+  .mkbadge{display:inline-flex;align-items:center;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700}
+  .mk-爆款{background:#FDE7E0;color:#CC1F1F}
+  .mk-主推{background:#FFE9D6;color:#D2691E}
+  .mk-热门{background:#FFF3DA;color:#9a6b08}
+  .grp-title{font-size:12px;font-weight:700;color:var(--lxm-c-muted,#766459);margin:14px 0 6px;letter-spacing:.5px}
+  .decor-wrap{display:grid;grid-template-columns:1fr 310px;gap:22px;align-items:start}
+  @media(max-width:1100px){.decor-wrap{grid-template-columns:1fr}}
+  .phone{background:#1c1714;border-radius:28px;padding:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);max-width:290px;margin:0 auto}
+  .phone-screen{background:#FFF7EF;border-radius:20px;overflow:hidden;min-height:520px}
+  .phone-banner{height:118px;background:linear-gradient(135deg,#EE2C2C,#FF8D52);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px}
+  .phone-mod{display:flex;justify-content:space-between;padding:11px 13px;border-bottom:1px solid #f0e6da;font-size:12px;color:#2A211B}
+  .phone-mod .s{color:#9a8a7d}
+  .banner-row{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--lxm-gray-200,#eee);border-radius:10px;margin-bottom:8px}
+  .banner-row .thumb{width:54px;height:40px;border-radius:6px;background:linear-gradient(135deg,#EE2C2C,#FF8D52);flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px}
+  .mod-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--lxm-gray-200,#eee);border-radius:10px;margin-bottom:8px}
+  .badge .d{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .switch{width:40px;height:22px;border-radius:20px;background:var(--lxm-gray-300);position:relative;cursor:pointer;transition:.2s;display:inline-block}
+  .switch.on{background:linear-gradient(135deg,#EE2C2C,#FF8D52)}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.2s}
+  .switch.on::after{left:20px}
+  .row-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .link{color:var(--lxm-red-ink);cursor:pointer;font-size:13px;font-weight:500}
+  .link:hover{text-decoration:underline}
+  .link.ghost{color:var(--lxm-gray-650)}
+  .muted{color:var(--lxm-muted)}
+  .view{display:none} .view.active{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  /* ===== 弹窗 / 抽屉 ===== */
+  .mask{position:fixed;inset:0;background:rgba(42,33,27,.45);display:none;align-items:center;justify-content:center;z-index:50}
+  .mask.show{display:flex}
+  .modal{background:var(--lxm-surface);width:600px;max-width:94vw;border-radius:16px;box-shadow:var(--lxm-shadow-md);overflow:hidden;max-height:92vh;display:flex;flex-direction:column}
+  .modal header{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;border-bottom:1px solid var(--lxm-gray-100)}
+  .modal header h3{font-size:var(--lxm-fz-lg);font-weight:700}
+  .modal .x{cursor:pointer;color:var(--lxm-muted);font-size:20px;line-height:1}
+  .modal .body{padding:18px 22px;overflow-y:auto}
+  .modal footer{padding:13px 22px;border-top:1px solid var(--lxm-gray-100);display:flex;justify-content:flex-end;gap:10px}
+  .field{margin-bottom:15px}
+  .field label{display:block;font-size:12px;font-weight:600;color:var(--lxm-gray-650);margin-bottom:6px}
+  .field .hint{font-size:11px;color:var(--lxm-muted);margin-top:4px}
+  .field input,.field textarea,.field select{width:100%;border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:9px 12px;font-size:13px;font-family:inherit;background:var(--lxm-surface)}
+  .field input:focus,.field textarea:focus,.field select:focus{outline:none;border-color:var(--lxm-red)}
+  .field textarea{resize:vertical;min-height:60px}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+  .chip-input{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:7px 10px;min-height:40px}
+  .chip-input input{border:none;outline:none;flex:1;min-width:80px;font-size:13px;font-family:inherit}
+  .chip{background:#FFF3DA;color:#9a6b08;border-radius:20px;padding:3px 10px;font-size:12px;display:inline-flex;align-items:center;gap:5px}
+  .chip x{cursor:pointer;font-weight:700}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px dashed var(--lxm-gray-100)}
+  .toggle-row:last-child{border-bottom:none}
+  .mini-cover{width:100%;height:110px;border-radius:10px;background:linear-gradient(135deg,var(--lxm-gold),var(--lxm-orange));display:flex;align-items:center;justify-content:center;color:#fff;font-size:28px;margin-bottom:8px}
+  /* ===== 照片留影编辑器（左列表·中表单·右手机预览） ===== */
+  .album-editor{display:grid;grid-template-columns:270px 1fr 300px;gap:18px;align-items:start}
+  @media(max-width:1180px){.album-editor{grid-template-columns:1fr}}
+  .ae-list{background:var(--lxm-surface);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius);overflow:hidden;box-shadow:var(--lxm-shadow-sm)}
+  .ae-list .head{display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid var(--lxm-gray-100)}
+  .ae-item{display:flex;gap:10px;align-items:center;padding:11px 15px;border-bottom:1px solid var(--lxm-gray-100);cursor:pointer}
+  .ae-item:last-child{border-bottom:none}
+  .ae-item:hover{background:var(--lxm-gray-50)}
+  .ae-item.active{background:#FFF3DA;border-left:3px solid var(--lxm-red);padding-left:12px}
+  .ae-item .ci{width:38px;height:38px;border-radius:8px;background:linear-gradient(135deg,var(--lxm-gold),var(--lxm-orange));display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;flex:none}
+  .ae-item .nm{font-weight:600;font-size:13px;color:var(--lxm-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ae-item .sub{font-size:11px;color:var(--lxm-muted)}
+  .ae-form{background:var(--lxm-surface);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius);padding:18px;box-shadow:var(--lxm-shadow-sm)}
+  .ae-form .ff{margin-bottom:14px}
+  .ae-form .ff label{display:block;font-size:12px;font-weight:600;color:var(--lxm-gray-650);margin-bottom:6px}
+  .ae-form .ff input,.ae-form .ff textarea,.ae-form .ff select{width:100%;border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:9px 12px;font-size:13px;font-family:inherit;background:var(--lxm-surface)}
+  .ae-form .ff input:focus,.ae-form .ff textarea:focus,.ae-form .ff select:focus{outline:none;border-color:var(--lxm-red)}
+  .ae-form .ff textarea{resize:vertical;min-height:64px}
+  .ae-preview{position:sticky;top:14px}
+  .pd-card{display:flex;gap:10px;padding:10px;background:#fff;border-radius:12px;margin:10px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+  .pd-cover{width:62px;height:62px;border-radius:10px;background:linear-gradient(135deg,#EE2C2C,#FF8D52);display:flex;align-items:center;justify-content:center;color:#fff;font-size:24px;flex:none;position:relative}
+  .pd-cover.off{filter:grayscale(1);opacity:.55}
+  .pd-cover .corner{position:absolute;top:0;left:0;background:#CC1F1F;color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px 0 10px 0}
+  .pd-title{font-weight:700;font-size:13px;color:#2A211B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pd-price{color:#CC1F1F;font-weight:700;font-size:14px;margin-top:3px}
+  .pd-offline{font-size:11px;margin-top:3px}
+  .pd-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:0 10px 10px}
+  .pd-grid .pc{aspect-ratio:1;border-radius:8px;background:linear-gradient(135deg,#FFE9D6,#FFD36A);display:flex;align-items:center;justify-content:center;font-size:16px}
+  .pd-seriesbar{background:#fff;margin:10px;border-radius:12px;padding:10px 12px;box-shadow:0 2px 8px rgba(0,0,0,.04)}
+  .pd-notes{font-size:11px;color:#766459;line-height:1.5;padding:0 14px 14px}
+  .pd-offbar{text-align:center;color:#9a8a7d;font-size:11px;padding:16px}
+  /* 旅拍套餐编辑器预览补充 */
+  .pk-origin{color:#9a8a7d;font-size:11px;font-weight:600;text-decoration:line-through;margin-left:6px}
+  .pk-items{display:flex;flex-direction:column;gap:6px}
+  .pk-item{display:flex;align-items:center;gap:8px;font-size:12px;color:#2A211B;padding:5px 8px;background:#FFF7EF;border-radius:8px}
+  .pk-ico{font-size:15px;flex:none}
+  .pk-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pk-p{color:#CC1F1F;font-weight:700;flex:none}
+  .pk-items-edit{display:flex;flex-direction:column;gap:8px}
+  .pk-row{display:flex;gap:6px;align-items:center}
+  .pk-row select{flex:none;width:84px;border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:7px 8px;font-size:12px;font-family:inherit;background:var(--lxm-surface)}
+  .pk-row input{flex:1;border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:7px 10px;font-size:12px;font-family:inherit;background:var(--lxm-surface);min-width:0}
+  .pk-row .pk-price{flex:none;width:64px}
+  .pk-row .link{font-size:13px;flex:none}
+  /* 视频 / 周边 / 攻略 / 打卡点 / 风格 / 城市 编辑器预览补充 */
+  .mk-新{background:#E6F7EE;color:#1a8a55}
+  .vd-play{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:20px;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5)}
+  .vd-badge{position:absolute;right:4px;bottom:4px;background:rgba(0,0,0,.55);color:#fff;font-size:9px;font-weight:600;padding:1px 5px;border-radius:6px}
+  .badge-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+  .gd-cat{display:inline-block;font-size:10px;background:#EAF3FF;color:#1c4f86;padding:2px 8px;border-radius:10px;margin-top:2px}
+  .gd-top{display:inline-block;font-size:10px;background:#FFE9D6;color:#9a6b08;padding:2px 8px;border-radius:10px;margin-top:2px;font-weight:700}
+  .sp-tag{display:inline-block;font-size:10px;background:#FFF3DA;color:#9a6b08;padding:2px 8px;border-radius:10px;margin:3px 4px 0 0}
+  .st-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 12px;border-radius:20px;background:#FFF7EF;border:1px solid var(--lxm-gray-200);color:#2A211B}
+  .st-chip.hide{opacity:.5;text-decoration:line-through}
+  .ct-tab{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding:7px 14px;border-radius:20px;background:linear-gradient(135deg,#EE2C2C,#FF8D52);color:#fff;font-weight:700}
+  .ct-tab.off{background:#e9e2da;color:#9a8a7d;font-weight:600}
+  /* ===== 配置中心入口状态 ===== */
+  .cfg-stack{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+  .cfg-status{font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px}
+  .cfg-status.on{background:#E6F7EE;color:#1a8a55}
+  .cfg-status.off{background:#FFF3DA;color:#9a6b08}
+  .cfg-progress{font-size:12px;color:var(--lxm-muted);margin:-2px 0 14px}
+  .conn-card{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;font-size:13px;margin:4px 0 16px;border:1px solid}
+  .conn-card.demo{border-color:#e7e1d8;background:#faf6ef;color:var(--lxm-muted)}
+  .conn-card.on{border-color:#bfe9cf;background:#E6F7EE;color:#1a8a55}
+  .conn-card.off{border-color:#ffd1cf;background:#FFF1F0;color:#CC1F1F}
+  .conn-card .dot{width:9px;height:9px;border-radius:50%;background:#cbd5e1;flex:none}
+  .conn-card .dot.on{background:#1a8a55;box-shadow:0 0 0 3px rgba(26,138,85,.2)}
+  .conn-card .dot.off{background:#CC1F1F}
+  /* 时间线 */
+  .timeline{position:relative;padding-left:18px}
+  .timeline::before{content:"";position:absolute;left:5px;top:4px;bottom:4px;width:2px;background:var(--lxm-gray-200)}
+  .timeline .ti{position:relative;padding:0 0 13px 4px}
+  .timeline .ti::before{content:"";position:absolute;left:-16px;top:4px;width:10px;height:10px;border-radius:50%;background:var(--lxm-orange);border:2px solid #fff;box-shadow:0 0 0 1px var(--lxm-gray-200)}
+  .timeline .ti .t{font-size:11px;color:var(--lxm-muted)}
+  .timeline .ti .c{font-size:13px;margin-top:2px}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:480px;max-width:94vw;background:var(--lxm-surface);box-shadow:-6px 0 24px rgba(42,33,27,.12);transform:translateX(100%);transition:transform .28s ease;z-index:60;display:flex;flex-direction:column}
+  .drawer.show{transform:none}
+  .drawer header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--lxm-gray-100)}
+  .drawer header h3{font-size:var(--lxm-fz-lg);font-weight:700}
+  .drawer .x{cursor:pointer;font-size:20px;color:var(--lxm-muted)}
+  .drawer .dbody{padding:16px 20px;overflow-y:auto;flex:1}
+  .drawer .dfoot{padding:13px 20px;border-top:1px solid var(--lxm-gray-100);display:flex;gap:8px;flex-wrap:wrap}
+  .kv{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px dashed var(--lxm-gray-100);font-size:13px}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--lxm-muted)} .kv .v{font-weight:600;text-align:right}
+  .sectitle{font-size:12px;font-weight:700;color:var(--lxm-gray-650);margin:16px 0 7px;letter-spacing:.5px}
+  /* 权限矩阵 / 角色 */
+  .role-pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;background:var(--lxm-brand-soft);color:var(--lxm-red-ink)}
+  .role-pill.cs{background:#EAF3FF;color:#1c4f86} .role-pill.fin{background:#E6F7EE;color:#1a8a55}
+  .role-pill.ph{background:#F3E9FB;color:#7B3FA0} .role-pill.mc{background:#FFF3DA;color:#9a6b08}
+  .role-pill.dt{background:#E0F2F7;color:#1c6b86} .role-pill.ct{background:#FDE7E0;color:var(--lxm-red-ink)}
+  /* 订单中心特有 */
+  .alert-tabs{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .alert-tabs .at{display:flex;align-items:center;gap:7px;padding:9px 14px;border:1px solid var(--lxm-gray-200);border-radius:24px;background:var(--lxm-surface);cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+  .alert-tabs .at:hover{border-color:var(--lxm-red)}
+  .alert-tabs .at.active{background:var(--lxm-brand-soft);border-color:var(--lxm-red);color:var(--lxm-red-ink)}
+  .alert-tabs .at .dot{width:8px;height:8px;border-radius:50%}
+  .alert-tabs .at strong{font-size:12px;color:var(--lxm-muted)}
+  .scope-bar{display:flex;align-items:center;gap:10px;background:#F3E9FB;border:1px solid #E2CFEF;border-radius:var(--lxm-radius-sm);padding:9px 14px;font-size:12px;color:#5b3a78;margin-bottom:14px}
+  .scope-bar b{color:#7B3FA0}
+  .batch-bar{display:flex;align-items:center;gap:10px;background:var(--lxm-cream);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:9px 14px;margin-bottom:14px;flex-wrap:wrap;font-size:12px}
+  .batch-bar strong{font-size:13px}
+  .summary{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
+  .summary div{background:var(--lxm-surface);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius-sm);padding:10px 13px}
+  .summary span{display:block;font-size:11px;color:var(--lxm-muted)}
+  .summary strong{font-size:var(--lxm-fz-lg);font-weight:700}
+  .placeholder{padding:60px 30px;text-align:center;color:var(--lxm-muted)}
+  .placeholder .big{font-size:46px;margin-bottom:10px}
+  .placeholder .pill{display:inline-block;background:var(--lxm-brand-soft);color:var(--lxm-red-ink);border-radius:20px;padding:3px 12px;font-size:12px;font-weight:600;margin-bottom:12px}
+  .perm-note{background:#F3E9FB;border:1px solid #E2CFEF;border-radius:var(--lxm-radius-sm);padding:10px 14px;font-size:12px;color:#5b3a78;margin-bottom:14px;display:flex;gap:8px;align-items:flex-start}
+  .perm-note b{color:#7B3FA0}
+  .empty{padding:46px;text-align:center;color:var(--lxm-muted)}
+  .empty .big{font-size:38px;margin-bottom:8px}
+  /* ===== 小程序数据配置中心 · 首页总览卡片 ===== */
+  .config-hub{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  @media(max-width:1280px){.config-hub{grid-template-columns:repeat(3,1fr)}}
+  @media(max-width:900px){.config-hub{grid-template-columns:repeat(2,1fr)}}
+  .cfg-card{background:var(--lxm-surface);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius);padding:16px;box-shadow:var(--lxm-shadow-sm);cursor:pointer;transition:.18s;position:relative;overflow:hidden;min-height:148px;display:flex;flex-direction:column}
+  .cfg-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--lxm-brand-grad);opacity:0;transition:.18s}
+  .cfg-card:hover{transform:translateY(-3px);box-shadow:var(--lxm-shadow-md);border-color:var(--lxm-gray-300)}
+  .cfg-card:hover::before{opacity:1}
+  .cfg-top{display:flex;align-items:center;justify-content:space-between}
+  .cfg-ico{width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:20px}
+  .cfg-cnt{font-size:11px;font-weight:700;color:var(--lxm-gray-650);background:var(--lxm-gray-50);border:1px solid var(--lxm-gray-200);border-radius:20px;padding:2px 10px}
+  .cfg-name{font-size:var(--lxm-fz-lg);font-weight:700;margin-top:12px}
+  .cfg-desc{font-size:12px;color:var(--lxm-muted);margin-top:5px;line-height:1.5;flex:1}
+  .cfg-go{font-size:12px;font-weight:600;color:var(--lxm-red-ink);margin-top:10px}
+  /* 我的门店（合作方专属） */
+  .store-card{display:flex;align-items:center;gap:16px;background:linear-gradient(120deg,#FFF7EF,#FFF1E4);border:1px solid var(--lxm-gray-200);border-radius:var(--lxm-radius);padding:18px 20px;margin-bottom:18px}
+  .store-cover{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,var(--lxm-c-red),var(--lxm-c-orange));display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0}
+  .store-info{flex:1;min-width:0}
+  .store-name{font-size:var(--lxm-fz-2xl);font-weight:800;display:flex;align-items:center;gap:10px}
+  .store-meta{font-size:12px;color:var(--lxm-gray-650);margin-top:4px}
+  .store-meta.muted{color:var(--lxm-muted)}
+  .store-actions{flex-shrink:0}
+</style>
+</head>
+<body>
+
+<!-- ============ 登录屏 ============ -->
+<div class="login" id="loginScreen">
+  <div class="login-card">
+    <div class="seal">鹿</div>
+    <h2>鹿小鸣旅拍</h2>
+    <div class="sub">管理后台 · 运营 / 订单 / 商品 / 财务</div>
+    <div class="field"><label>账号</label><input value="admin@luxiaoming.com" /></div>
+    <div class="field"><label>密码</label><input type="password" value="••••••••" /></div>
+    <button class="btn-login" onclick="loginAs('super')">登 录</button>
+    <div class="wx-tip">🟢 已接入企业微信：登录后订单可直接「联系客人」</div>
+    <div class="role-quick">
+      <div class="tt">👁 或选择角色，直接体验「权限边界」（不同角色看到的菜单与订单范围不同）</div>
+      <div class="role-grid">
+        <div class="role-btn" onclick="loginAs('super')"><span class="d" style="background:#EE2C2C"></span>系统超管</div>
+        <div class="role-btn" onclick="loginAs('service')"><span class="d" style="background:#1c4f86"></span>客服</div>
+        <div class="role-btn" onclick="loginAs('finance')"><span class="d" style="background:#1a8a55"></span>财务</div>
+        <div class="role-btn" onclick="loginAs('photo')"><span class="d" style="background:#7B3FA0"></span>摄影师</div>
+        <div class="role-btn" onclick="loginAs('merchant')"><span class="d" style="background:#9a6b08"></span>商家</div>
+        <div class="role-btn" onclick="loginAs('distributor')"><span class="d" style="background:#1c6b86"></span>分销员</div>
+        <div class="role-btn" onclick="loginAs('content')"><span class="d" style="background:#CC1F1F"></span>内容运营</div>
+      </div>
+    </div>
+    <div class="foot">© 2026 鹿小鸣旅拍 · 数据自托管</div>
+  </div>
+</div>
+
+<div class="app" id="app" style="display:none">
+  <!-- ============ 侧边栏 ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="seal">鹿</div>
+      <div><div class="name">鹿小鸣</div><div class="sub">旅拍管理后台</div></div>
+    </div>
+    <nav class="nav" id="sideNav"></nav>
+  </aside>
+
+  <!-- ============ 主区域 ============ -->
+  <div class="main">
+    <div class="topbar">
+      <div>
+        <h1 id="pageTitle">经营看板</h1>
+        <div class="crumb" id="pageCrumb">经营中心 / 总览</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="wx-badge">🟢 企业微信已连接</div>
+      <div class="role-switch" id="remoteSwitch" onclick="toggleRemote()" title="演示数据 / 连真实后台">🔌 <span id="remoteLabel">演示数据</span></div>
+      <div class="search">🔍 搜索</div>
+      <div class="role-switch" onclick="logout()" title="切换角色">🔄 <span id="curRole">系统超管</span></div>
+      <div class="bell">🔔<span class="n">3</span></div>
+      <div class="avatar" id="curAvatar">鹿</div>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+</div>
+
+<!-- ============ 订单详情抽屉 ============ -->
+<div class="drawer" id="orderDrawer">
+  <header><h3 id="odNo">订单详情</h3><span class="x" onclick="closeDrawer()">✕</span></header>
+  <div class="dbody" id="odBody"></div>
+  <div class="dfoot" id="odFoot"></div>
+</div>
+
+<!-- ============ 新建/编辑弹窗 ============ -->
+<div class="mask" id="mask">
+  <div class="modal">
+    <header><h3 id="mTitle">新建</h3><span class="x" onclick="closeModal()">✕</span></header>
+    <div class="body" id="mBody"></div>
+    <footer>
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" onclick="closeModal();alert('已保存（演示）')">保存</button>
+    </footer>
+  </div>
+</div>
+
+<script>
+/* ===================== 角色与权限配置（对齐工程 roles.js / business-config.js） ===================== */
+const ROLES = {
+  super:      { name:'系统超管', role:'超管', scope:'全部数据', home:'dashboard', avatar:'鹿',
+    menus:['dashboard','orders','afterSales','financeReview','reconciliation','staff','distributors','shops','miniConfig','albums','video','packages','peripherals','spots','samples','miniDecor','guides','cities','roles','logs','trash'],
+    actions:['*'] },
+  service:    { name:'客服', role:'客服', scope:'全部订单', home:'orders', avatar:'客',
+    menus:['dashboard','orders','afterSales','addonServices','reconciliation'],
+    actions:['view','orderEdit','assign','transfer','cancelOrder','export'] },
+  finance:    { name:'财务', role:'财务', scope:'财务审核范围', home:'financeReview', avatar:'财',
+    menus:['dashboard','orders','afterSales','financeReview','reconciliation'],
+    actions:['view','financeReview','export'] },
+  photo:      { name:'摄影师', role:'摄影师', scope:'仅自己的拍摄任务', home:'tasks', avatar:'摄',
+    menus:['tasks','reconciliation'],
+    actions:['view','shootUpdate'] },
+  // 商家＝线下合作方（门店）。只能看自己门店产生的数据：本门店订单/售后/结算，看不到其他门店、也看不到平台全局。
+  merchant:   { name:'商家（合作方）', role:'商家', merchantId:'merchant1', scope:'仅自己合作方旗下的门店数据', home:'shopSelf', avatar:'商',
+    menus:['shopSelf','orders','afterSales'],
+    actions:['view','export'] },
+  distributor:{ name:'分销员', role:'分销员', scope:'仅自己推广订单', home:'dashboard', avatar:'销',
+    menus:['dashboard','orders','afterSales','reconciliation'],
+    actions:['view','export'] },
+  content:    { name:'内容运营', role:'内容运营', scope:'内容与首页装修', home:'miniConfig', avatar:'内',
+    menus:['miniConfig','albums','video','packages','peripherals','spots','samples','miniDecor','guides','cities'],
+    actions:['view','contentEdit'] }
+};
+const MENU_META = {
+  dashboard:{label:'经营看板',icon:'📊',view:'dashboard',group:'经营中心'},
+  orders:{label:'订单管理',icon:'🧾',view:'orders',group:'订单履约'},
+  afterSales:{label:'售后服务',icon:'🛟',view:'aftersale',group:'订单履约'},
+  tasks:{label:'拍摄任务',icon:'🎬',view:'tasks',group:'订单履约'},
+  addonServices:{label:'增值服务',icon:'➕',view:'addon',group:'订单履约'},
+  financeReview:{label:'财务审核',icon:'✅',view:'finance',group:'财务管理'},
+  reconciliation:{label:'月度对账',icon:'💰',view:'finance',group:'财务管理'},
+  staff:{label:'人员管理',icon:'👥',view:'staff',group:'渠道增长'},
+  distributors:{label:'分销管理',icon:'🔗',view:'distributor',group:'渠道增长'},
+  shops:{label:'商家管理',icon:'🤝',view:'shop',group:'渠道增长'},
+  shopSelf:{label:'我的门店',icon:'🏪',view:'shopSelf',group:'渠道增长'},
+  miniConfig:{label:'配置中心首页',icon:'🏠',view:'miniConfig',group:'小程序数据配置中心'},
+  albums:{label:'照片留影',icon:'🖼️',view:'photo',group:'小程序数据配置中心'},
+  video:{label:'视频摄像',icon:'🎞️',view:'video',group:'小程序数据配置中心'},
+  packages:{label:'旅拍套餐',icon:'📦',view:'package',group:'小程序数据配置中心'},
+  peripherals:{label:'影像周边',icon:'🎁',view:'peripheral',group:'小程序数据配置中心'},
+  spots:{label:'打卡点',icon:'📍',view:'spot',group:'小程序数据配置中心'},
+  samples:{label:'样片素材库',icon:'🗂️',view:'dam',group:'小程序数据配置中心'},
+  miniDecor:{label:'小程序装修配置',icon:'🎛️',view:'decor',group:'小程序数据配置中心'},
+  guides:{label:'攻略管理',icon:'📖',view:'guides',group:'小程序数据配置中心'},
+  cities:{label:'城市配置',icon:'🏙️',view:'cities',group:'小程序数据配置中心'},
+  roles:{label:'角色权限',icon:'⚙️',view:'rbac',group:'系统安全'},
+  logs:{label:'操作日志',icon:'📜',view:'logs',group:'系统安全'},
+  trash:{label:'回收站',icon:'🗑️',view:'trash',group:'系统安全'}
+};
+const GROUP_ORDER = ['经营中心','订单履约','财务管理','渠道增长','小程序数据配置中心','系统安全'];
+let CUR_ROLE = 'super';
+
+/* ===================== 视图渲染 ===================== */
+const VIEWS = {
+  dashboard(){
+    const r=CUR_ROLE;
+    // 门店/推广员视角：只显示自己合作方旗下的门店产生的数据，平台全局与其他合作方不可见
+    if(r==='merchant'||r==='distributor'){
+      const ownOrders=ORDERS.filter(orderScopeFilter);
+      const isMer=r==='merchant';
+      const amt=ownOrders.reduce((s,o)=>s+o.amount,0);
+      const due=ownOrders.reduce((s,o)=>s+o.due,0);
+      const dep=ownOrders.reduce((s,o)=>s+o.deposit,0);
+      return `
+    <div class="note blue">🏪 <span><b>合作方视角（权限边界）</b>：你只能看到<b>自己合作方旗下的门店</b>产生的数据——平台全局、其他合作方的数据对你不可见。每个门店独立铺码、独立计业绩，这里汇总展示。</span></div>
+    <div class="stats">
+      <div class="stat"><div class="k">${isMer?'旗下门店订单':'推广订单'}</div><div class="v red">${ownOrders.length}</div></div>
+      <div class="stat"><div class="k">应收合计</div><div class="v">¥${amt}</div></div>
+      <div class="stat"><div class="k">待收尾款</div><div class="v gold">¥${due}</div></div>
+      <div class="stat"><div class="k">已收定金</div><div class="v green">¥${dep}</div></div>
+    </div>
+    <div class="sectitle">本合作方订单（仅自己门店产生的数据）</div>
+    <div class="table"><table><thead><tr><th>订单号</th><th>客人</th><th>商品</th><th>档期</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      ${ownOrders.length?ownOrders.map(o=>`<tr onclick="openOrder('${o.no}')"><td class="title-cell">${o.no}<small>${o.source}</small></td><td>${o.customer}</td><td>${o.products.join('、')}</td><td>${o.appt}</td><td><span class="badge" style="background:${o.color}1a;color:${o.color}"><span class="d" style="background:${o.color}"></span>${o.statusLabel}</span></td><td><span class="link">查看 →</span></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty"><div class="big">📭</div>当前没有可见订单</div></td></tr>`}
+    </tbody></table></div>`;
+    }
+    return `
+    <div class="note">💡 <span><b>命名对照</b>：小程序客人看到的板块名 = 后台商品模块名（照片留影 / 视频摄像 / 旅拍套餐 / 影像周边）。分类（风格/标签）建商品时直接选或填，不单列页面。</span></div>
+    <div class="stats">
+      <div class="stat"><div class="k">今日新订单</div><div class="v red">12</div><div class="delta">较昨日 +3</div></div>
+      <div class="stat"><div class="k">待客服联系</div><div class="v">5</div><div class="delta">需今日跟进</div></div>
+      <div class="stat"><div class="k">在拍 / 修图中</div><div class="v">8</div><div class="delta">拍摄 5 · 修图 3</div></div>
+      <div class="stat"><div class="k">本月营收</div><div class="v gold">¥46,800</div><div class="delta">已收(定金+尾款) ¥31,200</div></div>
+    </div>
+    <div class="table"><table><thead><tr><th>订单号</th><th>客人</th><th>商品</th><th>档期</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      <tr onclick="openOrder('LX20260814-001')"><td class="title-cell">LX20260814-001<small>小程序自然</small></td><td>微信用户·小鹿</td><td>古装庭院写真</td><td>08-20 14:00</td><td><span class="badge red"><span class="d"></span>待确认</span></td><td><span class="link">处理 →</span></td></tr>
+      <tr onclick="openOrder('LX20260814-002')"><td class="title-cell">LX20260814-002<small>本门店码</small></td><td>微信用户·阿橙</td><td>城市 Vlog</td><td>08-21 10:00</td><td><span class="badge warn"><span class="d"></span>拍摄中</span></td><td><span class="link">处理 →</span></td></tr>
+    </tbody></table></div>`;
+  },
+  orders(){ return orderCenterHTML(); },
+  finance(){ return `
+    <div class="note blue">💰 <span><b>收款与对账口径</b>：客人款项通过<b>企业微信</b>（转账/红包）收取，这是收款<b>渠道</b>、不是财务状态。财务按「应收 / 已收(定金+尾款) / 待收 / 渠道分成」记账，自动计算每家<b>商家分成</b>与每位<b>分销员佣金</b>、摄影师结算与净利。</span></div>
+    <div class="stats">
+      <div class="stat"><div class="k">本月应收</div><div class="v">¥46,800</div></div>
+      <div class="stat"><div class="k">已收金额（定金+尾款）</div><div class="v green">¥31,200</div></div>
+      <div class="stat"><div class="k">待收尾款</div><div class="v gold">¥15,600</div></div>
+      <div class="stat"><div class="k">渠道分成合计</div><div class="v red">¥6,240</div></div>
+    </div>
+
+    <div class="sectitle">订单对账明细</div>
+    <div class="table"><table><thead><tr><th>订单号</th><th>客人</th><th>商品</th><th>实收金额</th><th>来源</th><th>商家分成</th><th>分销佣金</th><th>摄影师结算</th><th>净利</th><th>状态</th></tr></thead><tbody>
+      <tr><td class="title-cell">LX20260814-004</td><td>阿金</td><td>旅拍套餐·经典</td><td>¥899</td><td><span class="badge off">直访</span></td><td>—</td><td>—</td><td>¥320</td><td>¥579</td><td><span class="badge on">已对账</span></td></tr>
+      <tr><td class="title-cell">LX20260814-002</td><td>阿橙</td><td>城市 Vlog</td><td>¥599</td><td><span class="badge blue">商家码</span></td><td>¥60</td><td>—</td><td>¥80</td><td>¥459</td><td><span class="badge on">已对账</span></td></tr>
+      <tr><td class="title-cell">LX20260814-003</td><td>小竹</td><td>橘洲清新写真</td><td>¥359</td><td><span class="badge blue">分销员</span></td><td>—</td><td>¥36</td><td>¥120</td><td>¥203</td><td><span class="badge on">已对账</span></td></tr>
+    </tbody></table></div>
+
+    <div class="sectitle">商家结算（按月汇总）</div>
+    <div class="table"><table><thead><tr><th>商家</th><th>城市</th><th>带来订单</th><th>应收</th><th>分成比例</th><th>商家分成</th><th>结算状态</th></tr></thead><tbody>
+      <tr><td class="title-cell">靖港古镇文创店</td><td>长沙</td><td>23</td><td>¥9,680</td><td>10%</td><td>¥968</td><td><span class="badge on">已结</span></td></tr>
+      <tr><td class="title-cell">橘子洲旅拍驿站</td><td>长沙</td><td>15</td><td>¥6,240</td><td>12%</td><td>¥749</td><td><span class="badge warn">待结</span></td></tr>
+    </tbody></table></div>
+
+    <div class="sectitle">分销佣金（按月汇总）</div>
+    <div class="table"><table><thead><tr><th>分销员</th><th>绑定门店</th><th>推广订单</th><th>佣金比例</th><th>应发佣金</th><th>结算状态</th></tr></thead><tbody>
+      <tr><td class="title-cell">小美</td><td>靖港古镇文创店</td><td>8</td><td>8%</td><td>¥612</td><td><span class="badge on">已发</span></td></tr>
+      <tr><td class="title-cell">阿强</td><td>橘子洲旅拍驿站</td><td>5</td><td>10%</td><td>¥420</td><td><span class="badge warn">待发</span></td></tr>
+    </tbody></table></div>`;
+  },
+  staff(){ return personListHTML('staff'); },
+  distributor(){ return distributorListHTML(); },
+  shop(){ return shopListHTML(); },
+  shopSelf(){ return shopSelfHTML(); },
+  spot(){ return spotEditorHTML(); },
+  photo(){ return albumEditorHTML(); },
+  video(){ return videoEditorHTML(); },
+  package(){ return packageEditorHTML(); },
+  peripheral(){ return peripheralEditorHTML(); },
+  dam(){ return `
+    <div class="note">🗂️ <span><b>素材管理 = 数字资产 DAM</b>：摄影师成片 / 底片在这里归档，按「订单 / 摄影师 / 风格」归类，可批量上传、打标、设为「前台展示样片」。</span></div>
+    <div class="toolbar"><button class="btn btn-primary">⬆ 批量上传</button><select class="select"><option>按摄影师</option><option>按订单</option><option>按风格</option><div class="spacer" style="flex:1"></div></select><span class="muted" style="font-size:12px">1,286 张</span></div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px">
+      <div class="table" style="padding:0;overflow:hidden"><div class="mini-cover">🖼️</div><div style="padding:10px"><div style="font-weight:600;font-size:13px">古装庭院_01</div><span class="tag series" style="margin-top:6px">古装</span></div></div>
+      <div class="table" style="padding:0;overflow:hidden"><div class="mini-cover">🖼️</div><div style="padding:10px"><div style="font-weight:600;font-size:13px">城市夜景_02</div><span class="tag series" style="margin-top:6px">胶片</span></div></div>
+      <div class="table" style="padding:0;overflow:hidden"><div class="mini-cover">🎞️</div><div style="padding:10px"><div style="font-weight:600;font-size:13px">Vlog_剪辑版</div><span class="tag" style="margin-top:6px">视频</span></div></div>
+      <div class="table" style="padding:0;overflow:hidden"><div class="mini-cover">🖼️</div><div style="padding:10px"><div style="font-weight:600;font-size:13px">橘子洲_03</div><span class="tag series" style="margin-top:6px">清新</span></div></div>
+      <div class="table" style="padding:0;overflow:hidden"><div class="mini-cover">＋</div><div style="padding:10px"><div class="muted" style="font-size:12px">上传更多</div></div></div>
+    </div>`;
+  },
+  rbac(){ return `
+    <div class="note">⚙️ <span><b>角色权限</b>：按"最小权限"分配。客服看不到财务明细；财务看不到客人沟通记录与派单；摄影师只能看自己的拍摄任务。当前登录角色为 <b id="rbacCur"></b>。</span></div>
+    <div class="table"><table><thead><tr><th>模块</th><th>超管</th><th>客服</th><th>财务</th><th>摄影师</th><th>商家</th><th>分销员</th><th>内容运营</th></tr></thead><tbody>
+      <tr><td>经营看板</td><td>✅</td><td>✅</td><td>✅</td><td>—</td><td>✅</td><td>✅</td><td>—</td></tr>
+      <tr><td>订单管理</td><td>✅</td><td>✅</td><td>✅(只读+审核)</td><td>仅自己任务</td><td>仅本店</td><td>仅自己推广</td><td>—</td></tr>
+      <tr><td>财务审核/对账</td><td>✅</td><td>—</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td>商品配置</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>✅</td></tr>
+      <tr><td>派单/联系客人</td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td>人员/渠道</td><td>✅</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+    </tbody></table></div>`;
+  },
+  logs(){ return `
+    <div class="note">📜 <span><b>操作日志</b>：所有关键动作（建商品/派单/录收款/改状态/改权限）自动留痕，含操作人+时间+IP，便于审计。</span></div>
+    <div class="toolbar"><select class="select"><option>全部动作</option><option>商品</option><option>订单</option><option>财务</option><option>权限</option></select><input class="input" placeholder="操作人 / 关键词"><div class="spacer" style="flex:1"></div><span class="muted" style="font-size:12px">近 30 天 1,204 条</span></div>
+    <div class="table"><table><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>IP</th></tr></thead><tbody>
+      <tr><td class="title-cell">08-14 16:20<small>系统</small></td><td>系统</td><td>客人提交预约</td><td>订单 LX20260814-001</td><td>—</td></tr>
+      <tr><td class="title-cell">08-14 15:02</td><td>王倩(客服)</td><td>上架商品</td><td>古装庭院写真</td><td>112.94.xx</td></tr>
+      <tr><td class="title-cell">08-14 11:10</td><td>林晓(摄影)</td><td>接派单</td><td>订单 LX20260814-002</td><td>—</td></tr>
+    </tbody></table></div>`;
+  },
+  /* 占位视图（真实后台含此模块，原型用占位演示） */
+  aftersale(){
+    if(CUR_ROLE==='merchant'){
+      const ownOrders=ORDERS.filter(orderScopeFilter);
+      return `<div class="note blue">🛟 <span><b>本门店售后（合作方视角）</b>：只显示<b>自己门店产生的订单</b>的售后工单，其他门店不可见。</span></div>
+      <div class="table"><table><thead><tr><th>订单号</th><th>客人</th><th>商品</th><th>状态</th><th>售后类型</th><th>操作</th></tr></thead><tbody>
+        ${ownOrders.length?ownOrders.map(o=>`<tr><td class="title-cell">${o.no}</td><td>${o.customer}</td><td>${o.products.join('、')}</td><td><span class="badge" style="background:${o.color}1a;color:${o.color}"><span class="d" style="background:${o.color}"></span>${o.statusLabel}</span></td><td><span class="tag series">改期/补拍</span></td><td><span class="link">处理 →</span></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty"><div class="big">📭</div>当前门店没有售后工单</div></td></tr>`}
+      </tbody></table></div>`;
+    }
+    return placeholderHTML('售后服务','🛟','售后工单：改期 / 补拍 / 重拍 / 退款处理。联动订单状态机。'); },
+  tasks(){ return placeholderHTML('拍摄任务','🎬','摄影师的履约清单：仅显示「派给我的」拍摄任务，可标记拍摄中 / 已交付。'); },
+  addon(){ return placeholderHTML('增值服务','➕','客服在订单处理时加购的内部项（修图 / 加片 / 改期），显示在后台订单与对账，小程序货架不展示。'); },
+  series(){ return seriesEditorHTML(); },
+  cities(){ return cityEditorHTML(); },
+  decor(){
+    const banners=[
+      {t:'image',title:'杜甫江阁夜景大片',target:'打卡点 · 杜甫江阁',on:true},
+      {t:'video',title:'长沙旅拍宣传片',target:'探索页',on:true},
+      {t:'image',title:'国风写真特辑',target:'风格系列 · 国风',on:false}
+    ];
+    const modules=[
+      {k:'hotSpots',title:'预约打卡点',on:true,sort:1},
+      {k:'bookingAlbums',title:'照片留影',on:true,sort:2},
+      {k:'videoProducts',title:'视频摄像',on:true,sort:3},
+      {k:'hotPackages',title:'旅拍套餐',on:true,sort:4},
+      {k:'peripherals',title:'影像周边',on:true,sort:5}
+    ];
+    let bh='';
+    banners.forEach(b=>{ bh+=`<div class="banner-row"><div class="thumb">${b.t==='video'?'▶ 视频':'图'}</div><div style="flex:1"><div style="font-weight:600;font-size:13px">${b.title}</div><div class="muted" style="font-size:11px">跳转：${b.target}</div></div><span class="switch ${b.on?'on':''}" onclick="this.classList.toggle('on')"></span><div class="row-actions"><span class="link">编辑</span><span class="link">删除</span></div></div>`; });
+    let mh='';
+    modules.forEach(m=>{ mh+=`<div class="mod-row"><div style="flex:1"><div style="font-weight:600;font-size:13px">${m.title}</div><div class="muted" style="font-size:11px">key: ${m.k} · 排序 ${m.sort}</div></div><span class="switch ${m.on?'on':''}" onclick="this.classList.toggle('on')"></span><span class="link" onclick="alert('上移')">↑</span><span class="link" onclick="alert('下移')">↓</span></div>`; });
+    const previewMods = modules.filter(m=>m.on).map(m=>`<div class="phone-mod"><span>${m.title}</span><span class="s">›</span></div>`).join('');
+    return `
+    <div class="note">🎛️ <span><b>小程序装修配置（运营装修）</b>：这里直接配置客人打开小程序看到的首页。左侧改、右侧实时预览（右侧即「接收」小程序当前真实配置）。数据写入 <code>homeConfig</code> 文档（_id: homeStats）。</span></div>
+    <div class="decor-wrap">
+      <div>
+        <div class="sectitle">🖼️ 首页轮播图（banners）</div>
+        <div class="note" style="margin:0 0 10px">轮播图支持图片 / 视频，可设置点击跳转到打卡点、探索页、风格系列或具体商品。下方列表即小程序首页 swiper 内容。</div>
+        ${bh}
+        <button class="btn btn-ghost" style="margin-top:8px" onclick="alert('新增轮播：上传图/视频 + 填标题 + 选跳转目标')">＋ 新增轮播</button>
+
+        <div class="sectitle" style="margin-top:22px">🔍 探索页轮播（exploreBanners）</div>
+        <div class="note" style="margin:0 0 10px">探索页顶部独立一套轮播，与首页分开配置。</div>
+        <div class="banner-row"><div class="thumb">图</div><div style="flex:1"><div style="font-weight:600;font-size:13px">长沙热门机位合集</div><div class="muted" style="font-size:11px">跳转：探索页</div></div><span class="switch on" onclick="this.classList.toggle('on')"></span><div class="row-actions"><span class="link">编辑</span></div></div>
+
+        <div class="sectitle" style="margin-top:22px">📢 活动公告（activityNotice）</div>
+        <textarea class="input" style="width:100%;min-height:64px;resize:vertical">长沙旅拍预约中 | 古装/国风写真 8 折 · 限时</textarea>
+
+        <div class="sectitle" style="margin-top:22px">⚡ 快捷入口（quickNav）</div>
+        <div class="chip-input" style="border:none;padding:0"><span class="tag series">打卡点</span><span class="tag series">风格系列</span><span class="tag series">约拍定制</span><span class="tag series">我的足迹</span></div>
+
+        <div class="sectitle" style="margin-top:22px">🧩 首页板块开关与排序（homeModules）</div>
+        <div class="note" style="margin:0 0 10px">控制首页各板块是否显示、显示顺序。客人看到的板块名与后台一致。</div>
+        ${mh}
+      </div>
+      <div>
+        <div class="sectitle">📱 小程序首页预览（接收真实配置）</div>
+        <div class="phone"><div class="phone-screen">
+          <div class="phone-banner">杜甫江阁夜景大片</div>
+          <div style="padding:10px 12px;font-weight:700;font-size:13px;color:#2A211B">鹿小鸣 · 长沙旅拍</div>
+          ${previewMods}
+          <div style="padding:12px;color:#9a8a7d;font-size:11px;text-align:center">— 真实配置实时同步 —</div>
+        </div></div>
+      </div>
+    </div>`;
+  },
+  miniConfig(){ const h=miniConfigHubHTML(); setTimeout(checkConn,30); return h; },
+  guides(){ return guideEditorHTML(); },
+  trash(){ return placeholderHTML('回收站','🗑️','已取消订单 / 已删除商品的恢复区（restorable）。'); }
+};
+function placeholderHTML(label,icon,txt){
+  return `<div class="placeholder"><div class="big">${icon}</div><div class="pill">${label}</div><div style="max-width:420px;margin:0 auto">${txt}<br><br><span class="muted">（真实后台已实现该模块，原型仅作占位演示）</span></div></div>`;
+}
+
+/* ===================== 列表类视图 ===================== */
+function productListHTML(type){
+  const isVideo = type==='video';
+  const conf = !isVideo
+    ? {btn:'＋ 新建照片留影', title:'照片留影管理', sub:'小程序数据配置 / 商品①', note:'照片留影即一条「照片单品」（如古装写真）。建时选风格系列、关联打卡点、打标签、设价格、开上架/素材展示双开关；营销徽标(爆款/主推/热门)在底部开关控制，对应小程序 isHotSale / isMainPush / isHot。',
+       rows:[['古装庭院写真','古装','靖港古镇·戏台','汉服 / 庭院','爆款','¥399','on','on'],['城市夜景胶片','胶片','IFS 国金中心','夜景','热门','¥299','on','off'],['橘子洲清新写真','清新','橘子洲头','江景','—','¥359','off','on']]}
+    : {btn:'＋ 新建视频摄像', title:'视频摄像管理', sub:'小程序数据配置 / 商品②', note:'视频摄像即一条「短视频单品」，数据来自小程序 packages(type=video)。比照片多 <b>时长 / 横竖屏</b> 字段；营销徽标同样是 爆款/主推/热门 三开关。',
+       rows:[['古装转场短片','古装','0:45 / 竖屏','转场','爆款','¥599','on','on'],['城市 Vlog','Vlog','1:30 / 横屏','街拍','主推','¥499','on','on']]};
+  let h=`<div class="note">🖼️ <span>${conf.note}</span></div>
+    <div class="toolbar"><button class="btn btn-primary" onclick="openCreate('${type}')">${conf.btn}</button><input class="input" placeholder="搜索标题 / 标签"><select class="select"><option>全部风格系列</option><option>古装</option><option>清新</option><option>胶片</option><option>Vlog</option></select><select class="select"><option>全部售卖状态</option><option>已上架</option><option>已下架</option></select><select class="select"><option>全部营销徽标</option><option>爆款</option><option>主推</option><option>热门</option><option>无</option></select><div class="spacer" style="flex:1"></div><span class="muted" style="font-size:12px">共 ${isVideo?9:24} 条</span></div>
+    <div class="table"><table><thead><tr><th>封面</th><th>标题 / 系列</th><th>${isVideo?'时长/画幅':'打卡点'}</th><th>标签</th><th>营销徽标</th><th>价格</th><th>售卖</th><th>素材展示</th><th>操作</th></tr></thead><tbody>`;
+  conf.rows.forEach(r=>{ 
+    const badgeCell = r[4]==='—' ? '<span class="muted">—</span>' : `<span class="mkbadge mk-${r[4]}">${r[4]}</span>`;
+    h+=`<tr><td><div class="cover">${isVideo?'🎞️':'🖼️'}</div></td><td class="title-cell">${r[0]}<small>系列：${r[1]}</small></td><td>${r[2]}</td><td>${r[3].split(' / ').map(t=>`<span class="tag series">${t}</span>`).join('')}</td><td>${badgeCell}</td><td>${r[5]}</td><td><span class="switch ${r[6]}" onclick="this.classList.toggle('on')"></span></td><td><span class="switch ${r[7]}" onclick="this.classList.toggle('on')"></span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">素材</span><span class="link">删除</span></div></td></tr>`; 
+  });
+  return h+`</tbody></table></div>`;
+}
+
+/* ===================== 照片留影编辑器（左列表·中表单·右小程序实时预览） ===================== */
+/* ===================== REMOTE 模式：连真实后台（自托管 json/mysql） ===================== */
+let REMOTE = false;
+let SERIES_NAME = {};
+const API_BASE = 'http://localhost:5192/api';
+function lxmApi(method, path, body){
+  return fetch(API_BASE + path, {
+    method,
+    headers:{'Content-Type':'application/json'},
+    body: body!==undefined ? JSON.stringify(body) : undefined
+  }).then(r=>r.json()).catch(e=>{ toast('接口请求失败：'+e.message); return {success:false, error:String(e.message)}; });
+}
+function remoteWrite(key, id, patch){
+  if(!REMOTE || !id) return;
+  lxmApi('PUT', '/collection/'+key+'/'+id, patch).then(r=>{
+    if(r && (r.error || r.success===false)) toast('保存失败：'+(r.error||r.message));
+    else if(r && r._id) toast('已写入真实后台');
+  });
+}
+function normAlbum(r){ return { id:r.id||r._id, name:r.name||'未命名单品', series:SERIES_NAME[r.seriesId]||r.seriesId||'', price:Number(r.price)||0, photoCount:Array.isArray(r.photoIds)?r.photoIds.length:(Number(r.photoCount)||0), cover:r.cover&&r.cover.indexOf('data:')===0?'🖼️':(r.cover||'🖼️'), isHotSale:!!r.isHotSale, isMainPush:!!r.isMainPush, isHot:!!r.isHot, isShow:r.isShow!==false, showSample:r.showSample!==false, notes:r.intro||r.notes||'' }; }
+function normPackage(r){ return { id:r.id||r._id, name:r.name||'未命名套餐', series:SERIES_NAME[r.seriesId]||r.seriesId||'', spotIds:Array.isArray(r.spotIds)?r.spotIds:(r.spotId?[r.spotId]:[]), cover:r.cover&&r.cover.indexOf('data:')===0?'📦':(r.cover||'📦'), price:Number(r.price)||0, originalPrice:Number(r.originalPrice)||0, serviceTags:Array.isArray(r.serviceTags)?r.serviceTags:[], duration:r.duration||'', retouchCount:Number(r.retouchCount)||0, isHotSale:!!r.isHotSale, isMainPush:!!r.isMainPush, isHot:!!r.isHot, isShow:r.isShow!==false, notes:r.description||r.notes||'', includedItems:Array.isArray(r.includedItems)?r.includedItems:[] }; }
+function normVideo(r){ return { id:r.id||r._id, name:r.name||'未命名视频', series:SERIES_NAME[r.seriesId]||r.seriesId||'', cover:r.cover&&r.cover.indexOf('data:')===0?'🎞️':(r.cover||'🎞️'), price:Number(r.price)||0, originalPrice:Number(r.originalPrice)||0, hasAerial:!!r.hasAerial, deliveryCycle:r.deliveryCycle||'', serviceTags:Array.isArray(r.serviceTags)?r.serviceTags:[], isHotSale:!!r.isHotSale, isMainPush:!!r.isMainPush, isHot:!!r.isHot, isShow:r.isShow!==false, notes:r.description||'' }; }
+function normPeripheral(r){ return { id:r.id||r._id, name:r.name||'未命名周边', cate:r.cate||r.category||'', cover:r.image&&r.image.indexOf('data:')===0?'🎁':(r.cover||r.image||'🎁'), price:Number(r.price)||0, stock:Number(r.stock)||0, isHot:!!r.isHot, isNew:!!r.isNew, isShow:r.isShow!==false, specs:r.specs||'', notes:r.description||'' }; }
+function normGuide(r){ return { id:r.id||r._id, title:r.title||'未命名攻略', cat:r.cat||r.category||'', spot:r.spotName||r.spotId||'', cover:r.coverUrl&&r.coverUrl.indexOf('data:')===0?'📖':(r.image||r.coverUrl||'📖'), top:!!r.top, isHot:!!r.isHot, status:r.status||'已发布', isShow:r.isShow!==false, readCount:Number(r.readCount)||0, notes:r.description||'' }; }
+function normSpot(r){ return { id:r.id||r._id, name:r.name||'未命名打卡点', cover:r.cover&&r.cover.indexOf('data:')===0?'📍':(r.image||r.cover||'📍'), address:r.address||'', hotScore:Number(r.hotScore)||0, checkinCount:Number(r.checkinCount)||0, tags:Array.isArray(r.tags)?r.tags:[], styles:Array.isArray(r.styles)?r.styles:[], notes:r.description||'' }; }
+function normStyle(r){ return { id:r.id||r._id, name:r.name||'未命名风格', count:Number(r.count)||0, order:Number(r.order)||0, hidden:!!r.hidden, notes:r.description||'' }; }
+function normCity(r){ return { id:r.id||r._id, name:r.name||'未命名城市', enabled:r.enabled!==false, sort:Number(r.sort)||0, desc:r.desc||r.description||'' }; }
+async function loadRemoteData(){
+  const seriesArr = await lxmApi('GET','/collection/series'); if(Array.isArray(seriesArr)){ SERIES_NAME={}; seriesArr.forEach(s=>SERIES_NAME[s.id||s._id]=s.name||s.id); }
+  const jobs=[['albums',ALBUMS,normAlbum],['packages',PACKAGES,normPackage],['peripherals',PERIPHERALS,normPeripheral],['guides',GUIDES,normGuide],['spots',SPOTS,normSpot],['series',STYLES,normStyle],['cities',CITIES,normCity]];
+  for(const job of jobs){ const data=await lxmApi('GET','/collection/'+job[0]); if(Array.isArray(data)){ job[1].length=0; data.forEach(r=>{ const o=job[2](r); if(o) job[1].push(o); }); } }
+  const pk=await lxmApi('GET','/collection/packages'); if(Array.isArray(pk)){ VIDEOS.length=0; pk.filter(p=>p.type==='video'||p.serviceType==='video').forEach(r=>VIDEOS.push(normVideo(r))); }
+}
+async function toggleRemote(){
+  REMOTE=!REMOTE;
+  const lab=document.getElementById('remoteLabel'); if(lab) lab.textContent=REMOTE?'连真实后台':'演示数据';
+  if(REMOTE){ toast('正在从真实后台加载数据…'); await loadRemoteData(); }
+  if(CUR_VIEW==='miniConfig') checkConn();
+  gotoView(CUR_VIEW);
+}
+async function checkConn(){
+  const el=document.getElementById('connCard'); if(!el) return;
+  if(!REMOTE){ el.className='conn-card demo'; el.innerHTML='<span class="dot off"></span> 当前为<b>演示数据</b>（内存，不连后台）。点右上角「🔌 演示数据」可切到真实后台验证联通与上传。'; return; }
+  const h=await lxmApi('GET','/health'); const home=await lxmApi('POST','/rpc/getHomeData',{}); const albums=await lxmApi('GET','/collection/albums');
+  const ok=h&&h.ok, rpcOk=home&&home.success;
+  el.className='conn-card '+(ok?'on':'off');
+  el.innerHTML='<span class="dot '+(ok?'on':'')+'"></span> 已连真实后台（自托管 json）· 健康检查 '+(ok?'✅':'❌')+' · 小程序 RPC '+(rpcOk?'✅ 已通':'❌')+' · 照片留影 '+(Array.isArray(albums)?albums.length:0)+' 条 · 编辑器里改完即写入后台，小程序端刷新即见';
+}
+
+const ALBUMS = [
+  {id:'a1',name:'杜甫江阁夜景照片单品',series:'杜甫江阁夜景国风',price:99,photoCount:18,cover:'🖼️',isHotSale:true,isMainPush:false,isHot:false,isShow:true,showSample:true,notes:'建议晚上7点后拍摄，古建灯光与湘江夜色同框最出片；服装可选黑、红、白或国风元素。'},
+  {id:'a2',name:'湘江国风同款样片',series:'杜甫江阁夜景国风',price:129,photoCount:16,cover:'🖼️',isHotSale:false,isMainPush:true,isHot:false,isShow:true,showSample:true,notes:'国风写真建议搭配汉服或素色长裙，江边逆光时段（傍晚）人物轮廓感最强。'},
+  {id:'a3',name:'城市地标封面样片',series:'长沙城市地标大片',price:99,photoCount:20,cover:'🖼️',isHotSale:false,isMainPush:false,isHot:true,isShow:true,showSample:true,notes:'城市封面适合上午或傍晚的斜射光，建筑线条更立体；可带墨镜、咖啡等小道具增加氛围。'},
+  {id:'a4',name:'闺蜜轻写真照片单品',series:'闺蜜轻写真',price:99,photoCount:16,cover:'🖼️',isHotSale:false,isMainPush:false,isHot:false,isShow:true,showSample:false,notes:'闺蜜轻写真以自然互动为主，不需刻意摆拍；建议穿同色系或互补色服装更上镜。'},
+  {id:'a5',name:'亲子旅行纪念样片',series:'亲子旅行纪念',price:99,photoCount:15,cover:'🖼️',isHotSale:false,isMainPush:false,isHot:false,isShow:false,showSample:true,notes:'亲子拍摄建议下午4点后光线更柔和，让孩子先自由玩耍再引导抓拍自然瞬间。'},
+  {id:'a6',name:'城市漫游短片分镜照片单品',series:'长沙城市漫游短片',price:129,photoCount:12,cover:'🎞️',isHotSale:false,isMainPush:true,isHot:false,isShow:true,showSample:true,notes:'短视频建议边走边拍，回头、穿过人群等动作让成片更真实；晚上7点后霓虹氛围最佳。'},
+  {id:'a7',name:'艺术馆极简写真样片',series:'艺术馆高级感写真',price:139,photoCount:16,cover:'🖼️',isHotSale:false,isMainPush:false,isHot:false,isShow:true,showSample:true,notes:'艺术馆内请保持安静，利用留白墙面与建筑线条构图；浅色或极简穿搭更出片。'},
+  {id:'a8',name:'IFS夜景地标大片照片单品',series:'长沙城市地标大片',price:99,photoCount:22,cover:'🖼️',isHotSale:false,isMainPush:false,isHot:true,isShow:true,showSample:true,notes:'IFS夜景建议晚上7点后，利用商场灯光与玻璃幕墙反光；亮色服装更吸睛。'}
+];
+const SERIES_SPOT = {'杜甫江阁夜景国风':'杜甫江阁','长沙城市地标大片':'IFS 国金中心','闺蜜轻写真':'太平老街','亲子旅行纪念':'橘子洲头','长沙城市漫游短片':'黄兴路步行街','艺术馆高级感写真':'谢子龙影像艺术馆'};
+let AE_SEL='a1';
+function albumBadge(a){ if(a.isHotSale) return {t:'爆款'}; if(a.isMainPush) return {t:'主推'}; if(a.isHot) return {t:'热门'}; return null; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function albumEditorHTML(){
+  const a=ALBUMS.find(x=>x.id===AE_SEL)||ALBUMS[0];
+  const list=ALBUMS.map(x=>{
+    const b=albumBadge(x);
+    return `<div class="ae-item ${x.id===AE_SEL?'active':''}" onclick="selectAlbum('${x.id}')">
+      <div class="ci">${x.cover}</div>
+      <div style="flex:1;min-width:0">
+        <div class="nm">${esc(x.name)}</div>
+        <div class="sub">${x.series} · ¥${x.price}${x.isShow?'':' · 已下架'}</div>
+      </div>
+      ${b?`<span class="mkbadge mk-${b.t}">${b.t}</span>`:''}
+    </div>`;
+  }).join('');
+  return `
+  <div class="note">🖼️ <span><b>照片留影 = 小程序「照片留影」板块里的单品卡</b>（数据来自 albums 集合，按风格系列归类）。左侧选单品、中间改字段、<b>右侧手机实时预览</b>客人看到的样子——后台改什么，小程序就出什么。</span></div>
+  <div class="album-editor">
+    <div class="ae-list">
+      <div class="head"><span style="font-weight:700;font-size:13px">照片留影（${ALBUMS.length}）</span><button class="btn btn-sm btn-primary" onclick="openCreate('photo')">＋ 新建</button></div>
+      ${list}
+    </div>
+    <div class="ae-form">${albumFormHTML(a)}</div>
+    <div class="ae-preview">
+      <div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div>
+      <div class="phone"><div class="phone-screen" id="aePreviewInner">${renderAlbumPreview()}</div></div>
+    </div>
+  </div>`;
+}
+function albumFormHTML(a){
+  const seriesOpts=['杜甫江阁夜景国风','长沙城市地标大片','闺蜜轻写真','亲子旅行纪念','长沙城市漫游短片','艺术馆高级感写真'];
+  const spot=SERIES_SPOT[a.series]||'—';
+  const b=albumBadge(a);
+  const sw=(k,on)=>`<span class="switch ${on?'on':''}" onclick="toggleAlbum('${k}')"></span>`;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-weight:700;font-size:15px">编辑单品</div>
+      ${b?`<span class="mkbadge mk-${b.t}">${b.t}</span>`:'<span class="muted" style="font-size:12px">无营销徽标</span>'}
+    </div>
+    <div class="ff"><label>标题 / 单品名</label><input value="${esc(a.name)}" oninput="updateAlbum('name',this.value)"></div>
+    <div class="twocol">
+      <div class="ff"><label>所属风格系列</label><select onchange="updateAlbum('series',this.value);selectAlbum(AE_SEL)">${seriesOpts.map(o=>`<option ${o===a.series?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="ff"><label>关联打卡点（自动带出）</label><input value="${esc(spot)}" readonly style="background:var(--lxm-gray-50);color:var(--lxm-muted)"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>价格（元）</label><input type="number" value="${a.price}" oninput="updateAlbum('price',this.value)"></div>
+      <div class="ff"><label>照片张数</label><input type="number" value="${a.photoCount}" oninput="updateAlbum('photoCount',this.value)"></div>
+    </div>
+    <div class="ff"><label>封面图</label><div class="mini-cover" style="cursor:pointer;height:92px" onclick="toast('打开图片上传（接素材库）')">${a.cover} 点击换封面</div></div>
+    <div class="ff"><label>拍摄说明（客人可见）</label><textarea oninput="updateAlbum('notes',this.value)">${esc(a.notes||'')}</textarea></div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">上架售卖</div><div class="hint" style="margin:0">关掉则客人在小程序「照片留影」看不到、不能预约</div></div>${sw('isShow',a.isShow)}</div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">素材展示</div><div class="hint" style="margin:0">关掉则不在样片展示区露脸（仍可售卖）</div></div>${sw('showSample',a.showSample)}</div>
+    <div class="grp-title">营销徽标（卡片角标 · 优先级：爆款 &gt; 主推 &gt; 热门）</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">爆款</div>${sw('isHotSale',a.isHotSale)}</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">主推</div>${sw('isMainPush',a.isMainPush)}</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">热门</div>${sw('isHot',a.isHot)}</div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn btn-primary" onclick="toast('已保存：'+ALBUMS.find(x=>x.id===AE_SEL).name)">💾 保存</button>
+      <button class="btn btn-ghost" onclick="selectAlbum(AE_SEL)">重置</button>
+    </div>`;
+}
+function renderAlbumPreview(){
+  const a=ALBUMS.find(x=>x.id===AE_SEL)||ALBUMS[0];
+  const b=albumBadge(a);
+  const n=Math.min(a.photoCount,9);
+  let grid='';
+  for(let i=0;i<n;i++) grid+=`<div class="pc">🖼️</div>`;
+  if(a.photoCount>9) grid+=`<div class="pc" style="font-size:11px">+${a.photoCount-9}</div>`;
+  const card=`<div class="pd-card">
+    <div class="pd-cover ${a.isShow?'':'off'}">${a.cover}${b&&a.isShow?`<span class="corner">${b.t}</span>`:''}</div>
+    <div style="flex:1;min-width:0">
+      <div class="pd-title">${esc(a.name)}</div>
+      <div class="pd-price">¥${a.price}</div>
+      ${a.isShow?'<div class="pd-offline" style="color:#1a8a55">● 上架中 · 可预约</div>':'<div class="pd-offline" style="color:#CC1F1F">⏸ 已下架 · 客人不可见</div>'}
+    </div>
+  </div>`;
+  const samples= a.showSample ? `<div class="pd-grid">${grid}</div>` : `<div class="pd-offbar">（该单品未开启素材展示）</div>`;
+  return `
+    <div class="phone-banner">照片留影</div>
+    <div class="pd-sec" style="font-weight:700;font-size:13px;color:#2A211B;padding:10px 12px 2px">${esc(a.series)}</div>
+    ${card}
+    <div class="pd-seriesbar">
+      <div style="font-weight:700;font-size:12px;color:#2A211B;margin-bottom:6px">照片合集（客人点进去看）</div>
+      <div class="muted" style="font-size:11px">共 ${a.photoCount} 张 · 关联打卡点：${esc(SERIES_SPOT[a.series]||'—')}</div>
+    </div>
+    ${samples}
+    <div class="pd-notes"><b>拍摄说明：</b>${esc(a.notes||'—')}</div>`;
+}
+function selectAlbum(id){ AE_SEL=id; gotoView('photo'); }
+function updateAlbum(prop,val){
+  const a=ALBUMS.find(x=>x.id===AE_SEL); if(!a) return;
+  a[prop] = (prop==='price'||prop==='photoCount') ? (Number(val)||0) : val;
+  const el=document.getElementById('aePreviewInner'); if(el) el.innerHTML=renderAlbumPreview();
+  if(REMOTE) remoteWrite('albums', a.id, {[prop]:a[prop]});
+}
+function toggleAlbum(prop){ const a=ALBUMS.find(x=>x.id===AE_SEL); if(a){ a[prop]=!a[prop]; if(REMOTE) remoteWrite('albums', a.id, {[prop]:a[prop]}); } selectAlbum(AE_SEL); }
+
+/* ===================== 旅拍套餐编辑器（左列表·中表单·右小程序实时预览） ===================== */
+const PACKAGES = [
+  {id:'p1',name:'经典国风旅拍套餐',series:'杜甫江阁夜景国风',spotIds:['杜甫江阁'],cover:'📦',price:899,serviceTags:['含妆造','含定制相册','含全部底片'],duration:'约 2 小时',retouchCount:15,isHotSale:false,isMainPush:true,isHot:false,isShow:true,notes:'古装庭院写真 + 湘江国风照片 + 定制皮质相册，一套搞定来长沙的国风纪念，比单买省心省钱。',includedItems:[
+    {type:'album',name:'杜甫江阁夜景照片单品',price:399},
+    {type:'album',name:'湘江国风同款样片',price:329},
+    {type:'peripheral',name:'定制皮质相册',price:129}
+  ]},
+  {id:'p2',name:'城市 Vlog 轻旅拍',series:'长沙城市漫游短片',spotIds:['黄兴路步行街','IFS 国金中心'],cover:'📦',price:469,serviceTags:['横屏成片','含航拍片段','3日交付'],duration:'约 1.5 小时',retouchCount:0,isHotSale:true,isMainPush:false,isHot:false,isShow:true,notes:'边走边拍的城市 Vlog，含一段航拍，适合发朋友圈 / 抖音，年轻人最爱。',includedItems:[
+    {type:'video',name:'城市漫游短片',price:399},
+    {type:'peripheral',name:'鹿小鸣钥匙扣',price:39}
+  ]},
+  {id:'p3',name:'闺蜜双人写真套餐',series:'闺蜜轻写真',spotIds:['太平老街'],cover:'📦',price:599,serviceTags:['双人','含妆造','含 20 张精修'],duration:'约 2 小时',retouchCount:20,isHotSale:false,isMainPush:false,isHot:true,isShow:true,notes:'两个人一起更出片，太平老街国风街拍 + 双人精修，闺蜜出游首选。',includedItems:[
+    {type:'album',name:'闺蜜轻写真照片单品',price:99},
+    {type:'album',name:'艺术馆极简写真样片',price:139},
+    {type:'peripheral',name:'定制皮质相册',price:129}
+  ]},
+  {id:'p4',name:'亲子漫游纪念套餐',series:'亲子旅行纪念',spotIds:['橘子洲头'],cover:'📦',price:529,serviceTags:['亲子','含底片','含相册'],duration:'约 1.5 小时',retouchCount:12,isHotSale:false,isMainPush:false,isHot:false,isShow:true,notes:'带娃也能拍好看，橘子洲江景亲子照 + 定制相册，留住旅行瞬间。',includedItems:[
+    {type:'album',name:'亲子旅行纪念样片',price:99},
+    {type:'peripheral',name:'定制皮质相册',price:129}
+  ]},
+  {id:'p5',name:'艺术馆高级感套餐',series:'艺术馆高级感写真',spotIds:['谢子龙影像艺术馆'],cover:'📦',price:699,serviceTags:['极简风','含妆造','含 25 张精修'],duration:'约 2 小时',retouchCount:25,isHotSale:false,isMainPush:true,isHot:false,isShow:false,notes:'谢子龙艺术馆内极简高级感写真，浅色穿搭更出片，适合个人作品集。',includedItems:[
+    {type:'album',name:'艺术馆极简写真样片',price:139},
+    {type:'peripheral',name:'定制皮质相册',price:129}
+  ]}
+];
+let PK_SEL='p1';
+function packageBadge(p){ if(p.isHotSale) return {t:'爆款'}; if(p.isMainPush) return {t:'主推'}; if(p.isHot) return {t:'热门'}; return null; }
+function pkgItemIcon(t){ return t==='video'?'🎞️':t==='peripheral'?'🎁':'🖼️'; }
+function pkgSum(p){ return (p.includedItems||[]).reduce((s,it)=>s+(Number(it.price)||0),0); }
+function pkgRecalc(p){ p.originalPrice = pkgSum(p); }
+function packageEditorHTML(){
+  const p=PACKAGES.find(x=>x.id===PK_SEL)||PACKAGES[0];
+  const list=PACKAGES.map(x=>{
+    const b=packageBadge(x);
+    return `<div class="ae-item ${x.id===PK_SEL?'active':''}" onclick="selectPackage('${x.id}')">
+      <div class="ci">${x.cover}</div>
+      <div style="flex:1;min-width:0">
+        <div class="nm">${esc(x.name)}</div>
+        <div class="sub">${x.series} · 组合价 ¥${x.price}${x.isShow?'':' · 已下架'}</div>
+      </div>
+      ${b?`<span class="mkbadge mk-${b.t}">${b.t}</span>`:''}
+    </div>`;
+  }).join('');
+  return `
+  <div class="note">📦 <span><b>套餐 = 多个基础商品组合打包</b>（照片单品 + 短视频单品 + 周边任意组合 + 设组合价）。全站只一个「旅拍套餐」板块。左侧选套餐、中间改字段、<b>右侧手机实时预览</b>客人看到的样子——组合价与含商品清单即时同步。</span></div>
+  <div class="album-editor">
+    <div class="ae-list">
+      <div class="head"><span style="font-weight:700;font-size:13px">旅拍套餐（${PACKAGES.length}）</span><button class="btn btn-sm btn-primary" onclick="openCreate('package')">＋ 新建</button></div>
+      ${list}
+    </div>
+    <div class="ae-form">${packageFormHTML(p)}</div>
+    <div class="ae-preview">
+      <div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div>
+      <div class="phone"><div class="phone-screen" id="pkPreviewInner">${renderPackagePreview()}</div></div>
+    </div>
+  </div>`;
+}
+function packageFormHTML(p){
+  const seriesOpts=['杜甫江阁夜景国风','长沙城市地标大片','闺蜜轻写真','亲子旅行纪念','长沙城市漫游短片','艺术馆高级感写真'];
+  const b=packageBadge(p);
+  const sw=(k,on)=>`<span class="switch ${on?'on':''}" onclick="togglePackage('${k}')"></span>`;
+  const typeOpt=(t)=>`<option value="album" ${t==='album'?'selected':''}>照片单品</option><option value="video" ${t==='video'?'selected':''}>短视频</option><option value="peripheral" ${t==='peripheral'?'selected':''}>周边</option>`;
+  const items=(p.includedItems||[]).map((it,idx)=>`<div class="pk-row">
+      <select onchange="updatePackageItem(${idx},'type',this.value)">${typeOpt(it.type)}</select>
+      <input value="${esc(it.name)}" placeholder="商品名" oninput="updatePackageItem(${idx},'name',this.value)">
+      <input type="number" value="${it.price}" placeholder="价" oninput="updatePackageItem(${idx},'price',this.value)" class="pk-price">
+      <span class="link" onclick="removePackageItem(${idx})">✕</span>
+    </div>`).join('');
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-weight:700;font-size:15px">编辑套餐</div>
+      ${b?`<span class="mkbadge mk-${b.t}">${b.t}</span>`:'<span class="muted" style="font-size:12px">无营销徽标</span>'}
+    </div>
+    <div class="ff"><label>套餐名</label><input value="${esc(p.name)}" oninput="updatePackage('name',this.value)"></div>
+    <div class="twocol">
+      <div class="ff"><label>所属风格系列</label><select onchange="updatePackage('series',this.value);selectPackage(PK_SEL)">${seriesOpts.map(o=>`<option ${o===p.series?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="ff"><label>关联打卡点（、分隔）</label><input value="${esc((p.spotIds||[]).join('、'))}" oninput="updatePackage('spotIds',this.value.split(/[、,]/).map(s=>s.trim()).filter(Boolean))"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>组合价（元）</label><input type="number" value="${p.price}" oninput="updatePackage('price',this.value)"></div>
+      <div class="ff"><label>套餐原价（自动=商品合计）</label><input value="¥${pkgSum(p)}" readonly style="background:var(--lxm-gray-50);color:var(--lxm-muted)"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>拍摄时长</label><input value="${esc(p.duration||'')}" oninput="updatePackage('duration',this.value)"></div>
+      <div class="ff"><label>精修张数</label><input type="number" value="${p.retouchCount||0}" oninput="updatePackage('retouchCount',this.value)"></div>
+    </div>
+    <div class="ff"><label>封面图</label><div class="mini-cover" style="cursor:pointer;height:92px" onclick="toast('打开图片上传（接素材库）')">${p.cover} 点击换封面</div></div>
+    <div class="ff"><label>服务标签（、分隔）</label><input value="${esc((p.serviceTags||[]).join('、'))}" oninput="updatePackage('serviceTags',this.value.split(/[、,]/).map(s=>s.trim()).filter(Boolean))"></div>
+    <div class="ff"><label>套餐说明（客人可见）</label><textarea oninput="updatePackage('notes',this.value)">${esc(p.notes||'')}</textarea></div>
+    <div class="grp-title">含商品清单（照片单品 / 短视频 / 周边 任意组合）</div>
+    <div class="pk-items-edit">${items}</div>
+    <button class="btn btn-ghost btn-sm" style="margin:6px 0 12px" onclick="addPackageItem()">＋ 添加商品</button>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">上架售卖</div><div class="hint" style="margin:0">关掉则客人在小程序「旅拍套餐」看不到、不能预约</div></div>${sw('isShow',p.isShow)}</div>
+    <div class="grp-title">营销徽标（卡片角标 · 优先级：爆款 &gt; 主推 &gt; 热门）</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">爆款</div>${sw('isHotSale',p.isHotSale)}</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">主推</div>${sw('isMainPush',p.isMainPush)}</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">热门</div>${sw('isHot',p.isHot)}</div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn btn-primary" onclick="toast('已保存：'+PACKAGES.find(x=>x.id===PK_SEL).name)">💾 保存</button>
+      <button class="btn btn-ghost" onclick="selectPackage(PK_SEL)">重置</button>
+    </div>`;
+}
+function renderPackagePreview(){
+  const p=PACKAGES.find(x=>x.id===PK_SEL)||PACKAGES[0];
+  const b=packageBadge(p);
+  const sum=pkgSum(p);
+  const items=(p.includedItems||[]).map(it=>`<div class="pk-item"><span class="pk-ico">${pkgItemIcon(it.type)}</span><span class="pk-name">${esc(it.name)}</span><span class="pk-p">¥${it.price}</span></div>`).join('');
+  const tags=(p.serviceTags||[]).map(t=>`<span class="tag series">${esc(t)}</span>`).join('')||'<span class="muted" style="font-size:11px">无</span>';
+  const card=`<div class="pd-card">
+    <div class="pd-cover ${p.isShow?'':'off'}">${p.cover}${b&&p.isShow?`<span class="corner">${b.t}</span>`:''}</div>
+    <div style="flex:1;min-width:0">
+      <div class="pd-title">${esc(p.name)}</div>
+      <div class="pd-price">¥${p.price}<span class="pk-origin">¥${sum}</span></div>
+      ${p.isShow?'<div class="pd-offline" style="color:#1a8a55">● 上架中 · 可预约</div>':'<div class="pd-offline" style="color:#CC1F1F">⏸ 已下架 · 客人不可见</div>'}
+    </div>
+  </div>`;
+  return `
+    <div class="phone-banner">旅拍套餐</div>
+    <div class="pd-sec" style="font-weight:700;font-size:13px;color:#2A211B;padding:10px 12px 2px">${esc(p.series)}</div>
+    ${card}
+    <div class="pd-seriesbar">
+      <div style="font-weight:700;font-size:12px;color:#2A211B;margin-bottom:6px">套餐信息</div>
+      <div class="muted" style="font-size:11px">拍摄时长：${esc(p.duration||'—')} · 精修：${p.retouchCount||0} 张 · 打卡点：${esc((p.spotIds||[]).join('、')||'—')}</div>
+      <div style="margin-top:6px">${tags}</div>
+    </div>
+    <div class="pd-seriesbar">
+      <div style="font-weight:700;font-size:12px;color:#2A211B;margin-bottom:6px">含商品清单（${p.includedItems?p.includedItems.length:0} 件 · 原价合计 ¥${sum}）</div>
+      <div class="pk-items">${items}</div>
+    </div>
+    <div class="pd-notes"><b>套餐说明：</b>${esc(p.notes||'—')}</div>`;
+}
+function selectPackage(id){ PK_SEL=id; gotoView('package'); }
+function updatePackage(prop,val){
+  const p=PACKAGES.find(x=>x.id===PK_SEL); if(!p) return;
+  if(prop==='price'||prop==='retouchCount'){ p[prop]=Number(val)||0; }
+  else { p[prop]=val; }
+  if(prop==='includedItems'){ pkgRecalc(p); }
+  const el=document.getElementById('pkPreviewInner'); if(el) el.innerHTML=renderPackagePreview();
+  if(REMOTE) remoteWrite('packages', p.id, {[prop]:p[prop]});
+}
+function updatePackageItem(idx,prop,val){
+  const p=PACKAGES.find(x=>x.id===PK_SEL); if(!p||!p.includedItems) return;
+  const it=p.includedItems[idx]; if(!it) return;
+  it[prop] = prop==='price' ? (Number(val)||0) : val;
+  pkgRecalc(p);
+  const el=document.getElementById('pkPreviewInner'); if(el) el.innerHTML=renderPackagePreview();
+}
+function addPackageItem(){
+  const p=PACKAGES.find(x=>x.id===PK_SEL); if(!p) return;
+  p.includedItems=p.includedItems||[];
+  p.includedItems.push({type:'album',name:'新商品',price:99});
+  pkgRecalc(p);
+  selectPackage(PK_SEL);
+}
+function removePackageItem(idx){
+  const p=PACKAGES.find(x=>x.id===PK_SEL); if(!p||!p.includedItems) return;
+  p.includedItems.splice(idx,1);
+  pkgRecalc(p);
+  selectPackage(PK_SEL);
+}
+function togglePackage(prop){ const p=PACKAGES.find(x=>x.id===PK_SEL); if(p){ p[prop]=!p[prop]; if(REMOTE) remoteWrite('packages', p.id, {[prop]:p[prop]}); } selectPackage(PK_SEL); }
+
+/* ===================== 视频摄像编辑器（左列表·中表单·右小程序实时预览） ===================== */
+const VIDEOS = [
+  {id:'v1',name:'古装转场短片',series:'杜甫江阁夜景国风',spotIds:['杜甫江阁'],cover:'🎞️',price:599,originalPrice:699,durationText:'0:45 / 竖屏',hasAerial:false,deliveryCycle:'3 个工作日',serviceTags:['横屏成片','含转场'],fullEdit:true,isHotSale:true,isMainPush:false,isHot:false,isShow:true,notes:'古装转场短片，含 3 段运镜转场，适合朋友圈 / 抖音。'},
+  {id:'v2',name:'城市 Vlog',series:'长沙城市漫游短片',spotIds:['黄兴路步行街'],cover:'🎞️',price:499,originalPrice:599,durationText:'1:30 / 横屏',hasAerial:true,deliveryCycle:'3 个工作日',serviceTags:['含航拍','精修调色'],fullEdit:true,isHotSale:false,isMainPush:true,isHot:false,isShow:true,notes:'边走边拍的城市 Vlog，含一段航拍，年轻人最爱。'},
+  {id:'v3',name:'亲子纪实短片',series:'亲子旅行纪念',spotIds:['橘子洲头'],cover:'🎞️',price:399,originalPrice:459,durationText:'1:00 / 横屏',hasAerial:false,deliveryCycle:'5 个工作日',serviceTags:['自然抓拍'],fullEdit:false,isHotSale:false,isMainPush:false,isHot:true,isShow:true,notes:'亲子自然纪实，不强摆拍，留住旅行瞬间。'},
+  {id:'v4',name:'艺术馆极简短片',series:'艺术馆高级感写真',spotIds:['谢子龙影像艺术馆'],cover:'🎞️',price:699,originalPrice:799,durationText:'0:50 / 竖屏',hasAerial:false,deliveryCycle:'5 个工作日',serviceTags:['极简调色'],fullEdit:true,isHotSale:false,isMainPush:false,isHot:false,isShow:false,notes:'艺术馆内极简高级感短片，浅色穿搭更出片。'}
+];
+let VD_SEL='v1';
+function videoBadge(p){ if(p.isHotSale) return {t:'爆款'}; if(p.isMainPush) return {t:'主推'}; if(p.isHot) return {t:'热门'}; return null; }
+function videoEditorHTML(){
+  const p=VIDEOS.find(x=>x.id===VD_SEL)||VIDEOS[0];
+  const list=VIDEOS.map(x=>{ const b=videoBadge(x); return `<div class="ae-item ${x.id===VD_SEL?'active':''}" onclick="selectVideo('${x.id}')">
+      <div class="ci">${x.cover}</div>
+      <div style="flex:1;min-width:0"><div class="nm">${esc(x.name)}</div><div class="sub">${x.series} · ¥${x.price}${x.isShow?'':' · 已下架'}</div></div>
+      ${b?`<span class="mkbadge mk-${b.t}">${b.t}</span>`:''}
+    </div>`; }).join('');
+  return `
+  <div class="note">🎞️ <span><b>视频摄像 = 小程序「视频摄像」板块里的短视频单品</b>（数据来自 packages type=video）。比照片多<b>时长 / 画幅 / 航拍 / 交付周期</b>字段。左侧选单品、中间改字段、<b>右侧手机实时预览</b>客人看到的样子。</span></div>
+  <div class="album-editor">
+    <div class="ae-list"><div class="head"><span style="font-weight:700;font-size:13px">视频摄像（${VIDEOS.length}）</span><button class="btn btn-sm btn-primary" onclick="openCreate('video')">＋ 新建</button></div>${list}</div>
+    <div class="ae-form">${videoFormHTML(p)}</div>
+    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="vdPreviewInner">${renderVideoPreview()}</div></div></div>
+  </div>`;
+}
+function videoFormHTML(p){
+  const seriesOpts=['杜甫江阁夜景国风','长沙城市地标大片','闺蜜轻写真','亲子旅行纪念','长沙城市漫游短片','艺术馆高级感写真'];
+  const b=videoBadge(p);
+  const sw=(k,on)=>`<span class="switch ${on?'on':''}" onclick="toggleVideo('${k}')"></span>`;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:700;font-size:15px">编辑短视频</div>${b?`<span class="mkbadge mk-${b.t}">${b.t}</span>`:'<span class="muted" style="font-size:12px">无营销徽标</span>'}</div>
+    <div class="ff"><label>标题 / 单品名</label><input value="${esc(p.name)}" oninput="updateVideo('name',this.value)"></div>
+    <div class="twocol">
+      <div class="ff"><label>所属风格系列</label><select onchange="updateVideo('series',this.value);selectVideo(VD_SEL)">${seriesOpts.map(o=>`<option ${o===p.series?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="ff"><label>关联打卡点（、分隔）</label><input value="${esc((p.spotIds||[]).join('、'))}" oninput="updateVideo('spotIds',this.value.split(/[、,]/).map(s=>s.trim()).filter(Boolean))"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>价格（元）</label><input type="number" value="${p.price}" oninput="updateVideo('price',this.value)"></div>
+      <div class="ff"><label>原价（划线价）</label><input type="number" value="${p.originalPrice}" oninput="updateVideo('originalPrice',this.value)"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>时长 / 画幅</label><input value="${esc(p.durationText||'')}" oninput="updateVideo('durationText',this.value)"></div>
+      <div class="ff"><label>交付周期</label><input value="${esc(p.deliveryCycle||'')}" oninput="updateVideo('deliveryCycle',this.value)"></div>
+    </div>
+    <div class="ff"><label>封面图</label><div class="mini-cover" style="cursor:pointer;height:92px" onclick="toast('打开视频封面/上传（接素材库）')">${p.cover} 点击换封面</div></div>
+    <div class="ff"><label>服务标签（、分隔）</label><input value="${esc((p.serviceTags||[]).join('、'))}" oninput="updateVideo('serviceTags',this.value.split(/[、,]/).map(s=>s.trim()).filter(Boolean))"></div>
+    <div class="ff"><label>视频说明（客人可见）</label><textarea oninput="updateVideo('notes',this.value)">${esc(p.notes||'')}</textarea></div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">含航拍</div><div class="hint" style="margin:0">开则卡片显示「航拍」标识，通常加价</div></div>${sw('hasAerial',p.hasAerial)}</div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">精修成片</div><div class="hint" style="margin:0">开则交付精修调色版成片</div></div>${sw('fullEdit',p.fullEdit)}</div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">上架售卖</div><div class="hint" style="margin:0">关掉则客人在小程序「视频摄像」看不到、不能预约</div></div>${sw('isShow',p.isShow)}</div>
+    <div class="grp-title">营销徽标（卡片角标 · 优先级：爆款 &gt; 主推 &gt; 热门）</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">爆款</div>${sw('isHotSale',p.isHotSale)}</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">主推</div>${sw('isMainPush',p.isMainPush)}</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">热门</div>${sw('isHot',p.isHot)}</div>
+    <div style="display:flex;gap:10px;margin-top:16px"><button class="btn btn-primary" onclick="toast('已保存：'+VIDEOS.find(x=>x.id===VD_SEL).name)">💾 保存</button><button class="btn btn-ghost" onclick="selectVideo(VD_SEL)">重置</button></div>`;
+}
+function renderVideoPreview(){
+  const p=VIDEOS.find(x=>x.id===VD_SEL)||VIDEOS[0];
+  const b=videoBadge(p);
+  const tags=(p.serviceTags||[]).map(t=>`<span class="tag series">${esc(t)}</span>`).join('')||'<span class="muted" style="font-size:11px">无</span>';
+  const extra=[]; if(p.hasAerial) extra.push('含航拍'); if(p.fullEdit) extra.push('精修成片'); if(p.deliveryCycle) extra.push('交付 '+esc(p.deliveryCycle));
+  const card=`<div class="pd-card"><div class="pd-cover ${p.isShow?'':'off'}">${p.cover}<span class="vd-play">▶</span><span class="vd-badge">${esc(p.durationText||'')}</span>${b&&p.isShow?`<span class="corner">${b.t}</span>`:''}</div>
+    <div style="flex:1;min-width:0"><div class="pd-title">${esc(p.name)}</div><div class="pd-price">¥${p.price}<span class="pk-origin">¥${p.originalPrice}</span></div>${p.isShow?'<div class="pd-offline" style="color:#1a8a55">● 上架中 · 可预约</div>':'<div class="pd-offline" style="color:#CC1F1F">⏸ 已下架 · 客人不可见</div>'}</div></div>`;
+  return `<div class="phone-banner">视频摄像</div><div class="pd-sec" style="font-weight:700;font-size:13px;color:#2A211B;padding:10px 12px 2px">${esc(p.series)}</div>${card}
+    <div class="pd-seriesbar"><div style="font-weight:700;font-size:12px;color:#2A211B;margin-bottom:6px">视频信息</div><div class="muted" style="font-size:11px">${extra.join(' · ')||'—'}</div><div style="margin-top:6px">${tags}</div></div>
+    <div class="pd-notes"><b>视频说明：</b>${esc(p.notes||'—')}</div>`;
+}
+function selectVideo(id){ VD_SEL=id; gotoView('video'); }
+function updateVideo(prop,val){ const p=VIDEOS.find(x=>x.id===VD_SEL); if(!p) return; p[prop]=(prop==='price'||prop==='originalPrice')?(Number(val)||0):val; const el=document.getElementById('vdPreviewInner'); if(el) el.innerHTML=renderVideoPreview(); if(REMOTE) remoteWrite('packages', p.id, {[prop]:p[prop]}); }
+function toggleVideo(prop){ const p=VIDEOS.find(x=>x.id===VD_SEL); if(p){ p[prop]=!p[prop]; if(REMOTE) remoteWrite('packages', p.id, {[prop]:p[prop]}); } selectVideo(VD_SEL); }
+
+/* ===================== 影像周边编辑器 ===================== */
+const PERIPHERALS = [
+  {id:'pe1',name:'定制皮质相册',cate:'相册',cover:'🎁',price:129,stock:120,specs:['A4','20页','可定制封面'],isHot:false,isNew:true,isShow:true,description:'头层牛皮封面，可印名字，旅行纪念首选。'},
+  {id:'pe2',name:'鹿小鸣钥匙扣',cate:'文创',cover:'🎁',price:39,stock:300,specs:['金属','夜光'],isHot:true,isNew:false,isShow:true,description:'品牌 IP 钥匙扣，夜光款更可爱。'},
+  {id:'pe3',name:'摆台相框',cate:'相框',cover:'🎁',price:79,stock:60,specs:['木质','8寸'],isHot:false,isNew:false,isShow:true,description:'原木摆台，放桌面刚刚好。'},
+  {id:'pe4',name:'旅拍帆布袋',cate:'文创',cover:'🎁',price:49,stock:0,specs:['帆布','大容量'],isHot:false,isNew:false,isShow:false,description:'加厚帆布，印品牌 logo。'}
+];
+let PE_SEL='pe1';
+function peBadges(p){ const a=[]; if(p.isHot) a.push('<span class="mkbadge mk-热门">热门</span>'); if(p.isNew) a.push('<span class="mkbadge mk-新">新</span>'); return a.join(' '); }
+function peripheralEditorHTML(){
+  const p=PERIPHERALS.find(x=>x.id===PE_SEL)||PERIPHERALS[0];
+  const list=PERIPHERALS.map(x=>`<div class="ae-item ${x.id===PE_SEL?'active':''}" onclick="selectPeripheral('${x.id}')">
+      <div class="ci">${x.cover}</div><div style="flex:1;min-width:0"><div class="nm">${esc(x.name)}</div><div class="sub">${x.cate} · ¥${x.price}${x.isShow?'':' · 已下架'}</div></div>${peBadges(x)}</div>`).join('');
+  return `
+  <div class="note">🎁 <span><b>影像周边 = 实物商品</b>（相册/钥匙扣/摆台等），有<b>库存</b>与<b>物流</b>字段，区别于虚拟拍摄服务。左侧选商品、中间改字段、<b>右侧手机实时预览</b>客人看到的样子。</span></div>
+  <div class="album-editor"><div class="ae-list"><div class="head"><span style="font-weight:700;font-size:13px">影像周边（${PERIPHERALS.length}）</span><button class="btn btn-sm btn-primary" onclick="openCreate('peripheral')">＋ 新建</button></div>${list}</div>
+    <div class="ae-form">${peripheralFormHTML(p)}</div>
+    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="pePreviewInner">${renderPeripheralPreview()}</div></div></div></div>`;
+}
+function peripheralFormHTML(p){
+  const cateOpts=['相册','文创','相框','摆台','其他'];
+  const sw=(k,on)=>`<span class="switch ${on?'on':''}" onclick="togglePeripheral('${k}')"></span>`;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:700;font-size:15px">编辑周边</div>${peBadges(p)||'<span class="muted" style="font-size:12px">无角标</span>'}</div>
+    <div class="ff"><label>商品名</label><input value="${esc(p.name)}" oninput="updatePeripheral('name',this.value)"></div>
+    <div class="twocol">
+      <div class="ff"><label>类型（分类）</label><select onchange="updatePeripheral('cate',this.value);selectPeripheral(PE_SEL)">${cateOpts.map(o=>`<option ${o===p.cate?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="ff"><label>价格（元）</label><input type="number" value="${p.price}" oninput="updatePeripheral('price',this.value)"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>库存</label><input type="number" value="${p.stock}" oninput="updatePeripheral('stock',this.value)"></div>
+      <div class="ff"><label>规格（、分隔）</label><input value="${esc((p.specs||[]).join('、'))}" oninput="updatePeripheral('specs',this.value.split(/[、,]/).map(s=>s.trim()).filter(Boolean))"></div>
+    </div>
+    <div class="ff"><label>封面图</label><div class="mini-cover" style="cursor:pointer;height:92px" onclick="toast('打开图片上传（接素材库）')">${p.cover} 点击换封面</div></div>
+    <div class="ff"><label>商品描述（客人可见）</label><textarea oninput="updatePeripheral('description',this.value)">${esc(p.description||'')}</textarea></div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">上架售卖</div><div class="hint" style="margin:0">关掉则客人在小程序「影像周边」看不到、不能购买</div></div>${sw('isShow',p.isShow)}</div>
+    <div class="grp-title">角标（卡片标识）</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">热门</div>${sw('isHot',p.isHot)}</div>
+    <div class="toggle-row"><div style="font-weight:600;font-size:13px">新品</div>${sw('isNew',p.isNew)}</div>
+    <div style="display:flex;gap:10px;margin-top:16px"><button class="btn btn-primary" onclick="toast('已保存：'+PERIPHERALS.find(x=>x.id===PE_SEL).name)">💾 保存</button><button class="btn btn-ghost" onclick="selectPeripheral(PE_SEL)">重置</button></div>`;
+}
+function renderPeripheralPreview(){
+  const p=PERIPHERALS.find(x=>x.id===PE_SEL)||PERIPHERALS[0];
+  const specs=(p.specs||[]).map(s=>`<span class="sp-tag">${esc(s)}</span>`).join('');
+  const card=`<div class="pd-card"><div class="pd-cover ${p.isShow?'':'off'}">${p.cover}</div>
+    <div style="flex:1;min-width:0"><div class="pd-title">${esc(p.name)}</div><div class="pd-price">¥${p.price}</div>${p.isShow?'<div class="pd-offline" style="color:#1a8a55">● 上架中 · 可购买</div>':'<div class="pd-offline" style="color:#CC1F1F">⏸ 已下架 · 客人不可见</div>'}${p.stock<=0?'<div class="pd-offline" style="color:#CC1F1F">缺货</div>':''}<div class="badge-row">${peBadges(p)}</div></div></div>`;
+  return `<div class="phone-banner">影像周边</div><div class="pd-sec" style="font-weight:700;font-size:13px;color:#2A211B;padding:10px 12px 2px">${esc(p.cate)}</div>${card}
+    <div style="padding:0 12px;margin-top:8px">${specs}</div>
+    <div class="pd-notes"><b>商品描述：</b>${esc(p.description||'—')}</div>`;
+}
+function selectPeripheral(id){ PE_SEL=id; gotoView('peripheral'); }
+function updatePeripheral(prop,val){ const p=PERIPHERALS.find(x=>x.id===PE_SEL); if(!p) return; p[prop]=(prop==='price'||prop==='stock')?(Number(val)||0):val; const el=document.getElementById('pePreviewInner'); if(el) el.innerHTML=renderPeripheralPreview(); if(REMOTE) remoteWrite('peripherals', p.id, {[prop]:p[prop]}); }
+function togglePeripheral(prop){ const p=PERIPHERALS.find(x=>x.id===PE_SEL); if(p){ p[prop]=!p[prop]; if(REMOTE) remoteWrite('peripherals', p.id, {[prop]:p[prop]}); } selectPeripheral(PE_SEL); }
+
+/* ===================== 攻略管理编辑器 ===================== */
+const GUIDES = [
+  {id:'g1',title:'长沙夜景机位全攻略',cat:'机位路线',spotName:'靖港古镇·戏台',cover:'📖',isHot:true,top:true,status:'已发布',readCount:1204,description:'盘点长沙最适合拍夜景的机位与最佳拍摄时间，附参数建议。'},
+  {id:'g2',title:'古装写真拍摄前准备',cat:'拍摄技巧',spotName:'古装',cover:'📖',isHot:false,top:false,status:'已发布',readCount:865,description:'服装 / 妆造 / 道具清单，拍前不慌。'},
+  {id:'g3',title:'情侣写真摆姿指南',cat:'拍摄技巧',spotName:'橘子洲头',cover:'📖',isHot:false,top:false,status:'已发布',readCount:642,description:'不尴尬的情侣摆姿灵感合集。'},
+  {id:'g4',title:'国风旅拍穿搭参考',cat:'风格灵感',spotName:'国风',cover:'📖',isHot:false,top:false,status:'草稿',readCount:0,description:'国风穿搭配色与单品建议。'}
+];
+let GD_SEL='g1';
+function guideEditorHTML(){
+  const p=GUIDES.find(x=>x.id===GD_SEL)||GUIDES[0];
+  const list=GUIDES.map(x=>{ const badge=x.top?'<span class="gd-top">置顶</span>':(x.isHot?'<span class="mkbadge mk-热门">热门</span>':''); return `<div class="ae-item ${x.id===GD_SEL?'active':''}" onclick="selectGuide('${x.id}')">
+      <div class="ci">${x.cover}</div><div style="flex:1;min-width:0"><div class="nm">${esc(x.title)}</div><div class="sub">${x.cat} · ${x.status==='已发布'?'已发布':'草稿'}</div></div>${badge}</div>`; }).join('');
+  return `
+  <div class="note">📖 <span><b>攻略 = 旅拍灵感内容</b>（非商品）：发布到小程序「旅拍灵感」板块，可按分类管理、置顶、设状态。左侧选攻略、中间改字段、<b>右侧手机实时预览</b>客人看到的样子。</span></div>
+  <div class="album-editor"><div class="ae-list"><div class="head"><span style="font-weight:700;font-size:13px">攻略管理（${GUIDES.length}）</span><button class="btn btn-sm btn-primary" onclick="openCreate('guide')">＋ 新建</button></div>${list}</div>
+    <div class="ae-form">${guideFormHTML(p)}</div>
+    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="gdPreviewInner">${renderGuidePreview()}</div></div></div></div>`;
+}
+function guideFormHTML(p){
+  const catOpts=['机位路线','拍摄技巧','风格灵感','穿搭','避坑'];
+  const sw=(k,on)=>`<span class="switch ${on?'on':''}" onclick="toggleGuide('${k}')"></span>`;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:700;font-size:15px">编辑攻略</div>${p.top?'<span class="gd-top">置顶中</span>':(p.isHot?'<span class="mkbadge mk-热门">热门</span>':'<span class="muted" style="font-size:12px">普通</span>')}</div>
+    <div class="ff"><label>攻略标题</label><input value="${esc(p.title)}" oninput="updateGuide('title',this.value)"></div>
+    <div class="twocol">
+      <div class="ff"><label>分类</label><select onchange="updateGuide('cat',this.value);selectGuide(GD_SEL)">${catOpts.map(o=>`<option ${o===p.cat?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="ff"><label>关联打卡点</label><input value="${esc(p.spotName||'')}" oninput="updateGuide('spotName',this.value)"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>状态</label><select onchange="updateGuide('status',this.value);selectGuide(GD_SEL)">${['已发布','草稿'].map(o=>`<option ${o===p.status?'selected':''}>${o}</option>`).join('')}</select></div>
+      <div class="ff"><label>阅读量</label><input type="number" value="${p.readCount}" oninput="updateGuide('readCount',this.value)"></div>
+    </div>
+    <div class="ff"><label>封面图</label><div class="mini-cover" style="cursor:pointer;height:92px" onclick="toast('打开图片上传（接素材库）')">${p.cover} 点击换封面</div></div>
+    <div class="ff"><label>正文摘要（客人可见）</label><textarea oninput="updateGuide('description',this.value)">${esc(p.description||'')}</textarea></div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">热门</div><div class="hint" style="margin:0">开则在列表标「热门」</div></div>${sw('isHot',p.isHot)}</div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">置顶</div><div class="hint" style="margin:0">开则在列表最前展示</div></div>${sw('top',p.top)}</div>
+    <div style="display:flex;gap:10px;margin-top:16px"><button class="btn btn-primary" onclick="toast('已保存：'+GUIDES.find(x=>x.id===GD_SEL).title)">💾 保存</button><button class="btn btn-ghost" onclick="selectGuide(GD_SEL)">重置</button></div>`;
+}
+function renderGuidePreview(){
+  const p=GUIDES.find(x=>x.id===GD_SEL)||GUIDES[0];
+  const card=`<div class="pd-card"><div class="pd-cover">${p.cover}</div><div style="flex:1;min-width:0"><div class="pd-title">${esc(p.title)}</div><div class="muted" style="font-size:11px;margin-top:3px">${p.status==='已发布'?'已发布':'草稿'} · 阅读 ${p.readCount}</div>${p.top?'<div class="pd-offline" style="color:#9a6b08">📌 已置顶</div>':''}</div></div>`;
+  return `<div class="phone-banner">旅拍灵感</div><div style="display:flex;align-items:center;gap:8px;padding:10px 12px">${p.top?'<span class="gd-top">置顶</span>':''}<span class="gd-cat">${esc(p.cat)}</span><span class="gd-cat" style="background:#FFF3DA;color:#9a6b08">${esc(p.spotName||'—')}</span></div>${card}
+    <div class="pd-notes"><b>摘要：</b>${esc(p.description||'—')}</div>`;
+}
+function selectGuide(id){ GD_SEL=id; gotoView('guides'); }
+function updateGuide(prop,val){ const p=GUIDES.find(x=>x.id===GD_SEL); if(!p) return; p[prop]=(prop==='readCount')?(Number(val)||0):val; const el=document.getElementById('gdPreviewInner'); if(el) el.innerHTML=renderGuidePreview(); if(REMOTE) remoteWrite('guides', p.id, {[prop]:p[prop]}); }
+function toggleGuide(prop){ const p=GUIDES.find(x=>x.id===GD_SEL); if(p){ p[prop]=!p[prop]; if(REMOTE) remoteWrite('guides', p.id, {[prop]:p[prop]}); } selectGuide(GD_SEL); }
+
+/* ===================== 打卡点编辑器（无价格 / 无上架） ===================== */
+const SPOTS = [
+  {id:'s1',name:'靖港古镇·戏台',cover:'📍',city:'长沙',address:'靖港古镇主街',description:'古镇主街→戏台→河边，适合古装国风。',tags:['古装','国风','夜景'],styles:['古装','国风'],hotScore:86,checkinCount:320},
+  {id:'s2',name:'IFS 国金中心',cover:'📍',city:'长沙',address:'芙蓉中路',description:'7 楼雕塑花园 + 商场灯光，城市夜景地标。',tags:['城市','夜景','地标'],styles:['城市','胶片'],hotScore:98,checkinCount:540},
+  {id:'s3',name:'橘子洲头',cover:'📍',city:'长沙',address:'湘江中',description:'江景 + 青年毛泽东雕塑，亲子清新。',tags:['江景','亲子','清新'],styles:['亲子','清新'],hotScore:90,checkinCount:410}
+];
+let SP_SEL='s1';
+function spotEditorHTML(){
+  const p=SPOTS.find(x=>x.id===SP_SEL)||SPOTS[0];
+  const list=SPOTS.map(x=>`<div class="ae-item ${x.id===SP_SEL?'active':''}" onclick="selectSpot('${x.id}')">
+      <div class="ci">${x.cover}</div><div style="flex:1;min-width:0"><div class="nm">${esc(x.name)}</div><div class="sub">${x.city} · 热度 ${x.hotScore}</div></div></div>`).join('');
+  return `
+  <div class="note">📍 <span><b>打卡点 = 可拍机位 / 路线</b>（地点信息，<b>没有</b>价格和上架开关）。建好后在「照片留影 / 视频摄像」建单品时选它。左侧选机位、中间改字段、<b>右侧手机实时预览</b>客人在探索页看到的样子。</span></div>
+  <div class="album-editor"><div class="ae-list"><div class="head"><span style="font-weight:700;font-size:13px">打卡点（${SPOTS.length}）</span><button class="btn btn-sm btn-primary" onclick="openCreate('spot')">＋ 新建</button></div>${list}</div>
+    <div class="ae-form">${spotFormHTML(p)}</div>
+    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="spPreviewInner">${renderSpotPreview()}</div></div></div></div>`;
+}
+function spotFormHTML(p){
+  return `
+    <div style="font-weight:700;font-size:15px;margin-bottom:12px">编辑打卡点</div>
+    <div class="ff"><label>机位名称</label><input value="${esc(p.name)}" oninput="updateSpot('name',this.value)"></div>
+    <div class="twocol">
+      <div class="ff"><label>城市</label><input value="${esc(p.city)}" oninput="updateSpot('city',this.value)"></div>
+      <div class="ff"><label>地址 / 定位</label><input value="${esc(p.address||'')}" oninput="updateSpot('address',this.value)"></div>
+    </div>
+    <div class="ff"><label>路线 / 机位描述（客人可见）</label><textarea oninput="updateSpot('description',this.value)">${esc(p.description||'')}</textarea></div>
+    <div class="twocol">
+      <div class="ff"><label>风格标签（、分隔）</label><input value="${esc((p.styles||[]).join('、'))}" oninput="updateSpot('styles',this.value.split(/[、,]/).map(s=>s.trim()).filter(Boolean))"></div>
+      <div class="ff"><label>其他标签（、分隔）</label><input value="${esc((p.tags||[]).join('、'))}" oninput="updateSpot('tags',this.value.split(/[、,]/).map(s=>s.trim()).filter(Boolean))"></div>
+    </div>
+    <div class="twocol">
+      <div class="ff"><label>热度分</label><input type="number" value="${p.hotScore}" oninput="updateSpot('hotScore',this.value)"></div>
+      <div class="ff"><label>打卡次数</label><input type="number" value="${p.checkinCount}" oninput="updateSpot('checkinCount',this.value)"></div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px"><button class="btn btn-primary" onclick="toast('已保存：'+SPOTS.find(x=>x.id===SP_SEL).name)">💾 保存</button><button class="btn btn-ghost" onclick="selectSpot(SP_SEL)">重置</button></div>`;
+}
+function renderSpotPreview(){
+  const p=SPOTS.find(x=>x.id===SP_SEL)||SPOTS[0];
+  const tags=(p.styles||[]).map(t=>`<span class="sp-tag">${esc(t)}</span>`).join('')+(p.tags||[]).map(t=>`<span class="sp-tag">${esc(t)}</span>`).join('');
+  return `<div class="phone-banner">探索</div><div class="pd-sec" style="font-weight:700;font-size:13px;color:#2A211B;padding:10px 12px 2px">${esc(p.city)}</div>
+    <div class="pd-card"><div class="pd-cover">${p.cover}</div><div style="flex:1;min-width:0"><div class="pd-title">${esc(p.name)}</div><div class="muted" style="font-size:11px;margin-top:3px">📍 ${esc(p.address||'—')}</div><div class="muted" style="font-size:11px">热度 ${p.hotScore} · 打卡 ${p.checkinCount}</div></div></div>
+    <div style="padding:0 12px;margin-top:8px">${tags}</div>
+    <div class="pd-notes"><b>路线：</b>${esc(p.description||'—')}</div>`;
+}
+function selectSpot(id){ SP_SEL=id; gotoView('spot'); }
+function updateSpot(prop,val){ const p=SPOTS.find(x=>x.id===SP_SEL); if(!p) return; p[prop]=(prop==='hotScore'||prop==='checkinCount')?(Number(val)||0):val; const el=document.getElementById('spPreviewInner'); if(el) el.innerHTML=renderSpotPreview(); if(REMOTE) remoteWrite('spots', p.id, {[prop]:p[prop]}); }
+
+/* ===================== 风格系列编辑器（集中维护：改名 / 排序 / 隐藏） ===================== */
+const STYLES = [
+  {id:'st1',name:'古装',count:9,order:1,hidden:false},
+  {id:'st2',name:'胶片',count:6,order:2,hidden:false},
+  {id:'st3',name:'清新',count:5,order:3,hidden:false},
+  {id:'st4',name:'Vlog',count:3,order:4,hidden:false},
+  {id:'st5',name:'复古',count:1,order:5,hidden:true}
+];
+let ST_SEL='st1';
+function seriesEditorHTML(){
+  const p=STYLES.find(x=>x.id===ST_SEL)||STYLES[0];
+  const list=STYLES.map(x=>`<div class="ae-item ${x.id===ST_SEL?'active':''}" onclick="selectSeries('${x.id}')">
+      <div class="ci">🎨</div><div style="flex:1;min-width:0"><div class="nm">${esc(x.name)}</div><div class="sub">${x.count} 个商品 · 排序 ${x.order}${x.hidden?' · 已隐藏':''}</div></div>${x.hidden?'<span class="badge off">隐藏</span>':''}</div>`).join('');
+  return `
+  <div class="note">🎨 <span><b>风格 / 标签管理</b>：平时建商品时直接选或输入即新建，不用进这页。这页用于<b>集中维护</b>——改名（全站生效）、排序、隐藏某个风格、看每个风格下挂了多少商品。右侧预览即客人在「照片留影」看到的风格系列入口。</span></div>
+  <div class="album-editor"><div class="ae-list"><div class="head"><span style="font-weight:700;font-size:13px">风格系列（${STYLES.length}）</span><button class="btn btn-sm btn-primary" onclick="toast('输入新风格名即新建')">＋ 新建</button></div>${list}</div>
+    <div class="ae-form">${seriesFormHTML(p)}</div>
+    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="stPreviewInner">${renderSeriesPreview()}</div></div></div></div>`;
+}
+function seriesFormHTML(p){
+  const sw=(k,on)=>`<span class="switch ${on?'on':''}" onclick="toggleSeries('${k}')"></span>`;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:700;font-size:15px">编辑风格</div>${p.hidden?'<span class="badge off">已隐藏</span>':'<span class="badge on">展示中</span>'}</div>
+    <div class="ff"><label>风格名称（改名全站生效）</label><input value="${esc(p.name)}" oninput="updateSeries('name',this.value)"></div>
+    <div class="twocol">
+      <div class="ff"><label>排序</label><input type="number" value="${p.order}" oninput="updateSeries('order',this.value)"></div>
+      <div class="ff"><label>下挂商品数</label><input value="${p.count}" readonly style="background:var(--lxm-gray-50);color:var(--lxm-muted)"></div>
+    </div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">小程序展示</div><div class="hint" style="margin:0">关掉则该风格在客人端不显示（商品仍存在，归入其他风格）</div></div>${sw('hidden',p.hidden)}</div>
+    <div style="display:flex;gap:10px;margin-top:16px"><button class="btn btn-primary" onclick="toast('已保存：'+STYLES.find(x=>x.id===ST_SEL).name)">💾 保存</button><button class="btn btn-ghost" onclick="selectSeries(ST_SEL)">重置</button></div>`;
+}
+function renderSeriesPreview(){
+  const chips=STYLES.slice().sort((a,b)=>a.order-b.order).map(x=>`<span class="st-chip ${x.hidden?'hide':''}">${esc(x.name)}${x.hidden?'（隐藏）':''}</span>`).join('');
+  const p=STYLES.find(x=>x.id===ST_SEL)||STYLES[0];
+  return `<div class="phone-banner">照片留影</div><div class="pd-sec" style="font-weight:700;font-size:12px;color:#2A211B;padding:10px 12px 4px">风格系列（客人端入口）</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:6px 12px">${chips}</div>
+    <div class="pd-notes"><b>当前编辑：</b>${esc(p.name)} · 排序 ${p.order} · ${p.count} 个商品${p.hidden?' · <span style="color:#CC1F1F">已隐藏</span>':''}</div>`;
+}
+function selectSeries(id){ ST_SEL=id; gotoView('series'); }
+function updateSeries(prop,val){ const p=STYLES.find(x=>x.id===ST_SEL); if(!p) return; p[prop]=(prop==='order'||prop==='count')?(Number(val)||0):val; const el=document.getElementById('stPreviewInner'); if(el) el.innerHTML=renderSeriesPreview(); if(REMOTE) remoteWrite('series', p.id, {[prop]:p[prop]}); }
+function toggleSeries(prop){ const p=STYLES.find(x=>x.id===ST_SEL); if(p){ p[prop]=!p[prop]; if(REMOTE) remoteWrite('series', p.id, {[prop]:p[prop]}); } selectSeries(ST_SEL); }
+
+/* ===================== 城市编辑器（探索页城市选择 · 补齐小程序配置缺口） ===================== */
+const CITIES = [
+  {id:'c1',name:'长沙',pinyin:'changsha',enabled:true,sort:1,desc:'样板城市，全量内容已配（打卡点/照片留影/视频/套餐/攻略）'},
+  {id:'c2',name:'成都',pinyin:'chengdu',enabled:false,sort:2,desc:'筹备中，待配置内容与机位'},
+  {id:'c3',name:'重庆',pinyin:'chongqing',enabled:false,sort:3,desc:'规划中，暂未开放'}
+];
+let CT_SEL='c1';
+function cityEditorHTML(){
+  const p=CITIES.find(x=>x.id===CT_SEL)||CITIES[0];
+  const list=CITIES.map(x=>`<div class="ae-item ${x.id===CT_SEL?'active':''}" onclick="selectCity('${x.id}')">
+      <div class="ci">🏙️</div><div style="flex:1;min-width:0"><div class="nm">${esc(x.name)}</div><div class="sub">${x.enabled?'已开放':'未开放'} · 排序 ${x.sort}</div></div>${x.enabled?'<span class="badge on">开放</span>':'<span class="badge off">未开放</span>'}</div>`).join('');
+  return `
+  <div class="note">🏙️ <span><b>城市 = 探索页城市选择</b>：小程序「探索」按城市切换内容。当前工程里城市是探索页配置<b>硬编码缺口</b>（后台配了小程序读不到）——这里补齐：城市开放 / 排序 / 文案均可后台配置，客人即时看到。</span></div>
+  <div class="album-editor"><div class="ae-list"><div class="head"><span style="font-weight:700;font-size:13px">城市（${CITIES.length}）</span><button class="btn btn-sm btn-primary" onclick="toast('新增城市（需同步配置该城内容）')">＋ 新建</button></div>${list}</div>
+    <div class="ae-form">${cityFormHTML(p)}</div>
+    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="ctPreviewInner">${renderCityPreview()}</div></div></div></div>`;
+}
+function cityFormHTML(p){
+  const sw=(k,on)=>`<span class="switch ${on?'on':''}" onclick="toggleCity('${k}')"></span>`;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div style="font-weight:700;font-size:15px">编辑城市</div>${p.enabled?'<span class="badge on">已开放</span>':'<span class="badge off">未开放</span>'}</div>
+    <div class="twocol">
+      <div class="ff"><label>城市名</label><input value="${esc(p.name)}" oninput="updateCity('name',this.value)"></div>
+      <div class="ff"><label>拼音 / 标识</label><input value="${esc(p.pinyin||'')}" oninput="updateCity('pinyin',this.value)"></div>
+    </div>
+    <div class="ff"><label>排序</label><input type="number" value="${p.sort}" oninput="updateCity('sort',this.value)"></div>
+    <div class="ff"><label>城市说明（运营备注）</label><textarea oninput="updateCity('desc',this.value)">${esc(p.desc||'')}</textarea></div>
+    <div class="toggle-row"><div><div style="font-weight:600;font-size:13px">开放城市</div><div class="hint" style="margin:0">关掉则客人端「探索」不显示该城市</div></div>${sw('enabled',p.enabled)}</div>
+    <div style="display:flex;gap:10px;margin-top:16px"><button class="btn btn-primary" onclick="toast('已保存：'+CITIES.find(x=>x.id===CT_SEL).name)">💾 保存</button><button class="btn btn-ghost" onclick="selectCity(CT_SEL)">重置</button></div>`;
+}
+function renderCityPreview(){
+  const tabs=CITIES.slice().sort((a,b)=>a.sort-b.sort).map(x=>`<span class="ct-tab ${x.enabled?'':'off'}">${esc(x.name)}${x.enabled?'':'（未开放）'}</span>`).join('');
+  const p=CITIES.find(x=>x.id===CT_SEL)||CITIES[0];
+  return `<div class="phone-banner">探索</div><div class="pd-sec" style="font-weight:700;font-size:12px;color:#2A211B;padding:10px 12px 4px">城市选择（客人端顶部）</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;padding:6px 12px">${tabs}</div>
+    <div class="pd-notes"><b>当前编辑：</b>${esc(p.name)} · 排序 ${p.sort} · ${p.enabled?'<span style="color:#1a8a55">已开放</span>':'<span style="color:#CC1F1F">未开放</span>'}<br>${esc(p.desc||'—')}</div>`;
+}
+function selectCity(id){ CT_SEL=id; gotoView('cities'); }
+function updateCity(prop,val){ const p=CITIES.find(x=>x.id===CT_SEL); if(!p) return; p[prop]=(prop==='sort')?(Number(val)||0):val; const el=document.getElementById('ctPreviewInner'); if(el) el.innerHTML=renderCityPreview(); if(REMOTE) remoteWrite('cities', p.id, {[prop]:p[prop]}); }
+function toggleCity(prop){ const p=CITIES.find(x=>x.id===CT_SEL); if(p){ p[prop]=!p[prop]; if(REMOTE) remoteWrite('cities', p.id, {[prop]:p[prop]}); } selectCity(CT_SEL); }
+
+function distributorListHTML(){
+  return `<div class="note">🔗 <span><b>分销员账号配置</b>：分销员是<b>个人推广账号</b>，只维护身份信息、登录账号、分销分成比例与结算周期。商家绑定由总部在「商家管理」里完成，分销员不能自行新增商家。（因此新建表单没有价格/标签/上架——那是商品字段）</span></div>
+    <div class="toolbar"><button class="btn btn-primary" onclick="openCreate('distributor')">＋ 新建推广员</button><input class="input" placeholder="搜索姓名 / 手机号 / 账号"><div class="spacer" style="flex:1"></div><span class="muted" style="font-size:12px">共 14 人 · 启用 11</span></div>
+    <div class="table"><table><thead><tr><th>分销员姓名</th><th>手机号</th><th>登录账号</th><th>共推门店</th><th>默认分销比例</th><th>结算周期</th><th>账号状态</th><th>操作</th></tr></thead><tbody>
+      <tr><td class="title-cell">小美</td><td>138****2044</td><td>xiaomei</td><td>靖港古镇文创店</td><td>8%</td><td>月结</td><td><span class="badge on">启用</span></td><td><div class="row-actions"><span class="link">编辑配置</span></div></td></tr>
+      <tr><td class="title-cell">阿强</td><td>139****5512</td><td>aqiang</td><td>橘子洲旅拍驿站</td><td>10%</td><td>半月结</td><td><span class="badge on">启用</span></td><td><div class="row-actions"><span class="link">编辑配置</span></div></td></tr>
+      <tr><td class="title-cell">小雨</td><td>137****8830</td><td>xyu</td><td><span class="muted">未绑定</span></td><td>—</td><td>—</td><td><span class="badge off">停用</span></td><td><div class="row-actions"><span class="link">编辑配置</span><span class="link">删除</span></div></td></tr>
+    </tbody></table></div>`;
+}
+function personListHTML(){
+  return `<div class="note">👥 <span><b>人员账号与权限</b>：维护总部内部员工、客服、财务、摄影师、内容运营账号。摄影师在此设分成比例与结算周期；其他角色只维护权限与登录信息。</span></div>
+    <div class="toolbar"><button class="btn btn-primary" onclick="openCreate('staff')">＋ 新建人员</button><select class="select"><option>全部角色</option><option>客服</option><option>财务</option><option>售后</option><option>摄影师</option><option>内容运营</option></select><input class="input" placeholder="搜索姓名 / 账号 / 手机号"><div class="spacer" style="flex:1"></div><span class="muted" style="font-size:12px">共 12 人</span></div>
+    <div class="table"><table><thead><tr><th>姓名</th><th>登录账号</th><th>角色</th><th>手机号</th><th>摄影师分成</th><th>结算周期</th><th>账号状态</th><th>操作</th></tr></thead><tbody>
+      <tr><td class="title-cell">林晓</td><td>linxiao</td><td><span class="role-pill ph">摄影师</span></td><td>135****2266</td><td>20%</td><td>月结</td><td><span class="badge on">启用</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">重置密码</span></div></td></tr>
+      <tr><td class="title-cell">王倩</td><td>wangq</td><td><span class="role-pill cs">客服</span></td><td>136****7788</td><td>—</td><td>—</td><td><span class="badge on">启用</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">重置密码</span></div></td></tr>
+      <tr><td class="title-cell">陈昊</td><td>chenh</td><td><span class="role-pill fin">财务</span></td><td>137****1199</td><td>—</td><td>—</td><td><span class="badge on">启用</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">重置密码</span></div></td></tr>
+      <tr><td class="title-cell">周敏</td><td>zhoum</td><td><span class="role-pill">售后</span></td><td>138****3320</td><td>—</td><td>—</td><td><span class="badge on">启用</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">重置密码</span></div></td></tr>
+    </tbody></table></div>`;
+}
+function shopListHTML(){
+  return `<div class="note">🤝 <span><b>合作方管理</b>：一个合作方（如"靖港古镇文创"）可开<b>多家门店</b>，每家门店独立铺「专属溯源码」物料，扫码成交各自计入对应门店业绩、按门店结算分成。<b>合作中/已终止</b>可配；与分销员是两条独立关系（解绑分销 ≠ 终止合作）。</span></div>
+    <div class="toolbar"><button class="btn btn-primary" onclick="openCreate('shop')">＋ 新建合作方</button><select class="select"><option>全部状态</option><option>合作中</option><option>已终止</option></select><input class="input" placeholder="合作方名 / 城市"><div class="spacer" style="flex:1"></div><span class="muted" style="font-size:12px">共 2 个合作方 · 合作中 2</span></div>
+    <div class="table"><table><thead><tr><th>合作方</th><th>城市</th><th>门店数</th><th>总带来单量</th><th>总分成比例</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      <tr><td class="title-cell">靖港古镇文创<small>旗下 2 家门店</small></td><td>长沙</td><td>2</td><td>32</td><td>10%</td><td><span class="badge on">合作中</span></td><td><div class="row-actions"><span class="link">门店管理</span><span class="link">编辑</span><span class="link">物料</span><span class="link">终止</span></div></td></tr>
+      <tr><td class="title-cell">橘子洲旅拍驿站<small>旗下 1 家门店</small></td><td>长沙</td><td>1</td><td>15</td><td>12%</td><td><span class="badge on">合作中</span></td><td><div class="row-actions"><span class="link">门店管理</span><span class="link">编辑</span><span class="link">物料</span><span class="link">终止</span></div></td></tr>
+    </tbody></table></div>
+    <div class="sectitle">门店明细（点上方「门店管理」查看 · 每家独立溯源码）</div>
+    <div class="table"><table><thead><tr><th>所属合作方</th><th>门店</th><th>城市</th><th>带来订单</th><th>应收</th><th>溯源码</th><th>操作</th></tr></thead><tbody>
+      <tr><td>靖港古镇文创</td><td class="title-cell">靖港古镇文创店</td><td>长沙</td><td>23</td><td>¥9,680</td><td><span class="badge blue">已生成</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">物料</span></div></td></tr>
+      <tr><td>靖港古镇文创</td><td class="title-cell">靖港古镇·戏台店</td><td>长沙</td><td>9</td><td>¥3,540</td><td><span class="badge blue">已生成</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">物料</span></div></td></tr>
+      <tr><td>橘子洲旅拍驿站</td><td class="title-cell">橘子洲旅拍驿站</td><td>长沙</td><td>15</td><td>¥5,680</td><td><span class="badge blue">已生成</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">物料</span></div></td></tr>
+    </tbody></table></div>`;
+}
+/* ===================== 我的门店（合作方专属视图：仅自己合作方旗下的门店数据） ===================== */
+function shopSelfHTML(){
+  const ownOrders=ORDERS.filter(orderScopeFilter);
+  const amt=ownOrders.reduce((s,o)=>s+o.amount,0);
+  const due=ownOrders.reduce((s,o)=>s+o.due,0);
+  const dep=ownOrders.reduce((s,o)=>s+o.deposit,0);
+  // 该合作方旗下门店（演示：merchant1 = 靖港古镇文创，旗下 2 家门店，各自独立溯源码）
+  const stores=[
+    {name:'靖港古镇文创店',city:'长沙',orders:4,recv:'¥2,196',rate:'10%',split:'¥220',code:'已生成',status:'已结'},
+    {name:'靖港古镇·戏台店',city:'长沙',orders:1,recv:'¥429',rate:'10%',split:'¥43',code:'已生成',status:'待结'}
+  ];
+  return `
+  <div class="note blue">🏪 <span><b>我的门店（合作方视角）</b>：这里只显示<b>你自己合作方旗下的门店</b>数据。旗下每家门店独立铺「专属溯源码」，扫码成交各自计入对应门店业绩、按门店结算。平台全局、其他合作方数据对你不可见——这是合作方的权限边界。</span></div>
+  <div class="store-card">
+    <div class="store-cover">🤝</div>
+    <div class="store-info">
+      <div class="store-name">靖港古镇文创 <span class="badge on">合作中</span></div>
+      <div class="store-meta">合作方主体 · 城市：长沙 · 旗下门店：2 家 · 总分成比例：10%</div>
+      <div class="store-meta muted">每家门店一张独立溯源码，客人扫码即可溯源到具体门店并计业绩</div>
+    </div>
+    <div class="store-actions"><button class="btn btn-ghost">查看合作物料</button></div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="k">旗下门店</div><div class="v red">${stores.length}</div></div>
+    <div class="stat"><div class="k">带来订单</div><div class="v">${ownOrders.length}</div></div>
+    <div class="stat"><div class="k">应收合计</div><div class="v gold">¥${amt}</div></div>
+    <div class="stat"><div class="k">待收尾款</div><div class="v">¥${due}</div></div>
+  </div>
+  <div class="sectitle">门店明细（每家独立溯源码 · 独立业绩 · 独立结算）</div>
+  <div class="table"><table><thead><tr><th>门店</th><th>城市</th><th>带来订单</th><th>应收</th><th>分成比例</th><th>商家分成</th><th>溯源码</th><th>结算状态</th></tr></thead><tbody>
+    ${stores.map(s=>`<tr><td class="title-cell">${s.name}</td><td>${s.city}</td><td>${s.orders}</td><td>${s.recv}</td><td>${s.rate}</td><td>${s.split}</td><td><span class="badge blue">${s.code}</span></td><td><span class="badge ${s.status==='已结'?'on':'warn'}">${s.status}</span></td></tr>`).join('')}
+  </tbody></table></div>
+  <div class="sectitle">名下订单（旗下所有门店产生的数据）</div>
+  <div class="table"><table><thead><tr><th>订单号</th><th>客人</th><th>商品</th><th>档期</th><th>状态</th><th>操作</th></tr></thead><tbody>
+    ${ownOrders.length?ownOrders.map(o=>`<tr onclick="openOrder('${o.no}')"><td class="title-cell">${o.no}<small>${o.source}</small></td><td>${o.customer}</td><td>${o.products.join('、')}</td><td>${o.appt}</td><td><span class="badge" style="background:${o.color}1a;color:${o.color}"><span class="d" style="background:${o.color}"></span>${o.statusLabel}</span></td><td><span class="link">查看 →</span></td></tr>`).join(''):`<tr><td colspan="6"><div class="empty"><div class="big">📭</div>当前合作方没有可见订单</div></td></tr>`}
+  </tbody></table></div>`;
+}
+function spotListHTML(){
+  return `<div class="toolbar"><button class="btn btn-primary" onclick="openCreate('spot')">＋ 新建打卡点</button><input class="input" placeholder="搜索机位名 / 城市"><select class="select"><option>全部城市</option><option>长沙</option><option>成都</option></select><div class="spacer" style="flex:1"></div><span class="muted" style="font-size:12px">共 16 个机位</span></div>
+    <div class="table"><table><thead><tr><th>封面</th><th>机位名称 / 城市</th><th>路线描述</th><th>坐标</th><th>热度</th><th>操作</th></tr></thead><tbody>
+      <tr><td><div class="cover">📍</div></td><td class="title-cell">靖港古镇·戏台<small>长沙</small></td><td>古镇主街→戏台→河边</td><td>28.43,112.88</td><td><span class="badge warn"><span class="d"></span>热</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">删除</span></div></td></tr>
+      <tr><td><div class="cover">📍</div></td><td class="title-cell">IFS 国金中心<small>长沙</small></td><td>7 楼雕塑花园</td><td>28.19,112.94</td><td><span class="badge red"><span class="d"></span>爆款</span></td><td><div class="row-actions"><span class="link">编辑</span><span class="link">删除</span></div></td></tr>
+    </tbody></table></div>
+    <div class="note" style="margin-top:14px">📍 <span><b>注意</b>：打卡点<b>没有</b>「价格」和「上架开关」——它是地点信息，不是商品。建好后在「照片留影」里建单品时选它即可。（所以新建表单也只有地点字段）</span></div>`;
+}
+
+/* ===================== 小程序数据配置中心 · 首页总览 ===================== */
+function miniConfigHubHTML(){
+  const cards=[
+    {v:'photo', icon:'🖼️', name:'照片留影', cnt:'24 条', status:'已配', desc:'客人预约的「照片单品」：风格系列 / 打卡点 / 标签 / 价格 / 上架 / 营销徽标', dot:'#EE2C2C'},
+    {v:'video', icon:'🎞️', name:'视频摄像', cnt:'9 条', status:'已配', desc:'短视频单品：时长·画幅 / 风格 / 标签 / 价格 / 营销徽标', dot:'#FF8D52'},
+    {v:'package', icon:'📦', name:'旅拍套餐', cnt:'6 个', status:'已配', desc:'多个基础商品组合打包 + 组合价（全站唯一套餐板块）', dot:'#FFD36A'},
+    {v:'peripheral', icon:'🎁', name:'影像周边', cnt:'11 件', status:'已配', desc:'实物商品：类型 / 库存 / 物流 / 价格（区别于拍摄服务）', dot:'#9a6b08'},
+    {v:'spot', icon:'📍', name:'打卡点', cnt:'16 个', status:'已配', desc:'可拍机位 / 路线（地点信息，无价格、无上架开关）', dot:'#1c6b86'},
+    {v:'samples', icon:'🗂️', name:'样片素材库', cnt:'1,286 张', status:'待完善', desc:'成片 / 底片 DAM：按订单·摄影·风格归档，批量上传打标', dot:'#7B3FA0'},
+    {v:'decor', icon:'🎛️', name:'小程序装修配置', cnt:'实时', status:'已配', desc:'首页轮播 / 公告 / 快捷入口 / 板块排序 —— 左编右预览（接收真实配置）', dot:'#CC1F1F'},
+    {v:'guides', icon:'📖', name:'攻略管理', cnt:'18 篇', status:'已配', desc:'旅拍灵感内容发布 / 置顶 / 分类', dot:'#1a8a55'},
+    {v:'cities', icon:'🏙️', name:'城市配置', cnt:'3 个', status:'已配', desc:'探索页城市开放 / 排序 / 文案（补齐小程序硬编码缺口）', dot:'#1c6b86'}
+  ];
+  let h=`<div class="note">🏠 <span><b>小程序数据配置中心</b>：这里配置客人打开小程序看到的<b>一切内容</b>——商品、打卡点、素材、首页装修、攻略、城市。菜单名与小程序客人端板块<b>完全一致</b>；分类（风格/标签）建商品时直接选或填，不单列页面。</span></div>
+    <div class="conn-card demo" id="connCard"><span class="dot off"></span> 检测中…</div>
+    <div class="cfg-progress">配置完成度：<b>8 / 9</b> 模块已接入真实小程序字段 · 仅「样片素材库」待打通小程序云 travel_photos</div>
+    <div class="config-hub">`;
+  cards.forEach(c=>{
+    h+=`<div class="cfg-card" onclick="gotoView('${c.v}')">
+      <div class="cfg-top"><span class="cfg-ico" style="background:${c.dot}1a;color:${c.dot}">${c.icon}</span><span class="cfg-stack"><span class="cfg-cnt">${c.cnt}</span><span class="cfg-status ${c.status==='已配'?'on':'off'}">${c.status}</span></span></div>
+      <div class="cfg-name">${c.name}</div>
+      <div class="cfg-desc">${c.desc}</div>
+      <div class="cfg-go">去配置 →</div>
+    </div>`;
+  });
+  h+=`</div>
+    <div class="note blue" style="margin-top:18px">🔗 <span>后台与小程序是<b>双向</b>的：后台配置的内容通过 RPC 下发到小程序（客人即时看到）；小程序产生的订单 / 浏览等行为也会回流到后台。装修配置页右侧手机预览即「接收」小程序当前真实配置。</span></div>`;
+  return h;
+}
+
+/* ===================== 攻略管理（真实列表） ===================== */
+function guidesListHTML(){
+  const rows=[
+    ['长沙夜景机位全攻略','机位路线','靖港古镇·戏台','🔥 热','已发布','1,204'],
+    ['古装写真拍摄前准备','拍摄技巧','古装','一般','已发布','865'],
+    ['情侣写真摆姿指南','拍摄技巧','橘子洲头','🆕 新','已发布','642'],
+    ['国风旅拍穿搭参考','风格灵感','国风','一般','草稿','—']
+  ];
+  return `<div class="note">📖 <span><b>攻略 = 旅拍灵感内容</b>（非商品）：发布到小程序「旅拍灵感」板块，可按分类管理、置顶、设状态。与照片留影/视频摄像同属「配置小程序内容」。</span></div>
+    <div class="toolbar"><button class="btn btn-primary" onclick="openCreate('guide')">＋ 新建攻略</button><select class="select"><option>全部分类</option><option>机位路线</option><option>拍摄技巧</option><option>风格灵感</option></select><select class="select"><option>全部状态</option><option>已发布</option><option>草稿</option></select><input class="input" placeholder="搜索攻略标题"><div class="spacer" style="flex:1"></div><span class="muted" style="font-size:12px">共 18 篇</span></div>
+    <div class="table"><table><thead><tr><th>封面</th><th>标题</th><th>分类</th><th>关联打卡点</th><th>热度</th><th>状态</th><th>阅读量</th><th>操作</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td><div class="cover">📖</div></td><td class="title-cell">${r[0]}</td><td><span class="tag blue">${r[1]}</span></td><td>${r[2]}</td><td>${r[3].includes('热')?'<span class="badge warn">'+r[3]+'</span>':r[3].includes('新')?'<span class="badge red">'+r[3]+'</span>':'<span class="badge off">'+r[3]+'</span>'}</td><td>${r[4]==='已发布'?'<span class="badge on">已发布</span>':'<span class="badge off">草稿</span>'}</td><td>${r[6]}</td><td><div class="row-actions"><span class="link">编辑</span><span class="link">置顶</span><span class="link">删除</span></div></td></tr>`).join('')}
+    </tbody></table></div>`;
+}
+
+/* ===================== 订单中心（参照真实后台 + 权限边界） ===================== */
+const ORDERS = [
+  {no:'LX20260814-001',customer:'微信用户·小鹿',phone:'138****6020',status:'pending',statusLabel:'待确认',color:'#F59E0B',source:'小程序自然',products:['古装庭院写真'],amount:399,deposit:0,due:399,finance:'未审',refund:'无退',photographer:'',assignee:'',appt:'08-20 14:00',shopId:'shop1',merchantId:'merchant1',distributorId:'',scopeTag:'全'},
+  {no:'LX20260814-002',customer:'微信用户·阿橙',phone:'139****5512',status:'shooting',statusLabel:'拍摄中',color:'#3B82F6',source:'本门店码',products:['城市 Vlog'],amount:599,deposit:200,due:399,finance:'已审',refund:'无退',photographer:'st4',assignee:'王倩',appt:'08-21 10:00',shopId:'shop1',merchantId:'merchant1',distributorId:'',scopeTag:'摄商'},
+  {no:'LX20260814-003',customer:'微信用户·小竹',phone:'137****8830',status:'confirmed',statusLabel:'已确认',color:'#10B981',source:'分销员推广',products:['橘洲清新写真'],amount:359,deposit:0,due:359,finance:'未审',refund:'无退',photographer:'',assignee:'',appt:'08-22 15:30',shopId:'',merchantId:'dist2',distributorId:'dist2',scopeTag:'销'},
+  {no:'LX20260814-004',customer:'微信用户·阿金',phone:'136****1199',status:'completed',statusLabel:'已完成',color:'#6B7280',source:'小程序自然',products:['旅拍套餐·经典'],amount:899,deposit:899,due:0,finance:'已审',refund:'无退',photographer:'st4',assignee:'王倩',appt:'08-19 09:00',shopId:'shop2',merchantId:'merchant2',distributorId:'',scopeTag:'全'},
+  {no:'LX20260814-005',customer:'微信用户·小桐',phone:'135****2266',status:'retouching',statusLabel:'修片中',color:'#F97316',source:'本门店码',products:['夜景氛围写真'],amount:499,deposit:100,due:399,finance:'已审',refund:'无退',photographer:'st4',assignee:'王倩',appt:'08-18 16:00',shopId:'shop1',merchantId:'merchant1',distributorId:'',scopeTag:'摄商'},
+  {no:'LX20260814-006',customer:'微信用户·小满',phone:'138****3320',status:'cancelled',statusLabel:'已取消',color:'#6B7280',source:'小程序自然',products:['情侣双人写真'],amount:699,deposit:0,due:699,finance:'未审',refund:'已审',photographer:'',assignee:'',appt:'08-17 11:00',shopId:'',merchantId:'merchant1',distributorId:'',scopeTag:'全'},
+  {no:'LX20260814-007',customer:'微信用户·小荷',phone:'135****7788',status:'confirmed',statusLabel:'已确认',color:'#10B981',source:'本门店码',products:['戏台古装写真'],amount:429,deposit:0,due:429,finance:'未审',refund:'无退',photographer:'',assignee:'',appt:'08-23 13:00',shopId:'shop1b',merchantId:'merchant1',distributorId:'',scopeTag:'摄商'}
+];
+function orderScopeFilter(o){
+  const r=CUR_ROLE, rp=ROLES[r];
+  if(r==='photo') return o.photographer==='st4';
+  if(r==='merchant') return o.merchantId===(rp.merchantId||'merchant1');
+  if(r==='distributor') return o.distributorId==='dist2';
+  return true; // super / service / finance 看全部
+}
+function orderCols(){
+  const r=CUR_ROLE;
+  if(r==='finance') return ['customer','status','source','products','amount','risk','appt','op'];
+  if(r==='photo')   return ['customer','status','products','appt','op'];
+  if(r==='merchant'||r==='distributor') return ['customer','status','products','amount','appt','op'];
+  return ['customer','status','source','products','amount','risk','assignee','appt','op']; // service / super
+}
+function canAct(a){ const acts=ROLES[CUR_ROLE].actions; return acts.includes('*')||acts.includes(a); }
+function orderCenterHTML(){
+  const r=CUR_ROLE, rp=ROLES[r];
+  const visible=ORDERS.filter(orderScopeFilter);
+  const cols=orderCols();
+  const colLabel={customer:'客户',status:'状态/售后',source:'来源链路',products:'商品',amount:'金额/尾款',risk:'审核/风险',assignee:'跟进',appt:'预约时间',op:'操作'};
+  // 状态 tab
+  const statusTabs=[['','全部',visible.length,'#EE2C2C'],['pending','待确认',visible.filter(o=>o.status==='pending').length,'#F59E0B'],['confirmed','已确认',visible.filter(o=>o.status==='confirmed').length,'#10B981'],['shooting','拍摄中',visible.filter(o=>o.status==='shooting').length,'#3B82F6'],['retouching','修片中',visible.filter(o=>o.status==='retouching').length,'#F97316'],['completed','已完成',visible.filter(o=>o.status==='completed').length,'#6B7280'],['cancelled','已取消',visible.filter(o=>o.status==='cancelled').length,'#6B7280']];
+  let tabs=`<div class="alert-tabs">`;
+  statusTabs.forEach(t=>{ tabs+=`<div class="at ${t[0]===''?'active':''}" onclick="this.parentNode.querySelectorAll('.at').forEach(x=>x.classList.remove('active'));this.classList.add('active')"><span class="dot" style="background:${t[2]?'#EE2C2C':'#ccc'}"></span>${t[1]}<strong>${t[2]}</strong></div>`; });
+  tabs+=`</div>`;
+  const scopeBar=`<div class="scope-bar">🔐 <span>当前登录：<b>${rp.name}</b> · 数据范围：<b>${rp.scope}</b></span>${r!=='super'&&r!=='service'&&r!=='finance'?` · 你只能看到范围内的订单`:''}</div>`;
+  // 批量条
+  let batch='';
+  if((r==='service'||r==='super') && canAct('orderEdit')){
+    batch=`<div class="batch-bar"><strong>已选 0 单</strong><span>合计 ¥0 · 待收 ¥0</span><button class="btn btn-sm btn-primary" ${canAct('orderEdit')?'':'disabled'}>批量接单</button><button class="btn btn-sm btn-ghost" ${canAct('orderEdit')?'':'disabled'}>批量备注</button><button class="btn btn-sm btn-ghost" ${canAct('transfer')?'':'disabled'}>批量转派/交接</button>${canAct('cancelOrder')?'<button class="btn btn-sm btn-danger">批量取消进回收站</button>':''}</div>`;
+  } else if(r==='finance'){
+    batch=`<div class="batch-bar"><strong>财务视图（只读 + 审核）</strong><span class="muted">看不到「联系客人 / 派单」等操作</span><button class="btn btn-sm btn-ghost">按筛选导出</button></div>`;
+  } else if(r==='photo'){
+    batch=`<div class="batch-bar"><strong>摄影师视图</strong><span class="muted">仅显示派给你的拍摄任务，可标记拍摄/交付</span></div>`;
+  }
+  const summary=`<div class="summary"><div><span>筛选订单</span><strong>${visible.length}</strong></div><div><span>订单总额</span><strong>¥${visible.reduce((s,o)=>s+o.amount,0)}</strong></div><div><span>已收定金</span><strong>¥${visible.reduce((s,o)=>s+o.deposit,0)}</strong></div><div><span>已收尾款</span><strong>¥${visible.reduce((s,o)=>s+(o.amount-o.due-o.deposit),0)}</strong></div><div><span>待收尾款</span><strong>¥${visible.reduce((s,o)=>s+o.due,0)}</strong></div></div>`;
+  // 表头
+  let head=`<tr>${cols.map(c=>`<th>${colLabel[c]}</th>`).join('')}</tr>`;
+  let body='';
+  if(!visible.length){ body=`<tr><td colspan="${cols.length}"><div class="empty"><div class="big">📭</div>当前角色/数据范围内没有可见订单</div></td></tr>`; }
+  visible.forEach(o=>{
+    let tds='';
+    cols.forEach(c=>{
+      if(c==='customer') tds+=`<td class="title-cell">${o.no}<small>${o.customer}</small><div class="muted">${o.phone}</div></td>`;
+      else if(c==='status') tds+=`<td><span class="badge" style="background:${o.color}1a;color:${o.color}"><span class="d" style="background:${o.color}"></span>${o.statusLabel}</span></td>`;
+      else if(c==='source') tds+=`<td>${CUR_ROLE==='merchant'&&o.source.indexOf('分销')>=0?'门店推广':o.source}</td>`;
+      else if(c==='products') tds+=`<td>${o.products.map(p=>`<span class="tag series">${p}</span>`).join('')}</td>`;
+      else if(c==='amount') tds+=`<td>${money(o.amount)}<div class="muted">应收尾款 ${money(o.due)}</div></td>`;
+      else if(c==='risk') tds+=`<td><span class="tag blue">财务：${o.finance}</span>${o.refund!=='无退'?`<span class="tag" style="background:#FDE7E0;color:#CC1F1F;border-color:#F6C3B5">退款：${o.refund}</span>`:''}</td>`;
+      else if(c==='assignee') tds+=`<td>客服：${o.assignee||'—'}<div class="muted">摄影：${o.photographer?('st4 阿南'):'未派'}</div></td>`;
+      else if(c==='appt') tds+=`<td>${o.appt}</td>`;
+      else if(c==='op'){
+        let ops='';
+        if(canAct('orderEdit')) ops+=`<span class="link" onclick="openOrder('${o.no}')">编辑</span>`;
+        else ops+=`<span class="link" onclick="openOrder('${o.no}')">查看</span>`;
+        if(canAct('financeReview')) ops+=`<span class="link">财务审核</span>`;
+        if(canAct('shootUpdate')) ops+=`<span class="link">标记完成</span>`;
+        if(canAct('cancelOrder')) ops+=`<span class="link" style="color:#CC1F1F">取消</span>`;
+        if(canAct('export')&&!canAct('orderEdit')&&!canAct('financeReview')&&!canAct('shootUpdate')) ops+=`<span class="link ghost">导出</span>`;
+        tds+=`<td><div class="row-actions">${ops}</div></td>`;
+      }
+    });
+    body+=`<tr onclick="openOrder('${o.no}')">${tds}</tr>`;
+  });
+  const note=`<div class="note">🧾 <span><b>订单不是客服建的</b>：客人在小程序提交预约那一刻，订单自动进后台。客服只做「接单 → 联系客人（企微/电话）→ 录收款 → 派单」。点任意订单行，右侧抽屉集中处理。<b>本视图已按你的角色（${rp.name}）过滤可见列与数据范围。</b></span></div>`;
+  return note+scopeBar+tabs+batch+summary+`<div class="table"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+function money(n){ return '¥'+Number(n).toLocaleString('zh-CN'); }
+
+/* ===================== 订单详情抽屉（按钮按角色 actions 门控） ===================== */
+function openOrder(no){
+  const o=ORDERS.find(x=>x.no===no)||ORDERS[0];
+  document.getElementById('odNo').textContent='订单详情 · '+o.no;
+  const canEdit=canAct('orderEdit'), canFin=canAct('financeReview'), canShoot=canAct('shootUpdate'), canView=canAct('view');
+  let body=`
+    <div class="sectitle">客户与来源</div>
+    <div class="kv"><span class="k">客人</span><span class="v">${o.customer}</span></div>
+    <div class="kv"><span class="k">微信身份</span><span class="v">已授权（可企微直连）</span></div>
+    <div class="kv"><span class="k">预留电话</span><span class="v">${o.phone}</span></div>
+    <div class="kv"><span class="k">来源</span><span class="v">${o.source}</span></div>
+    <div class="sectitle">预约内容</div>
+    <div class="kv"><span class="k">商品</span><span class="v">${o.products.join('、')}</span></div>
+    <div class="kv"><span class="k">档期</span><span class="v">${o.appt}</span></div>
+    <div class="kv"><span class="k">当前状态</span><span class="v" style="color:${o.color}">${o.statusLabel}</span></div>
+    ${canView||canEdit?`<div class="sectitle">收款记录（企微）</div>
+    <div class="kv"><span class="k">定金</span><span class="v">${money(o.deposit)} / ${money(Math.min(o.amount,200))}</span></div>
+    <div class="kv"><span class="k">应收尾款</span><span class="v">${money(o.due)}</span></div>`:''}
+    <div class="sectitle">派单</div>
+    <div class="kv"><span class="k">摄影师</span><span class="v ${o.photographer?'':'muted'}">${o.photographer?'st4 阿南':'未派单'}</span></div>
+    <div class="kv"><span class="k">负责客服</span><span class="v">${o.assignee||'—'}</span></div>`;
+  if(canEdit) body+=`<div class="sectitle">沟通记录</div><div class="timeline"><div class="ti"><div class="t">${o.appt.split(' ')[0]} · 系统</div><div class="c">客人在小程序提交预约，订单生成</div></div><div class="ti"><div class="t">— · 客服</div><div class="c muted">点下方「联系客人」开始对接，记录自动留痕</div></div></div>`;
+  document.getElementById('odBody').innerHTML=body;
+  // 底部操作按钮（门控）
+  let foot='';
+  if(canEdit){
+    foot=`<button class="btn btn-primary" onclick="alert('拉起企业微信向该客人发消息（已授权可直连；未加好友则提示打电话）')">💬 联系客人</button>
+      <button class="btn btn-ghost" onclick="alert('弹出：录沟通记录 + 收定金/尾款金额')">💰 录收款</button>
+      <button class="btn btn-ghost" onclick="alert('弹出：选摄影师 + 档期 → 派单')">🎬 派单</button>
+      <button class="btn btn-ghost btn-sm" onclick="alert('推进状态：待确认 → 已确认 → 拍摄中 …（记录操作人+时间）')">推进状态 →</button>`;
+  } else if(canFin){
+    foot=`<button class="btn btn-primary" onclick="alert('财务审核：通过 / 驳回（记录操作人+时间）')">✅ 财务审核</button><button class="btn btn-ghost" onclick="alert('查看订单详情（财务只读）')">查看</button>`;
+  } else if(canShoot){
+    foot=`<button class="btn btn-primary" onclick="alert('标记：拍摄中 / 已交付')">🎬 标记拍摄完成</button><button class="btn btn-ghost" onclick="alert('查看任务详情')">查看</button>`;
+  } else {
+    foot=`<button class="btn btn-ghost" onclick="alert('当前角色仅可查看/导出，无编辑权限')">查看详情</button><button class="btn btn-ghost btn-sm" onclick="alert('导出该订单')">导出</button>`;
+  }
+  document.getElementById('odFoot').innerHTML=foot;
+  document.getElementById('orderDrawer').classList.add('show');
+}
+function closeDrawer(){ document.getElementById('orderDrawer').classList.remove('show'); }
+
+/* ===================== 新建弹窗：按类型渲染不同表单（修复推广员/人员/商家/打卡点） ===================== */
+const FORM_SCHEMAS = {
+  photo: { title:'新建照片留影', groups:[
+    {fields:[{k:'title',label:'标题 / 名称',ph:'如：古装庭院写真'}]},
+    {fields:[{k:'series',label:'所属风格系列',type:'combo',options:['古装','清新','胶片'],hint:'选已有风格；输入新名称即自动新建，不用先去别处建'},{k:'spot',label:'关联打卡点',type:'select',options:['靖港古镇·戏台','IFS 国金中心','橘子洲头']}]},
+    {fields:[{k:'tags',label:'标签（回车添加）',type:'chips'}]},
+    {fields:[{k:'price',label:'价格（元）',type:'number',val:399}]},
+    {fields:[{k:'cover',label:'封面图',type:'upload'}]},
+    {toggles:[{k:'sell',label:'上架售卖',on:true,hint:'关掉则客人在小程序看不到、不能预约'},{k:'show',label:'素材展示',on:true,hint:'关掉则不在样片展示区露脸（仍可售卖）'}]},
+    {title:'营销徽标（商品卡角标 · 优先级：爆款 > 主推 > 热门，对应小程序 isHotSale / isMainPush / isHot）',toggles:[{k:'isHotSale',label:'爆款',on:false,hint:'开 → 卡片角标显示「爆款」'},{k:'isMainPush',label:'主推',on:false,hint:'爆款关时 → 显示「主推」'},{k:'isHot',label:'热门',on:false,hint:'前两者关时 → 显示「热门」'}]}
+  ]},
+  video: { title:'新建视频摄像', groups:[
+    {fields:[{k:'title',label:'标题 / 名称',ph:'如：城市 Vlog'}]},
+    {fields:[{k:'series',label:'所属风格系列',type:'combo',options:['古装','Vlog','卡点'],hint:'选已有或输入新建'},{k:'spot',label:'关联打卡点',type:'select',options:['靖港古镇·戏台','IFS 国金中心','橘子洲头']}]},
+    {fields:[{k:'dur',label:'时长（如 0:45）',type:'text'},{k:'aspect',label:'画幅',type:'select',options:['竖屏','横屏']}]},
+    {fields:[{k:'tags',label:'标签（回车添加）',type:'chips'}]},
+    {fields:[{k:'price',label:'价格（元）',type:'number',val:499}]},
+    {fields:[{k:'cover',label:'封面图',type:'upload'}]},
+    {toggles:[{k:'sell',label:'上架售卖',on:true,hint:'关掉则客人在小程序看不到、不能预约'}]},
+    {title:'营销徽标（商品卡角标 · 优先级：爆款 > 主推 > 热门）',toggles:[{k:'isHotSale',label:'爆款',on:false,hint:'开 → 卡片角标显示「爆款」'},{k:'isMainPush',label:'主推',on:false,hint:'爆款关时 → 显示「主推」'},{k:'isHot',label:'热门',on:false,hint:'前两者关时 → 显示「热门」'}]}
+  ]},
+  package: { title:'新建旅拍套餐', groups:[
+    {fields:[{k:'title',label:'套餐名',ph:'如：经典旅拍套餐'}]},
+    {fields:[{k:'combo',label:'组合商品（多选基础商品）',type:'checks',options:['古装庭院写真','城市夜景胶片','城市 Vlog','定制皮质相册','鹿小鸣钥匙扣'],hint:'套餐=多个基础商品组合打包'}]},
+    {fields:[{k:'priceO',label:'原价合计（元）',type:'number',val:1057},{k:'price',label:'组合价（元）',type:'number',val:899}]},
+    {fields:[{k:'cover',label:'封面图',type:'upload'}]},
+    {toggles:[{k:'sell',label:'上架售卖',on:true,hint:'关掉则客人在小程序看不到、不能预约'}]},
+    {title:'营销徽标（商品卡角标 · 优先级：爆款 > 主推 > 热门）',toggles:[{k:'isHotSale',label:'爆款',on:false,hint:'开 → 卡片角标显示「爆款」'},{k:'isMainPush',label:'主推',on:false,hint:'爆款关时 → 显示「主推」'},{k:'isHot',label:'热门',on:false,hint:'前两者关时 → 显示「热门」'}]}
+  ]},
+  peripheral: { title:'新建影像周边', groups:[
+    {fields:[{k:'title',label:'名称',ph:'如：定制皮质相册'}]},
+    {fields:[{k:'type',label:'类型',type:'select',options:['相册','文创','摆台','钥匙扣']},{k:'stock',label:'库存（件）',type:'number',val:100}]},
+    {fields:[{k:'price',label:'价格（元）',type:'number',val:129}]},
+    {fields:[{k:'cover',label:'封面图',type:'upload'}]},
+    {toggles:[{k:'sell',label:'上架售卖',on:true,hint:'关掉则客人在小程序看不到、不能购买'}]}
+  ]},
+  /* —— 人 / 地点类：绝不含价格 / 标签 / 上架 / 素材展示 —— */
+  distributor: { title:'新建推广员', note:'分销员是<b>个人推广账号</b>：只维护身份信息、登录账号、分销分成比例与结算周期。商家绑定由总部在「商家管理」里完成。因此<b>没有价格/标签/上架</b>这些卖货字段。', groups:[
+    {fields:[{k:'name',label:'分销员姓名',ph:'如：小美'},{k:'phone',label:'手机号',ph:'11 位手机号'}]},
+    {fields:[{k:'account',label:'登录账号',ph:'用于后台登录，如 xiaomei'},{k:'bindShop',label:'共推门店（绑定商家）',type:'select',options:['靖港古镇文创店','橘子洲旅拍驿站','未绑定']}]},
+    {fields:[{k:'rate',label:'默认分销比例（%）',type:'number',val:8},{k:'cycle',label:'结算周期',type:'select',options:['周结','月结','季度结']}]},
+    {fields:[{k:'status',label:'账号状态',type:'select',options:['启用','停用']}]}
+  ]},
+  staff: { title:'新建人员', note:'维护总部内部员工、客服、财务、摄影师、内容运营账号。摄影师在此设分成比例与结算周期；其他角色只维护权限与登录信息。', groups:[
+    {fields:[{k:'name',label:'姓名'},{k:'account',label:'登录账号',ph:'如：linxiao'}]},
+    {fields:[{k:'role',label:'角色',type:'select',options:['客服','财务','售后','摄影师','内容运营']},{k:'phone',label:'手机号'}]},
+    {fields:[{k:'rate',label:'摄影师分成比例（%，仅摄影师填）',type:'number',val:20},{k:'cycle',label:'结算周期（仅摄影师填）',type:'select',options:['周结','月结','季度结']}]},
+    {fields:[{k:'status',label:'账号状态',type:'select',options:['启用','停用']}]}
+  ]},
+  shop: { title:'新建合作方', note:'合作方（如"靖港古镇文创"）可开<b>多家门店</b>，每家独立铺专属溯源码、独立计业绩、独立结算。建合作方时同步开第一家门店；后续在「门店管理」里继续加门店。与分销员是两条独立关系。', groups:[
+    {fields:[{k:'name',label:'合作方名称',ph:'如：靖港古镇文创'},{k:'city',label:'城市'}]},
+    {fields:[{k:'manager',label:'负责人'},{k:'phone',label:'联系电话'}]},
+    {fields:[{k:'rate',label:'分成比例（%）',type:'number',val:10},{k:'cycle',label:'结算周期',type:'select',options:['周结','月结','半月结','季度结']}]},
+    {title:'首店信息（建合作方时同步开第一家门店，每家门店一张独立溯源码）',fields:[{k:'storeName',label:'首店名称',ph:'如：靖港古镇文创店'},{k:'storeCity',label:'首店城市'}]},
+    {fields:[{k:'status',label:'合作状态',type:'select',options:['合作中','已终止']}]}
+  ]},
+  spot: { title:'新建打卡点', note:'打卡点是<b>地点信息</b>（可拍机位/路线），<b>没有价格和上架开关</b>。建好后在「照片留影」里建单品时选它即可。', groups:[
+    {fields:[{k:'name',label:'机位名称',ph:'如：靖港古镇·戏台'},{k:'city',label:'城市'}]},
+    {fields:[{k:'route',label:'路线描述',ph:'如：古镇主街→戏台→河边'},{k:'gps',label:'坐标（lat,lng）',ph:'如：28.43,112.88'}]},
+    {fields:[{k:'cover',label:'封面图',type:'upload'}]},
+    {fields:[{k:'hot',label:'热度',type:'select',options:['一般','热','爆款']}]}
+  ]},
+  guide: { title:'新建攻略', note:'攻略是<b>旅拍灵感内容</b>（非商品），发布到小程序「旅拍灵感」板块。同样不出现价格/上架这些卖货字段。', groups:[
+    {fields:[{k:'title',label:'攻略标题',ph:'如：长沙夜景机位全攻略'}]},
+    {fields:[{k:'cat',label:'分类',type:'select',options:['机位路线','拍摄技巧','风格灵感']},{k:'rel',label:'关联打卡点',type:'select',options:['靖港古镇·戏台','IFS 国金中心','橘子洲头','不关联']}]},
+    {fields:[{k:'cover',label:'封面图',type:'upload'}]},
+    {fields:[{k:'body',label:'正文（支持图文）',type:'textarea'}]},
+    {fields:[{k:'status',label:'状态',type:'select',options:['已发布','草稿']}]}
+  ]}
+};
+function openCreate(type){
+  const s=FORM_SCHEMAS[type]; if(!s) return;
+  document.getElementById('mTitle').textContent=s.title;
+  let h='';
+  if(s.note) h+=`<div class="note" style="margin-bottom:14px">ℹ️ <span>${s.note}</span></div>`;
+  s.groups.forEach(g=>{
+    if(g.fields){
+      if(g.fields.length===2) h+=`<div class="twocol">`;
+      g.fields.forEach(f=>{ h+=fieldHTML(f); });
+      if(g.fields.length===2) h+=`</div>`;
+    }
+    if(g.toggles){
+      if(g.title) h+=`<div class="grp-title">${g.title}</div>`;
+      g.toggles.forEach(t=>{ h+=`<div class="toggle-row"><div><div style="font-weight:600;font-size:13px">${t.label}</div><div class="hint" style="margin:0">${t.hint}</div></div><span class="switch ${t.on?'on':''}" onclick="this.classList.toggle('on')"></span></div>`; });
+    }
+  });
+  document.getElementById('mBody').innerHTML=h;
+  document.getElementById('mask').classList.add('show');
+}
+function fieldHTML(f){
+  let inner='';
+  if(f.type==='combo') inner=`<input list="dl_${f.k}" placeholder="${f.ph||''}"><datalist id="dl_${f.k}">${f.options.map(o=>`<option>${o}</option>`).join('')}</datalist><div class="hint">${f.hint||''}</div>`;
+  else if(f.type==='select') inner=`<select>${f.options.map(o=>`<option>${o}</option>`).join('')}</select>`;
+  else if(f.type==='chips') inner=`<div class="chip-input" id="chip_${f.k}"><input placeholder="输入后回车添加" onkeydown="if(event.key==='Enter'){addChip(this)}"></div>`;
+  else if(f.type==='number') inner=`<input type="number" value="${f.val!==undefined?f.val:''}">`;
+  else if(f.type==='upload') inner=`<div class="mini-cover" style="cursor:pointer" onclick="alert('打开图片上传（接素材库/本地）')">⬆ 上传封面</div>`;
+  else if(f.type==='checks') inner=`<div style="display:flex;flex-direction:column;gap:6px">${f.options.map(o=>`<label style="font-size:13px;display:flex;gap:8px;align-items:center"><input type="checkbox"> ${o}</label>`).join('')}</div><div class="hint">${f.hint||''}</div>`;
+  else inner=`<input placeholder="${f.ph||''}">`;
+  return `<div class="field"><label>${f.label}</label>${inner}</div>`;
+}
+function closeModal(){ document.getElementById('mask').classList.remove('show'); }
+function addChip(input){
+  const v=input.value.trim(); if(!v) return;
+  const c=document.createElement('span'); c.className='chip'; c.innerHTML=v+' <x onclick="this.parentNode.remove()">✕</x>';
+  input.parentNode.insertBefore(c,input); input.value='';
+}
+document.getElementById('mask').addEventListener('click',e=>{ if(e.target.id==='mask') closeModal(); });
+
+/* ===================== 登录 / 角色切换 / 侧边栏 ===================== */
+function loginAs(role){
+  CUR_ROLE=role;
+  document.getElementById('loginScreen').classList.add('hide');
+  document.getElementById('app').style.display='flex';
+  buildSidebar();
+  gotoView(ROLES[role].home);
+  document.getElementById('curRole').textContent=ROLES[role].name;
+  document.getElementById('curAvatar').textContent=ROLES[role].avatar;
+}
+function logout(){ if(confirm('切换角色 / 退出登录？')){ document.getElementById('app').style.display='none'; document.getElementById('loginScreen').classList.remove('hide'); } }
+function buildSidebar(){
+  const rp=ROLES[CUR_ROLE];
+  let html='';
+  GROUP_ORDER.forEach(g=>{
+    const items=rp.menus.map(k=>MENU_META[k]).filter(m=>m && m.group===g);
+    if(!items.length) return;
+    html+=`<div class="nav-group"><div class="label">${g}</div>`;
+    items.forEach(m=>{ html+=`<div class="nav-item" data-view="${m.view}"><span class="ico">${m.icon}</span>${m.label}</div>`; });
+    html+=`</div>`;
+  });
+  const nav=document.getElementById('sideNav');
+  nav.innerHTML=html;
+  nav.querySelectorAll('.nav-item').forEach(el=> el.addEventListener('click',()=>gotoView(el.dataset.view)));
+}
+function gotoView(v){
+  const content=document.getElementById('content');
+  const meta=Object.values(MENU_META).find(m=>m.view===v);
+  if(VIEWS[v]){
+    content.innerHTML=VIEWS[v]();
+    document.getElementById('pageTitle').textContent=meta?meta.label:v;
+    document.getElementById('pageCrumb').textContent=(meta?meta.group:'')+' / '+(meta?meta.label:'');
+    // 高亮侧边栏
+    document.querySelectorAll('#sideNav .nav-item').forEach(n=>n.classList.toggle('active',n.dataset.view===v));
+    // 权限提示（订单/财务等）
+    if(v==='orders'||v==='finance') showPermNote(v);
+  } else {
+    content.innerHTML=placeholderHTML(v,'📦','该模块占位');
+  }
+  content.scrollTop=0;
+}
+function toast(msg){ const t=document.createElement('div'); t.textContent=msg; t.style.cssText='position:fixed;left:50%;bottom:32px;transform:translateX(-50%);background:var(--lxm-ink);color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:var(--lxm-shadow-md)'; document.body.appendChild(t); setTimeout(()=>t.remove(),1800); }
+function showPermNote(v){
+  const rp=ROLES[CUR_ROLE];
+  const note=document.createElement('div'); note.className='perm-note';
+  note.innerHTML=`<span>🔐 <b>权限边界</b>：当前为 <b>${rp.name}</b> 视角，数据范围「${rp.scope}」${v==='orders'?'——上表订单与可见操作已按此过滤':''}。点右上角「切换角色」可对比其他角色看到的界面。</span>`;
+  document.getElementById('content').insertBefore(note, document.getElementById('content').firstChild);
+}
+</script>
+</body>
+</html>

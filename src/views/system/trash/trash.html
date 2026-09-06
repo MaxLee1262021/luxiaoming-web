@@ -1,0 +1,91 @@
+<div class="trash-page">
+  <div class="trash-toolbar">
+    <div>
+      <span class="eyebrow">回收站</span>
+      <h3>回收站</h3>
+      <p>覆盖订单、打卡点、照片单品、摄影周边等关键业务数据。删除后默认保留 30 天，支持超管恢复或永久清除。</p>
+    </div>
+    <div class="trash-toolbar-actions">
+      <el-button plain @click="restoreAllTrash">全部恢复</el-button>
+      <el-button type="danger" plain @click="clearTrash">清空回收站</el-button>
+    </div>
+  </div>
+
+  <div class="trash-stat-grid">
+    <div>
+      <span>回收站数据</span>
+      <strong>{{ state.trash.length }}</strong>
+      <em>当前可处理记录</em>
+    </div>
+    <div>
+      <span>订单记录</span>
+      <strong>{{ state.trash.filter(i => i.type === '订单').length }}</strong>
+      <em>取消或删除订单</em>
+    </div>
+    <div>
+      <span>内容商品</span>
+      <strong>{{ state.trash.filter(i => ['打卡点','打卡','照片单品','图片样片','视频样片','摄影周边','照片套餐','套餐','增值服务'].includes(i.type)).length }}</strong>
+      <em>内容资产与商品</em>
+    </div>
+    <div>
+      <span>可恢复</span>
+      <strong>{{ state.trash.filter(i => i.restorable !== false).length }}</strong>
+      <em>超管权限处理</em>
+    </div>
+  </div>
+
+  <div class="trash-table-card panel">
+    <div class="section-title-row compact">
+      <div>
+        <h3>删除记录</h3>
+        <p>恢复会回到对应业务列表；永久删除只清除回收站记录，正式版应由后端执行不可逆二次确认。</p>
+      </div>
+      <el-tag type="info">{{ state.trash.length }} 条</el-tag>
+    </div>
+
+    <el-table :data="pagedList('trash', state.trash)" border stripe empty-text="回收站是空的，删除的订单和内容会在这里保留 30 天">
+      <el-table-column label="类型" width="120">
+        <template #default="{row}">
+          <el-tag>{{ row.type }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="名称" min-width="190">
+        <template #default="{row}">
+          <strong>{{ row.name }}</strong>
+          <div class="muted">{{ row.reason || '业务删除' }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="删除时间" width="170">
+        <template #default="{row}">{{ row.time || row.deletedAt || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="操作人" width="130">
+        <template #default="{row}">{{ row.operator || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="恢复校验" min-width="220">
+        <template #default="{row}">
+          <el-tag :type="trashRestoreCheck(row).ok ? 'success' : 'warning'">{{ trashRestoreCheck(row).ok ? '可恢复' : '需处理' }}</el-tag>
+          <div class="muted">{{ trashRestoreCheck(row).reason }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="保留规则" min-width="160">
+        <template #default="{row}">
+          <span class="trash-retain">默认保留30天，可恢复</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="190" fixed="right">
+        <template #default="{row}">
+          <el-tooltip :content="trashRestoreCheck(row).reason" placement="top" :disabled="trashRestoreCheck(row).ok">
+            <span>
+              <el-button link type="primary" :disabled="!trashRestoreCheck(row).ok" @click="restoreTrash(row)">恢复</el-button>
+            </span>
+          </el-tooltip>
+          <el-button link type="danger" @click="purgeTrash(row)">永久删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="state.trash.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="state.trash.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('trash').size" :current-page="pager('trash').page" @current-change="pager('trash').page = $event" @size-change="onListPageSizeChange('trash', $event)" />
+      <span class="pager-info">第 {{ Math.min(state.trash.length, (pager('trash').page-1)*pager('trash').size+1) }}–{{ Math.min(state.trash.length, pager('trash').page*pager('trash').size) }} 条 / 共 {{ state.trash.length }} 条</span>
+    </div>
+  </div>
+</div>

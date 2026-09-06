@@ -1,0 +1,95 @@
+.page-route-operation-trace .page-head-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.page-route-operation-trace .page-head-bar h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--lxm-c-ink);
+}
+.page-route-operation-trace .page-head-bar p {
+  margin: 4px 0 0;
+  color: rgba(42, 33, 27, 0.55);
+  font-size: 13px;
+}
+.page-route-operation-trace .funnel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0 4px;
+}
+.page-route-operation-trace .funnel-step {
+  margin: 0 auto;
+}
+.page-route-operation-trace .funnel-bar {
+  border-radius: 10px;
+  padding: 14px 0;
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(238, 44, 44, 0.15);
+}
+.page-route-operation-trace .funnel-bar.lv0 { background: linear-gradient(90deg, #ff8d52, #ee2c2c); }
+.page-route-operation-trace .funnel-bar.lv1 { background: linear-gradient(90deg, #f57f4a, #e0442f); }
+.page-route-operation-trace .funnel-bar.lv2 { background: linear-gradient(90deg, #ec7142, #d63a2a); }
+.page-route-operation-trace .funnel-bar.lv3 { background: linear-gradient(90deg, #e2653b, #cc3326); }
+.page-route-operation-trace .funnel-bar.lv4 { background: linear-gradient(90deg, #d65a34, #c12e22); }
+.page-route-operation-trace .funnel-bar strong {
+  display: block;
+  font-size: 22px;
+}
+.page-route-operation-trace .funnel-bar span {
+  font-size: 13px;
+  opacity: 0.9;
+}
+.page-route-operation-trace .funnel-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(42, 33, 27, 0.12);
+  font-size: 13px;
+  color: rgba(42, 33, 27, 0.65);
+}
+.page-route-operation-trace .funnel-foot b {
+  color: var(--lxm-c-ink);
+  font-size: 15px;
+  margin-left: 4px;
+}
+.page-route-operation-trace .funnel-foot .hl b {
+  color: var(--lxm-c-red);
+}
+.page-route-operation-trace .src-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 2px;
+}
+.page-route-operation-trace .src-flow-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 70px;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+.page-route-operation-trace .src-name {
+  color: rgba(42, 33, 27, 0.75);
+}
+.page-route-operation-trace .src-track {
+  height: 12px;
+  background: rgba(238, 44, 44, 0.1);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.page-route-operation-trace .src-track i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--lxm-c-orange), var(--lxm-c-red));
+}
+.page-route-operation-trace .src-flow-row strong {
+  text-align: right;
+  color: var(--lxm-c-ink);
+}

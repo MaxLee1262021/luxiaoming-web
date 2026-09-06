@@ -1,0 +1,160 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">小程序配置</span>
+      <h3 class="lxm-page-head__title">小程序全局配置</h3>
+      <p class="lxm-page-head__desc">这里配置小程序游客端全站通用的文案与规则——约拍定价、预约须知、隐私政策、企业微信、搜索热词、足迹章册。改完点「保存并同步小程序」，云端模式下游客端立即生效。</p>
+    </div>
+    <div class="lxm-page-head__actions">
+      <el-button type="primary" v-if="can('contentEdit')" @click="saveSiteConfig">保存并同步小程序</el-button>
+    </div>
+  </header>
+
+  <div class="decor-workbench cfg-workbench">
+    <!-- 左/中栏：表单 -->
+    <main class="decor-content cfg-content">
+      <!-- 约拍定制定价 -->
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <strong>约拍定制定价</strong>
+          <span>小程序「约拍定制」计价规则，原写死在预约页，现可后台调</span>
+        </div>
+        <div class="cfg-form cfg-grid-3">
+          <label><span>基准时长(小时)</span><el-input-number v-model="state.siteConfig.customPrice.baseHours" :min="1" :max="8" /></label>
+          <label><span>单人价格(¥)</span><el-input-number v-model="state.siteConfig.customPrice.singlePersonPrice" :min="0" :step="10" /></label>
+          <label><span>每加 1 人(¥)</span><el-input-number v-model="state.siteConfig.customPrice.perExtraPerson" :min="0" :step="10" /></label>
+          <label class="wide"><span>计价说明</span><el-input v-model="state.siteConfig.customPrice.note" placeholder="如：每增加 1 人拍摄 +¥100，时长默认 1 小时" /></label>
+        </div>
+      </section>
+
+      <!-- 预约须知 -->
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <strong>预约须知</strong>
+          <span>小程序预约页底部逐条展示</span>
+        </div>
+        <div class="cfg-list">
+          <div v-for="(line, i) in state.siteConfig.bookingNotice" :key="i" class="cfg-list-row">
+            <span class="cfg-list-idx">{{ i + 1 }}</span>
+            <el-input v-model="state.siteConfig.bookingNotice[i]" placeholder="须知条目" />
+            <button class="cfg-list-del" @click="removeNoticeLine(i)">✕</button>
+          </div>
+          <div v-if="!state.siteConfig.bookingNotice.length" class="cfg-empty">暂无须知，点下方添加</div>
+          <el-button size="small" plain @click="addNoticeLine">+ 添加须知条目</el-button>
+        </div>
+      </section>
+
+      <!-- 隐私政策 -->
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <strong>隐私政策正文</strong>
+          <span>小程序「隐私政策」页展示，替换原硬编码文案</span>
+        </div>
+        <div class="cfg-form">
+          <label class="wide"><span>政策正文</span>
+            <el-input v-model="state.siteConfig.privacyText" type="textarea" :rows="5" placeholder="完整隐私政策条款" />
+          </label>
+          <div class="cfg-row-actions">
+            <el-button size="small" plain @click="resetPrivacy">恢复默认政策</el-button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 企业微信 -->
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <strong>企业微信对接</strong>
+          <span>小程序「我的」页一键跳转客服使用</span>
+        </div>
+        <div class="cfg-form cfg-grid-2">
+          <label><span>企业微信 corpId</span><el-input v-model="state.siteConfig.wechat.corpId" placeholder="企微企业 ID（留空走小程序兜底）" /></label>
+          <label><span>小程序 AppId</span><el-input v-model="state.siteConfig.wechat.appId" placeholder="小程序 AppId" /></label>
+          <label class="wide"><span>跳转引导文案</span><el-input v-model="state.siteConfig.wechat.guideText" placeholder="如：点击前往企业微信，专属顾问 1 对 1 为你服务" /></label>
+        </div>
+      </section>
+
+      <!-- 搜索热词 -->
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <strong>搜索热词</strong>
+          <span>小程序搜索首页 / 探索页展示，原硬编码 demoData</span>
+        </div>
+        <div class="cfg-sub-head">搜索热词</div>
+        <div class="cfg-chips">
+          <span v-for="(w, i) in state.siteConfig.search.hotwords" :key="i" class="cfg-chip">
+            {{ w }}<button @click="removeHotword(i)">✕</button>
+          </span>
+          <span v-if="!state.siteConfig.search.hotwords.length" class="cfg-empty">暂无热词</span>
+        </div>
+        <div class="cfg-inline-add">
+          <el-input v-model="state._hotwordDraft" size="small" placeholder="输入热词后回车/点添加" @keyup.enter="addHotword" />
+          <el-button size="small" type="primary" plain @click="addHotword">添加</el-button>
+        </div>
+      </section>
+
+      <!-- 足迹章册 -->
+      <section class="cfg-card">
+        <div class="cfg-card-head">
+          <strong>足迹章册</strong>
+          <span>小程序「我的」页足迹章册，原读 siteConfig 兜底</span>
+        </div>
+        <div class="cfg-form cfg-grid-2">
+          <label class="cfg-switch"><span>是否开启</span>
+            <el-switch v-model="state.siteConfig.footprint.enabled" />
+          </label>
+          <label><span>印章总数</span><el-input-number v-model="state.siteConfig.footprint.total" :min="1" :max="50" /></label>
+          <label><span>章册标题</span><el-input v-model="state.siteConfig.footprint.title" placeholder="如：长沙旅拍足迹" /></label>
+          <label class="wide"><span>集章奖励文案</span><el-input v-model="state.siteConfig.footprint.rewardText" placeholder="如：集满 8 枚印章送精修电子相册" /></label>
+        </div>
+      </section>
+    </main>
+
+    <!-- 右栏：手机仿真预览 -->
+    <aside class="decor-phone-wrap">
+      <div class="decor-phone">
+        <div class="phone-status"></div>
+        <div class="phone-nav"><strong>游客端预览</strong></div>
+
+        <div class="phone-screen">
+          <!-- 搜索 -->
+          <div class="cfg-pv-search">
+            <div class="cfg-pv-search-bar">搜索打卡点 / 套餐 / 照片</div>
+            <div class="cfg-pv-hot">
+              <span v-for="(w, i) in state.siteConfig.search.hotwords.slice(0, 8)" :key="i" class="cfg-pv-hot-chip">{{ w }}</span>
+              <span v-if="!state.siteConfig.search.hotwords.length" class="cfg-pv-muted">热词（后台未配）</span>
+            </div>
+          </div>
+
+          <!-- 预约卡片 -->
+          <div class="cfg-pv-block">
+            <div class="cfg-pv-block-title">预约须知</div>
+            <div class="cfg-pv-notice">
+              <div class="cfg-pv-block-title sm">预约须知</div>
+              <p v-for="(line, i) in state.siteConfig.bookingNotice" :key="i">{{ i + 1 }}. {{ line }}</p>
+              <p v-if="!state.siteConfig.bookingNotice.length" class="cfg-pv-muted">暂无须知</p>
+            </div>
+          </div>
+
+          <!-- 我的页 -->
+          <div class="cfg-pv-block">
+            <div class="cfg-pv-block-title">我的</div>
+            <button class="cfg-pv-wechat">{{ state.siteConfig.wechat.guideText || "前往企业微信联系客服" }}</button>
+            <div v-if="state.siteConfig.footprint.enabled" class="cfg-pv-footprint">
+              <strong>{{ state.siteConfig.footprint.title || "旅拍足迹" }}</strong>
+              <div class="cfg-pv-stamps">
+                <span v-for="n in Math.min(state.siteConfig.footprint.total || 0, 12)" :key="n" class="cfg-pv-stamp" :class="{ got: n <= 3 }">{{ n <= 3 ? '✦' : '✧' }}</span>
+              </div>
+              <em>{{ state.siteConfig.footprint.rewardText || "集章奖励待配" }}</em>
+            </div>
+          </div>
+
+          <!-- 隐私 -->
+          <div class="cfg-pv-block">
+            <div class="cfg-pv-block-title">隐私政策</div>
+            <p class="cfg-pv-privacy">{{ (state.siteConfig.privacyText || "（隐私政策待配）").slice(0, 48) }}…</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>

@@ -1,0 +1,316 @@
+.page-route-addon-service .addon-design-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.page-route-addon-service .addon-toolbar,
+.page-route-addon-service .addon-stat-grid > div,
+.page-route-addon-service .addon-boundary-strip,
+.page-route-addon-service .addon-side,
+.page-route-addon-service .addon-main,
+.page-route-addon-service .addon-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .04);
+}
+
+.page-route-addon-service .addon-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px;
+}
+
+.page-route-addon-service .eyebrow {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: var(--lxm-brand);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.page-route-addon-service .addon-toolbar h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+}
+
+.page-route-addon-service .addon-toolbar p,
+.page-route-addon-service .addon-card p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.page-route-addon-service .addon-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.page-route-addon-service .addon-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.page-route-addon-service .addon-stat-grid > div {
+  min-height: 78px;
+  padding: 11px;
+}
+
+.page-route-addon-service .addon-stat-grid span,
+.page-route-addon-service .addon-stat-grid em {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.page-route-addon-service .addon-stat-grid strong {
+  display: block;
+  margin: 5px 0;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.page-route-addon-service .addon-boundary-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border-left: 4px solid #4f46e5;
+}
+
+.page-route-addon-service .addon-boundary-strip strong,
+.page-route-addon-service .addon-boundary-strip span {
+  display: block;
+}
+
+.page-route-addon-service .addon-boundary-strip strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.page-route-addon-service .addon-boundary-strip span {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.page-route-addon-service .addon-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.page-route-addon-service .addon-side,
+.page-route-addon-service .addon-main {
+  padding: 14px;
+}
+
+.page-route-addon-service .side-title strong,
+.page-route-addon-service .side-title span {
+  display: block;
+}
+
+.page-route-addon-service .side-title strong {
+  color: #111827;
+}
+
+.page-route-addon-service .side-title span {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.page-route-addon-service .addon-category-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.page-route-addon-service .addon-category-list button {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.page-route-addon-service .addon-category-list button.active {
+  border-color: var(--lxm-brand);
+  background: var(--lxm-brand-soft);
+}
+
+.page-route-addon-service .addon-rule-card {
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.page-route-addon-service .addon-rule-card strong {
+  display: block;
+  color: #111827;
+}
+
+.page-route-addon-service .addon-rule-card p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.page-route-addon-service .addon-filter-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 180px 140px;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.page-route-addon-service .addon-scope-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--lxm-brand-soft);
+  border-radius: 8px;
+  background: var(--lxm-brand-soft);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.page-route-addon-service .addon-scope-note strong {
+  color: var(--lxm-brand);
+  font-size: 13px;
+}
+
+.page-route-addon-service .addon-scope-note span {
+  color: #475569;
+  font-size: 12px;
+}
+
+.page-route-addon-service .addon-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.page-route-addon-service .addon-card {
+  display: flex;
+  min-height: 268px;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.page-route-addon-service .addon-card.disabled {
+  opacity: .68;
+}
+
+.page-route-addon-service .addon-card-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.page-route-addon-service .addon-card-top span {
+  display: inline-block;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.page-route-addon-service .addon-card h4 {
+  margin: 7px 0 0;
+  color: #111827;
+  font-size: 14px;
+}
+
+.page-route-addon-service .addon-price {
+  margin-top: 10px;
+  color: #dc2626;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.page-route-addon-service .addon-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.page-route-addon-service .addon-rule-grid div,
+.page-route-addon-service .addon-relation {
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 8px;
+}
+
+.page-route-addon-service .addon-rule-grid span,
+.page-route-addon-service .addon-relation span,
+.page-route-addon-service .addon-relation em {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.page-route-addon-service .addon-rule-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: #111827;
+  font-size: 13px;
+}
+
+.page-route-addon-service .addon-relation {
+  margin-top: 10px;
+}
+
+.page-route-addon-service .addon-relation em {
+  margin-top: 3px;
+}
+
+.page-route-addon-service .addon-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid #f1f5f9;
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+@media (max-width: 1200px) {
+  .page-route-addon-service .addon-stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .page-route-addon-service .addon-toolbar,
+  .page-route-addon-service .addon-layout,
+  .page-route-addon-service .addon-boundary-strip,
+  .page-route-addon-service .addon-filter-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .page-route-addon-service .addon-stat-grid,
+  .page-route-addon-service .addon-rule-grid {
+    grid-template-columns: 1fr;
+  }
+}

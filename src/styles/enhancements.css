@@ -1,0 +1,210 @@
+/* ============================================================
+   鹿小鸣旅拍 · Web 管理后台 增强层（微交互 / 无障碍 / 复用组件）
+   UI Designer · 2026-07-18
+   在 tokens.css 之后加载。只做「增量增强」，不重写既有布局。
+   ============================================================ */
+
+/* ---------- 1. 按钮微交互：点击缩放 + 品牌 hover ---------- */
+.el-button,
+.lxm-btn {
+  transition: transform var(--lxm-t-fast), box-shadow var(--lxm-t-normal),
+    background-color var(--lxm-t-fast), border-color var(--lxm-t-fast);
+}
+.el-button:active,
+.lxm-btn:active {
+  transform: scale(.97);
+}
+.el-button--primary:hover:not(.is-disabled),
+.lxm-btn--primary:hover:not(:disabled) {
+  box-shadow: var(--lxm-shadow-md);
+}
+/* 链接型按钮 hover 变色（原偏蓝，现品牌橙） */
+.el-button.is-link:hover,
+.el-button--text:hover {
+  color: var(--lxm-brand-strong) !important;
+}
+
+/* ---------- 2. 全局聚焦环（键盘可达性，WCAG 2.4.7） ---------- */
+:focus-visible {
+  outline: 2px solid var(--lxm-brand-strong);
+  outline-offset: 2px;
+  border-radius: var(--lxm-r-sm);
+}
+.el-button:focus-visible,
+.el-input__wrapper:focus-visible,
+.el-select__wrapper:focus-visible,
+.el-textarea__inner:focus-visible,
+.lxm-btn:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--lxm-brand-strong);
+  outline-offset: 2px;
+}
+
+/* ---------- 3. 品牌选区色 ---------- */
+::selection {
+  background: var(--lxm-brand);
+  color: #fff;
+}
+
+/* ---------- 4. 克制滚动条（暖灰，hover 显橙） ---------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #E2D5C8;
+  border-radius: var(--lxm-r-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--lxm-brand-vivid);
+  background-clip: content-box;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #E2D5C8 transparent;
+}
+
+/* ---------- 5. 尊重「减少动态效果」偏好（WCAG 2.3.3） ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   6. 复用组件：品牌空状态 .lxm-empty
+   用法：
+   <div class="lxm-empty">
+     <div class="lxm-empty__mark">鹿</div>
+     <p class="lxm-empty__title">这里还空空如也</p>
+     <p class="lxm-empty__desc">添加第一个打卡点，让客人看见长沙的美</p>
+     <button class="lxm-btn lxm-btn--primary">去添加</button>
+   </div>
+   ============================================================ */
+.lxm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--lxm-space-12) var(--lxm-space-6);
+  gap: var(--lxm-space-3);
+  color: var(--lxm-muted);
+}
+.lxm-empty__mark {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--lxm-r-pill);
+  display: grid;
+  place-items: center;
+  font-size: 30px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--lxm-brand-vivid), var(--lxm-brand-strong));
+  box-shadow: var(--lxm-shadow-md);
+  margin-bottom: var(--lxm-space-2);
+}
+.lxm-empty__title {
+  margin: 0;
+  font-size: var(--lxm-fz-lg);
+  font-weight: 600;
+  color: var(--lxm-ink-2);
+}
+.lxm-empty__desc {
+  margin: 0;
+  max-width: 320px;
+  font-size: var(--lxm-fz-base);
+  line-height: 1.6;
+  color: var(--lxm-muted);
+}
+.lxm-empty .lxm-btn,
+.lxm-empty .el-button {
+  margin-top: var(--lxm-space-3);
+}
+
+/* 全局朴素空状态也带上品牌底色（零侵入增强，不改原结构） */
+.empty-mini {
+  display: flex;
+  align-items: center;
+  gap: var(--lxm-space-2);
+  padding: var(--lxm-space-3) var(--lxm-space-4);
+  margin: var(--lxm-space-3) 0;
+  border-radius: var(--lxm-r-md);
+  background: var(--lxm-brand-soft);
+  color: var(--lxm-brand-strong);
+  font-size: var(--lxm-fz-sm);
+  border: 1px dashed var(--lxm-brand);
+}
+
+/* ============================================================
+   7. 复用组件：微光骨架屏 .lxm-skeleton
+   替代生硬转圈；可用于列表/卡片/表格加载占位。
+   <div class="lxm-skeleton" style="height:16px;width:60%"></div>
+   ============================================================ */
+.lxm-skeleton {
+  display: block;
+  border-radius: var(--lxm-r-md);
+  background: linear-gradient(
+    90deg,
+    var(--lxm-divider) 25%,
+    var(--lxm-line-strong) 37%,
+    var(--lxm-divider) 63%
+  );
+  background-size: 400% 100%;
+  animation: lxm-shimmer 1.4s var(--lxm-ease) infinite;
+}
+.lxm-skeleton--text { height: 14px; margin: 8px 0; }
+.lxm-skeleton--circle { border-radius: var(--lxm-r-pill); }
+.lxm-skeleton--title { height: 20px; width: 40%; margin-bottom: 14px; }
+@keyframes lxm-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ---------- 8. 通用按钮基样式（与小程序 .lxm-btn 同源语义） ---------- */
+.lxm-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lxm-space-2);
+  padding: 0 var(--lxm-space-5);
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--lxm-r-md);
+  font-size: var(--lxm-fz-base);
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  text-decoration: none;
+}
+.lxm-btn--primary {
+  background: linear-gradient(135deg, var(--lxm-brand-vivid), var(--lxm-brand-strong));
+  color: #fff;
+}
+.lxm-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+.lxm-btn--ghost {
+  background: #fff;
+  border-color: var(--lxm-line-strong);
+  color: var(--lxm-ink-2);
+}
+.lxm-btn--ghost:hover:not(:disabled) {
+  border-color: var(--lxm-brand);
+  color: var(--lxm-brand-strong);
+}
+.lxm-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+  pointer-events: none;
+}

@@ -1,0 +1,40 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">内容沉淀</span>
+      <h3 class="lxm-page-head__title">故事管理</h3>
+      <p class="lxm-page-head__desc">品牌故事与客户案例，用于内容运营与信任建设。当前小程序端暂未展示该模块，可先在后台沉淀内容，后续版本再接入。</p>
+    </div>
+    <div class="lxm-page-head__actions">
+      <el-button plain @click="openContentLogs('故事')">操作日志</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('stories')">新增故事</el-button>
+    </div>
+  </header>
+
+  <div class="lxm-toolbar">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索故事标题" style="max-width:320px" />
+    <el-button @click="state.filters.keyword=''">重置</el-button>
+  </div>
+
+  <div class="lxm-cards">
+    <article v-for="item in data.stories" :key="item.id" class="lxm-card">
+      <div class="lxm-card__cover">
+        <img :src="item.cover" />
+        <span class="lxm-card__badge">{{ item.tag || '故事' }}</span>
+      </div>
+      <div class="lxm-card__body">
+        <h4 class="lxm-card__title">{{ item.title || item.name }}</h4>
+        <p v-if="item.subtitle" style="margin:2px 0 0;color:var(--lxm-muted);font-size:12px;line-height:1.5">{{ item.subtitle }}</p>
+        <div class="lxm-card__meta"><span>状态 <b>{{ item.status || '草稿' }}</b></span></div>
+      </div>
+      <div class="lxm-card__actions">
+        <el-button link type="primary" @click="openContent(item)">编辑</el-button>
+      </div>
+    </article>
+    <div v-if="!data.stories.length" class="lxm-empty-inline">
+      <strong>暂无故事</strong>
+      <span>先新增一个品牌故事。</span>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('stories')">新增故事</el-button>
+    </div>
+  </div>
+</div>

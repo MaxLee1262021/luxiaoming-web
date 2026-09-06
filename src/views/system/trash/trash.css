@@ -1,0 +1,90 @@
+.page-route-trash .trash-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.page-route-trash .trash-toolbar,
+.page-route-trash .trash-stat-grid > div,
+.page-route-trash .trash-table-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .04);
+}
+
+.page-route-trash .trash-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px;
+}
+
+.page-route-trash .eyebrow {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: var(--lxm-brand);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.page-route-trash .trash-toolbar h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+}
+
+.page-route-trash .trash-toolbar p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.page-route-trash .trash-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.page-route-trash .trash-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.page-route-trash .trash-stat-grid > div,
+.page-route-trash .trash-table-card {
+  padding: 14px;
+}
+
+.page-route-trash .trash-stat-grid span,
+.page-route-trash .trash-stat-grid em {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.page-route-trash .trash-stat-grid strong {
+  display: block;
+  margin: 5px 0;
+  color: #111827;
+  font-size: 18px;
+}
+
+.page-route-trash .trash-retain {
+  color: #64748b;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .page-route-trash .trash-toolbar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .page-route-trash .trash-stat-grid {
+    grid-template-columns: 1fr;
+  }
+}

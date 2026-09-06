@@ -1,0 +1,116 @@
+.page-route-report {
+  color: #172033;
+}
+
+.page-route-report .role-report-page {
+  display: grid;
+  gap: 16px;
+}
+
+.page-route-report .role-report-header,
+.page-route-report .role-report-filter,
+.page-route-report .table-card {
+  border: 1px solid #e6eaf2;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.page-route-report .role-report-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 18px 20px;
+}
+
+.page-route-report .role-report-header span,
+.page-route-report .role-report-header p,
+.page-route-report .role-report-filter p,
+.page-route-report .table-title p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.page-route-report .role-report-header h2 {
+  margin: 6px 0;
+  font-size: 22px;
+}
+
+.page-route-report .role-report-actions,
+.page-route-report .role-report-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.page-route-report .role-report-filter {
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.page-route-report .role-report-filter > div {
+  margin-right: auto;
+}
+
+.page-route-report .role-report-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.page-route-report .role-report-kpis div {
+  padding: 14px;
+  border: 1px solid #e6eaf2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.page-route-report .role-report-kpis span,
+.page-route-report .role-report-kpis em {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.page-route-report .role-report-kpis strong {
+  display: block;
+  margin: 6px 0;
+  font-size: 20px;
+}
+
+.page-route-report .table-card {
+  padding: 14px;
+}
+
+.page-route-report .table-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.page-route-report .table-title strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 15px;
+}
+
+@media (max-width: 1200px) {
+  .page-route-report .role-report-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .page-route-report .role-report-header {
+    flex-direction: column;
+  }
+
+  .page-route-report .role-report-kpis {
+    grid-template-columns: 1fr;
+  }
+}

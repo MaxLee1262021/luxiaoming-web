@@ -1,0 +1,57 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">媒体库</span>
+      <h3 class="lxm-page-head__title">素材库</h3>
+      <p class="lxm-page-head__desc">素材（照片 / 短视频）是套餐与照片单品实际展示的内容，按打卡点、拍摄风格、照片单品归类。</p>
+    </div>
+    <div class="lxm-page-head__actions">
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('samples')">新增素材</el-button>
+    </div>
+  </header>
+
+  <div class="lxm-kpi-grid">
+    <div class="lxm-kpi"><span class="lxm-kpi__label">素材总数</span><strong class="lxm-kpi__value">{{ data.samples.length }}</strong><span class="lxm-kpi__hint">照片与短视频</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">照片素材</span><strong class="lxm-kpi__value">{{ data.samples.filter(s=>s.type!=='video').length }}</strong><span class="lxm-kpi__hint">照片类素材</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">短视频</span><strong class="lxm-kpi__value">{{ data.samples.filter(s=>s.type==='video').length }}</strong><span class="lxm-kpi__hint">短视频类素材</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">未配置标签</span><strong class="lxm-kpi__value">{{ data.samples.filter(s=>!(s.tags && s.tags.length) && !s.tag).length }}</strong><span class="lxm-kpi__hint">建议补全便于检索</span></div>
+  </div>
+
+  <div class="lxm-toolbar">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索素材名称" />
+    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="打卡点">
+      <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+    <el-button @click="clearContentFilters">重置</el-button>
+  </div>
+
+  <div class="lxm-cards" v-if="data.samples.length">
+    <article v-for="item in data.samples.filter(s =>
+        (!state.filters.keyword || (s.name||'').toLowerCase().includes(state.filters.keyword.toLowerCase())) &&
+        (!state.filters.contentSpotId || !item.spotId ||
+          item.spotId === state.filters.contentSpotId ||
+          (item.spotIds && item.spotIds.includes(state.filters.contentSpotId))
+        )
+      )" :key="item.id" class="lxm-card">
+      <div class="lxm-card__cover">
+        <img :src="item.cover || item.url" />
+        <span class="lxm-card__badge" :class="item.type==='video' ? 'lxm-card__badge--video' : ''">{{ item.type==='video' ? '短视频' : '照片素材' }}</span>
+      </div>
+      <div class="lxm-card__body">
+        <h4 class="lxm-card__title">{{ item.name }}</h4>
+        <div class="lxm-card__tags">
+          <span class="lxm-pill" v-for="t in (item.tags && item.tags.length ? item.tags : (item.tag ? [item.tag] : [])).slice(0,4)" :key="t">{{ t }}</span>
+          <span class="lxm-pill" v-if="!(item.tags && item.tags.length) && !item.tag">未配置标签</span>
+        </div>
+      </div>
+      <div class="lxm-card__actions">
+        <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(item)">编辑</el-button>
+      </div>
+    </article>
+  </div>
+  <div v-else class="lxm-empty-inline">
+    <strong>暂无素材</strong>
+    <span>先上传素材，作为套餐与照片单品的展示内容。</span>
+    <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('samples')">新增素材</el-button>
+  </div>
+</div>

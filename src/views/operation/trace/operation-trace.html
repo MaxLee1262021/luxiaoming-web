@@ -1,0 +1,32 @@
+<div class="page-head-bar">
+  <div><h2>转化追溯</h2><p>从扫码到拍摄完成的链路转化，定位在哪个环节流失最多。</p></div>
+</div>
+
+<div class="panel">
+  <div class="section-title-row"><div><h3>预约转化漏斗</h3><span>扫码 → 浏览 → 预约 → 支付定金 → 拍摄完成（演示倍数估算扫码/浏览）</span></div></div>
+  <div class="funnel">
+    <div class="funnel-step" v-for="(f,i) in [{k:'scan',t:'扫码访问'},{k:'browse',t:'浏览详情'},{k:'book',t:'提交预约'},{k:'pay',t:'支付定金'},{k:'done',t:'拍摄完成'}]" :key="f.k" :style="{width: (100 - i*15) + '%'}">
+      <div class="funnel-bar" :class="'lv' + i">
+        <strong>{{ f.k==='scan' ? scopedOrders.length*6 : f.k==='browse' ? scopedOrders.length*3 : f.k==='book' ? scopedOrders.length : f.k==='pay' ? scopedOrders.filter(o=>['已确认','待拍摄','拍摄中','completed'].includes(o.status)).length : scopedOrders.filter(o=>o.status==='completed').length }}</strong>
+        <span>{{ f.t }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="funnel-foot">
+    <span>预约订单 <b>{{ scopedOrders.length }}</b></span>
+    <span>支付定金 <b>{{ scopedOrders.filter(o=>['已确认','待拍摄','拍摄中','completed'].includes(o.status)).length }}</b></span>
+    <span>拍摄完成 <b>{{ scopedOrders.filter(o=>o.status==='completed').length }}</b></span>
+    <span class="hl">整体完成率 <b>{{ scopedOrders.length ? Math.round(scopedOrders.filter(o=>o.status==='completed').length / scopedOrders.length * 100) : 0 }}%</b></span>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="section-title-row"><div><h3>来源链路分布</h3><span>不同扫码来源的客户量与预约转化</span></div></div>
+  <div class="src-flow">
+    <div class="src-flow-row" v-for="s in [{k:'headquarter',t:'总部二维码'},{k:'shop',t:'商家二维码'},{k:'natural',t:'小程序自然'},{k:'manual',t:'客服手动'}]" :key="s.k">
+      <span class="src-name">{{ s.t }}</span>
+      <div class="src-track"><i :style="{width: Math.min(100, scopedOrders.filter(o=>o.sourceType===s.k).length / Math.max(1, scopedOrders.length) * 100 * 3) + '%'}"></i></div>
+      <strong>{{ scopedOrders.filter(o=>o.sourceType===s.k).length }} 单</strong>
+    </div>
+  </div>
+</div>

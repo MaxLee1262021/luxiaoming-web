@@ -1,0 +1,97 @@
+<div class="addon-design-page">
+  <div class="addon-toolbar">
+    <div>
+      <span class="eyebrow">订单增值服务</span>
+      <h3>增值服务</h3>
+      <p>增值服务只在客服订单处理中加购，不进入小程序公开商品货架。可按拍照、短视频或全订单通用限制使用，并控制限购、财务审核和是否计入订单总额。</p>
+    </div>
+    <div class="addon-toolbar-actions">
+      <el-button plain @click="clearContentFilters">重置筛选</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
+      <el-button @click="switchMenu('packages')">套餐设置</el-button>
+      <el-button type="primary" v-if="can('orderEdit')" @click="openContentQuick('addonServices')">新增增值服务</el-button>
+    </div>
+  </div>
+
+  <div class="addon-stat-grid">
+    <div><span>服务项目</span><strong>{{ addonSummary.total }}</strong><em>内部可加购项目</em></div>
+    <div><span>启用中</span><strong>{{ addonSummary.enabled }}</strong><em>客服可选择</em></div>
+    <div><span>仅拍照</span><strong>{{ addonSummary.photoOnly }}</strong><em>拍照订单专用</em></div>
+    <div><span>仅短视频</span><strong>{{ addonSummary.videoOnly }}</strong><em>短视频订单专用</em></div>
+    <div><span>需财务审核</span><strong>{{ addonSummary.financeRequired }}</strong><em>加购后进入审核</em></div>
+    <div><span>平均价格</span><strong>{{ money(addonSummary.avgPrice) }}</strong><em>客服报价参考</em></div>
+  </div>
+
+  <div class="addon-boundary-strip">
+    <div>
+      <strong>公开货架隔离</strong>
+      <span>增值服务只在客服处理订单时加购，小程序商城、商品货架和公开套餐列表均不展示。</span>
+    </div>
+    <div>
+      <strong>财务口径</strong>
+      <span>服务可单独配置是否需要财务审核、是否计入订单总额，避免客服加购影响对账口径。</span>
+    </div>
+  </div>
+
+  <div class="addon-layout">
+    <aside class="addon-side panel">
+      <div class="side-title"><strong>服务分类</strong><span>按客服操作场景快速筛选</span></div>
+      <div class="addon-category-list">
+        <button :class="{active:!state.filters.keyword}" @click="state.filters.keyword=''"><span>全部服务</span><b>{{ data.addonServices.length }}</b></button>
+        <button v-for="cat in [...new Set(data.addonServices.map(s=>s.category || '其他'))]" :key="cat" :class="{active:state.filters.keyword===cat}" @click="state.filters.keyword=cat">
+          <span>{{ cat }}</span><b>{{ data.addonServices.filter(s=>(s.category||'其他')===cat).length }}</b>
+        </button>
+      </div>
+      <div class="addon-rule-card">
+        <strong>使用边界</strong>
+        <p>修图、加片、加急、改期、服装道具、视频剪辑等都属于订单内部加购。小程序商城不展示，金额按配置决定是否计入订单总额和财务审核。</p>
+      </div>
+    </aside>
+
+    <main class="addon-main">
+      <div class="addon-filter-row">
+        <el-input v-model="state.filters.keyword" clearable placeholder="搜索服务名称、分类、说明" />
+        <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
+          <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
+        <el-select v-model="state.filters.contentStatus" clearable placeholder="状态">
+          <el-option label="启用" value="启用" />
+          <el-option label="停用" value="停用" />
+        </el-select>
+      </div>
+      <div class="addon-scope-note">
+        <strong>订单适用范围</strong>
+        <span>每个增值服务可设置为全订单通用、仅拍照订单或仅短视频订单，并限制单订单最大购买份数。</span>
+      </div>
+
+      <div class="addon-card-grid">
+        <article v-for="svc in addonRows" :key="svc.id" class="addon-card" :class="{disabled:svc.enabled===false}">
+          <div class="addon-card-top">
+            <div>
+              <span>{{ svc.category || '其他' }}</span>
+              <h4>{{ svc.name }}</h4>
+            </div>
+            <el-tag :type="svc.enabled===false ? 'info' : 'success'" size="small">{{ svc.enabled===false ? '停用' : '启用' }}</el-tag>
+          </div>
+          <div class="addon-price">{{ money(svc.price) }}</div>
+          <div class="addon-rule-grid">
+            <div><span>适用</span><strong>{{ addonEligibilityText(svc) }}</strong></div>
+            <div><span>限购</span><strong>{{ svc.maxQuantity || 1 }} 份/单</strong></div>
+            <div><span>节假日加价</span><strong>{{ money(svc.holidaySurcharge || 0) }}</strong></div>
+            <div><span>财务</span><strong>{{ addonFinanceText(svc) }}</strong></div>
+          </div>
+          <p>{{ svc.intro || '暂无服务说明' }}</p>
+          <div class="addon-relation">
+            <span>{{ relationText(svc) }}</span>
+            <em>{{ svc.includeInOrderAmount===false ? '不计入订单总额' : '计入订单总额' }}</em>
+          </div>
+          <div class="addon-actions">
+            <el-button link type="primary" v-if="can('orderEdit')" @click="openContent(svc)">编辑</el-button>
+            <el-button link :type="svc.enabled===false ? 'success' : 'warning'" v-if="can('orderEdit')" @click="toggleAddonEnabled(svc)">{{ svc.enabled===false ? '启用' : '停用' }}</el-button>
+            <el-button link type="danger" v-if="can('orderEdit')" @click="requestDeleteAddon(svc)">删除</el-button>
+          </div>
+        </article>
+      </div>
+    </main>
+  </div>
+</div>

@@ -1,0 +1,57 @@
+<div class="channel-config-page">
+  <div class="config-page-head">
+    <div>
+      <h3>商家基础配置</h3>
+      <p>用于新增合作商家、绑定/解绑分销员、维护商家分成比例、结算周期和二维码投放物料。订单、成交额、应计分账统一在经营看板和月度对账查看。</p>
+    </div>
+    <el-button v-if="canManageShopBinding()" type="primary" @click="openShop()">新增商家</el-button>
+  </div>
+
+  <div class="config-metric-grid">
+    <div><span>合作商家</span><strong>{{ scopedShops.length }}</strong></div>
+    <div><span>已绑定分销员</span><strong>{{ scopedShops.filter(s => s.distributorIds && s.distributorIds.length).length }}</strong></div>
+    <div><span>二维码物料</span><strong>{{ scopedShops.filter(s => s.shopId).length }}</strong></div>
+    <div><span>启用商家</span><strong>{{ scopedShops.filter(s => s.status === '合作中').length }}</strong></div>
+  </div>
+
+  <div class="filter-card">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索商家名称/联系人/账号/二维码编号" />
+  </div>
+
+  <div class="table-card">
+    <el-table :data="pagedList('shops', scopedShops)" stripe border max-height="calc(100vh - 360px)" empty-text="暂无商家，点击右上角新增">
+      <el-table-column prop="name" label="商家名称" min-width="140" />
+      <el-table-column prop="contact" label="联系人" width="110" />
+      <el-table-column prop="phone" label="联系电话" width="130" />
+      <el-table-column label="绑定分销员 / 本店提成" min-width="210">
+        <template #default="{row}">{{ (row.distributorIds && row.distributorIds.length) ? row.distributorIds.map(id => distributorName(id) + ' ' + distributorRateForShop(row, id) + '%').join('、') : '总部直营/未绑定' }}</template>
+      </el-table-column>
+      <el-table-column label="二维码物料" min-width="230">
+        <template #default="{row}">
+          <strong>{{ row.shopId }}</strong>
+          <div class="muted">{{ shopQrUrl(row) }}</div>
+          <div class="muted">位置：{{ row.qrPosition }} · 场景：{{ row.scene }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="商家分成比例" width="120">
+        <template #default="{row}">{{ row.commissionRate }}%</template>
+      </el-table-column>
+      <el-table-column prop="settlementCycle" label="结算周期" width="100" />
+      <el-table-column label="合作状态" width="100">
+        <template #default="{row}">
+          <el-tag :type="row.status === '合作中' ? 'success' : 'info'" size="small">{{ row.status || '合作中' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column fixed="right" label="配置操作" width="170">
+        <template #default="{row}">
+          <el-button link @click="openQr(row)">二维码物料</el-button>
+          <el-button v-if="canManageShopBinding()" link type="primary" @click="openShop(row)">编辑配置</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="scopedShops.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="scopedShops.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('shops').size" :current-page="pager('shops').page" @current-change="pager('shops').page = $event" @size-change="onListPageSizeChange('shops', $event)" />
+      <span class="pager-info">第 {{ Math.min(scopedShops.length, (pager('shops').page-1)*pager('shops').size+1) }}–{{ Math.min(scopedShops.length, pager('shops').page*pager('shops').size) }} 条 / 共 {{ scopedShops.length }} 条</span>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,14 @@
+<div class="login-page"><div class="login-hero">
+        <div class="brand-mark big">鹿</div>
+        <h1>鹿小鸣旅拍</h1>
+        <p>记录城市与你的故事 / 定格每一刻的心动</p>
+        <div class="login-note">O2O旅拍服务交易后台。商家铺码、游客扫码、客服接单、手动派单、微信交付、月度核对。</div>
+      </div>
+      <div class="login-panel">
+        <h2>统一后台登录</h2>
+        <p>请使用分配给你的账号密码登录；忘记密码请联系主理人重置。</p>
+        <el-input v-model="state.login.account" size="large" placeholder="账号" />
+        <el-input v-model="state.login.password" size="large" type="password" show-password placeholder="密码" @keyup.enter="login" />
+        <el-button type="primary" size="large" :loading="state.loading" @click="login">登录</el-button>
+      </div>
+    </div>

@@ -1,0 +1,29 @@
+﻿<div class="page-head-bar">
+  <div><h2>派单台</h2><p>把还没有摄影师的订单指派给摄影师，指派后进入拍摄排期。</p></div>
+</div>
+
+<div class="dispatch-stat">
+  <div><span>待派单</span><strong>{{ scopedOrders.filter(o=>!o.photographerId && !['completed','cancelled','已取消','done'].includes(o.status)).length }}</strong></div>
+  <div><span>已派单（未完成）</span><strong>{{ scopedOrders.filter(o=>o.photographerId && !['completed','cancelled','已取消','done'].includes(o.status)).length }}</strong></div>
+  <div><span>可排期摄影师</span><strong>{{ photographers.length }}</strong></div>
+</div>
+
+<div class="dispatch-board">
+  <div class="dispatch-card" v-for="o in scopedOrders.filter(x=>!x.photographerId && !['completed','cancelled','已取消','done'].includes(x.status))" :key="o.id">
+    <div class="dc-head">
+      <button class="table-link" @click="openOrder(o)">{{ o.orderNo }}</button>
+      <span class="status-dot" :style="{background: orderWorkflowStatusMeta(o).color}"></span>
+      <span>{{ orderWorkflowStatusLabel(o) }}</span>
+    </div>
+    <div class="dc-cust"><strong>{{ o.customer }}</strong><div class="muted">{{ visiblePhone(o) }}</div></div>
+    <div class="dc-prod"><el-tag v-for="p in o.products" :key="p.type+p.id" @click="openProduct(p)">{{ productName(p) }}</el-tag></div>
+    <div class="dc-time"><span>预约时间</span>{{ o.appointmentAt || '未约定' }}</div>
+    <div class="dc-assign">
+      <el-select v-model="o._pg" clearable filterable placeholder="预选摄影师">
+        <el-option v-for="s in photographers" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-button type="primary" size="small" @click="openOrder(o)">派单</el-button>
+    </div>
+  </div>
+  <div v-if="!scopedOrders.filter(x=>!x.photographerId && !['completed','cancelled','已取消','done'].includes(x.status)).length" class="empty-state">当前没有待派单的订单 🎉</div>
+</div>

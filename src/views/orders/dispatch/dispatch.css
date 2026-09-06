@@ -1,0 +1,83 @@
+.page-route-dispatch .page-head-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.page-route-dispatch .page-head-bar h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--lxm-c-ink);
+}
+.page-route-dispatch .page-head-bar p {
+  margin: 4px 0 0;
+  color: rgba(42, 33, 27, 0.55);
+  font-size: 13px;
+}
+.page-route-dispatch .dispatch-stat {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.page-route-dispatch .dispatch-stat > div {
+  flex: 1;
+  background: #fff;
+  border: 1px solid rgba(42, 33, 27, 0.1);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.page-route-dispatch .dispatch-stat span {
+  font-size: 13px;
+  color: rgba(42, 33, 27, 0.55);
+}
+.page-route-dispatch .dispatch-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 26px;
+  color: var(--lxm-c-red);
+}
+.page-route-dispatch .dispatch-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.page-route-dispatch .dispatch-card {
+  background: #fff;
+  border: 1px solid rgba(42, 33, 27, 0.1);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.page-route-dispatch .dc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.page-route-dispatch .dc-head .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.page-route-dispatch .dc-cust strong {
+  font-size: 15px;
+  color: var(--lxm-c-ink);
+}
+.page-route-dispatch .dc-time {
+  font-size: 13px;
+  color: rgba(42, 33, 27, 0.65);
+}
+.page-route-dispatch .dc-time span {
+  display: inline-block;
+  margin-right: 8px;
+  color: rgba(42, 33, 27, 0.45);
+}
+.page-route-dispatch .dc-assign {
+  display: flex;
+  gap: 8px;
+}
+.page-route-dispatch .dc-assign .el-select {
+  flex: 1;
+}

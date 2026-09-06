@@ -1,0 +1,326 @@
+/* ============================================================
+   鹿小鸣旅拍 · Web 管理后台 · 通用视觉统一层（lxm-polish.css）
+   UI Designer · 2026-08-14
+   ------------------------------------------------------------
+   作用：对「全局共享基元」做品牌化收口，使所有尚未单独精修的模块
+   （订单列表、渠道、系统、登录等）一并达到 audit / reconciliation
+   同级的视觉水准；同时补齐全站一致的可访问性细节。
+   原则：
+   - 仅用品牌令牌，不新增硬编码颜色；
+   - 只改全局单类名选择器；页面级 .page-route-x .xxx 特异性更高，不受影响；
+   - 不改动任何 HTML 结构与 JS 逻辑（纯视觉收口）。
+   ============================================================ */
+
+/* ---------- 卡片 / 面板 / 指标卡：统一圆角·描边·轻投影·暖底 ---------- */
+.table-card,
+.panel,
+.stat-card {
+  border-radius: var(--lxm-r-lg);
+  border: 1px solid var(--lxm-line);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+
+/* ---------- 筛选条：品牌左侧强调 ---------- */
+.filter-card {
+  border-radius: var(--lxm-r-lg);
+  border: 1px solid var(--lxm-line);
+  border-left: 4px solid var(--lxm-brand);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+
+/* ---------- 订单状态快捷筛选（order-alerts） ---------- */
+.order-alerts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.order-alerts button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--lxm-line);
+  border-radius: var(--lxm-r-pill);
+  background: var(--lxm-surface);
+  color: var(--lxm-ink-2);
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: var(--lxm-shadow-sm);
+  transition: border-color var(--lxm-t-fast), background var(--lxm-t-fast), color var(--lxm-t-fast);
+}
+.order-alerts button:hover {
+  border-color: var(--lxm-brand-soft-2);
+}
+.order-alerts button.active {
+  border-color: var(--lxm-brand);
+  background: var(--lxm-brand-soft);
+  color: var(--lxm-brand);
+  font-weight: 600;
+}
+.order-alerts button.active span {
+  background: var(--lxm-brand) !important;
+}
+
+/* ---------- 指标 / 汇总卡（order-summary / kpi-card） ---------- */
+.order-summary > div,
+.kpi-card {
+  border-radius: var(--lxm-r-lg);
+  border: 1px solid var(--lxm-line);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+.order-summary > div,
+.kpi-card {
+  transition: border-color var(--lxm-t-fast), box-shadow var(--lxm-t-fast), transform var(--lxm-t-fast);
+}
+.order-summary > div:hover,
+.kpi-card:hover {
+  border-color: var(--lxm-brand-soft-2);
+  box-shadow: var(--lxm-shadow-md);
+  transform: translateY(-2px);
+}
+.kpi-card.active {
+  border-color: var(--lxm-brand);
+  background: var(--lxm-brand-soft);
+}
+.kpi-card.active::after {
+  color: var(--lxm-brand);
+}
+.kpi-card em {
+  color: var(--lxm-brand-ink);
+}
+
+/* ---------- 数据范围条 / 批量操作条 / 翻页 ---------- */
+
+/* 高级筛选折叠区：订单列表等筛选卡内第二层 */
+.filter-card .filter-advanced {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+  margin-top: 2px;
+  border-top: 1px dashed var(--lxm-line);
+}
+.filter-card .filter-advanced .el-select,
+.filter-card .filter-advanced .el-input {
+  width: 180px;
+}
+
+/* 表格空态：与品牌风格统一（鹿小鸣暖色调，替代默认灰色“暂无数据”） */
+.el-table__empty-block {
+  padding: 18px 0;
+}
+.el-table__empty-text {
+  color: var(--lxm-brand-ink, #8a7a6d);
+  font-size: 13px;
+  line-height: 1.9;
+}
+.el-table__empty-text::before {
+  content: "🦌";
+  display: block;
+  font-size: 22px;
+  margin-bottom: 2px;
+  opacity: .55;
+}
+
+.tenant-scope-bar,
+.table-pager {
+  border-radius: var(--lxm-r-lg);
+  border: 1px solid var(--lxm-line);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+.batch-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--lxm-line);
+  border-left: 4px solid var(--lxm-brand-strong);
+  border-radius: var(--lxm-r-lg);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+.batch-bar strong,
+.batch-bar .batch-stats {
+  color: var(--lxm-ink-2);
+  font-size: 13px;
+}
+
+/* ---------- 页面级配置头（渠道/权限等）：与财务审核头一致的品牌左侧强调 ---------- */
+.config-page-head {
+  border-left: 4px solid var(--lxm-brand-strong) !important;
+}
+.config-metric-grid div {
+  transition: border-color var(--lxm-t-fast), box-shadow var(--lxm-t-fast), transform var(--lxm-t-fast);
+}
+.config-metric-grid div:hover {
+  border-color: var(--lxm-brand-soft-2);
+  box-shadow: var(--lxm-shadow-md);
+  transform: translateY(-2px);
+}
+
+/* ---------- Element Plus 表格：品牌化表头 + 暖色 hover（全局统一） ---------- */
+.el-table {
+  --el-table-border-color: var(--lxm-line);
+  --el-table-header-bg-color: var(--lxm-cream);
+  font-size: 13px;
+}
+.el-table th.el-table__cell {
+  background: var(--lxm-cream) !important;
+  color: var(--lxm-ink-3) !important;
+  font-weight: 700;
+}
+.el-table td.el-table__cell {
+  padding: 9px 0;
+}
+.el-table .cell {
+  line-height: 1.4;
+}
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: var(--lxm-bg);
+}
+.el-table__body tr:hover > td.el-table__cell {
+  background: var(--lxm-brand-soft) !important;
+}
+
+/* ---------- 通用状态点（status-dot 多数模块内联设色，这里补尺寸） ---------- */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* ---------- 表内链接 / 次要文字 ---------- */
+.table-link {
+  color: var(--lxm-brand);
+  font-weight: 600;
+  cursor: pointer;
+}
+.table-link:hover {
+  text-decoration: underline;
+}
+.muted {
+  color: var(--lxm-muted);
+}
+
+/* ---------- 品牌滚动条 ---------- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--lxm-line-strong);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--lxm-brand-vivid);
+}
+
+/* ---------- 全站一致性：可访问性（WCAG AA 聚焦环 + 品牌选区） ---------- */
+:focus-visible {
+  outline: 2px solid var(--lxm-brand);
+  outline-offset: 2px;
+}
+::selection {
+  background: var(--lxm-brand-soft);
+  color: var(--lxm-ink-3);
+}
+
+/* ============================================================
+   核心 Element Plus 基元品牌化（全局收口 · 第二阶段）
+   UI Designer · 2026-08-14
+   ------------------------------------------------------------
+   目标：让尚未单独精修的模块（订单列表 / 渠道 / 配置中心 /
+   系统设置 / 售后 / 任务 …）的按钮、输入、选择、分页、标签、
+   勾选、标签页也呈现品牌色，与已精修模块（audit /
+   reconciliation / dashboard）保持同一套视觉语言。
+   策略：仅覆盖「EP 默认蓝」的全局单类名；页面级
+   .page-route-x .xxx 特异性更高，仍优先生效，互不影响。
+   ============================================================ */
+
+/* ---------- 主按钮：品牌橙(#D9531E) → 悬停红(#EE2C2C) ---------- */
+.el-button--primary {
+  --el-button-bg-color: var(--lxm-brand);
+  --el-button-border-color: var(--lxm-brand);
+  --el-button-hover-bg-color: var(--lxm-brand-strong);
+  --el-button-hover-border-color: var(--lxm-brand-strong);
+  --el-button-active-bg-color: var(--lxm-brand-strong);
+  --el-button-active-border-color: var(--lxm-brand-strong);
+  --el-button-disabled-bg-color: var(--lxm-brand-soft-2);
+  --el-button-disabled-border-color: var(--lxm-brand-soft-2);
+  --el-button-disabled-text-color: var(--lxm-muted);
+  color: #fff;
+}
+.el-button--primary.is-plain {
+  --el-button-text-color: var(--lxm-brand);
+  --el-button-bg-color: var(--lxm-brand-soft);
+  --el-button-border-color: var(--lxm-brand-soft-2);
+  --el-button-hover-text-color: #fff;
+  --el-button-hover-bg-color: var(--lxm-brand);
+  --el-button-hover-border-color: var(--lxm-brand);
+  --el-button-active-bg-color: var(--lxm-brand-strong);
+  --el-button-active-border-color: var(--lxm-brand-strong);
+}
+
+/* ---------- 输入框 / 文本域 / 下拉 / 日期范围：聚焦品牌描边 ---------- */
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-select .el-input.is-focus .el-input__wrapper,
+.el-range-editor.is-active {
+  box-shadow: 0 0 0 1px var(--lxm-brand) inset !important;
+}
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px var(--lxm-brand) inset !important;
+  outline: none;
+}
+
+/* ---------- 勾选 / 单选 / 开关：品牌选中态 ---------- */
+.el-checkbox__input.is-checked .el-checkbox__inner,
+.el-radio__input.is-checked .el-radio__inner {
+  background-color: var(--lxm-brand);
+  border-color: var(--lxm-brand);
+}
+.el-switch.is-checked .el-switch__core {
+  background-color: var(--lxm-brand);
+  border-color: var(--lxm-brand);
+}
+
+/* ---------- 分页：当前页品牌填充 ---------- */
+.el-pagination.is-background .el-pager li.is-active {
+  background-color: var(--lxm-brand);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ---------- 标签页：激活品牌色 + 品牌指示条 ---------- */
+.el-tabs__item.is-active {
+  color: var(--lxm-brand);
+  font-weight: 600;
+}
+.el-tabs__active-bar {
+  background-color: var(--lxm-brand);
+}
+
+/* ---------- 默认标签（无 type）：品牌浅底，避免 raw 蓝 ---------- */
+.el-tag:not(.el-tag--success):not(.el-tag--warning):not(.el-tag--danger):not(.el-tag--info):not(.el-tag--primary) {
+  background-color: var(--lxm-brand-soft);
+  border-color: var(--lxm-brand-soft-2);
+  color: var(--lxm-brand-ink);
+}
+
+/* ---------- 弹窗关闭钮：悬停品牌色（轻量微交互） ---------- */
+.el-dialog__headerbtn:hover .el-dialog__close,
+.el-message-box__headerbtn:hover .el-message-box__close {
+  color: var(--lxm-brand);
+}

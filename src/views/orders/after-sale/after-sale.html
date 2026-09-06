@@ -1,0 +1,130 @@
+<div class="filter-card">
+  <el-select v-model="state.filters.productType" clearable placeholder="售后类型">
+    <el-option label="退款申请" value="退款申请" />
+    <el-option label="协商退款" value="协商退款" />
+    <el-option label="改期" value="改期" />
+    <el-option label="投诉反馈" value="投诉反馈" />
+    <el-option label="补发成片" value="补发成片" />
+    <el-option label="补拍" value="补拍" />
+  </el-select>
+  <el-select v-model="state.filters.status" clearable placeholder="处理状态">
+    <el-option label="待处理" value="待处理" />
+    <el-option label="处理中" value="处理中" />
+    <el-option label="待超管审核" value="待超管审核" />
+    <el-option label="待财务审核" value="待财务审核" />
+    <el-option label="已完成" value="已完成" />
+  </el-select>
+  <el-select v-model="state.filters.assigneeId" clearable placeholder="负责客服">
+    <el-option v-for="s in services" :key="s.id" :label="s.name" :value="s.id" />
+  </el-select>
+  <el-input v-model="state.filters.keyword" clearable placeholder="搜索订单/客户/原因/商家" />
+</div>
+
+<div class="content-kpis">
+  <div><span>售后总数</span><strong>{{ afterSaleSummary.total }}</strong></div>
+  <div><span>待处理</span><strong>{{ afterSaleSummary.pending }}</strong></div>
+  <div><span>处理中</span><strong>{{ afterSaleSummary.processing }}</strong></div>
+  <div><span>已完成</span><strong>{{ afterSaleSummary.done }}</strong></div>
+</div>
+
+<div class="table-card">
+  <div class="table-title">
+    <div>
+      <strong>售后服务</strong>
+      <p>售后处理中会锁定订单完结、取消、转派和金额修改；有退款时需先确认金额，再进入财务审核。</p>
+    </div>
+  </div>
+  <el-table :data="pagedList('afterSaleActive', activeAfterSaleRows)" stripe border height="390" empty-text="暂无处理中的售后，客人发起的退款/改期会出现在这里">
+    <el-table-column prop="createdAt" label="提交时间" width="150" />
+    <el-table-column prop="type" label="类型" width="100" />
+    <el-table-column label="订单/客户" min-width="180">
+      <template #default="{row}">
+        <button class="table-link" @click="openOrderById(row.orderId,{readonly:true})">{{ row.orderNo }}</button>
+        <strong>{{ row.customer }}</strong>
+        <div class="muted">{{ shopName(row.shopId) }}</div>
+      </template>
+    </el-table-column>
+    <el-table-column prop="reason" label="售后原因" min-width="230" />
+    <el-table-column label="来源/客人可见" width="145">
+      <template #default="{row}">
+        <strong>{{ row.submitSource || '后台提交' }}</strong>
+        <div class="muted">{{ row.customerVisibleStatus || row.status }}</div>
+      </template>
+    </el-table-column>
+    <el-table-column label="退款/订单状态" width="150">
+      <template #default="{row}">
+        {{ row.amount ? money(row.amount) : '-' }}
+        <div class="muted">{{ row.orderStatus }} · {{ row.financeStatus || '无需财务审核' }}</div>
+      </template>
+    </el-table-column>
+    <el-table-column label="负责客服" width="120">
+      <template #default="{row}">{{ staffName(row.assigneeId) }}</template>
+    </el-table-column>
+    <el-table-column label="处理状态" width="120">
+      <template #default="{row}">
+        <el-tag :type="row.status === '待财务审核' ? 'warning' : row.status === '已完成' ? 'success' : 'danger'">{{ row.status }}</el-tag>
+      </template>
+    </el-table-column>
+    <el-table-column fixed="right" label="操作" width="190">
+      <template #default="{row}">
+        <el-button link type="primary" @click="openAfterSaleProcess(row)">售后处理</el-button>
+        <el-tooltip :content="isAfterSaleProcessReadonly(row) ? '该售后已完成或待财务审核，不能重复处理' : '确认售后处理完成'" placement="top" :disabled="!isAfterSaleProcessReadonly(row)">
+          <span class="disabled-tip-wrap">
+            <el-button link :disabled="isAfterSaleProcessReadonly(row)" @click="completeAfterSale(row)">处理完成</el-button>
+          </span>
+        </el-tooltip>
+      </template>
+    </el-table-column>
+  </el-table>
+  <div class="table-pager" v-if="activeAfterSaleRows.length > 0">
+    <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="activeAfterSaleRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('afterSaleActive').size" :current-page="pager('afterSaleActive').page" @current-change="pager('afterSaleActive').page = $event" @size-change="onListPageSizeChange('afterSaleActive', $event)" />
+    <span class="pager-info">第 {{ Math.min(activeAfterSaleRows.length, (pager('afterSaleActive').page-1)*pager('afterSaleActive').size+1) }}–{{ Math.min(activeAfterSaleRows.length, pager('afterSaleActive').page*pager('afterSaleActive').size) }} 条 / 共 {{ activeAfterSaleRows.length }} 条</span>
+  </div>
+</div>
+
+<div class="table-card section-gap">
+  <div class="table-title">
+    <div>
+      <strong>售后记录</strong>
+      <p>已完成售后处理的订单记录，只读留痕，便于后续查询。</p>
+    </div>
+  </div>
+  <el-table :data="pagedList('afterSaleRecords', afterSaleRecordRows)" stripe border height="260" empty-text="暂无已完成的售后记录">
+    <el-table-column prop="updatedAt" label="完成时间" width="150" />
+    <el-table-column prop="type" label="类型" width="100" />
+    <el-table-column label="订单/客户" min-width="180">
+      <template #default="{row}">
+        <button class="table-link" @click="openOrderById(row.orderId,{readonly:true})">{{ row.orderNo }}</button>
+        <strong>{{ row.customer }}</strong>
+      </template>
+    </el-table-column>
+    <el-table-column prop="reason" label="售后原因" min-width="220" />
+    <el-table-column label="客人可见" width="100">
+      <template #default="{row}">{{ row.customerVisibleStatus || row.status }}</template>
+    </el-table-column>
+    <el-table-column label="退款/财务" width="150">
+      <template #default="{row}">
+        {{ row.amount ? money(row.amount) : '-' }}
+        <div class="muted">{{ row.financeStatus || '无需财务审核' }}</div>
+      </template>
+    </el-table-column>
+    <el-table-column label="处理记录" min-width="260">
+      <template #default="{row}">
+        <div class="after-sale-log-preview">
+          <div v-for="log in (row.logs || []).slice(0,2)" :key="log" class="muted log-line">{{ log }}</div>
+          <el-popover v-if="(row.logs || []).length > 2" placement="left" width="420" trigger="click">
+            <template #reference><el-button link type="primary">查看全部 {{ row.logs.length }} 条</el-button></template>
+            <div class="after-sale-log-popover">
+              <strong>完整处理记录</strong>
+              <div v-for="log in row.logs" :key="log" class="log-popover-row">{{ log }}</div>
+            </div>
+          </el-popover>
+        </div>
+      </template>
+    </el-table-column>
+  </el-table>
+  <div class="table-pager" v-if="afterSaleRecordRows.length > 0">
+    <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="afterSaleRecordRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('afterSaleRecords').size" :current-page="pager('afterSaleRecords').page" @current-change="pager('afterSaleRecords').page = $event" @size-change="onListPageSizeChange('afterSaleRecords', $event)" />
+    <span class="pager-info">第 {{ Math.min(afterSaleRecordRows.length, (pager('afterSaleRecords').page-1)*pager('afterSaleRecords').size+1) }}–{{ Math.min(afterSaleRecordRows.length, pager('afterSaleRecords').page*pager('afterSaleRecords').size) }} 条 / 共 {{ afterSaleRecordRows.length }} 条</span>
+  </div>
+</div>

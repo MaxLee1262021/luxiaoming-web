@@ -1,0 +1,25 @@
+﻿<div class="page-head-bar">
+  <div><h2>接单队列</h2><p>摄影师视角的待办：已派给你、还未完成拍摄与交付的订单。</p></div>
+</div>
+
+<div class="receive-stat">
+  <div><span>待接单（已派未拍）</span><strong>{{ scopedOrders.filter(o=>o.photographerId && ['已确认','待拍摄'].includes(o.status)).length }}</strong></div>
+  <div><span>拍摄中</span><strong>{{ scopedOrders.filter(o=>o.status==='拍摄中').length }}</strong></div>
+  <div><span>已完成</span><strong>{{ scopedOrders.filter(o=>o.status==='completed').length }}</strong></div>
+</div>
+
+<div class="receive-board">
+  <div class="receive-card" v-for="o in scopedOrders.filter(x=>x.photographerId && ['已确认','待拍摄','拍摄中'].includes(x.status))" :key="o.id">
+    <div class="rc-badge" :class="o.status==='拍摄中' ? 'shooting' : 'wait'">{{ o.status==='拍摄中' ? '拍摄中' : '待接单' }}</div>
+    <div class="rc-body">
+      <div class="rc-cust"><strong>{{ o.customer }}</strong><span class="muted">{{ visiblePhone(o) }}</span></div>
+      <div class="rc-prod"><el-tag v-for="p in o.products" :key="p.type+p.id" @click="openProduct(p)">{{ productName(p) }}</el-tag></div>
+      <div class="rc-time"><span>预约</span>{{ o.appointmentAt || '未约定' }}</div>
+      <div class="rc-photog">摄影师：{{ staffName(o.photographerId) }}</div>
+    </div>
+    <div class="rc-actions">
+      <el-button size="small" @click="openOrder(o)">{{ o.status==='拍摄中' ? '更新进度' : '确认档期' }}</el-button>
+    </div>
+  </div>
+  <div v-if="!scopedOrders.filter(x=>x.photographerId && ['已确认','待拍摄','拍摄中'].includes(x.status)).length" class="empty-state">暂无待接任务 🎉</div>
+</div>

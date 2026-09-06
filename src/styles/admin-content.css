@@ -1,0 +1,402 @@
+/* ============================================================
+   鹿小鸣旅拍 · Web 管理后台 · 内容管理通用设计层（admin-content.css）
+   UI Designer · 2026-07-25
+   ------------------------------------------------------------
+   本文件是「内容 / 旅拍商品管理」所有页面的通用设计基底。
+   与 styles.css 里 spot/album/package… 的「每页一套」写法不同，
+   这里只定义一套页面无关的组件类（.lxm-*），所有内容页统一调用，
+   保证视觉一致、避免重复、便于维护。全部复用 tokens.css 的 --lxm-*，
+   不新增任何硬编码颜色。
+
+   页面标准骨架（按此顺序套用）：
+   <div class="lxm-page">
+     <header class="lxm-page-head">
+       <div>
+         <span class="lxm-eyebrow">模块标识</span>
+         <h3 class="lxm-page-head__title">页面标题</h3>
+         <p class="lxm-page-head__desc">一句话说明本页用途</p>
+       </div>
+       <div class="lxm-page-head__actions">
+         <el-button plain>批量操作</el-button>
+         <el-button type="primary" @click="openX">新增</el-button>
+       </div>
+     </header>
+
+     <div class="lxm-toolbar">            <!-- 筛选 / 快捷操作条（可 sticky） -->
+       <el-input .../><el-select .../><el-button @click="reset">重置</el-button>
+     </div>
+
+     <div class="lxm-kpi-grid"> … 指标卡 … </div>   <!-- 可选 -->
+
+     <div class="lxm-cards">             <!-- 卡片网格：拍摄风格 / 素材库等 -->
+       <article class="lxm-card" v-for="…"> … </article>
+     </div>
+
+     <div class="lxm-layout lxm-layout--3"> 侧栏 / 主区 / 关系 </div>  <!-- 或主从布局 -->
+     <div class="lxm-panel lxm-table-card"><el-table …/></div>        <!-- 或表格 -->
+   </div>
+   ============================================================ */
+
+/* ---------- 页面根容器 ---------- */
+.lxm-page {
+  display: grid;
+  gap: var(--lxm-space-4);
+  padding-bottom: var(--lxm-space-8);
+}
+
+/* ---------- 页头 ---------- */
+.lxm-page-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--lxm-space-5);
+  min-height: 104px;
+  padding: 18px 20px;
+  border: 1px solid var(--lxm-line);
+  border-radius: var(--lxm-r-lg);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+.lxm-eyebrow {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: var(--lxm-brand);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+.lxm-page-head__title {
+  margin: 4px 0 6px;
+  color: var(--lxm-ink);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+.lxm-page-head__desc {
+  max-width: 880px;
+  margin: 0;
+  color: var(--lxm-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.lxm-page-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--lxm-space-2);
+  max-width: 480px;
+}
+.lxm-page-head__actions .el-button {
+  margin-left: 0;
+  border-radius: var(--lxm-r-sm);
+}
+
+/* ---------- 筛选 / 工具条 ---------- */
+.lxm-toolbar {
+  position: sticky;
+  top: 72px;
+  z-index: 8;
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) repeat(auto-fit, minmax(150px, 190px));
+  align-items: center;
+  gap: var(--lxm-space-3);
+  padding: var(--lxm-space-3);
+  border: 1px solid var(--lxm-line);
+  border-radius: var(--lxm-r-lg);
+  background: rgba(255, 255, 255, .96);
+  box-shadow: var(--lxm-shadow-sm);
+  backdrop-filter: blur(10px);
+}
+.lxm-toolbar .el-button {
+  margin-left: 0;
+}
+
+/* ---------- 指标卡网格 ---------- */
+.lxm-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: var(--lxm-space-3);
+}
+.lxm-kpi {
+  position: relative;
+  min-height: 92px;
+  padding: 14px 16px;
+  overflow: hidden;
+  border: 1px solid var(--lxm-line);
+  border-radius: var(--lxm-r-lg);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+.lxm-kpi__label,
+.lxm-kpi__hint {
+  display: block;
+  color: var(--lxm-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.lxm-kpi__value {
+  display: block;
+  margin: 6px 0;
+  color: var(--lxm-ink);
+  font-size: 22px;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+
+/* ---------- 通用面板（卡片容器） ---------- */
+.lxm-panel {
+  border: 1px solid var(--lxm-line);
+  border-radius: var(--lxm-r-lg);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+}
+.lxm-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--lxm-line);
+}
+.lxm-panel__head strong {
+  color: var(--lxm-ink);
+  font-size: 15px;
+}
+.lxm-panel__body {
+  padding: 16px;
+}
+
+/* ---------- 卡片网格（内容卡：拍摄风格 / 素材库 / 照片单品缩略等） ---------- */
+.lxm-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  gap: var(--lxm-space-4);
+}
+.lxm-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--lxm-line);
+  border-radius: var(--lxm-r-lg);
+  background: var(--lxm-surface);
+  box-shadow: var(--lxm-shadow-sm);
+  transition: border-color var(--lxm-t-normal), box-shadow var(--lxm-t-normal),
+    transform var(--lxm-t-normal);
+}
+.lxm-card:hover {
+  border-color: var(--lxm-brand-soft-2);
+  box-shadow: var(--lxm-shadow-md);
+  transform: translateY(-2px);
+}
+.lxm-card__cover {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  background: var(--lxm-bg);
+}
+.lxm-card__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.lxm-card__badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 9px;
+  border-radius: var(--lxm-r-pill);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(42, 33, 27, .68);
+}
+.lxm-card__badge--hot {
+  background: var(--lxm-brand-strong);
+}
+.lxm-card__badge--video {
+  background: var(--lxm-brand-vivid);
+}
+.lxm-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lxm-space-2);
+  flex: 1;
+  padding: 12px 14px;
+}
+.lxm-card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--lxm-ink);
+}
+.lxm-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--lxm-muted);
+}
+.lxm-card__meta b {
+  color: var(--lxm-ink);
+}
+.lxm-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.lxm-pill {
+  padding: 2px 9px;
+  border-radius: var(--lxm-r-pill);
+  background: var(--lxm-brand-soft);
+  color: var(--lxm-brand);
+  font-size: 11px;
+  font-weight: 600;
+}
+.lxm-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lxm-space-2);
+  padding: 0 14px 14px;
+}
+.lxm-card__actions .el-button {
+  margin-left: 0;
+}
+
+/* ---------- 主从 / 侧栏布局 ---------- */
+.lxm-layout {
+  display: grid;
+  gap: var(--lxm-space-4);
+  align-items: start;
+}
+.lxm-layout--3 {
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+}
+.lxm-layout--2 {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+.lxm-layout--side {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+
+/* ---------- 说明 / 边界条 ---------- */
+.lxm-rule {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--lxm-brand-soft-2);
+  border-left: 4px solid var(--lxm-brand);
+  border-radius: var(--lxm-r-lg);
+  background: var(--lxm-brand-soft);
+}
+.lxm-rule--plain {
+  border-color: var(--lxm-line);
+  border-left-color: var(--lxm-line-strong);
+  background: var(--lxm-surface);
+}
+.lxm-rule strong {
+  color: var(--lxm-ink);
+  font-size: 14px;
+}
+.lxm-rule span {
+  color: var(--lxm-muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* ---------- 表格卡 ---------- */
+.lxm-table-card {
+  padding: 16px;
+  overflow: hidden;
+}
+.lxm-table-card .el-table {
+  --el-table-border-color: var(--lxm-line);
+  --el-table-header-bg-color: var(--lxm-bg);
+  font-size: 13px;
+}
+.lxm-table-card .el-table th.el-table__cell {
+  height: 44px;
+  color: var(--lxm-ink-2);
+  background: var(--lxm-bg);
+  font-weight: 800;
+}
+.lxm-table-card .el-table td.el-table__cell {
+  padding: 8px 0;
+}
+
+/* ---------- 轻量内联空态（复用 enhancements.css 的 .lxm-empty，这里补无图版） ---------- */
+.lxm-empty-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: var(--lxm-space-10) var(--lxm-space-6);
+  text-align: center;
+  color: var(--lxm-muted);
+}
+.lxm-empty-inline strong {
+  display: block;
+  font-size: 16px;
+  color: var(--lxm-ink);
+}
+.lxm-empty-inline span {
+  max-width: 360px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 1320px) {
+  .lxm-layout--3,
+  .lxm-layout--2,
+  .lxm-layout--side {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 980px) {
+  .lxm-page-head,
+  .lxm-toolbar {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  .lxm-page-head__actions {
+    justify-content: flex-start;
+    max-width: none;
+  }
+  .lxm-toolbar {
+    position: static;
+  }
+  .lxm-cards {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+}
+
+/* ===== 短视频卡片 + 编辑表单 ===== */
+.lxm-card__cover--video { position: relative; }
+.lxm-card__cover--video img { width: 100%; height: 100%; object-fit: cover; }
+.lxm-play {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 46px; height: 46px; border-radius: 50%;
+  background: rgba(0,0,0,.45); color: #fff; font-size: 16px; line-height: 46px;
+  text-align: center; padding-left: 3px; pointer-events: none;
+}
+.lxm-duration {
+  position: absolute; right: 8px; bottom: 8px;
+  background: rgba(0,0,0,.6); color: #fff; font-size: 12px;
+  padding: 2px 8px; border-radius: 10px;
+}
+.lxm-price { color: var(--lxm-brand-strong); font-weight: 700; }
+.lxm-pill--muted { background: #f1ece7; color: #9b8e84; border-color: #ece3da; }
+
+.lxm-video-preview {
+  width: 100%; max-height: 240px; border-radius: 10px; margin-top: 8px;
+  background: #000;
+}
+.lxm-form { display: flex; flex-direction: column; gap: 14px; }
+.lxm-form__row { display: flex; flex-direction: column; gap: 6px; }
+.lxm-form__row > label { font-size: 13px; color: var(--lxm-ink-2); font-weight: 600; }
+.lxm-form__row--split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.lxm-upload { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.lxm-upload input[type="file"] { font-size: 13px; color: var(--lxm-ink-2); }
+.lxm-upload__hint { font-size: 12px; color: #9b8e84; line-height: 1.5; }
+

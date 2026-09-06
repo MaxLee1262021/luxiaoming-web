@@ -1,0 +1,97 @@
+<div class="tag-manage-page">
+  <div class="tag-toolbar">
+    <div>
+      <span class="eyebrow">全局标签</span>
+      <h3>标签管理</h3>
+      <p>统一维护风格、场景、人群、活动标签，供打卡点、照片单品、套餐、周边与商品货架复用，避免运营手写标签重复混乱。</p>
+    </div>
+    <div class="tag-toolbar-actions">
+      <el-button plain @click="state.filters.keyword='';state.tagCategoryFilter=''">重置筛选</el-button>
+      <el-button plain @click="openContentLogs('标签管理')">操作日志</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
+      <el-button @click="switchMenu('packages')">套餐设置</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openTag()">新增标签</el-button>
+    </div>
+  </div>
+
+  <div class="tag-stat-grid">
+    <button :class="{active:!state.tagCategoryFilter}" @click="state.tagCategoryFilter=''"><span>全部标签</span><strong>{{ tagSummary.total }}</strong><em>启用 {{ tagSummary.enabled }} 个</em></button>
+    <button :class="{active:state.tagCategoryFilter==='风格'}" @click="state.tagCategoryFilter='风格'"><span>风格标签</span><strong>{{ tagSummary.style }}</strong><em>用于照片单品、套餐展示</em></button>
+    <button :class="{active:state.tagCategoryFilter==='场景'}" @click="state.tagCategoryFilter='场景'"><span>场景标签</span><strong>{{ tagSummary.scene }}</strong><em>用于打卡点、货架推荐</em></button>
+    <button :class="{active:state.tagCategoryFilter==='人群'}" @click="state.tagCategoryFilter='人群'"><span>人群标签</span><strong>{{ tagSummary.crowd }}</strong><em>情侣、亲子、闺蜜等</em></button>
+    <button :class="{active:state.tagCategoryFilter==='活动'}" @click="state.tagCategoryFilter='活动'"><span>活动标签</span><strong>{{ tagSummary.activity }}</strong><em>节假日、档期活动</em></button>
+  </div>
+
+  <div class="tag-filter-row">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索标签名称、分类、适用范围" />
+    <el-select v-model="state.tagCategoryFilter" clearable placeholder="标签分类">
+      <el-option label="风格" value="风格" />
+      <el-option label="场景" value="场景" />
+      <el-option label="人群" value="人群" />
+      <el-option label="活动" value="活动" />
+    </el-select>
+    <el-tag type="info">当前引用 {{ tagSummary.used }} 次</el-tag>
+  </div>
+
+  <div class="tag-layout">
+    <section class="tag-table-card panel">
+      <div class="section-title-row compact">
+        <div>
+          <h3>标签库明细</h3>
+          <p>停用标签不会删除历史引用；批量替换用于后续清理重复标签。</p>
+        </div>
+        <el-tag type="info">{{ tagRows.length }} 个标签</el-tag>
+      </div>
+      <el-table :data="pagedList('tags', tagRows)" border stripe empty-text="暂无符合条件的标签，试试重置筛选或新增标签">
+        <el-table-column label="标签" min-width="220">
+          <template #default="{row}">
+            <div class="tag-name-cell"><i :style="{background:row.color || '#E0662A'}"></i><div><strong>{{ row.name }}</strong><span>{{ tagCategoryText(row) }}</span></div></div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="category" label="分类" width="100" />
+        <el-table-column prop="scope" label="适用范围" min-width="160" />
+        <el-table-column prop="sort" label="排序" width="90" sortable />
+        <el-table-column label="引用次数" width="110" sortable>
+          <template #default="{row}"><strong>{{ row.usageCount }}</strong></template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{row}"><el-tag :type="row.status==='停用' ? 'info' : 'success'">{{ row.status }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="操作" width="230" fixed="right">
+          <template #default="{row}">
+            <el-button link type="primary" v-if="can('contentEdit')" @click="openTag(row)">编辑</el-button>
+            <el-button link v-if="can('contentEdit')" @click="replaceTagUsage(row)">批量替换</el-button>
+            <el-button v-if="row.lastReplaceSnapshot && can('contentEdit')" link type="success" @click="undoTagReplacement(row)">回溯</el-button>
+            <el-button link :type="row.status==='停用' ? 'success' : 'warning'" v-if="can('contentEdit')" @click="toggleTagStatus(row)">{{ row.status==='停用' ? '启用' : '停用' }}</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="table-pager" v-if="tagRows.length > 0">
+        <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="tagRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('tags').size" :current-page="pager('tags').page" @current-change="pager('tags').page = $event" @size-change="onListPageSizeChange('tags', $event)" />
+        <span class="pager-info">第 {{ Math.min(tagRows.length, (pager('tags').page-1)*pager('tags').size+1) }}–{{ Math.min(tagRows.length, pager('tags').page*pager('tags').size) }} 条 / 共 {{ tagRows.length }} 条</span>
+      </div>
+    </section>
+
+    <aside class="tag-rule-panel">
+      <div>
+        <strong>标签使用边界</strong>
+        <p>拍摄风格仍然只是内容分类，不设置商品价格；标签只用于运营展示、筛选和货架推荐，不参与财务分账。</p>
+      </div>
+      <div>
+        <strong>推荐分类</strong>
+        <span>风格：清新、复古、国风</span>
+        <span>场景：热门打卡、夜景、室内</span>
+        <span>人群：情侣、亲子、闺蜜</span>
+        <span>活动：暑期、周末、节假日</span>
+      </div>
+      <div>
+        <strong>后续联动</strong>
+        <p>照片单品、套餐、周边、货架均从此处下拉复用；删除标签前先批量替换，避免前端展示脏数据。</p>
+      </div>
+      <div>
+        <strong>替换回溯</strong>
+        <p>批量替换会写入操作日志并保留快照编号；生成快照后表格会出现“回溯”入口，便于按映射关系追踪或撤销。</p>
+      </div>
+    </aside>
+  </div>
+</div>

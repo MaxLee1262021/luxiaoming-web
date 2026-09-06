@@ -1,0 +1,94 @@
+.page-route-receive .page-head-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.page-route-receive .page-head-bar h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--lxm-c-ink);
+}
+.page-route-receive .page-head-bar p {
+  margin: 4px 0 0;
+  color: rgba(42, 33, 27, 0.55);
+  font-size: 13px;
+}
+.page-route-receive .receive-stat {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.page-route-receive .receive-stat > div {
+  flex: 1;
+  background: #fff;
+  border: 1px solid rgba(42, 33, 27, 0.1);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.page-route-receive .receive-stat span {
+  font-size: 13px;
+  color: rgba(42, 33, 27, 0.55);
+}
+.page-route-receive .receive-stat strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 26px;
+  color: var(--lxm-c-red);
+}
+.page-route-receive .receive-board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.page-route-receive .receive-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #fff;
+  border: 1px solid rgba(42, 33, 27, 0.1);
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+.page-route-receive .rc-badge {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+}
+.page-route-receive .rc-badge.wait { background: linear-gradient(135deg, var(--lxm-c-orange), var(--lxm-c-red)); }
+.page-route-receive .rc-badge.shooting { background: linear-gradient(135deg, #4f9dff, #2b6fd6); }
+.page-route-receive .rc-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.page-route-receive .rc-cust strong {
+  font-size: 16px;
+  color: var(--lxm-c-ink);
+}
+.page-route-receive .rc-time {
+  font-size: 13px;
+  color: rgba(42, 33, 27, 0.65);
+}
+.page-route-receive .rc-time span {
+  display: inline-block;
+  margin-right: 8px;
+  color: rgba(42, 33, 27, 0.45);
+}
+.page-route-receive .rc-photog {
+  font-size: 12px;
+  color: rgba(42, 33, 27, 0.5);
+}
+.page-route-receive .muted {
+  color: rgba(42, 33, 27, 0.5);
+  font-size: 12px;
+  margin-left: 8px;
+}

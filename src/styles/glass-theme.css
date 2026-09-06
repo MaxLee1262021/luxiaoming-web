@@ -1,0 +1,821 @@
+/* ============================================================
+   鹿小鸣旅拍 · 后台「年轻活力渐变玻璃」主题层
+   UI Designer · 方案 C 落地（第一批）
+   ------------------------------------------------------------
+   本文件在 index.html 中最后加载，专门把后台从「暖白扁平」
+   升级为「深渐变底 + 玻璃拟态 + 红橙渐变 CTA + 暖金激活态」。
+
+   关键约束：
+   - 各视图 .css 由 router 动态 append 到 <head>（在我之后），
+     因此所有需要覆盖具体类名的表面一律用 !important 兜底。
+   - 编辑器模式（三栏）多数走品牌令牌（--lxm-surface/-bg/-cream），
+     故在 :root 重定义这些令牌为玻璃值即可整体生效。
+   ============================================================ */
+
+:root {
+  /* —— 玻璃表面令牌（重定义，编辑器模式自动继承）—— */
+  --lxm-glass-surface: rgba(255, 255, 255, .72);
+  --lxm-glass-surface-2: rgba(255, 255, 255, .55);
+  --lxm-glass-border: rgba(255, 255, 255, .55);
+  --lxm-glass-border-strong: rgba(255, 255, 255, .72);
+  --lxm-glass-shadow: 0 12px 34px rgba(22, 12, 8, .28);
+  --lxm-glass-shadow-sm: 0 6px 18px rgba(22, 12, 8, .20);
+
+  /* 编辑器模式表面：半透明白玻璃（保留可读深色文字） */
+  --lxm-surface: var(--lxm-glass-surface) !important;
+  --lxm-bg: rgba(255, 255, 255, .42) !important;
+  --lxm-line: rgba(255, 255, 255, .55) !important;
+  --lxm-line-strong: rgba(255, 255, 255, .72) !important;
+
+  /* 暖金激活态（方案 C 标识色） */
+  --lxm-glass-gold: #FFD36A;
+  --lxm-glass-gold-soft: rgba(255, 211, 106, .28);
+
+  /* 侧栏红橙渐变玻璃 */
+  --lxm-sidebar-grad: linear-gradient(165deg, rgba(238, 44, 44, .94) 0%, rgba(255, 107, 53, .94) 55%, rgba(255, 141, 82, .94) 100%);
+
+  /* Element Plus 玻璃化（输入/选择/填充） */
+  --el-bg-color: rgba(255, 255, 255, .80) !important;
+  --el-fill-color-blank: rgba(255, 255, 255, .80) !important;
+  --el-fill-color: rgba(255, 255, 255, .62) !important;
+  --el-fill-color-light: rgba(255, 255, 255, .55) !important;
+  --el-border-color: rgba(42, 33, 27, .16) !important;
+  --el-border-color-light: rgba(42, 33, 27, .14) !important;
+  --el-border-color-lighter: rgba(42, 33, 27, .12) !important;
+  --el-text-color-regular: #3a2f27 !important;
+  --el-text-color-primary: #2A211B !important;
+}
+
+/* ============ 1. 深渐变底 + 光晕 ============ */
+html, body {
+  background: #2A211B !important;
+}
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 760px at 86% -8%, rgba(255, 141, 82, .38), transparent 60%),
+    radial-gradient(1000px 720px at -4% 102%, rgba(238, 44, 44, .32), transparent 55%),
+    radial-gradient(760px 620px at 12% 8%, rgba(255, 211, 106, .14), transparent 60%),
+    linear-gradient(140deg, #241b16 0%, #33221b 42%, #43281d 100%) !important;
+  background-attachment: fixed;
+}
+/* 固定光晕层（不挡交互） */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: blur(40px);
+}
+body::before {
+  top: -160px; right: -120px;
+  width: 520px; height: 520px;
+  background: radial-gradient(circle, rgba(255, 141, 82, .55), transparent 70%);
+}
+body::after {
+  bottom: -180px; left: -140px;
+  width: 560px; height: 560px;
+  background: radial-gradient(circle, rgba(238, 44, 44, .45), transparent 70%);
+}
+
+.admin-shell {
+  background: transparent !important;
+  min-height: 100vh;
+}
+
+/* ============ 2. 侧边栏：红橙渐变玻璃 ============ */
+.lxm-sidebar {
+  width: 264px !important;
+  flex: 0 0 264px !important;
+  color: #fff !important;
+  background: var(--lxm-sidebar-grad) !important;
+  backdrop-filter: blur(18px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(150%) !important;
+  border-right: 1px solid rgba(255, 255, 255, .28) !important;
+  box-shadow: 6px 0 30px rgba(20, 8, 4, .35) !important;
+  overflow-y: auto;
+  position: relative;
+  z-index: 20;
+}
+.lxm-brand {
+  height: 72px !important;
+  padding: 14px 16px !important;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, .18) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, .18) !important;
+}
+.lxm-brand .brand-mark {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 800; color: #fff;
+  background: rgba(255, 255, 255, .22) !important;
+  border: 1px solid rgba(255, 255, 255, .4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+.lxm-brand strong { color: #fff !important; }
+.lxm-brand span { color: rgba(255, 255, 255, .72) !important; }
+
+.menu-group strong { color: rgba(255, 255, 255, .92) !important; }
+.menu-group span { color: rgba(255, 255, 255, .62) !important; }
+
+.menu-btn {
+  color: rgba(255, 255, 255, .86) !important;
+  background: transparent !important;
+  border-radius: 12px !important;
+}
+.menu-btn:hover {
+  color: #fff !important;
+  background: rgba(255, 255, 255, .16) !important;
+}
+.menu-btn.active {
+  color: #fff !important;
+  background: rgba(255, 255, 255, .20) !important;
+  box-shadow: inset 3px 0 0 var(--lxm-glass-gold), 0 4px 14px rgba(0, 0, 0, .18) !important;
+}
+.menu-mini {
+  background: rgba(255, 255, 255, .20) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255, 255, 255, .35);
+}
+.menu-btn.active .menu-mini,
+.menu-btn:hover .menu-mini {
+  background: var(--lxm-glass-gold) !important;
+  color: #7a3b00 !important;
+  border-color: transparent;
+}
+.content-menu-subtitle {
+  color: rgba(255, 255, 255, .82) !important;
+  border-top: 1px solid rgba(255, 255, 255, .16) !important;
+}
+.content-menu-subtitle span:not(.sub-dot) { color: rgba(255, 255, 255, .82) !important; }
+.content-menu-subtitle em { color: rgba(255, 255, 255, .6) !important; }
+.content-menu-subtitle.closed span:not(.sub-dot) { color: #fff !important; }
+.sub-dot { background: var(--lxm-glass-gold) !important; }
+
+.sidebar-toggle {
+  color: rgba(255, 255, 255, .85) !important;
+  background: rgba(255, 255, 255, .16) !important;
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 8px;
+}
+.sidebar-toggle:hover { background: rgba(255, 255, 255, .28) !important; }
+
+/* ============ 3. 顶栏：磨砂玻璃 ============ */
+.lxm-topbar {
+  background: rgba(255, 255, 255, .66) !important;
+  backdrop-filter: blur(22px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(170%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, .45) !important;
+  box-shadow: 0 6px 22px rgba(20, 12, 8, .12) !important;
+}
+.lxm-topbar h1 { color: #2A211B !important; }
+.lxm-topbar p { color: #6b5a4d !important; }
+.role-pill {
+  background: var(--lxm-glass-gold-soft) !important;
+  color: #7a4a00 !important;
+  border: 1px solid rgba(255, 211, 106, .6);
+}
+
+.lxm-content { background: transparent !important; }
+
+/* ============ 4. 通用内容卡片 / 配置页容器 玻璃化 ============ */
+/* 通用筛选卡 */
+.filter-card {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) !important;
+}
+
+/* 配置小程序页：lxm-page / 装修工作台 / 配置卡 */
+.lxm-page { padding: 0 !important; }
+.lxm-page-head {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) !important;
+  padding: 18px 22px !important;
+  margin-bottom: 16px;
+}
+.lxm-eyebrow {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  color: #fff !important;
+  background: var(--lxm-brand-grad) !important;
+}
+.lxm-page-head__title { color: #2A211B !important; }
+.lxm-page-head__desc { color: #6b5a4d !important; }
+
+.decor-workbench {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
+  gap: 16px;
+  align-items: start;
+}
+.decor-panel,
+.decor-content,
+.decor-panel-left {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow) !important;
+  backdrop-filter: blur(16px) saturate(140%) !important;
+  padding: 14px !important;
+}
+.decor-panel-head {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 12px !important;
+  margin: 4px 0 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .5) !important;
+  border: 1px solid rgba(255, 255, 255, .5);
+}
+.decor-panel-head strong { color: #2A211B !important; font-size: 14px; }
+.decor-panel-head span { color: #6b5a4d !important; font-size: 12px; }
+.decor-panel-head.compact { background: rgba(255, 255, 255, .38) !important; }
+
+/* 装修：左栏列表按钮 / 模块开关 */
+.decor-page-list button,
+.decor-module-list button,
+.quicknav-presets .preset-btn,
+.page-config-tabs button {
+  border: 1px solid rgba(255, 255, 255, .55) !important;
+  background: rgba(255, 255, 255, .55) !important;
+  color: #3a2f27 !important;
+  border-radius: 12px !important;
+  transition: var(--lxm-t-fast);
+}
+.decor-page-list button:hover,
+.decor-module-list button:hover,
+.page-config-tabs button:hover { background: rgba(255, 255, 255, .8) !important; }
+.decor-page-list button.active,
+.decor-module-list button.active,
+.page-config-tabs button.active {
+  background: var(--lxm-brand-grad) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: 0 6px 16px rgba(238, 44, 44, .3);
+}
+.decor-panel-head,
+.decor-form label span,
+.cfg-card-head strong { color: #2A211B !important; }
+
+/* 配置卡（mini-config） */
+.cfg-card {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) !important;
+  padding: 16px !important;
+  margin-bottom: 14px;
+}
+.cfg-card-head {
+  border-bottom: 1px solid rgba(255, 255, 255, .5) !important;
+  padding-bottom: 10px; margin-bottom: 12px;
+}
+.cfg-card-head strong { color: #2A211B !important; font-size: 15px; }
+.cfg-card-head span { color: #6b5a4d !important; }
+.cfg-form label span,
+.cfg-sub-head { color: #6b5a4d !important; }
+
+/* 装修素材网格（首页轮播快速选用） */
+.decor-material-grid button {
+  border: 1px solid rgba(255, 255, 255, .5) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  background: rgba(255, 255, 255, .5) !important;
+  color: #3a2f27 !important;
+}
+.decor-material-grid button.active {
+  border-color: var(--lxm-brand-strong) !important;
+  box-shadow: 0 0 0 2px rgba(238, 44, 44, .35) !important;
+}
+
+/* 探索页 / 首页 轮播 banner 编辑器 */
+.explore-banner-editor {
+  display: grid; gap: 12px;
+}
+.eb-item {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .55) !important;
+  border: 1px solid rgba(255, 255, 255, .55) !important;
+}
+.eb-media { position: relative; }
+.eb-thumb {
+  width: 100%; height: 96px; object-fit: cover; border-radius: 10px;
+  background: rgba(255, 255, 255, .4);
+}
+.eb-thumb--empty { display: flex; align-items: center; justify-content: center; color: #8a766a; font-size: 12px; }
+.eb-media-actions { display: flex; gap: 6px; margin-top: 6px; }
+.eb-media-actions button {
+  flex: 1; padding: 5px 0; font-size: 12px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, .6) !important;
+  background: rgba(255, 255, 255, .6) !important; color: #3a2f27 !important;
+  border-radius: 8px;
+}
+.eb-fields { display: grid; gap: 8px; }
+.eb-row { display: grid; gap: 4px; }
+.eb-row > span { font-size: 12px; color: #6b5a4d; }
+.eb-tools { display: flex; flex-direction: column; gap: 6px; }
+.eb-tools button,
+.eb-add {
+  padding: 6px 10px; font-size: 13px; cursor: pointer;
+  border-radius: 10px; border: 1px solid rgba(255, 255, 255, .6) !important;
+  background: rgba(255, 255, 255, .6) !important; color: #3a2f27 !important;
+}
+.eb-add {
+  border-style: dashed !important;
+  background: rgba(255, 255, 255, .35) !important;
+  color: var(--lxm-brand) !important;
+}
+.eb-del, .qn-btn.danger, .cfg-list-del, .sf-del {
+  color: #c0392b !important;
+}
+.eb-empty, .quicknav-empty, .cfg-empty, .sf-empty { color: #8a766a !important; }
+
+/* 首页推荐位选择卡 */
+.decor-choice-list button {
+  border: 1px solid rgba(255, 255, 255, .5) !important;
+  background: rgba(255, 255, 255, .5) !important;
+  color: #3a2f27 !important;
+  border-radius: 12px !important;
+}
+.decor-choice-list button:hover { background: rgba(255, 255, 255, .8) !important; }
+.decor-choice-list button.active {
+  background: var(--lxm-brand-soft) !important;
+  border-color: var(--lxm-brand-strong) !important;
+  color: var(--lxm-brand-deep) !important;
+}
+.decor-pick-grid h4, .page-config-title strong { color: #2A211B !important; }
+
+/* 页面级模块开关 */
+.page-module-switches button {
+  border: 1px solid rgba(255, 255, 255, .5) !important;
+  background: rgba(255, 255, 255, .5) !important;
+  color: #3a2f27 !important;
+  border-radius: 999px !important;
+  padding: 6px 12px;
+}
+.page-module-switches button.active {
+  background: var(--lxm-brand-grad) !important; border-color: transparent !important; color: #fff !important;
+}
+
+/* 手机仿真预览（保留深色机身，内部奶油实底，可读性优先） */
+.decor-phone-wrap { display: flex; justify-content: center; }
+.decor-phone {
+  width: 300px;
+  background: #1c1714 !important;
+  border-radius: 30px !important;
+  padding: 12px !important;
+  box-shadow: var(--lxm-glass-shadow);
+  border: 1px solid rgba(255, 255, 255, .18);
+}
+.phone-nav { color: #fff !important; }
+.phone-status { background: #1c1714 !important; }
+.phone-head { color: #fff !important; background: rgba(255,255,255,.08) !important; border-radius: 10px; padding: 6px; font-size: 12px; }
+.phone-screen { background: var(--lxm-cream) !important; }
+.phone-module-title { color: #2A211B !important; }
+.phone-hero { border-radius: 14px; overflow: hidden; box-shadow: 0 8px 18px rgba(0,0,0,.2); }
+.phone-hero strong { color: #fff !important; }
+.phone-hero span { color: rgba(255,255,255,.9) !important; }
+.phone-trust span, .phone-quicknav-item, .phone-package, .phone-spot-row, .phone-album-grid, .phone-peripheral {
+  background: #fff !important; color: #2A211B !important; border-radius: 12px;
+}
+.phone-quicknav-item { color: var(--lxm-brand-deep) !important; }
+
+/* ============ 5. 四块商品货架：硬编码白底 → 玻璃 ============ */
+/* —— 照片留影 album —— */
+.page-route-album .album-toolbar,
+.page-route-album .album-stat-grid > div,
+.page-route-album .album-filter-row,
+.page-route-album .album-rule-strip,
+.page-route-album .album-card,
+.page-route-album .album-side-panel,
+.page-route-album .album-rule-card,
+.page-route-album .album-preview-card,
+.page-route-album .album-upload-card,
+.page-route-album .album-risk-card,
+.page-route-album .upload-log-list div,
+.page-route-album .sample-group.enhanced,
+.page-route-album .sample-tile,
+.page-route-album .album-list,
+.page-route-album .album-form {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+}
+.page-route-album .album-rule-strip { border-left: 4px solid var(--lxm-brand-strong) !important; }
+.page-route-album .album-cover { background: rgba(255,255,255,.4) !important; }
+.page-route-album .album-card { overflow: hidden; }
+.page-route-album .album-toolbar h3,
+.page-route-album .album-title-row h4,
+.page-route-album .album-stat-grid strong,
+.page-route-album .album-rule-card strong,
+.page-route-album .album-preview-card strong,
+.page-route-album .album-upload-card strong,
+.page-route-album .album-risk-card strong { color: #2A211B !important; }
+.page-route-album .album-toolbar p,
+.page-route-album .album-title-row p,
+.page-route-album .album-intro,
+.page-route-album .album-rule-card p,
+.page-route-album .album-risk-card p { color: #6b5a4d !important; }
+
+/* —— 旅拍套餐 package —— */
+.page-route-package .package-toolbar,
+.page-route-package .metric-card,
+.page-route-package .package-filter-bar,
+.page-route-package .package-rule-strip,
+.page-route-package .package-workflow-strip,
+.page-route-package .package-product-card,
+.page-route-package .package-anchor-nav button,
+.page-route-package .package-module-grid section,
+.page-route-package .package-module-grid section.collapsed,
+.page-route-package .pkg-toolbar,
+.page-route-package .pkg-stat-grid > div,
+.page-route-package .pkg-filter-row,
+.page-route-package .pkg-list,
+.page-route-package .pkg-form {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+}
+.page-route-package .package-workflow-strip { border-left: 4px solid var(--lxm-brand) !important; }
+.page-route-package .package-toolbar h3,
+.page-route-package .metric-card strong,
+.page-route-package .package-title-row h4 { color: #2A211B !important; }
+.page-route-package .package-toolbar p,
+.page-route-package .package-title-row p { color: #6b5a4d !important; }
+.page-route-package .package-product-cover { background: rgba(255,255,255,.4) !important; }
+
+/* —— 影像周边 peripheral —— */
+.page-route-peripheral .peripheral-toolbar,
+.page-route-peripheral .peripheral-stat-grid > div,
+.page-route-peripheral .peripheral-filter-row,
+.page-route-peripheral .peripheral-rule-strip,
+.page-route-peripheral .peripheral-card,
+.page-route-peripheral .ppl-toolbar,
+.page-route-peripheral .ppl-stat-grid > div,
+.page-route-peripheral .ppl-filter-row,
+.page-route-peripheral .ppl-list,
+.page-route-peripheral .ppl-form {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+}
+.page-route-peripheral .peripheral-rule-strip { border-left: 4px solid #059669 !important; }
+.page-route-peripheral .peripheral-toolbar h3,
+.page-route-peripheral .peripheral-stat-grid strong,
+.page-route-peripheral .peripheral-card h4 { color: #2A211B !important; }
+.page-route-peripheral .peripheral-toolbar p,
+.page-route-peripheral .peripheral-card p { color: #6b5a4d !important; }
+.page-route-peripheral .peripheral-cover { background: rgba(255,255,255,.4) !important; }
+
+/* —— 短视频 videoSingle —— */
+.page-route-videoSingle .vse-list,
+.page-route-videoSingle .vse-form {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+}
+.page-route-videoSingle .vse-list-head { background: rgba(255, 247, 239, .5) !important; }
+
+/* 三栏编辑器内列表项（令牌已玻璃化，这里补文字色） */
+.page-route-album .album-list-item,
+.page-route-package .pkg-list-item,
+.page-route-peripheral .ppl-list-item,
+.page-route-videoSingle .vse-list-item { color: #3a2f27 !important; }
+.page-route-album .ali-main strong,
+.page-route-package .pkg-list-item strong,
+.page-route-peripheral .pli-main strong,
+.page-route-videoSingle .vli-main strong { color: #2A211B !important; }
+
+/* ============ 6. 按钮 / Element Plus 玻璃化 ============ */
+.el-button--primary {
+  background: var(--lxm-brand-grad) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px rgba(238, 44, 44, .32) !important;
+  border-radius: 10px !important;
+}
+.el-button--primary:hover { filter: brightness(1.06) !important; }
+.el-button--primary:active { filter: brightness(.96) !important; }
+.el-button:not(.el-button--primary):not(.el-button--danger):not(.el-button--success):not(.el-button--warning) {
+  background: rgba(255, 255, 255, .66) !important;
+  border-color: rgba(255, 255, 255, .7) !important;
+  color: #3a2f27 !important;
+  border-radius: 10px !important;
+  backdrop-filter: blur(8px);
+}
+.el-button.is-plain {
+  background: rgba(255, 255, 255, .5) !important;
+  backdrop-filter: blur(8px);
+}
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  background-color: rgba(255, 255, 255, .82) !important;
+  box-shadow: 0 0 0 1px rgba(42, 33, 27, .16) inset !important;
+  border-radius: 10px !important;
+  color: #2A211B !important;
+}
+.el-input__inner, .el-textarea__inner { color: #2A211B !important; }
+.el-table, .el-table__expanded-cell {
+  background: transparent !important;
+}
+.el-table tr, .el-table th.el-table__cell, .el-table td.el-table__cell {
+  background: rgba(255, 255, 255, .6) !important;
+  color: #2A211B !important;
+}
+.el-table th.el-table__cell { background: rgba(255, 255, 255, .78) !important; font-weight: 700; }
+
+/* 滚动条美化（玻璃感） */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 141, 82, .5); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(238, 44, 44, .6); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ============ 7. 顶栏 message / 角色选择 在玻璃下可读 ============ */
+.top-actions .el-button { color: #3a2f27 !important; }
+.message-panel { background: #fff !important; color: #2A211B !important; border-radius: 12px; }
+.message-row { border-bottom: 1px solid var(--lxm-line) !important; color: #2A211B !important; }
+.empty-mini { color: #6b5a4d !important; }
+
+/* ============================================================
+   8. 第二批：全站剩余页玻璃化（#708 通用骨架 + #709~#712 模块）
+   策略：覆盖各页「硬编码 #fff 表面」；lxm-card/lxm-panel 已通过
+   令牌继承玻璃，这里再显式兜底，确保渠道/订单/内容页零漏页。
+   ============================================================ */
+
+/* —— #708 通用骨架防御：显式玻璃（令牌继承之外的双保险）—— */
+.lxm-card,
+.lxm-panel {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+}
+.lxm-card__cover { background: rgba(255, 255, 255, .4) !important; }
+.lxm-card__title,
+.lxm-panel__head strong { color: #2A211B !important; }
+.lxm-card__meta,
+.lxm-card__meta b { color: #6b5a4d !important; }
+
+/* —— #709 仪表盘 / 经营看板：KPI 卡 / 面板 / 风险条 / 待办条 / 销量 KPI / 图表卡 —— */
+.page-route-operation-dashboard .dashboard-date-shortcuts button,
+.page-route-operation-dashboard .dashboard-kpi-card,
+.page-route-operation-dashboard .dashboard-risk-strip,
+.page-route-operation-dashboard .dashboard-risk-strip > div,
+.page-route-operation-dashboard .dashboard-todo-strip,
+.page-route-operation-dashboard .dashboard-panel,
+.page-route-operation-dashboard .product-sales-head,
+.page-route-operation-dashboard .product-sales-kpis > div,
+.page-route-operation-dashboard .scan-line-chart,
+.page-route-operation-dashboard .product-trend-chart {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+}
+/* 仪表盘内小标签（em）：轻量玻璃，去掉白底小方块 */
+.page-route-operation-dashboard .dashboard-kpi-head em,
+.page-route-operation-dashboard .dashboard-panel-head em {
+  background: var(--lxm-glass-gold-soft) !important;
+  color: #7a4a00 !important;
+  border-radius: 8px !important;
+  padding: 1px 8px !important;
+}
+
+/* —— #710 订单管理：接单 / 派单 统计卡 + 卡片 —— */
+.page-route-receive .receive-stat > div,
+.page-route-receive .receive-card,
+.page-route-dispatch .dispatch-stat > div,
+.page-route-dispatch .dispatch-card {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+}
+/* 订单列表 / 任务 / 售后 主要靠 .filter-card + .lxm-card + .el-table（已玻璃）；
+   这里补其表格容器与汇总条，避免透底发灰 */
+.page-route-order-list .table-card,
+.page-route-order-list .order-summary > div,
+.page-route-order-list .order-alerts button,
+.page-route-task .table-card,
+.page-route-after-sale .table-card {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(12px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
+}
+.page-route-order-list .order-alerts button.active {
+  background: var(--lxm-brand-grad) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+}
+
+/* —— #711 财务对账：审计 / 对账 / 报告 三页表面 —— */
+/* 大表面（整块玻璃） */
+.page-route-audit .audit-header,
+.page-route-audit .audit-filter-card,
+.page-route-audit .audit-main-card,
+.page-route-audit .audit-stat,
+.page-route-audit .audit-icon,
+.page-route-reconciliation .reconcile-header,
+.page-route-reconciliation .reconcile-filter-panel,
+.page-route-reconciliation .formula-banner,
+.page-route-reconciliation .table-card,
+.page-route-reconciliation .hold-section,
+.page-route-reconciliation .service-card,
+.page-route-reconciliation .split-preview-panel,
+.page-route-reconciliation .transfer-panel,
+.page-route-reconciliation .transfer-metrics div,
+.page-route-reconciliation .recon-topbar,
+.page-route-reconciliation .actual-board,
+.page-route-reconciliation .estimate-board,
+.page-route-reconciliation .recon-tabs,
+.page-route-reconciliation .metric-card,
+.page-route-reconciliation .role-reconcile-focus > div:not(:first-child),
+.page-route-reconciliation .board-metrics div,
+.page-route-reconciliation .stat-card,
+.page-route-report .role-report-header,
+.page-route-report .role-report-filter,
+.page-route-report .table-card,
+.page-route-report .role-report-kpis div {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+}
+/* 财务告警框：仅换玻璃底，保留原有语义色边框（红/橙） */
+.page-route-reconciliation .risk-alert {
+  background: var(--lxm-glass-surface) !important;
+  backdrop-filter: blur(14px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(140%) !important;
+}
+/* 财务小胶囊（角色/筛选/区块） */
+.page-route-reconciliation .role-chip,
+.page-route-reconciliation .filter-chips span,
+.page-route-reconciliation .section-pill {
+  background: var(--lxm-glass-gold-soft) !important;
+  color: #7a4a00 !important;
+  border: 1px solid rgba(255, 211, 106, .55) !important;
+  border-radius: 999px !important;
+}
+/* 公式行内白底小字：透明化，避免玻璃卡里再嵌白块 */
+.page-route-reconciliation .formula-line span,
+.page-route-reconciliation .formula-line strong {
+  background: transparent !important;
+}
+
+/* —— #712 渠道管理（商家 / 分销员 / 客服）：以 .lxm-card 令牌玻璃为主，
+   这里补列表统计条与表格容器，确保零白块 —— */
+.page-route-shop .table-card,
+.page-route-shop .shop-stat > div,
+.page-route-staff .table-card,
+.page-route-staff .staff-stat > div,
+.page-route-distributor .table-card,
+.page-route-distributor .distributor-stat > div {
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  border-radius: 14px !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(12px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
+}
+
+/* ============ 顶栏用户菜单（鹿小鸣·玻璃主题） ============ */
+.user-menu { margin-left: 6px; }
+.user-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 6px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: var(--lxm-glass-surface) !important;
+  border: 1px solid var(--lxm-glass-border) !important;
+  box-shadow: var(--lxm-glass-shadow-sm) !important;
+  backdrop-filter: blur(12px) saturate(140%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.user-trigger:hover { transform: translateY(-1px); box-shadow: var(--lxm-glass-shadow) !important; }
+.user-avatar {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  font-style: normal; font-weight: 700; font-size: 14px; color: #fff;
+  background: linear-gradient(135deg, #EE2C2C 0%, #FF8D52 100%) !important;
+  box-shadow: 0 3px 10px rgba(238, 44, 44, .35) !important;
+}
+.user-name { font-size: 13px; font-weight: 600; color: #2A211B; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-caret { font-size: 10px; color: #8a7a6d; }
+
+/* ============ 自助改密弹窗 ============ */
+.lxm-change-pwd .el-dialog__body { padding-top: 8px; }
+.cpw-form { display: flex; flex-direction: column; gap: 18px; }
+.cpw-field { display: flex; flex-direction: column; gap: 7px; }
+.cpw-label { font-size: 13px; font-weight: 600; color: #4a3c32; }
+.cpw-strength { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cpw-strength-bar {
+  position: relative; flex: 1; min-width: 120px; height: 6px;
+  border-radius: 999px; background: rgba(42, 33, 27, .12) !important; overflow: hidden;
+}
+.cpw-strength-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px;
+  transition: width .25s ease, background .25s ease;
+}
+.cpw-strength-label { font-size: 12px; font-weight: 700; }
+.cpw-strength-tip { font-size: 12px; color: #8a7a6d; flex-basis: 100%; }
+
+/* ============ 导航升级：菜单图标 / 菜单搜索 / 顶栏面包屑 ============ */
+/* 图标芯片：居中放 SVG */
+.menu-mini { display: flex !important; align-items: center; justify-content: center; }
+.menu-mini svg { width: 16px; height: 16px; display: block; }
+.menu-btn .menu-mini svg { flex: 0 0 auto; }
+
+/* 菜单搜索框（品牌区下方，红橙渐变上的白玻璃） */
+.menu-search { position: relative; margin: 2px 14px 10px; }
+.menu-search input {
+  width: 100%; box-sizing: border-box; height: 34px;
+  padding: 0 28px 0 32px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  background: rgba(255, 255, 255, .16);
+  color: #fff; font-size: 13px; line-height: 34px; outline: none;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  transition: background .2s ease, border-color .2s ease;
+}
+.menu-search input::placeholder { color: rgba(255, 255, 255, .62); }
+.menu-search input:focus { background: rgba(255, 255, 255, .26); border-color: rgba(255, 255, 255, .58); }
+.menu-search-icon {
+  position: absolute; left: 9px; top: 9px; width: 16px; height: 16px;
+  color: rgba(255, 255, 255, .72); pointer-events: none;
+}
+.menu-search-icon svg { width: 16px; height: 16px; display: block; }
+.menu-search-clear {
+  position: absolute; right: 7px; top: 7px; width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: rgba(42, 33, 27, .28);
+  color: rgba(255, 255, 255, .9); font-size: 13px; line-height: 1; cursor: pointer;
+}
+.menu-search-clear:hover { background: rgba(42, 33, 27, .5); }
+
+/* 搜索结果：内联展开面板（奶油底深棕字，避免被侧边栏滚动裁剪） */
+.menu-search-results {
+  margin-top: 6px; border-radius: 12px;
+  max-height: 42vh; overflow-y: auto;
+  background: rgba(255, 247, 239, .97);
+  border: 1px solid rgba(255, 255, 255, .6);
+  box-shadow: 0 12px 28px rgba(120, 40, 10, .32);
+}
+.menu-search-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 10px; border: 0; background: transparent; cursor: pointer; text-align: left;
+}
+.menu-search-item + .menu-search-item { border-top: 1px solid rgba(42, 33, 27, .05); }
+.menu-search-item .menu-mini { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 7px; background: rgba(238, 44, 44, .1); color: #C21F1F; }
+.menu-search-item .menu-mini svg { width: 14px; height: 14px; }
+.menu-search-item:hover, .menu-search-item.active { background: rgba(255, 141, 82, .16); }
+.msi-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.msi-copy strong { font-size: 13px; font-weight: 600; color: #2A211B; }
+.msi-copy em { font-size: 11px; font-style: normal; color: #8a7a6d; }
+.menu-search-empty { padding: 16px 12px; font-size: 12px; color: #8a7a6d; text-align: center; }
+
+/* 顶栏面包屑（h1 上方小字导航路径） */
+.topbar-breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; font-size: 12px; color: #8a7a6d; margin-bottom: 2px; }
+.topbar-breadcrumb span { display: inline-flex; align-items: center; }
+.topbar-breadcrumb span i { font-style: normal; margin-right: 5px; color: #c9b8a8; font-size: 11px; }
+.topbar-breadcrumb .current { color: #2A211B; font-weight: 600; }

@@ -1,0 +1,169 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">短视频单品</span>
+      <h3 class="lxm-page-head__title">短视频</h3>
+      <p class="lxm-page-head__desc">独立可售的短视频成片，关联打卡点与拍摄风格，作为小程序「短视频」tab 的单品展示与预约入口。与旅拍套餐并列两类内容。</p>
+    </div>
+    <div class="lxm-page-head__actions">
+      <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
+        <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
+        <span class="remote-dot"></span>{{ remoteOn ? '数据源：真实后端' : '数据源：演示数据' }}
+      </label>
+      <el-button v-if="state.role==='super' && remoteOn" plain @click="refreshFromServer">刷新真实数据</el-button>
+      <el-button plain @click="openContentLogs('短视频')">操作日志</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openVideoSingle()">新增短视频</el-button>
+    </div>
+  </header>
+
+  <div class="lxm-kpi-grid">
+    <div class="lxm-kpi"><span class="lxm-kpi__label">短视频总数</span><strong class="lxm-kpi__value">{{ videoSingleRows.length }}</strong><span class="lxm-kpi__hint">独立可售短视频</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">在售</span><strong class="lxm-kpi__value">{{ videoSingleRows.filter(v => videoSingleStatus(v) !== '下架').length }}</strong><span class="lxm-kpi__hint">满足货架展示</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">主推</span><strong class="lxm-kpi__value">{{ videoSingleRows.filter(v => v.isMainPush).length }}</strong><span class="lxm-kpi__hint">优先推荐位</span></div>
+    <div class="lxm-kpi warning"><span class="lxm-kpi__label">待处理</span><strong class="lxm-kpi__value">{{ videoSingleRows.filter(v => (v.status || '').includes('待')).length }}</strong><span class="lxm-kpi__hint">审核 / 上下架</span></div>
+  </div>
+
+  <div class="lxm-toolbar">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索短视频名称 / 标签" />
+    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
+      <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+    <el-select v-model="state.filters.contentSeriesId" clearable filterable placeholder="拍摄风格">
+      <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+    <el-select v-model="state.filters.contentStatus" clearable placeholder="状态">
+      <el-option label="上架" value="上架" />
+      <el-option label="下架" value="下架" />
+      <el-option label="草稿" value="草稿" />
+    </el-select>
+    <el-button @click="clearContentFilters">重置</el-button>
+  </div>
+
+  <div class="vse-editor">
+    <!-- 左：列表 -->
+    <aside class="vse-list">
+      <div class="vse-list-head">
+        <strong>短视频</strong>
+        <span>{{ listSource.length }} 项</span>
+      </div>
+      <div class="vse-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
+        <button v-for="item in listSource" v-if="item" :key="item.id||item._id" class="vse-list-item" :class="{active: isSelected(item), off: videoSingleStatus(item)==='下架'}" @click="selectVideoSingle(item)">
+          <span class="vli-cover">
+            <img v-if="item.cover" :src="item.cover" />
+            <i v-else>&#9654;</i>
+            <span v-if="item.durationText" class="vli-dur">{{ item.durationText }}</span>
+          </span>
+          <span class="vli-main">
+            <strong>{{ item.title || item.name }}</strong>
+            <em>{{ money(item.price||0) }} · {{ videoSingleStatus(item) }} · {{ seriesName(item.seriesId) }}</em>
+          </span>
+        </button>
+        <div v-if="listSource.length===0" class="empty-state">
+          <strong>暂无短视频</strong><span>先新增一条短视频成片（带视频文件 / 链接），再关联打卡点与拍摄风格。</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中：表单 -->
+    <section class="vse-form" v-if="selectedVideoSingle">
+      <div class="vse-form-head">
+        <div>
+          <strong>编辑短视频</strong>
+          <p>改完点「保存」；开关类直接切换即时生效。</p>
+        </div>
+        <div class="vse-form-actions">
+          <el-button type="primary" @click="saveSelectedVideoSingle">保存</el-button>
+          <el-button @click="openVideoSingle(selectedVideoSingle)">高级编辑</el-button>
+          <el-button type="danger" v-if="can('contentEdit')" @click="deleteVideoSingle(selectedVideoSingle)">删除</el-button>
+        </div>
+      </div>
+
+      <div class="vse-form-body">
+        <label class="vf-field"><span>名称</span><el-input v-model="selectedVideoSingle.title" placeholder="如：杜甫江阁湘江夜景短片" /></label>
+        <div class="vf-row">
+          <label class="vf-field"><span>拍摄风格</span>
+            <el-select v-model="selectedVideoSingle.seriesId" filterable placeholder="选择风格">
+              <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </label>
+          <label class="vf-field"><span>关联打卡点</span>
+            <el-select v-model="selectedVideoSingle.spotId" filterable placeholder="选择打卡点">
+              <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </label>
+        </div>
+        <label class="vf-field"><span>视频文件 / 链接</span>
+          <el-input v-model="selectedVideoSingle.videoUrl" placeholder="粘贴视频 URL（如 https://...mp4），或下方选择本地文件预览" />
+          <span class="vf-upload">
+            <input type="file" accept="video/*" @change="onVideoFilePick" />
+            <span class="vf-upload__hint">选择文件仅在本机会话内预览；正式上传需后端配置对象存储 / 上传接口（当前与全站一致用 URL 落库）。</span>
+          </span>
+        </label>
+        <label class="vf-field"><span>封面图</span><el-input v-model="selectedVideoSingle.cover" placeholder="封面图 URL（留空将用占位图）" /></label>
+        <div class="vf-row">
+          <label class="vf-field"><span>时长</span><el-input v-model="selectedVideoSingle.durationText" placeholder="如 60秒" /></label>
+          <label class="vf-field"><span>价格（元）</span><el-input-number v-model="selectedVideoSingle.price" :min="0" :step="10" /></label>
+        </div>
+        <label class="vf-field"><span>简介 / 描述</span><el-input type="textarea" :rows="2" v-model="selectedVideoSingle.intro" /></label>
+        <div class="vf-row">
+          <label class="vf-field"><span>状态</span>
+            <el-select v-model="selectedVideoSingle.status">
+              <el-option label="上架" value="上架" />
+              <el-option label="下架" value="下架" />
+              <el-option label="草稿" value="草稿" />
+            </el-select>
+          </label>
+          <label class="vf-field"><span>主推</span>
+            <el-switch v-model="selectedVideoSingle.isMainPush" />
+          </label>
+        </div>
+        <label class="vf-field"><span>标签</span>
+          <el-select v-model="selectedVideoSingle.tags" multiple filterable allow-create default-first-option placeholder="输入或选择标签">
+            <el-option v-for="t in (data.tagLibrary || []).filter(Boolean)" v-if="t" :key="t.id" :label="t.name" :value="t.name" />
+          </el-select>
+        </label>
+        <el-button v-if="can('contentEdit')" :type="videoSingleStatus(selectedVideoSingle)==='下架' ? 'success' : 'warning'" plain @click="toggleVideoSingleShelf(selectedVideoSingle)">
+          {{ videoSingleStatus(selectedVideoSingle)==='下架' ? '上架' : '下架' }}
+        </el-button>
+      </div>
+    </section>
+
+    <!-- 右：手机实时预览（小程序客人端真实效果） -->
+    <aside class="vse-preview" v-if="selectedVideoSingle">
+      <div class="lxm-phone">
+        <div class="lxm-phone-notch"></div>
+        <div class="lxm-phone-screen">
+          <div class="phone-banner">短视频</div>
+          <div class="vse-phone-card">
+            <div class="vse-phone-cover">
+              <img v-if="selectedVideoSingle.cover" :src="selectedVideoSingle.cover" />
+              <i v-else>&#9654;</i>
+              <span class="vse-phone-play">&#9654;</span>
+              <span v-if="selectedVideoSingle.durationText" class="vse-phone-dur">{{ selectedVideoSingle.durationText }}</span>
+              <span v-if="selectedVideoSingle.isMainPush" class="vse-phone-hot">主推</span>
+              <span class="vse-phone-status" :class="{off: videoSingleStatus(selectedVideoSingle)==='下架'}">{{ videoSingleStatus(selectedVideoSingle) }}</span>
+            </div>
+            <div class="vse-phone-info">
+              <strong class="vse-phone-title">{{ selectedVideoSingle.title || selectedVideoSingle.name }}</strong>
+              <div class="vse-phone-meta">
+                <span class="vse-phone-price">{{ money(selectedVideoSingle.price||0) }}</span>
+                <span>{{ seriesName(selectedVideoSingle.seriesId) }}</span>
+                <span>{{ spotName(selectedVideoSingle.spotId) }}</span>
+              </div>
+              <div class="vse-phone-tags">
+                <span class="lxm-pill" v-for="t in (selectedVideoSingle.tags || []).slice(0,4)" :key="t">{{ t }}</span>
+                <span class="lxm-pill lxm-pill--muted" v-if="!(selectedVideoSingle.tags || []).length">未配置标签</span>
+              </div>
+            </div>
+          </div>
+          <video v-if="selectedVideoSingle.videoUrl" :src="selectedVideoSingle.videoUrl" controls class="vse-phone-video" />
+        </div>
+      </div>
+      <p class="preview-tip">↑ 小程序客人端真实效果预览（与小程序展示一致）</p>
+    </aside>
+  </div>
+
+  <div v-if="!selectedVideoSingle" class="empty-state">
+    <strong>请选择左侧短视频</strong><span>点击列表项即可在中栏编辑、右栏预览。</span>
+  </div>
+</div>

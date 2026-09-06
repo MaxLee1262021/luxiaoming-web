@@ -1,0 +1,36 @@
+.page-route-after-sale .after-sale-log-preview {
+  display: grid;
+  gap: 4px;
+  max-height: 58px;
+  overflow: hidden;
+}
+
+.page-route-after-sale .after-sale-log-preview .log-line {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.45;
+}
+
+.after-sale-log-popover {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.after-sale-log-popover strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.after-sale-log-popover .log-popover-row {
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.6;
+}

@@ -1,0 +1,64 @@
+<div class="city-manage-page">
+  <div class="city-toolbar">
+    <div>
+      <span class="eyebrow">多城市管理</span>
+      <h3>城市管理</h3>
+      <p>维护鹿小鸣已开通的城市与运营模式。新增城市并设为「运营中」后，小程序城市切换器即可对该城市开放（需配合小程序多城能力）。</p>
+    </div>
+    <div class="city-toolbar-actions">
+      <el-button plain @click="cityKeyword='';cityStatusFilter=''">重置筛选</el-button>
+      <el-button plain @click="openContentLogs('城市管理')">操作日志</el-button>
+      <el-button plain @click="switchMenu('trash')">回收站</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('cities')">新增城市</el-button>
+    </div>
+  </div>
+
+  <div class="city-stat-grid">
+    <div><span>城市总数</span><strong>{{ visibleCities.filter(c=>!c.deleted).length }}</strong><em>含筹备中</em></div>
+    <div><span>运营中</span><strong>{{ visibleCities.filter(c=>!c.deleted && c.status==='运营中').length }}</strong><em>小程序可开放</em></div>
+    <div><span>筹备中</span><strong>{{ visibleCities.filter(c=>!c.deleted && c.status==='筹备中').length }}</strong><em>尚未开放</em></div>
+  </div>
+
+  <div class="city-filter-row">
+    <el-input v-model="cityKeyword" clearable placeholder="搜索城市名称" />
+    <el-select v-model="cityStatusFilter" clearable placeholder="上线状态">
+      <el-option label="运营中" value="运营中" />
+      <el-option label="筹备中" value="筹备中" />
+    </el-select>
+  </div>
+
+  <section class="city-table-card panel">
+    <div class="section-title-row compact">
+      <div>
+        <h3>城市明细</h3>
+        <p>城市是小程序多城能力的根配置；删除进入回收站，超管可在 30 天内恢复。</p>
+      </div>
+      <el-tag type="info">{{ cityRows.length }} 个城市</el-tag>
+    </div>
+    <el-table :data="pagedList('cities', cityRows)" border stripe empty-text="暂无符合条件的城市，试试重置筛选或新增城市">
+      <el-table-column label="城市" min-width="200">
+        <template #default="{row}">
+          <div class="city-name-cell">
+            <i class="city-dot" :class="row.status==='运营中' ? 'on' : 'off'"></i>
+            <div><strong>{{ row.name }}</strong><span>{{ row.id }}</span></div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="mode" label="运营模式" width="120" />
+      <el-table-column label="上线状态" width="120">
+        <template #default="{row}"><el-tag :type="row.status==='运营中' ? 'success' : 'info'">{{ row.status }}</el-tag></template>
+      </el-table-column>
+      <el-table-column prop="description" label="简介" min-width="200" show-overflow-tooltip />
+      <el-table-column label="操作" width="180" fixed="right">
+        <template #default="{row}">
+          <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
+          <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteCity(row)">删除</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="cityRows.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="cityRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('cities').size" :current-page="pager('cities').page" @current-change="pager('cities').page = $event" @size-change="onListPageSizeChange('cities', $event)" />
+      <span class="pager-info">第 {{ Math.min(cityRows.length, (pager('cities').page-1)*pager('cities').size+1) }}–{{ Math.min(cityRows.length, pager('cities').page*pager('cities').size) }} 条 / 共 {{ cityRows.length }} 条</span>
+    </div>
+  </section>
+</div>

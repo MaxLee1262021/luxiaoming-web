@@ -1,0 +1,149 @@
+/* ============================================================
+   鹿小鸣旅拍 · Web 管理后台 设计令牌（单一令牌源）
+   UI Designer · 2026-07-18
+   ------------------------------------------------------------
+   本文件在 styles.css 之后加载，是「品牌视觉的唯一标准」。
+   它做两件事：
+   1) 定义一套与小程序完全一致的暖色品牌令牌（--lxm-*）；
+   2) 把后台遗留的旧变量（--brand / --content-accent / --cp-accent
+      / --blue / --nav …）重定向到品牌令牌，从而让所有引用旧变量的
+      样式「自动」统一到品牌色，无需改动 2000 行 styles.css。
+   暗色模式本次不做，但令牌已按可扩展结构预留（见文件底部注释）。
+   ============================================================ */
+
+:root {
+  /* ---------- 1. 品牌色（与小程序 app.wxss 同源） ---------- */
+  --lxm-brand:        #D9531E; /* AA 安全 burnt orange：主交互色（链接/激活/文字强调） */
+  --lxm-brand-vivid:  #FF8D52; /* 活力橙：装饰填充、图表、边框、图标、hover 光晕 */
+  --lxm-brand-strong: #EE2C2C; /* 品牌红：主按钮实底 + 危险/紧急（白字对比 4.57:1 ✓AA） */
+  --lxm-brand-deep:   #B8430F; /* 主按钮 hover/active 加深 */
+  --lxm-brand-ink:    #E0662A; /* 橙作文字（仅大号/加粗使用） */
+  --lxm-brand-soft:   #FBE6D8; /* 最浅橙底（替代原蓝底 #eff6ff） */
+  --lxm-brand-soft-2: #FBDCC9;
+  --lxm-brand-grad:   linear-gradient(135deg, var(--lxm-brand-strong), var(--lxm-brand-vivid)); /* 品牌主渐变（图标/强调面） */
+  --lxm-ink:          #2A211B; /* 焦糖墨：深色面（侧栏底）/ 大标题 */
+  --lxm-cream:        #FFF7EF; /* 奶油浅底 */
+
+  /* 兼容旧样式别名：legacy .content-card / .badge 等仍引用以下名称，
+     统一指向品牌令牌，避免颜色声明失效（红/橙/墨） */
+  --lxm-c-ink:    var(--lxm-ink);
+  --lxm-c-red:    var(--lxm-brand-strong);
+  --lxm-c-orange: var(--lxm-brand-vivid);
+
+  /* ---------- 2. 语义色（成功/警告/危险/信息） ---------- */
+  --lxm-success:      #1F9254;
+  --lxm-success-soft: #E7F5EC;
+  --lxm-warning:      #B7791F;
+  --lxm-warning-soft: #FBF1DD;
+  --lxm-danger:       #EE2C2C;
+  --lxm-danger-soft:  #FCE8E8;
+  --lxm-info:         #2F6FB0;
+  --lxm-info-soft:    #E8F0F8;
+
+  /* ---------- 3. 中性色（暖化，呼应品牌） ---------- */
+  --lxm-bg:           #FAF7F3; /* 页面标准底色（微暖，原 #f5f7fb） */
+  --lxm-surface:      #FFFFFF; /* 卡片表面 */
+  --lxm-ink-2:        #4A3F38; /* 标题/正文强色 */
+  --lxm-ink-3:        #2A211B;
+  --lxm-muted:        #7C6A5E; /* 次要文字（落浅底对比达标） */
+  --lxm-line:         #EFE6DD; /* 分隔线（原 #e8edf3） */
+  --lxm-line-strong:  #E2D5C8;
+  --lxm-divider:      #F0E8E0; /* 骨架/占位底 */
+
+  /* ---------- 4. 间距 / 字阶 / 圆角 / 阴影 / 动效 ---------- */
+  --lxm-space-1: 4px;
+  --lxm-space-2: 8px;
+  --lxm-space-3: 12px;
+  --lxm-space-4: 16px;
+  --lxm-space-5: 20px;
+  --lxm-space-6: 24px;
+  --lxm-space-8: 32px;
+  --lxm-space-10: 40px;
+  --lxm-space-12: 48px;
+
+  --lxm-fz-xs: 12px;
+  --lxm-fz-sm: 13px;
+  --lxm-fz-base: 14px;
+  --lxm-fz-md: 15px;
+  --lxm-fz-lg: 18px;
+  --lxm-fz-xl: 20px;
+  --lxm-fz-2xl: 24px;
+  --lxm-fz-3xl: 30px;
+
+  --lxm-r-sm: 6px;
+  --lxm-r-md: 10px;
+  --lxm-r-lg: 14px;
+  --lxm-r-xl: 20px;
+  --lxm-r-pill: 999px;
+
+  --lxm-shadow-sm: 0 2px 8px rgba(42, 33, 27, .06);
+  --lxm-shadow-md: 0 8px 22px rgba(42, 33, 27, .08);
+  --lxm-shadow-lg: 0 16px 38px rgba(42, 33, 27, .12);
+
+  --lxm-ease: cubic-bezier(.4, 0, .2, 1);
+  --lxm-t-fast: 120ms var(--lxm-ease);
+  --lxm-t-normal: 240ms var(--lxm-ease);
+
+  /* ============================================================
+     5. 旧变量重定向 —— 一处改，全站跟随
+     （styles.css 里的 :root 仍写着旧值，本文件后加载即覆盖它；
+       内容页作用域里的 --content-accent / --cp-accent 我也在
+       styles.css 源文件里同步改了，双保险）
+     ============================================================ */
+  --brand:        var(--lxm-brand-strong); /* 原珊瑚红 #ff6b6b → 品牌红 */
+  --brand-dark:   var(--lxm-brand-deep);
+  --brown:        var(--lxm-brand-ink);
+  --nav:          var(--lxm-ink);          /* 侧栏底 → 焦糖墨（暖深） */
+  --nav-dark:     #1F1813;
+  --bg:           var(--lxm-bg);
+  --text:         var(--lxm-ink-2);
+  --muted:        var(--lxm-muted);
+  --line:         var(--lxm-line);
+  --card:         var(--lxm-surface);
+  --warning:      var(--lxm-warning);
+  --success:      var(--lxm-success);
+  --blue:         var(--lxm-brand);        /* 原 #2196f3 → 品牌橙 */
+  --gray:         #8A7C70;
+  --shadow:       0 10px 30px rgba(42, 33, 27, .08);
+
+  /* ---------- 6. Element Plus 主题重定向到品牌 ---------- */
+  --el-color-primary:        #D9531E;
+  --el-color-primary-light-3:#E48762;
+  --el-color-primary-light-5:#ECA98E;
+  --el-color-primary-light-7:#F3C2B1;
+  --el-color-primary-light-8:#F7CFC2;
+  --el-color-primary-light-9:#FADBD3;
+  --el-color-primary-dark-2: #AE4218;
+
+  --el-color-success:        #1F9254;
+  --el-color-success-light-3:#58A970;
+  --el-color-success-light-9:#EAF7EE;
+  --el-color-success-dark-2: #186F40;
+
+  --el-color-warning:        #B7791F;
+  --el-color-warning-light-3:#CD9D5E;
+  --el-color-warning-light-9:#FBF1DD;
+  --el-color-warning-dark-2: #94600F;
+
+  --el-color-danger:         #EE2C2C;
+  --el-color-danger-light-3: #F06262;
+  --el-color-danger-light-9: #FAD4D4;
+  --el-color-danger-dark-2:  #C41F1F;
+
+  --el-color-error:          #EE2C2C;
+  --el-color-error-light-3:  #F06262;
+  --el-color-error-light-9:  #FAD4D4;
+  --el-color-error-dark-2:   #C41F1F;
+
+  --el-color-info:           #2F6FB0;
+  --el-color-info-light-3:   #5E92C4;
+  --el-color-info-light-9:   #E8F0F8;
+  --el-color-info-dark-2:    #245A8E;
+}
+
+/* ============================================================
+   暗色模式（预留，本次不启用）
+   将来只需：document.documentElement.dataset.theme = 'dark'
+   并在下方补充各令牌的暗色值即可，组件无需改动。
+   [data-theme="dark"] { --lxm-bg: #1A1512; ... }
+   ============================================================ */

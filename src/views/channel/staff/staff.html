@@ -1,0 +1,59 @@
+<div class="channel-config-page">
+  <div class="config-page-head">
+    <div>
+      <h3>人员账号与权限</h3>
+      <p>用于维护总部内部员工、客服、财务、摄影师和内容运营账号。摄影师可在这里设置分成比例和结算周期；其他角色只维护权限和登录信息。</p>
+    </div>
+    <el-button type="primary" @click="openStaff()">新增人员</el-button>
+  </div>
+
+  <div class="filter-card">
+    <el-select v-model="state.filters.staffRole" clearable placeholder="角色">
+      <el-option v-for="(r,k) in LXM_CONFIG.roles" :key="k" :label="r.name" :value="k" />
+    </el-select>
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索姓名/账号/手机号" />
+  </div>
+
+  <div class="permission-overview">
+    <div v-for="(r,k) in LXM_CONFIG.roles" :key="k" @click="state.filters.staffRole=k">
+      <strong>{{ r.name }}</strong>
+      <span>{{ r.menus.length }} 个菜单 · {{ r.actions.includes('*') ? '全操作权限' : r.actions.length + ' 个操作权限' }}</span>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <el-table :data="pagedList('staff', staffRows)" stripe border max-height="calc(100vh - 360px)" empty-text="暂无人员账号，点击右上角新增">
+      <el-table-column prop="name" label="姓名" min-width="120" />
+      <el-table-column prop="account" label="登录账号" width="130" />
+      <el-table-column label="角色" width="110">
+        <template #default="{row}">{{ roleName(row.role) }}</template>
+      </el-table-column>
+      <el-table-column prop="phone" label="手机号" width="130" />
+      <el-table-column label="摄影师分成比例" width="130">
+        <template #default="{row}"><span v-if="row.role==='photo'">{{ row.commissionRate || 20 }}%</span><span v-else>-</span></template>
+      </el-table-column>
+      <el-table-column label="结算周期" width="100">
+        <template #default="{row}"><span v-if="row.role==='photo'">{{ row.settlementCycle || '月结' }}</span><span v-else>-</span></template>
+      </el-table-column>
+      <el-table-column label="账号状态" width="100">
+        <template #default="{row}">
+          <el-tag :type="row.status === '停用' ? 'danger' : 'success'" size="small">{{ row.status || '启用' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="权限说明" min-width="260">
+        <template #default="{row}">{{ permissionText(row) }}</template>
+      </el-table-column>
+      <el-table-column fixed="right" label="配置操作" width="230">
+        <template #default="{row}">
+          <el-button link type="primary" @click="openStaff(row)">编辑账号/权限</el-button>
+          <el-button link @click="resetPassword(row)">重置密码</el-button>
+          <el-button link :type="row.status === '停用' ? 'success' : 'danger'" @click="toggleStaffStatus(row)">{{ row.status === '停用' ? '启用' : '停用' }}</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="staffRows.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="staffRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('staff').size" :current-page="pager('staff').page" @current-change="pager('staff').page = $event" @size-change="onListPageSizeChange('staff', $event)" />
+      <span class="pager-info">第 {{ Math.min(staffRows.length, (pager('staff').page-1)*pager('staff').size+1) }}–{{ Math.min(staffRows.length, pager('staff').page*pager('staff').size) }} 条 / 共 {{ staffRows.length }} 条</span>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,18 @@
+{
+  "name": "luxiaoming-admin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "鹿小鸣长沙旅拍 Web 管理后台",
+  "scripts": {
+    "dev": "node scripts/serve.cjs",
+    "start": "node scripts/serve.cjs",
+    "server": "node server/index.cjs",
+    "check": "node --check src/app.js && node --check src/router/index.js && node --check src/layout/app-shell.js && node --check src/config/business-config.js && node --check src/config/api.js && node --check src/api/cloud.js",
+    "lint": "echo \"静态演示版暂未接入 ESLint 运行时依赖，已提供 eslint.config.js 规范文件\"",
+    "build": "node scripts/serve.cjs --check-only"
+  },
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.18.3",
+    "dotenv": "^17.4.2"
+  }
+}

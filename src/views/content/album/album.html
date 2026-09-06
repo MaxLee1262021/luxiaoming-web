@@ -1,0 +1,152 @@
+<div class="album-manage-page">
+  <div class="album-toolbar">
+    <div>
+      <span class="eyebrow">照片留影</span>
+      <h3>照片留影 · 照片单品管理</h3>
+      <p>客人端「照片留影」板块的照片单品商品。既可作公开售卖商品，也可作套餐引用素材；售卖开关与素材展示开关互相独立。</p>
+    </div>
+    <div class="album-toolbar-actions">
+      <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
+        <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
+        <span class="remote-dot"></span>{{ remoteOn ? '数据源：真实后端' : '数据源：演示数据' }}
+      </label>
+      <el-button v-if="state.role==='super' && remoteOn" plain @click="refreshFromServer">刷新真实数据</el-button>
+      <el-button plain @click="clearContentFilters">重置筛选</el-button>
+      <el-button plain @click="openContentLogs('照片单品')">操作日志</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
+      <el-button plain @click="switchMenu('contentTags')">标签管理</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('albums')">新增照片单品</el-button>
+    </div>
+  </div>
+
+  <div class="album-stat-grid">
+    <div><span>照片单品总数</span><strong>{{ albumSummary.total }}</strong><em>内容资产与可售照片单品统一管理</em></div>
+    <div><span>允许售卖</span><strong>{{ albumSummary.sellable }}</strong><em>可进入商品货架对外下单</em></div>
+    <div><span>素材可引用</span><strong>{{ albumSummary.materialEnabled }}</strong><em>可被套餐作为素材展示</em></div>
+    <div><span>照片素材</span><strong>{{ albumSummary.photoSamples }}</strong><em>照片套餐专用素材</em></div>
+    <div><span>短视频</span><strong>{{ albumSummary.videoSamples }}</strong><em>短视频专用素材</em></div>
+    <div><span>关联套餐</span><strong>{{ albumSummary.linkedPackages }}</strong><em>正在引用照片单品素材</em></div>
+  </div>
+
+  <div class="album-filter-row">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索照片单品名称、标签、简介" />
+    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="打卡点">
+      <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+    <el-select v-model="state.filters.contentSeriesId" clearable filterable placeholder="拍摄风格">
+      <el-option v-for="s in data.series" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+    <el-select v-model="state.filters.contentStatus" clearable placeholder="售卖状态">
+      <el-option label="上架" value="上架" />
+      <el-option label="下架" value="下架" />
+      <el-option label="草稿" value="草稿" />
+    </el-select>
+  </div>
+
+  <div class="album-editor">
+    <!-- 左：列表 -->
+    <aside class="album-list">
+      <div class="album-list-head">
+        <strong>照片单品</strong>
+        <span>{{ (remoteOn ? (remoteAlbums||[]) : albumRows).length }} 项</span>
+      </div>
+      <div class="album-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
+        <button v-for="a in (remoteOn ? (remoteAlbums||[]) : albumRows)" :key="a._id||a.id"
+                class="album-list-item" :class="{active:(selectedAlbum&&(selectedAlbum._id||selectedAlbum.id))===(a._id||a.id)}"
+                @click="selectAlbum(a)">
+          <span class="ali-cover"><img v-if="a.cover" :src="a.cover" /><i v-else>照</i></span>
+          <span class="ali-main">
+            <strong>{{ a.name }}</strong>
+            <em>{{ money(a.price||0) }} · {{ a.isSellable===false ? '不可售卖' : '可售卖' }}</em>
+          </span>
+        </button>
+        <div v-if="(remoteOn ? (remoteAlbums||[]).length : albumRows.length)===0" class="empty-state">
+          <strong>暂无照片单品</strong><span>先新增照片单品再配置。</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中：表单 -->
+    <section class="album-form" v-if="selectedAlbum">
+      <div class="album-form-head">
+        <div>
+          <strong>编辑照片单品</strong>
+          <p>改完点「保存」；开关类直接切换即时生效。</p>
+        </div>
+        <div class="album-form-actions">
+          <el-button type="primary" @click="saveSelectedAlbum">保存</el-button>
+          <el-button @click="openContent(selectedAlbum)">高级编辑</el-button>
+          <el-button @click="previewContent(selectedAlbum)">预览</el-button>
+          <el-button type="danger" v-if="can('contentEdit')" @click="requestDeleteAlbum(selectedAlbum)">删除</el-button>
+        </div>
+      </div>
+
+      <div class="album-form-body">
+        <label class="af-field"><span>名称</span><el-input v-model="selectedAlbum.name" /></label>
+        <div class="af-row">
+          <label class="af-field"><span>打卡点</span>
+            <el-select v-model="selectedAlbum.spotId" filterable placeholder="选择打卡点">
+              <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </label>
+          <label class="af-field"><span>拍摄风格</span>
+            <el-select v-model="selectedAlbum.seriesId" filterable placeholder="选择拍摄风格">
+              <el-option v-for="s in data.series" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </label>
+        </div>
+        <label class="af-field"><span>价格（元）</span><el-input-number v-model="selectedAlbum.price" :min="0" :step="10" /></label>
+        <label class="af-field"><span>简介 / 拍摄说明</span><el-input type="textarea" :rows="3" v-model="selectedAlbum.intro" /></label>
+
+        <div class="af-switches">
+          <label><span>作为商品售卖</span><el-switch v-model="selectedAlbum.isSellable" @change="toggleAlbumSellable(selectedAlbum)" /></label>
+          <label><span>允许素材展示</span><el-switch v-model="selectedAlbum.allowMaterialUse" @change="toggleAlbumMaterialUse(selectedAlbum)" /></label>
+        </div>
+
+        <div class="af-meta">
+          <span>图片：{{ (selectedAlbum.summary&&selectedAlbum.summary.photoSamples)||0 }}</span>
+          <span>视频：{{ (selectedAlbum.summary&&selectedAlbum.summary.videoSamples)||0 }}</span>
+          <span>套餐引用：{{ (selectedAlbum.summary&&selectedAlbum.summary.packages)||0 }}</span>
+        </div>
+
+        <div class="af-upload" v-if="can('contentEdit')">
+          <el-button link type="success" @click="uploadAlbumSample(selectedAlbum,'photo')">上传图片</el-button>
+          <el-button link type="warning" @click="uploadAlbumSample(selectedAlbum,'video')">上传视频</el-button>
+          <el-button link @click="openAlbumReplace(selectedAlbum)">替换引用</el-button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右：手机实时预览（小程序客人端真实效果） -->
+    <aside class="album-preview" v-if="selectedAlbum">
+      <div class="lxm-phone">
+        <div class="lxm-phone-notch"></div>
+        <div class="lxm-phone-screen">
+          <div class="phone-banner">照片留影</div>
+          <div class="pd-card">
+            <div class="pd-cover" :class="{off:selectedAlbum.isSellable===false}">
+              <img v-if="selectedAlbum.cover" :src="selectedAlbum.cover" />
+              <i v-else>照</i>
+              <span v-if="selectedAlbum.isSellable!==false" class="pd-badge">可售卖</span>
+              <span v-else class="pd-badge off">不可售卖</span>
+            </div>
+            <div class="pd-info">
+              <strong class="pd-title">{{ selectedAlbum.name }}</strong>
+              <div class="pd-price">{{ money(selectedAlbum.price||0) }}</div>
+              <div class="pd-note">{{ selectedAlbum.intro || '暂无照片单品说明' }}</div>
+              <div class="pd-tags">
+                <span v-if="selectedAlbum.allowMaterialUse!==false" class="ok">素材可引用</span>
+                <span v-else class="warn">素材禁用</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="preview-tip">↑ 小程序客人端真实效果预览（与小程序展示一致）</p>
+    </aside>
+  </div>
+
+  <div v-if="!selectedAlbum" class="empty-state">
+    <strong>请选择左侧照片单品</strong><span>点击列表项即可在中栏编辑、右栏预览。</span>
+  </div>
+</div>

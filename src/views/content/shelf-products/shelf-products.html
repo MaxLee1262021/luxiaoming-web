@@ -1,0 +1,220 @@
+<div class="shelf-design-page">
+  <div class="shelf-toolbar">
+    <div>
+      <span class="eyebrow">商品货架</span>
+      <h3>商品上下架</h3>
+      <p>公开售卖商品统一货架：照片套餐、短视频、可售照片单品、摄影周边。内部增值服务不在这里展示。</p>
+    </div>
+    <div class="shelf-toolbar-actions">
+      <el-button plain @click="clearContentFilters">清空筛选</el-button>
+      <el-button plain @click="openContentLogs('商品货架')">操作日志</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
+      <el-button @click="switchMenu('packages')">套餐设置</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('packages')">新增套餐</el-button>
+    </div>
+  </div>
+
+  <div class="shelf-revenue-grid">
+    <button :class="{active:!state.filters.shelfType}" @click="state.filters.shelfType=''">
+      <span>全部商品</span>
+      <strong>{{ shelfSummary.total }}</strong>
+      <em>在售 {{ shelfSummary.onSale }} / 待审 {{ shelfSummary.pendingAudit }}</em>
+    </button>
+    <button :class="{active:state.filters.shelfType==='packages'}" @click="state.filters.shelfType='packages'">
+      <span>照片套餐营收</span>
+      <strong>{{ money(shelfSummary.photoRevenue) }}</strong>
+      <em>{{ shelfRows().filter(r=>r.__key==='packages' && r.type!=='video').length }} 个商品</em>
+    </button>
+    <button :class="{active:state.filters.shelfType==='video'}" @click="state.filters.shelfType='video'">
+      <span>短视频营收</span>
+      <strong>{{ money(shelfSummary.videoRevenue) }}</strong>
+      <em>{{ shelfRows().filter(r=>r.type==='video').length }} 个商品</em>
+    </button>
+    <button :class="{active:state.filters.shelfType==='peripherals'}" @click="state.filters.shelfType='peripherals'">
+      <span>周边营收</span>
+      <strong>{{ money(shelfSummary.peripheralRevenue) }}</strong>
+      <em>{{ shelfRows().filter(r=>r.__key==='peripherals').length }} 个商品</em>
+    </button>
+    <button :class="{active:state.filters.shelfType==='albums'}" @click="state.filters.shelfType='albums'">
+      <span>可售照片单品</span>
+      <strong>{{ shelfRows().filter(r=>r.__key==='albums').length }}</strong>
+      <em>照片单品售卖与素材展示分开管控</em>
+    </button>
+  </div>
+
+  <div class="shelf-filter-row">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索商品名称、标签、打卡点" />
+    <el-select v-model="state.filters.contentStatus" clearable placeholder="商品状态">
+      <el-option label="上架" value="上架" />
+      <el-option label="下架" value="下架" />
+      <el-option label="草稿" value="草稿" />
+      <el-option label="待审核" value="待审核" />
+    </el-select>
+    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
+      <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+  </div>
+
+  <div class="shelf-policy-strip">
+    <div>
+      <strong>货架统计口径</strong>
+      <span>仅上架且审核通过的公开商品计入小程序在售展示；草稿、待审核、驳回、下架、增值服务均不进入公开货架。</span>
+    </div>
+    <div>
+      <strong>高频运营动作</strong>
+      <span>批量上下架、设主推、打标签和定时配置会写入操作日志；涉及风险变更时进入商品审核。</span>
+    </div>
+  </div>
+
+  <div class="shelf-batch-bar">
+    <div>
+      <strong>批量运营</strong>
+      <span>已选 {{ state.selectedShelfKeys.length }} 个商品；草稿、待审核商品不计入在售统计。</span>
+    </div>
+    <div>
+      <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
+        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('on')">批量上架</el-button></span>
+      </el-tooltip>
+      <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
+        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('off')">批量下架</el-button></span>
+      </el-tooltip>
+      <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
+        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('main')">批量设主推</el-button></span>
+      </el-tooltip>
+      <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
+        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('tag')">批量打标签</el-button></span>
+      </el-tooltip>
+      <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
+        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('schedule')">定时配置</el-button></span>
+      </el-tooltip>
+      <el-button v-if="(state.lastShelfBatchResult && state.lastShelfBatchResult.failures.length) && can('contentEdit')" size="small" type="warning" plain @click="retryShelfBatchFailures">重试失败项</el-button>
+    </div>
+  </div>
+
+  <div v-if="state.lastShelfBatchResult" class="shelf-batch-summary">
+    <div class="shelf-batch-summary-head">
+      <div>
+        <strong>{{ state.lastShelfBatchResult.actionText }}</strong>
+        <span>成功 {{ state.lastShelfBatchResult.success.length }} 项 / 失败 {{ state.lastShelfBatchResult.failures.length }} 项</span>
+      </div>
+      <div>
+        <el-button v-if="state.lastShelfBatchResult.failures.length" size="small" type="warning" plain @click="retryShelfBatchFailures">重试失败项</el-button>
+        <el-button size="small" plain @click="clearShelfBatchResult">收起结果</el-button>
+      </div>
+    </div>
+    <div v-if="state.lastShelfBatchResult.failures.length" class="shelf-batch-failure-list">
+      <div v-for="item in state.lastShelfBatchResult.failures" :key="item.key">
+        <strong>{{ item.name }}</strong>
+        <span>{{ item.reason }}</span>
+      </div>
+    </div>
+    <div v-else class="shelf-batch-success-note">本次批量操作已全部处理完成，并已写入内容商品操作日志。</div>
+  </div>
+
+  <div class="shelf-table-card panel">
+    <div class="section-title-row compact">
+      <div>
+        <h3>货架商品清单</h3>
+        <p>统一控制小程序公开商品的状态、价格、推荐位、标签、展示开关和审核留痕。</p>
+      </div>
+      <el-tag type="info">{{ contentRows.length }} 个商品</el-tag>
+    </div>
+
+    <el-table :data="pagedList('shelf', contentRows)" border stripe empty-text="暂无符合条件的商品，试试调整筛选或切换内容范围" @selection-change="onShelfSelectionChange">
+      <el-table-column type="selection" width="46" fixed="left" />
+      <el-table-column label="商品" min-width="260" fixed="left">
+        <template #default="{row}">
+          <div class="shelf-product-cell">
+            <img :src="row.cover || row.url" />
+            <div>
+              <strong>{{ row.name }}</strong>
+              <span>{{ shelfTypeText(row.__key, row) }} / {{ relationText(row) }}</span>
+              <small>{{ row.intro || '暂无说明' }}</small>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="商品类型" width="120">
+        <template #default="{row}">
+          <el-tag size="small" :type="row.type==='video' ? 'warning' : 'info'">{{ shelfTypeText(row.__key, row) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态/审核" width="130">
+        <template #default="{row}">
+          <div class="shelf-status-cell">
+            <el-tag :type="shelfStatusType(row)" size="small">{{ shelfAuditText(row) }}</el-tag>
+            <span :class="{online:productStatus(row)==='上架', offline:productStatus(row)!=='上架'}">{{ productStatus(row) }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="前端可见" width="140">
+        <template #default="{row}">
+          <el-tooltip :content="shelfVisibilityState(row).reason" placement="top">
+            <div class="shelf-visibility-light" :class="{ok:shelfVisibilityState(row).visible, blocked:!shelfVisibilityState(row).visible}">
+              <i></i><span>{{ shelfVisibilityState(row).text }}</span>
+            </div>
+          </el-tooltip>
+        </template>
+      </el-table-column>
+      <el-table-column label="货架价格" width="145">
+        <template #default="{row}">
+          <div class="shelf-price-edit">
+            <el-input-number v-model="row.shelfPrice" :min="0" :controls="false" />
+            <button v-if="can('contentEdit')" @click="syncShelfPrice(row)">保存</button>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="推荐位/标签" min-width="190">
+        <template #default="{row}">
+          <div class="shelf-tags">
+            <span>{{ shelfRecommendationText(row) }}</span>
+            <el-input v-model="row.__source.tag" placeholder="热门/推荐/新品" @change="saveShelfInline(row,'标签')" />
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="销量/成交额" width="125" sortable>
+        <template #default="{row}">
+          <div class="shelf-number-cell">
+            <strong>{{ row.soldCount || 0 }} 单</strong>
+            <span>{{ money(row.soldAmount || 0) }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="最近编辑" width="145">
+        <template #default="{row}">
+          <div class="shelf-mini-cell">
+            <strong>{{ row.updatedBy || row.editor || '运营后台' }}</strong>
+            <span>{{ row.updatedAt || row.shelfTime || '当前演示数据' }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="上下架时间" width="150">
+        <template #default="{row}">
+          <div class="shelf-mini-cell">
+            <strong>{{ row.scheduledOnAt || row.shelfOnAt || '未设置' }}</strong>
+            <span>下架 {{ row.scheduledOffAt || row.shelfOffAt || '未设置' }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="展示" width="105">
+        <template #default="{row}">
+          <div class="shelf-display-switch">
+            <el-switch v-model="row.__source.isShow" active-text="展示" inactive-text="隐藏" @change="toggleShelf(row)" />
+            <small v-if="['待审','待审核'].includes(row.auditStatus)">审核后生效</small>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="160" fixed="right">
+        <template #default="{row}">
+          <el-button link type="primary" @click="openContent(row)">编辑</el-button>
+          <el-button link @click="previewContent(row)">预览</el-button>
+          <el-button link @click="openContentLogs(row.name)">日志</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="contentRows.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="contentRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('shelf').size" :current-page="pager('shelf').page" @current-change="pager('shelf').page = $event" @size-change="onListPageSizeChange('shelf', $event)" />
+      <span class="pager-info">第 {{ Math.min(contentRows.length, (pager('shelf').page-1)*pager('shelf').size+1) }}–{{ Math.min(contentRows.length, pager('shelf').page*pager('shelf').size) }} 条 / 共 {{ contentRows.length }} 条</span>
+    </div>
+  </div>
+</div>

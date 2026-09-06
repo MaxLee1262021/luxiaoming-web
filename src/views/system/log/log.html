@@ -1,0 +1,121 @@
+<div class="audit-log-page">
+  <div class="audit-log-toolbar">
+    <div>
+      <span class="eyebrow">操作审计</span>
+      <h3>操作日志</h3>
+      <p>记录财务、订单、内容商品、渠道人员等关键操作，支持按模块、风险级别、操作人和关键字追溯。</p>
+    </div>
+    <div class="audit-log-actions">
+      <el-button plain @click="openExportDialog('auditLogs')">导出审计日志</el-button>
+    </div>
+  </div>
+
+  <div class="audit-log-stat-grid">
+    <div>
+      <span>全部日志</span>
+      <strong>{{ operationLogSummary.total }}</strong>
+      <em>系统累计记录</em>
+    </div>
+    <div>
+      <span>内容商品</span>
+      <strong>{{ operationLogSummary.content }}</strong>
+      <em>上下架/审核/回收站</em>
+    </div>
+    <div>
+      <span>财务审计</span>
+      <strong>{{ operationLogSummary.finance }}</strong>
+      <em>结算/关账/冲正/导出</em>
+    </div>
+    <div class="danger">
+      <span>高风险</span>
+      <strong>{{ operationLogSummary.high }}</strong>
+      <em>删除、清空、退款、关账</em>
+    </div>
+    <div>
+      <span>今日新增</span>
+      <strong>{{ operationLogSummary.today }}</strong>
+      <em>当日操作留痕</em>
+    </div>
+  </div>
+
+  <div class="audit-log-filter panel">
+    <el-select v-model="state.filters.logUser" clearable filterable placeholder="操作人">
+      <el-option v-for="s in data.staff" :key="s.id" :label="s.name" :value="s.name" />
+      <el-option label="系统" value="系统" />
+      <el-option :label="roleProfile.name" :value="roleProfile.name" />
+    </el-select>
+    <el-select v-model="state.filters.logModule" clearable placeholder="业务模块">
+      <el-option label="财务审计" value="财务审计" />
+      <el-option label="订单履约" value="订单履约" />
+      <el-option label="内容商品" value="内容商品" />
+      <el-option label="渠道人员" value="渠道人员" />
+      <el-option label="系统操作" value="系统操作" />
+    </el-select>
+    <el-select v-model="state.filters.logLevel" clearable placeholder="风险级别">
+      <el-option label="高" value="高" />
+      <el-option label="中" value="中" />
+      <el-option label="低" value="低" />
+    </el-select>
+    <el-select v-model="state.filters.logAction" clearable filterable placeholder="动作类型">
+      <el-option v-for="action in logActionOptions" :key="action" :label="action" :value="action" />
+    </el-select>
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索操作人、动作、对象、详情" />
+  </div>
+
+  <div class="audit-log-table panel">
+    <div class="section-title-row compact">
+      <div>
+        <h3>审计明细</h3>
+        <p>高风险动作会标红；正式版应同步写入后端不可篡改审计表。</p>
+      </div>
+      <el-tag type="info">当前 {{ operationLogRows.length }} 条</el-tag>
+    </div>
+
+    <el-table :data="pagedList('logs', operationLogRows)" max-height="calc(100vh - 420px)" border stripe empty-text="暂无符合条件的日志，试试调整筛选条件">
+      <el-table-column prop="time" label="时间" width="165" fixed="left" />
+      <el-table-column prop="user" label="操作人" width="120" />
+      <el-table-column label="模块" width="120">
+        <template #default="{row}">
+          <el-tag size="small" :type="row.moduleText === '财务审计' ? 'warning' : row.moduleText === '内容商品' ? 'success' : 'info'">
+            {{ row.moduleText }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="风险" width="90" align="center">
+        <template #default="{row}">
+          <el-tag size="small" :type="row.levelText === '高' ? 'danger' : row.levelText === '中' ? 'warning' : 'success'">
+            {{ row.levelText }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="action" label="动作" width="150" />
+      <el-table-column prop="objectType" label="对象类型" width="120" />
+      <el-table-column label="对象名称" min-width="170">
+        <template #default="{row}">
+          <strong>{{ row.objectName || row.target || '-' }}</strong>
+        </template>
+      </el-table-column>
+      <el-table-column label="金额" width="130" align="right">
+        <template #default="{row}">
+          <span v-if="row.amount !== '' && row.amount != null" :class="{negative: Number(row.amount) < 0}">
+            {{ money(Number(row.amount || 0)) }}
+          </span>
+          <span v-else class="muted">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="detail" label="详情" min-width="260" />
+      <el-table-column label="变更摘要" min-width="240">
+        <template #default="{row}">
+          <div class="log-snapshot-cell">
+            <span>{{ logSnapshotSummary(row) }}</span>
+            <el-button v-if="row.snapshot" link type="primary" @click="showLogSnapshot(row)">查看快照</el-button>
+          </div>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="operationLogRows.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="operationLogRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('logs').size" :current-page="pager('logs').page" @current-change="pager('logs').page = $event" @size-change="onListPageSizeChange('logs', $event)" />
+      <span class="pager-info">第 {{ Math.min(operationLogRows.length, (pager('logs').page-1)*pager('logs').size+1) }}–{{ Math.min(operationLogRows.length, pager('logs').page*pager('logs').size) }} 条 / 共 {{ operationLogRows.length }} 条</span>
+    </div>
+  </div>
+</div>

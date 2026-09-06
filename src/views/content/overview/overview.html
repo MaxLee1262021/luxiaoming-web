@@ -1,0 +1,48 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">内容总览</span>
+      <h3 class="lxm-page-head__title">内容总览 · 小程序内容地图</h3>
+      <p class="lxm-page-head__desc">一张地图看懂：客人在小程序看到什么 ↔ 后台在哪里建、在哪里管。每个板块下面标注了<b>当前数量</b>，为 0 就代表还没创建，点「去管理」直接跳过去建。</p>
+    </div>
+  </header>
+
+  <section class="ov-steps">
+    <div class="ov-steps__head"><strong>建议创建顺序</strong><span>从左到右，一步一步来。点击任意一步直接跳到对应页面。</span></div>
+    <div class="ov-steps__track">
+      <template v-for="(step, idx) in visibleSteps" :key="step.key">
+        <button class="ov-step" @click="goManage(step.key)">
+          <i class="ov-step__no">{{ idx + 1 }}</i>
+          <span class="ov-step__label">{{ step.label }}</span>
+        </button>
+        <span v-if="idx < visibleSteps.length - 1" class="ov-step__arrow">›</span>
+      </template>
+    </div>
+  </section>
+
+  <section v-for="group in visibleGroups" :key="group.key" class="ov-group">
+    <div class="ov-group__head">
+      <strong>{{ group.label }}</strong>
+      <span>{{ group.desc }}</span>
+    </div>
+    <div class="ov-grid">
+      <article v-for="card in group.cards" :key="card.key" class="ov-card" :class="{ 'is-empty': card.count !== null && card.count === 0 }">
+        <div class="ov-card__top">
+          <span class="menu-mini" v-html="menuIcon(card.key)"></span>
+          <div class="ov-card__title">
+            <h4>{{ menuLabel(card.key) }}</h4>
+            <em>{{ card.miniView }}</em>
+          </div>
+          <span v-if="card.count !== null" class="ov-card__count" :class="card.count === 0 ? 'ov-card__count--zero' : ''">
+            {{ card.count === 0 ? '待创建' : card.count + ' 项' }}
+          </span>
+        </div>
+        <p class="ov-card__desc">{{ card.desc }}</p>
+        <div class="ov-card__foot">
+          <el-button v-if="card.count === 0" type="primary" size="small" @click="goManage(card.key)">去创建</el-button>
+          <el-button v-else size="small" @click="goManage(card.key)">去管理</el-button>
+        </div>
+      </article>
+    </div>
+  </section>
+</div>

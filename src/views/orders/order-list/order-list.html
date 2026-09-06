@@ -1,0 +1,75 @@
+﻿<div class="order-alerts">
+              <button :class="{active:!state.filters.status}" @click="state.filters.status=''"><span style="background:rgba(42,33,27,.45)"></span>全部订单<strong>{{ reminderBaseOrders.length }}</strong></button>
+              <button v-for="r in reminders" :key="r.status" :class="{active:state.filters.status===r.status}" @click="state.filters.status=r.status"><span :style="{background:r.color}"></span>{{ r.label }}<strong>{{ r.count }}</strong></button>
+            </div>
+            <div class="tenant-scope-bar" :class="{collapsed:state.scopeCollapsed}">
+              <div><strong>当前数据范围</strong><span v-if="!state.scopeCollapsed">{{ roleProfile.name }} · 鹿小鸣长沙自营 · {{ state.filters.shopId ? shopName(state.filters.shopId) : '全部商家' }}</span></div>
+              <div class="scope-actions"><template v-if="!state.scopeCollapsed"><el-button v-if="canEditOrder()" size="small" type="primary" @click="createManualOrder">手动创建订单</el-button><el-button size="small" @click="exportOrders">按筛选导出订单</el-button><el-button size="small" :disabled="!state.selectedOrderIds.length" @click="state.selectedOrderIds=[]">清空勾选</el-button></template><el-button size="small" plain @click="state.scopeCollapsed=!state.scopeCollapsed">{{ state.scopeCollapsed ? '展开' : '收起' }}</el-button></div>
+            </div>
+            <div v-if="!state.scopeCollapsed" class="filter-card">
+              <el-date-picker v-model="state.filters.dateRange" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :shortcuts="orderDateShortcuts" style="width:280px" />
+              <el-select v-model="state.filters.status" clearable placeholder="订单状态" style="width:150px"><el-option v-for="s in statusDict" :key="s.value" :label="s.label" :value="s.value" /></el-select>
+              <el-input v-model="state.filters.keyword" clearable placeholder="搜索客户/手机号/订单号/商品" style="width:260px" />
+              <el-button @click="clearOrderFilters">重置</el-button>
+              <el-button link type="primary" @click="state.advFiltersOpen=!state.advFiltersOpen">{{ state.advFiltersOpen ? '收起高级筛选' : (activeAdvFilterCount ? ('高级筛选（' + activeAdvFilterCount + '）') : '高级筛选') }}</el-button>
+              <div v-if="state.advFiltersOpen" class="filter-advanced">
+                <el-select v-model="state.filters.financeStatus" clearable placeholder="财务审核状态"><el-option label="未提交" value="未提" /><el-option label="待审核" value="待审" /><el-option label="已审核" value="已审" /><el-option label="已驳回" value="已驳" /></el-select>
+                <el-select v-model="state.filters.afterSaleStatus" clearable placeholder="售后状态"><el-option label="无售后" value="none" /><el-option label="售后处理中" value="active" /><el-option label="售后已结案" value="done" /></el-select>
+                <el-select v-model="state.filters.refundStatus" clearable placeholder="退款状态"><el-option label="无退款" value="无退" /><el-option label="待审核" value="待审" /><el-option label="已审核" value="已审" /><el-option label="已驳回" value="已驳" /></el-select>
+                <el-select v-model="state.filters.transferStatus" clearable placeholder="转派记录"><el-option label="有转派" value="has" /><el-option label="无转派" value="none" /></el-select>
+                <el-select v-model="state.filters.rescheduleStatus" clearable placeholder="改期记录"><el-option label="有改期" value="has" /><el-option label="无改期" value="none" /></el-select>
+                <el-select v-model="state.filters.sourceType" clearable placeholder="订单来源"><el-option label="总部二维码" value="headquarter" /><el-option label="商家二维码" value="shop" /><el-option label="小程序自然下单" value="natural" /><el-option label="客服手动创建" value="manual" /></el-select>
+                <el-select v-model="state.filters.distributorId" clearable filterable placeholder="分销员"><el-option v-for="d in visibleDistributors" :key="d.id" :label="d.name" :value="d.id" /></el-select>
+                <el-select v-model="state.filters.shopId" clearable filterable placeholder="来源商家"><el-option v-for="s in scopedShops" :key="s.id" :label="s.name" :value="s.id" /></el-select>
+                <el-select v-model="state.filters.assigneeId" clearable filterable placeholder="负责客服"><el-option v-for="s in services" :key="s.id" :label="s.name" :value="s.id" /></el-select>
+                <el-select v-model="state.filters.photographerId" clearable filterable placeholder="摄影师"><el-option v-for="s in photographers" :key="s.id" :label="s.name" :value="s.id" /></el-select>
+                <el-select v-model="state.filters.productType" clearable placeholder="商品类型"><el-option label="照片套餐" value="photo" /><el-option label="短视频" value="video" /><el-option label="照片单品" value="album" /><el-option label="加购服务" value="service" /><el-option label="摄影周边" value="peripheral" /></el-select>
+              </div>
+            </div>
+            <div v-if="state.selectedOrderIds.length" class="batch-bar">
+              <strong>已选 {{ state.selectedOrderIds.length }} 单</strong>
+              <span>合计 {{ money(sumOrders(selectedOrders,'total')) }} · 待收 {{ money(sumOrders(selectedOrders,'due')) }}</span>
+              <span class="batch-stats">可接单 {{ selectedOrderBatchSummary.accept }} · 可备注 {{ selectedOrderBatchSummary.note }} · 锁定 {{ selectedOrderBatchSummary.locked }} · 完结/取消 {{ selectedOrderBatchSummary.completed }}</span>
+              <el-button size="small" @click="exportOrders">导出已选</el-button>
+              <el-tooltip v-if="canEditOrder()" :content="selectedOrderActionDisabledReason('accept')" placement="top" :disabled="!selectedOrderActionDisabledReason('accept')"><span class="disabled-tip-wrap"><el-button size="small" type="success" plain :disabled="!!selectedOrderActionDisabledReason('accept')" @click="batchAcceptOrders">批量接单</el-button></span></el-tooltip>
+              <el-tooltip v-if="canEditOrder()" :content="selectedOrderActionDisabledReason('note')" placement="top" :disabled="!selectedOrderActionDisabledReason('note')"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!!selectedOrderActionDisabledReason('note')" @click="openBatchNoteDialog">批量备注</el-button></span></el-tooltip>
+              <el-tooltip :content="selectedOrderActionDisabledReason('transfer')" placement="top" :disabled="!selectedOrderActionDisabledReason('transfer')"><span class="disabled-tip-wrap"><el-button size="small" type="primary" plain :disabled="!!selectedOrderActionDisabledReason('transfer')" @click="openTransferDialog(null)">批量转派/交接</el-button></span></el-tooltip>
+              <el-tooltip v-if="can('cancelOrder')" :content="selectedOrderActionDisabledReason('cancel')" placement="top" :disabled="!selectedOrderActionDisabledReason('cancel')"><span class="disabled-tip-wrap"><el-button size="small" type="danger" plain :disabled="!!selectedOrderActionDisabledReason('cancel')" @click="batchCancelOrders">批量取消进回收站</el-button></span></el-tooltip>
+            </div>
+            <div class="order-summary">
+              <div><span>筛选订单</span><strong>{{ scopedOrders.length }}</strong></div>
+              <div><span>订单总额</span><strong>{{ money(sumOrders(scopedOrders,'total')) }}</strong></div>
+              <div><span>已收定金</span><strong>{{ money(sumOrders(scopedOrders,'deposit')) }}</strong></div>
+              <div><span>已收尾款</span><strong>{{ money(sumOrders(scopedOrders,'final')) }}</strong></div>
+              <div><span>待收尾款</span><strong>{{ money(sumOrders(scopedOrders,'due')) }}</strong></div>
+            </div>
+            <div class="table-card">
+                <el-table :data="scopedOrders.slice((state.orderPage-1)*state.orderPageSize, state.orderPage*state.orderPageSize)" stripe border max-height="calc(100vh - 420px)" empty-text="暂无符合条件的订单，试试调整筛选或点击重置" @row-click="openOrder" @selection-change="onOrderSelection">
+                  <el-table-column type="selection" width="46" />
+                  <el-table-column label="客户" min-width="150"><template #default="{row}"><button class="table-link" :data-order-open="row.id" @click.stop="openOrder(row,{readonly:!canOpenOrderForEdit(row)})">{{ row.orderNo }}</button><strong>{{ row.customer }}</strong><div class="muted">{{ visiblePhone(row) }}</div></template></el-table-column>
+                <el-table-column label="状态/售后" width="130"><template #default="{row}"><span class="status-dot" :style="{background:orderWorkflowStatusMeta(row).color}"></span>{{ orderWorkflowStatusLabel(row) }}<div v-if="afterSaleBadge(row)" class="after-sale-badge">{{ afterSaleBadge(row) }}</div></template></el-table-column>
+                <el-table-column v-if="canViewOrderSource()" label="来源链路" min-width="190"><template #default="{row}">{{ orderSourceName(row) }}<div class="muted">分销员：{{ row.distributorId ? distributorName(row.distributorId) : '无' }}</div></template></el-table-column>
+                <el-table-column label="商品" min-width="180"><template #default="{row}"><el-tag v-for="p in row.products" :key="p.type+p.id" @click.stop="openProduct(p)">{{ productName(p) }}</el-tag></template></el-table-column>
+                <el-table-column label="金额/尾款" width="155"><template #default="{row}">{{ money(row.totalAmount) }}<div class="muted">应收尾款 {{ money(expectedFinalAmount(row)) }}</div><div class="muted">尾款差额 {{ money(finalGap(row)) }}</div><div class="muted">财务待审 {{ money(financePendingAmount(row)) }}</div></template></el-table-column>
+                <el-table-column label="审核/风险" width="170">
+                  <template #default="{row}">
+                    <div class="order-risk-tags">
+                      <el-tag size="small" :type="orderFinanceStatus(row)==='已审' ? 'success' : orderFinanceStatus(row)==='已驳' ? 'danger' : orderFinanceStatus(row)==='待审' ? 'warning' : 'info'">财务：{{ orderFinanceStatus(row) }}</el-tag>
+                      <el-tag v-if="orderRefundStatus(row)!=='无退'" size="small" :type="orderRefundStatus(row)==='已审' ? 'success' : orderRefundStatus(row)==='已驳' ? 'danger' : 'warning'">退款：{{ orderRefundStatus(row) }}</el-tag>
+                      <el-tag v-if="hasTransferRecord(row)" size="small" type="warning" effect="plain">有转派</el-tag>
+                      <el-tag v-if="hasRescheduleRecord(row)" size="small" type="info" effect="plain">有改期</el-tag>
+                      <el-tag v-if="isOrderAfterSaleLocked(row)" size="small" type="danger">售后锁定</el-tag>
+                      <el-tag v-if="hasRiskBlock(row)" size="small" type="danger">风控冻结</el-tag>
+                      <el-tag v-if="isFinanceLocked(row)" size="small" type="warning" effect="plain">财务锁定</el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="预约时间" width="150"><template #default="{row}">{{ row.appointmentAt }}<div class="muted">{{ row.timePeriod }}</div></template></el-table-column>
+                <el-table-column label="跟进" width="130"><template #default="{row}"><span v-if="canViewOrderSource()">客服：{{ staffName(row.assigneeId) }}</span><span v-else>跟进中</span><div class="muted">摄影：{{ staffName(row.photographerId) }}</div></template></el-table-column>
+                <el-table-column fixed="right" label="操作" width="130"><template #default="{row}"><el-button link :data-order-open="row.id" @click.stop="openOrder(row,{readonly:!canOpenOrderForEdit(row)})">{{ canOpenOrderForEdit(row) ? '编辑' : '查看' }}</el-button><el-tooltip v-if="can('cancelOrder')" :content="cancelDisabledReason(row)" placement="top" :disabled="!cancelDisabledReason(row)"><span class="disabled-tip-wrap"><el-button link type="danger" :disabled="!!cancelDisabledReason(row)" @click.stop="cancelOrder(row)">取消</el-button></span></el-tooltip></template></el-table-column>
+              </el-table>
+            </div>
+            <div class="table-pager" v-if="scopedOrders.length > 0">
+              <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="scopedOrders.length" :page-sizes="[12, 20, 50, 100]" :page-size="state.orderPageSize" :current-page="state.orderPage" @current-change="state.orderPage = $event" @size-change="onOrderPageSizeChange" />
+              <span class="pager-info">第 {{ Math.min(scopedOrders.length, (state.orderPage-1)*state.orderPageSize+1) }}–{{ Math.min(scopedOrders.length, state.orderPage*state.orderPageSize) }} 条 / 共 {{ scopedOrders.length }} 条</span>
+            </div>

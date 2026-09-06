@@ -1,0 +1,411 @@
+.page-route-shelf-products .shelf-design-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.page-route-shelf-products .shelf-toolbar,
+.page-route-shelf-products .shelf-revenue-grid button,
+.page-route-shelf-products .shelf-filter-row,
+.page-route-shelf-products .shelf-policy-strip,
+.page-route-shelf-products .shelf-batch-bar,
+.page-route-shelf-products .shelf-table-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .04);
+}
+
+.page-route-shelf-products .shelf-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 16px;
+}
+
+.page-route-shelf-products .eyebrow {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: var(--lxm-brand);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.page-route-shelf-products .shelf-toolbar h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 18px;
+}
+
+.page-route-shelf-products .shelf-toolbar p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.page-route-shelf-products .shelf-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.page-route-shelf-products .shelf-revenue-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.page-route-shelf-products .shelf-revenue-grid button {
+  min-height: 88px;
+  padding: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.page-route-shelf-products .shelf-revenue-grid button.active {
+  border-color: var(--lxm-brand);
+  box-shadow: 0 8px 18px rgba(217, 83, 30, .12);
+}
+
+.page-route-shelf-products .shelf-revenue-grid span,
+.page-route-shelf-products .shelf-revenue-grid em {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.page-route-shelf-products .shelf-revenue-grid strong {
+  display: block;
+  margin: 5px 0;
+  color: #0f172a;
+  font-size: 17px;
+}
+
+.page-route-shelf-products .shelf-filter-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(130px, 150px) minmax(160px, 190px);
+  gap: 10px;
+  padding: 12px;
+}
+
+.page-route-shelf-products .shelf-policy-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border-left: 4px solid #0f766e;
+}
+
+.page-route-shelf-products .shelf-policy-strip strong,
+.page-route-shelf-products .shelf-policy-strip span {
+  display: block;
+}
+
+.page-route-shelf-products .shelf-policy-strip strong {
+  color: #111827;
+  font-size: 13px;
+}
+
+.page-route-shelf-products .shelf-policy-strip span {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.page-route-shelf-products .shelf-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.page-route-shelf-products .shelf-batch-bar strong {
+  display: block;
+  color: #111827;
+  font-size: 13px;
+}
+
+.page-route-shelf-products .shelf-batch-bar span {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.page-route-shelf-products .shelf-batch-bar > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.page-route-shelf-products .shelf-batch-bar > div:last-child > span {
+  display: inline-flex;
+}
+
+.page-route-shelf-products .shelf-batch-summary {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--lxm-brand-soft-2);
+  border-radius: 8px;
+  background: var(--lxm-brand-soft);
+}
+
+.page-route-shelf-products .shelf-batch-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.page-route-shelf-products .shelf-batch-summary-head strong,
+.page-route-shelf-products .shelf-batch-summary-head span {
+  display: block;
+}
+
+.page-route-shelf-products .shelf-batch-summary-head strong {
+  color: #1e3a8a;
+  font-size: 13px;
+}
+
+.page-route-shelf-products .shelf-batch-summary-head span {
+  margin-top: 4px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.page-route-shelf-products .shelf-batch-summary-head > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.page-route-shelf-products .shelf-batch-failure-list {
+  display: grid;
+  gap: 8px;
+}
+
+.page-route-shelf-products .shelf-batch-failure-list div {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.page-route-shelf-products .shelf-batch-failure-list strong {
+  color: #991b1b;
+  font-size: 12px;
+}
+
+.page-route-shelf-products .shelf-batch-failure-list span,
+.page-route-shelf-products .shelf-batch-success-note {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.page-route-shelf-products .shelf-table-card {
+  padding: 14px;
+}
+
+.page-route-shelf-products .el-table {
+  font-size: 12px;
+}
+
+.page-route-shelf-products .el-table .cell {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.page-route-shelf-products .section-title-row.compact {
+  margin-bottom: 10px;
+}
+
+.page-route-shelf-products .shelf-product-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.page-route-shelf-products .shelf-product-cell > div {
+  min-width: 0;
+  max-width: 174px;
+}
+
+.page-route-shelf-products .shelf-product-cell img {
+  width: 54px;
+  height: 42px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #f1f5f9;
+  flex-shrink: 0;
+}
+
+.page-route-shelf-products .shelf-product-cell strong,
+.page-route-shelf-products .shelf-mini-cell strong,
+.page-route-shelf-products .shelf-number-cell strong {
+  display: block;
+  color: #111827;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-route-shelf-products .shelf-product-cell span,
+.page-route-shelf-products .shelf-product-cell small,
+.page-route-shelf-products .shelf-mini-cell span,
+.page-route-shelf-products .shelf-number-cell span,
+.page-route-shelf-products .shelf-status-cell span {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.page-route-shelf-products .shelf-status-cell span.online {
+  color: var(--lxm-success-dark-2);
+}
+
+.page-route-shelf-products .shelf-status-cell span.offline {
+  color: #b45309;
+}
+
+.page-route-shelf-products .shelf-visibility-light {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  padding: 5px 8px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.page-route-shelf-products .shelf-visibility-light i {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.page-route-shelf-products .shelf-visibility-light.ok {
+  border-color: var(--lxm-success-soft);
+  background: var(--lxm-success-soft);
+  color: var(--lxm-success-dark-2);
+}
+
+.page-route-shelf-products .shelf-visibility-light.ok i {
+  background: var(--lxm-success);
+}
+
+.page-route-shelf-products .shelf-visibility-light.blocked {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.page-route-shelf-products .shelf-visibility-light.blocked i {
+  background: #ef4444;
+}
+
+.page-route-shelf-products .shelf-product-cell small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-route-shelf-products .shelf-price-edit {
+  display: grid;
+  grid-template-columns: minmax(0, 88px) 42px;
+  gap: 6px;
+  align-items: center;
+  max-width: 136px;
+}
+
+.page-route-shelf-products .shelf-price-edit button {
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--lxm-brand);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.page-route-shelf-products .shelf-price-edit .el-input-number {
+  width: 88px;
+}
+
+.page-route-shelf-products .shelf-price-edit .el-input__wrapper {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.page-route-shelf-products .shelf-price-edit .el-input__inner {
+  text-align: left;
+  font-size: 12px;
+}
+
+.page-route-shelf-products .shelf-tags {
+  display: grid;
+  gap: 6px;
+}
+
+.page-route-shelf-products .shelf-tags .el-input__wrapper {
+  min-height: 28px;
+}
+
+.page-route-shelf-products .shelf-tags > span {
+  color: #475569;
+  font-size: 12px;
+}
+
+.page-route-shelf-products .shelf-display-switch {
+  display: grid;
+  gap: 4px;
+}
+
+.page-route-shelf-products .shelf-display-switch small {
+  color: #d97706;
+  font-size: 11px;
+}
+
+@media (max-width: 1280px) {
+  .page-route-shelf-products .shelf-revenue-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .page-route-shelf-products .shelf-toolbar,
+  .page-route-shelf-products .shelf-batch-bar {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .page-route-shelf-products .shelf-toolbar-actions,
+  .page-route-shelf-products .shelf-batch-bar > div:last-child {
+    justify-content: flex-start;
+  }
+
+  .page-route-shelf-products .shelf-revenue-grid,
+  .page-route-shelf-products .shelf-filter-row,
+  .page-route-shelf-products .shelf-policy-strip {
+    grid-template-columns: 1fr;
+  }
+}

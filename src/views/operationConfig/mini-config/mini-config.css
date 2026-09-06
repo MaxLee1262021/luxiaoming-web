@@ -1,0 +1,66 @@
+/* ===== 小程序全局配置页 · 鹿小鸣暖胶片品牌 ===== */
+.page-route-mini-config { --lxm-cream:#FFF7EF; --lxm-ink:#2A211B; --lxm-red:#EE2C2C; --lxm-orange:#FF8D52; --lxm-gold:#FFD36A; --lxm-soft:#FFF1E6; }
+.cfg-workbench { display:grid; grid-template-columns:1fr 360px; gap:20px; align-items:start; }
+.cfg-content { display:flex; flex-direction:column; gap:16px; }
+
+.cfg-card { background:#fff; border:1px solid #f1e6da; border-radius:16px; padding:18px 20px; box-shadow:0 6px 20px rgba(42,33,27,.05); }
+.cfg-card-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+.cfg-card-head strong { font-size:16px; color:var(--lxm-ink); }
+.cfg-card-head span { font-size:12px; color:#a08e7e; }
+
+.cfg-form { display:flex; flex-direction:column; gap:12px; }
+.cfg-form label { display:flex; flex-direction:column; gap:6px; font-size:13px; color:#6b5d4f; }
+.cfg-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.cfg-grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.cfg-fixed em { font-style:normal; color:var(--lxm-red); font-weight:600; }
+.cfg-switch { flex-direction:row; align-items:center; justify-content:space-between; }
+
+.cfg-row-actions { display:flex; gap:8px; }
+
+.cfg-sub-head { font-size:13px; font-weight:600; color:var(--lxm-ink); margin:6px 0 8px; }
+.cfg-empty { font-size:12px; color:#b6a798; padding:6px 0; }
+
+.cfg-list { display:flex; flex-direction:column; gap:8px; }
+.cfg-list-row { display:flex; align-items:center; gap:8px; }
+.cfg-list-idx { width:22px; height:22px; flex:0 0 22px; border-radius:50%; background:var(--lxm-soft); color:var(--lxm-orange); font-size:12px; display:flex; align-items:center; justify-content:center; font-weight:600; }
+.cfg-list-del, .cfg-chip button { border:none; background:#fbe9e0; color:var(--lxm-red); width:26px; height:26px; border-radius:8px; cursor:pointer; font-size:12px; }
+.cfg-list-del:hover, .cfg-chip button:hover { background:var(--lxm-red); color:#fff; }
+
+.cfg-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.cfg-chip { display:inline-flex; align-items:center; gap:6px; background:var(--lxm-soft); color:var(--lxm-ink); border-radius:999px; padding:5px 8px 5px 12px; font-size:13px; }
+.cfg-chip button { width:20px; height:20px; font-size:11px; }
+.cfg-inline-add { display:flex; gap:8px; align-items:center; }
+.cfg-inline-add .el-input { max-width:240px; }
+
+.cfg-route-row { display:flex; gap:8px; align-items:center; }
+.cfg-route-name { max-width:160px; }
+.cfg-route-spots { flex:1; }
+
+/* ===== 手机仿真预览 ===== */
+.cfg-pv-search { background:linear-gradient(135deg,var(--lxm-red),var(--lxm-orange)); border-radius:14px; padding:14px; color:#fff; }
+.cfg-pv-search-bar { background:rgba(255,255,255,.92); color:#7a6a5a; border-radius:999px; padding:8px 14px; font-size:13px; }
+.cfg-pv-hot { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.cfg-pv-hot-chip { background:rgba(255,255,255,.22); border-radius:999px; padding:4px 10px; font-size:12px; }
+.cfg-pv-muted { color:#c9bdb0; font-size:12px; }
+
+.cfg-pv-block { background:#fff; border:1px solid #f1e6da; border-radius:14px; padding:14px; margin-top:14px; }
+.cfg-pv-block-title { font-size:14px; font-weight:700; color:var(--lxm-ink); margin-bottom:8px; }
+.cfg-pv-block-title.sm { font-size:12px; color:#8a7766; }
+.cfg-pv-lock { display:flex; gap:10px; align-items:flex-start; }
+.cfg-pv-lock-amt { flex:0 0 auto; background:var(--lxm-soft); color:var(--lxm-red); font-weight:800; border-radius:10px; padding:6px 10px; font-size:14px; }
+.cfg-pv-lock p { font-size:12px; color:#6b5d4f; line-height:1.6; margin:0; }
+.cfg-pv-notice { margin-top:10px; }
+.cfg-pv-notice p { font-size:12px; color:#7a6a5a; line-height:1.7; margin:2px 0; }
+.cfg-pv-wechat { width:100%; border:none; border-radius:10px; padding:10px; background:linear-gradient(135deg,var(--lxm-orange),var(--lxm-gold)); color:#fff; font-size:13px; font-weight:600; cursor:pointer; }
+.cfg-pv-footprint { margin-top:12px; background:var(--lxm-cream); border-radius:12px; padding:12px; }
+.cfg-pv-footprint strong { font-size:13px; color:var(--lxm-ink); }
+.cfg-pv-stamps { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+.cfg-pv-stamp { width:26px; height:26px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:#fff; border:1px solid #e7d8c8; color:#cbb9a6; font-size:13px; }
+.cfg-pv-stamp.got { background:var(--lxm-red); color:#fff; border-color:var(--lxm-red); }
+.cfg-pv-footprint em { font-style:normal; font-size:12px; color:#8a7766; }
+.cfg-pv-privacy { font-size:12px; color:#8a7766; line-height:1.7; margin:0; }
+
+@media (max-width: 1100px) {
+  .cfg-workbench { grid-template-columns:1fr; }
+  .cfg-grid-3 { grid-template-columns:1fr 1fr; }
+}

@@ -1,0 +1,343 @@
+<div class="filter-card dashboard-filter">
+  <div class="dashboard-date-shortcuts">
+    <button :class="{active:state.dashboardShortcut==='today'}" @click="dashboardSetDateShortcut('today')">今日</button>
+    <button :class="{active:state.dashboardShortcut==='yesterday'}" @click="dashboardSetDateShortcut('yesterday')">昨日</button>
+    <button :class="{active:state.dashboardShortcut==='7'}" @click="dashboardSetDateShortcut('7')">近 7 天</button>
+    <button :class="{active:state.dashboardShortcut==='30'}" @click="dashboardSetDateShortcut('30')">近 30 天</button>
+    <el-date-picker v-model="state.filters.dateRange" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :shortcuts="orderDateShortcuts" style="width:260px" @change="state.dashboardShortcut=''" />
+  </div>
+  <el-select v-if="canUseHeadquarterReconciliation" v-model="state.filters.distributorId" clearable filterable placeholder="分销员"><el-option v-for="d in visibleDistributors" :key="d.id" :label="d.name" :value="d.id" /></el-select>
+</div>
+
+<div class="dashboard-kpi-row">
+  <div class="dashboard-kpi-card is-scan" :class="{active:['scan'].includes(state.dashboardDrill)}" @click="setDashboardDrill('scan')">
+    <div class="dashboard-kpi-head"><span class="kpi-icon">扫</span><b>扫码量</b><em>扫码转化口径</em></div>
+    <strong>{{ dashboard.scans }}</strong>
+    <div class="kpi-delta" :class="dashboardDelta ? dashboardDelta.scans.trend : 'flat'"><span>{{ dashboardDelta ? dashboardDelta.scans.text : '待选时间' }}</span><em>{{ dashboardDelta ? dashboardDelta.label : '选日期后展示环比' }}</em></div>
+    <div class="dashboard-kpi-links">
+      <button @click.stop="setDashboardDrill('scan')">去重 <span>{{ dashboard.unique }}</span></button>
+      <button class="warn" @click.stop="setDashboardDrill('scan')">未下单 <span>{{ dashboard.browseOnly }}</span></button>
+    </div>
+  </div>
+  <div class="dashboard-kpi-card is-order" :class="{active:state.dashboardDrill==='conversion'}" @click="setDashboardDrill('conversion')">
+    <div class="dashboard-kpi-head"><span class="kpi-icon">约</span><b>预约订单</b><em>扫码转化口径</em></div>
+    <strong>{{ dashboard.orders }}</strong>
+    <div class="kpi-delta" :class="dashboardDelta ? dashboardDelta.orders.trend : 'flat'"><span>{{ dashboardDelta ? dashboardDelta.orders.text : '待选时间' }}</span><em>{{ dashboardDelta ? dashboardDelta.label : '选日期后展示环比' }}</em></div>
+    <div class="dashboard-kpi-links">
+      <button @click.stop="setDashboardDrill('conversion')">转化 <span>{{ dashboard.conversion }}</span> 单</button>
+    </div>
+  </div>
+  <div class="dashboard-kpi-card is-revenue" :class="{active:['amount','deposit','final','due'].includes(state.dashboardDrill)}" @click="setDashboardDrill('amount')">
+    <div class="dashboard-kpi-head"><span class="kpi-icon">收</span><b>成交额</b><em>收款核对口径</em></div>
+    <strong>{{ money(dashboard.amount) }}</strong>
+    <div class="kpi-delta" :class="dashboardDelta ? dashboardDelta.amount.trend : 'flat'"><span>{{ dashboardDelta ? dashboardDelta.amount.text : '待选时间' }}</span><em>{{ dashboardDelta ? dashboardDelta.label : '选日期后展示环比' }}</em></div>
+    <div class="dashboard-kpi-links">
+      <button @click.stop="setDashboardDrill('deposit')">定金 <span>{{ money(dashboard.deposit) }}</span></button>
+      <button @click.stop="setDashboardDrill('final')">尾款 <span>{{ money(dashboard.finalPaid) }}</span></button>
+      <button class="danger" @click.stop="setDashboardDrill('due')">待收 <span>{{ money(dashboard.due) }}</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="dashboard-risk-strip">
+  <span class="risk-strip-dot"></span>
+  <div class="risk-strip-main">
+    <strong>经营异常提醒</strong>
+    <span>优先处理影响履约、收款与转化的异常</span>
+  </div>
+  <div class="risk-strip-chips">
+    <button v-for="item in dashboardRiskAlerts" :key="item.key" :class="['chip', item.level]" @click="handleDashboardRiskAlert(item)">
+      <span>{{ item.label }}</span><strong>{{ item.count }}</strong>
+    </button>
+  </div>
+  <button class="risk-strip-more" @click="switchMenu('reconciliation')">查看全部 ›</button>
+</div>
+
+<div class="dashboard-scope-bar refined"><strong>{{ dashboardScopeLabel }}</strong><span>{{ state.role==='merchant' ? '当前仅展示本店扫码、订单与对账数据。' : '点击商家排行切换商家；点击指标卡可查看对应明细。' }}</span><button v-if="state.role!=='merchant'" class="mini-text-btn" @click="clearDashboardScope()">全部</button></div>
+
+<div class="dashboard-todo-strip">
+  <div class="todo-strip-head">
+    <strong>关键待办</strong>
+    <span>点击先预览订单，再决定是否进入订单管理</span>
+  </div>
+  <div class="todo-strip-list">
+    <button v-for="r in reminders" :key="r.status" class="todo-strip-item" @click="openReminderPreview(r)">
+      <span class="todo-dot" :style="{background:r.color}"></span>
+      <em>{{ r.label }}</em>
+      <strong>{{ r.count }}</strong>
+      <b>单</b>
+    </button>
+  </div>
+</div>
+
+<div class="dashboard-tabbar">
+  <button :class="{active: state.dashboardTab==='traffic'}" @click="switchDashboardTab('traffic')"><span class="tab-ico">流</span>流量转化</button>
+  <button :class="{active: state.dashboardTab==='product'}" @click="switchDashboardTab('product')"><span class="tab-ico">商</span>商品售卖</button>
+  <button :class="{active: state.dashboardTab==='finance'}" @click="switchDashboardTab('finance')"><span class="tab-ico">账</span>财务对账</button>
+</div>
+
+<div v-show="state.dashboardTab==='traffic'" class="dashboard-tab-panel">
+  <div class="dashboard-main-grid">
+    <div class="dash-main-col dash-main-col-left">
+      <div class="dashboard-panel heatmap-panel line-panel">
+        <div class="dashboard-panel-head">
+          <div><h3>扫码时段走势</h3><span>按 0-23 点统计扫码次数，点击点位查看扫码明细</span></div>
+          <em>高峰 {{ scanLinePeak.hour }} 点 · {{ scanLinePeak.count }} 次</em>
+        </div>
+        <div class="scan-line-summary">
+          <div><span>当前扫码</span><strong>{{ dashboard.scans }}</strong></div>
+          <div><span>峰值时段</span><strong>{{ String(scanLinePeak.hour).padStart(2,'0') }}:00</strong></div>
+          <div><span>小时均值</span><strong>{{ Math.round(dashboard.scans / 24) }}</strong></div>
+        </div>
+        <div class="scan-line-chart" @click="setDashboardDrill('scan')">
+          <svg viewBox="0 0 240 122" preserveAspectRatio="none" role="img" aria-label="扫码时段走势">
+            <defs>
+              <linearGradient id="scanLineFill" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#EE2C2C" stop-opacity=".26" />
+                <stop offset="100%" stop-color="#EE2C2C" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <g class="scan-grid">
+              <line x1="8" y1="18" x2="232" y2="18"></line>
+              <line x1="8" y1="48" x2="232" y2="48"></line>
+              <line x1="8" y1="78" x2="232" y2="78"></line>
+              <line x1="8" y1="108" x2="232" y2="108"></line>
+            </g>
+            <polygon :points="scanLineArea" class="scan-line-area"></polygon>
+            <polyline :points="scanLinePolyline" class="scan-line-path"></polyline>
+            <g v-for="point in scanLinePoints" :key="point.hour" class="scan-line-point" :class="{peak: point.hour === scanLinePeak.hour}">
+              <circle :cx="point.x" :cy="point.y" r="3.2"></circle>
+            </g>
+          </svg>
+          <div class="scan-line-hover">
+            <button v-for="point in scanLinePoints" :key="point.hour" :title="String(point.hour).padStart(2,'0') + ':00 · ' + point.count + ' 次扫码'" @click.stop="setDashboardDrill('scan')">
+              <span>{{ point.count }} 次</span>
+            </button>
+          </div>
+        </div>
+        <div class="scan-line-axis">
+          <span v-for="h in scanHeat" :key="h.hour">{{ h.hour % 6 === 0 ? String(h.hour).padStart(2,'0') + ':00' : '' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-main-col dash-main-col-right">
+      <div class="dashboard-panel">
+        <div class="dashboard-panel-head"><div><h3>流量转化漏斗</h3><span>扫码浏览 → 预约订单 → 转化成交</span></div></div>
+        <div class="funnel">
+          <div class="funnel-row">
+            <span class="funnel-label">扫码浏览</span>
+            <div class="funnel-bar"><i :style="{width: (dashboard.scans ? '100%' : '0%')}"></i></div>
+            <strong>{{ dashboard.scans }}</strong>
+            <em>次</em>
+          </div>
+          <div class="funnel-row">
+            <span class="funnel-label">预约订单</span>
+            <div class="funnel-bar"><i :style="{width: (dashboard.scans ? (dashboard.orders / dashboard.scans * 100) + '%' : '0%')}"></i></div>
+            <strong>{{ dashboard.orders }}</strong>
+            <em>单 · 转化 {{ dashboard.scans ? (dashboard.orders / dashboard.scans * 100).toFixed(1) : '0' }}%</em>
+          </div>
+          <div class="funnel-row">
+            <span class="funnel-label">转化成交</span>
+            <div class="funnel-bar"><i :style="{width: (dashboard.scans ? (dashboard.conversion / dashboard.scans * 100) + '%' : '0%')}"></i></div>
+            <strong>{{ dashboard.conversion }}</strong>
+            <em>单 · 转化 {{ dashboard.scans ? (dashboard.conversion / dashboard.scans * 100).toFixed(1) : '0' }}%</em>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div v-show="state.dashboardTab==='product'" class="dashboard-tab-panel">
+  <section class="dashboard-product-sales section-gap">
+    <div class="product-sales-head">
+      <div>
+        <span class="eyebrow">商品售卖</span>
+        <h3>商品售卖情况</h3>
+        <p>按顶部时间筛选联动统计照片套餐、短视频、可售照片单品、摄影周边和增值服务；下架、草稿、待审核、取消、退款订单不计入营收。</p>
+      </div>
+      <div class="product-sales-actions">
+        <el-button plain @click="state.dashboardProductDetailsOpen=!state.dashboardProductDetailsOpen">{{ state.dashboardProductDetailsOpen ? '收拢明细' : '展开明细' }}</el-button>
+        <el-button type="primary" plain @click="exportDashboardProductSales">导出商品售卖明细</el-button>
+      </div>
+    </div>
+
+    <div class="product-sales-kpis">
+      <div><span>套餐&周边总营收</span><strong>{{ money(dashboardProductSummary.publicRevenue) }}</strong><em>公开售卖商品</em></div>
+      <div><span>商品成交订单总数</span><strong>{{ dashboardProductSummary.publicOrders }}</strong><em>去重订单数</em></div>
+      <div><span>增值服务加购总收入</span><strong>{{ money(dashboardProductSummary.addonRevenue) }}</strong><em>客服内部加购</em></div>
+      <div><span>增值服务订单数量</span><strong>{{ dashboardProductSummary.addonOrders }}</strong><em>去重订单数</em></div>
+    </div>
+
+    <div class="product-sales-grid product-rank-grid">
+      <div class="dashboard-panel">
+        <div class="dashboard-panel-head"><div><h3>热销 TOP10</h3><span>按营收排序，点击进入对应商品编辑</span></div></div>
+        <div class="product-rank-list">
+          <button v-for="(row,index) in dashboardHotProducts" :key="row.key" class="product-rank-row" :class="{'gold':index===0,'silver':index===1,'bronze':index===2}" @click="openDashboardProduct(row)">
+            <b>{{ index + 1 }}</b>
+            <div><strong>{{ row.name }}</strong><span>{{ row.categoryLabel }} · {{ row.spotName || '未绑定点位' }} · {{ row.status }}</span></div>
+            <em>{{ row.orders }} 单</em>
+            <strong>{{ money(row.revenue) }}</strong>
+          </button>
+          <div v-if="!dashboardHotProducts.length" class="lxm-empty">
+            <div class="lxm-empty__mark">鹿</div>
+            <p class="lxm-empty__title">这里暂时空空如也</p>
+            <p class="lxm-empty__desc">当前筛选范围暂无有效商品成交，换个时间或渠道看看</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-panel">
+        <div class="dashboard-panel-head"><div><h3>滞销 / 风险 TOP10</h3><span>近30天0成交或存在素材等风险的商品</span></div></div>
+        <div class="product-rank-list">
+          <button v-for="row in dashboardSlowProducts" :key="row.key" class="product-rank-row risk" @click="openDashboardProduct(row)">
+            <b>!</b>
+            <div><strong>{{ row.name }}</strong><span>{{ row.categoryLabel }} · {{ row.spotName || '未绑定点位' }}</span></div>
+            <em>{{ row.risk }}</em>
+          </button>
+          <div v-if="!dashboardSlowProducts.length" class="lxm-empty">
+            <div class="lxm-empty__mark">鹿</div>
+            <p class="lxm-empty__title">没有风险商品，很安心</p>
+            <p class="lxm-empty__desc">近30天暂无滞销商品，继续保持～</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <template v-if="state.dashboardProductDetailsOpen">
+      <div class="product-sales-grid">
+        <div class="dashboard-panel product-pie-panel">
+          <div class="dashboard-panel-head"><div><h3>品类营收占比</h3><span>按商品分类统计成交金额与订单数</span></div></div>
+          <div class="product-pie-wrap">
+            <div class="product-pie" :style="dashboardProductPieStyle">
+              <div class="product-pie-center">
+                <strong>{{ money(dashboardProductSummary.publicRevenue) }}</strong>
+                <span>总营收</span>
+              </div>
+            </div>
+            <div class="product-pie-legend">
+              <div v-for="row in dashboardProductCategoryRows" :key="row.key" class="legend-item" :class="{zero: !row.orders && !row.revenue}">
+                <i :style="{background:row.color}"></i>
+                <div class="legend-info">
+                  <div class="legend-title"><span>{{ row.label }}</span><strong>{{ money(row.revenue) }}</strong></div>
+                  <div class="legend-meta">
+                    <div class="legend-bar"><b :style="{width: (Math.max(...dashboardProductCategoryRows.map(r => r.revenue || 0)) ? ((row.revenue || 0) / Math.max(...dashboardProductCategoryRows.map(r => r.revenue || 0)) * 100) + '%' : '0%')}"></b></div>
+                    <em>{{ row.orders }} 单</em>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-panel product-trend-panel">
+          <div class="dashboard-panel-head"><div><h3>每日销量趋势</h3><span>成交金额与订单量走势</span></div></div>
+          <div class="product-trend-summary">
+            <div><span>成交金额</span><strong>{{ money(dashboardProductSummary.publicRevenue + dashboardProductSummary.addonRevenue) }}</strong></div>
+            <div><span>成交订单</span><strong>{{ dashboardProductSummary.publicOrders + dashboardProductSummary.addonOrders }}</strong></div>
+            <div><span>统计天数</span><strong>{{ dashboardDailySalesRows.length }}</strong></div>
+          </div>
+          <div class="product-trend-chart-wrap">
+            <svg class="product-trend-chart" viewBox="0 0 240 124" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="trendMoneyFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stop-color="#EE2C2C" stop-opacity=".22" />
+                  <stop offset="100%" stop-color="#EE2C2C" stop-opacity="0" />
+                </linearGradient>
+                <linearGradient id="trendOrdersFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stop-color="#FF8D52" stop-opacity=".18" />
+                  <stop offset="100%" stop-color="#FF8D52" stop-opacity="0" />
+                </linearGradient>
+              </defs>
+              <g class="scan-grid">
+                <line x1="10" y1="20" x2="230" y2="20"></line>
+                <line x1="10" y1="50" x2="230" y2="50"></line>
+                <line x1="10" y1="80" x2="230" y2="80"></line>
+                <line x1="10" y1="110" x2="230" y2="110"></line>
+              </g>
+              <line x1="10" y1="110" x2="230" y2="110" class="trend-axis"></line>
+              <polygon :points="dashboardTrendArea('revenue')" fill="url(#trendMoneyFill)"></polygon>
+              <polygon :points="dashboardTrendArea('orders')" fill="url(#trendOrdersFill)"></polygon>
+              <polyline :points="dashboardTrendPoints('revenue')" class="trend-money"></polyline>
+              <polyline :points="dashboardTrendPoints('orders')" class="trend-orders"></polyline>
+            </svg>
+            <div class="product-trend-legend"><span><i class="money"></i>成交金额</span><span><i class="orders"></i>订单量</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="product-sales-grid">
+        <div class="dashboard-panel spot-revenue-panel">
+          <div class="dashboard-panel-head"><div><h3>点位营收排行</h3><span>点击点位跳转打卡点设置</span></div></div>
+          <div class="spot-revenue-bars">
+            <button v-for="row in dashboardSpotRevenueRows" :key="row.id" @click="openDashboardSpot(row)">
+              <span class="spot-name">{{ row.name }}</span>
+              <div class="spot-bar"><i :style="{width:row.percent + '%'}"></i></div>
+              <div class="spot-meta"><strong>{{ money(row.revenue) }}</strong><em>{{ row.orders }} 单</em></div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </section>
+</div>
+
+<div v-show="state.dashboardTab==='finance'" class="dashboard-tab-panel">
+  <div class="dashboard-main-grid">
+    <div class="dash-main-col dash-main-col-left">
+      <div class="dashboard-panel dashboard-reminders">
+        <div class="dashboard-panel-head">
+          <div><h3>月度对账建议预览</h3><span>按当前筛选范围预判本月入账、暂缓与分成风险</span></div>
+          <button class="mini-text-btn" @click="switchMenu('reconciliation')">去对账</button>
+        </div>
+        <div class="reconcile-advice-grid">
+          <button class="reconcile-advice-card primary" @click="openReconciliationDetail('eligible','实际可分账净额')">
+            <span>实际入池净额</span><strong>{{ money(reconciliationSummary.eligibleAmount) }}</strong><em>{{ reconciliationSummary.eligibleOrders }} 单</em>
+          </button>
+          <button v-if="canUseHeadquarterReconciliation" class="reconcile-advice-card" @click="openReconciliationDetail('estimated','预计可入分账池')">
+            <span>预计入池净额</span><strong>{{ money(reconciliationSummary.estimatedAmount) }}</strong><em>含静置期</em>
+          </button>
+          <button class="reconcile-advice-card" @click="openReconciliationDetail('observation','订单静置期暂缓')">
+            <span>订单静置期暂缓</span><strong>{{ money(reconciliationSummary.observationAmount) }}</strong><em>{{ reconciliationSummary.observationOrders }} 单</em>
+          </button>
+          <button class="reconcile-advice-card warning" @click="openReconciliationDetail('blocked','售后/退款暂缓')">
+            <span>售后/退款暂缓</span><strong>{{ money(reconciliationSummary.blockedAmount) }}</strong><em>{{ reconciliationSummary.blockedOrders }} 单</em>
+          </button>
+          <button class="reconcile-advice-card" @click="openReconciliationDetail('due','待收尾款')">
+            <span>财务口径待收</span><strong>{{ money(dashboard.due) }}</strong><em>需客服跟进</em>
+          </button>
+        </div>
+        <div class="reconcile-advice-note">
+          <strong>建议</strong>
+          <span>优先核对待收尾款和售后订单；已完成订单需满 3 天订单静置期后，才进入实际分账。</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dash-main-col dash-main-col-right">
+      <div v-if="state.role!=='merchant'" class="dashboard-panel">
+        <div class="dashboard-panel-head"><div><h3>商家来源排行</h3><span>点击商家联动热力范围</span></div><button class="mini-text-btn" @click="clearDashboardScope('shop')">全部</button></div>
+        <div class="merchant-rank-list">
+          <div v-for="(s,index) in shopRank" :key="s.id" class="merchant-rank-item" :class="{active:state.dashboardShopId===s.id}" @click="selectDashboardShop(s)">
+            <span class="rank-num" :class="{gold:index===0,silver:index===1,bronze:index===2}">{{ index + 1 }}</span>
+            <div><strong>{{ s.name }}</strong><em>扫码 {{ s.scanCount }} · 订单 {{ s.orderCount }}</em></div>
+            <b>{{ money(s.amount) }}</b>
+            <button @click.stop="openRankPreview('shop',s)">详情</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="dashboard-panel">
+        <div class="dashboard-panel-head"><div><h3>本月分成预估</h3><span>仅作经营看板预览，最终以月度对账页为准</span></div></div>
+        <div class="settlement-preview-list">
+          <div><span>商家应计</span><strong>{{ money(reconciliationSummary.shopCommissionAmount) }}</strong></div>
+          <div v-if="['super','finance','distributor'].includes(state.role)"><span>分销员应计</span><strong>{{ money(reconciliationSummary.distributorCommissionAmount) }}</strong></div>
+          <div v-if="['super','finance','photo'].includes(state.role)"><span>摄影师应计</span><strong>{{ money(reconciliationSummary.photographerCommissionAmount) }}</strong></div>
+          <div v-if="canUseHeadquarterReconciliation" class="total"><span>总部收入</span><strong>{{ money(reconciliationSummary.headquarterAmount) }}</strong></div>
+          <div v-if="state.role==='merchant'" class="total"><span>本店结算记录</span><strong>{{ reconciliationTransferRows.length }} 条</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

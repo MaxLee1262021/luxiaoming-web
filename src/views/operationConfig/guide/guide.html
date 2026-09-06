@@ -1,0 +1,39 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">攻略运营</span>
+      <h3 class="lxm-page-head__title">攻略管理</h3>
+      <p class="lxm-page-head__desc">游玩攻略与拍摄建议，帮助游客规划路线，可关联打卡点与拍摄风格。配置后在小程序「旅拍灵感」板块展示。</p>
+    </div>
+    <div class="lxm-page-head__actions">
+      <el-button plain @click="openContentLogs('攻略')">操作日志</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('guides')">新增攻略</el-button>
+    </div>
+  </header>
+
+  <div class="lxm-toolbar">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索攻略标题" style="max-width:320px" />
+    <el-button @click="state.filters.keyword=''">重置</el-button>
+  </div>
+
+  <div class="lxm-cards">
+    <article v-for="item in data.guides" :key="item.id" class="lxm-card">
+      <div class="lxm-card__cover">
+        <img :src="item.cover" />
+        <span class="lxm-card__badge">{{ item.tag || '攻略' }}</span>
+      </div>
+      <div class="lxm-card__body">
+        <h4 class="lxm-card__title">{{ item.title || item.name }}</h4>
+        <div class="lxm-card__meta"><span>状态 <b>{{ item.status || '草稿' }}</b></span></div>
+      </div>
+      <div class="lxm-card__actions">
+        <el-button link type="primary" @click="openContent(item)">编辑</el-button>
+      </div>
+    </article>
+    <div v-if="!data.guides.length" class="lxm-empty-inline">
+      <strong>暂无攻略</strong>
+      <span>先新增一篇攻略。</span>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('guides')">新增攻略</el-button>
+    </div>
+  </div>
+</div>

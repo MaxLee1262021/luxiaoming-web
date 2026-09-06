@@ -1,0 +1,122 @@
+<div class="content-audit-page">
+  <div class="audit-toolbar">
+    <div>
+      <span class="eyebrow">商品审核</span>
+      <h3>商品审核</h3>
+      <p>统一审核套餐、可售照片单品、摄影周边的调价、上下架、主推、定时配置和素材展示变更。审核通过后才作为正式商品配置。</p>
+    </div>
+    <div class="audit-toolbar-actions">
+      <el-button plain @click="state.filters.keyword='';state.filters.contentStatus=''">重置筛选</el-button>
+      <el-button plain @click="openContentLogs('商品审核')">操作日志</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
+      <el-button @click="switchMenu('shelfProducts')">商品货架</el-button>
+    </div>
+  </div>
+
+  <div class="audit-stat-grid">
+    <button :class="{active:!state.filters.contentStatus}" @click="state.filters.contentStatus=''"><span>全部商品</span><strong>{{ productAuditSummary.total }}</strong><em>套餐/照片单品/周边</em></button>
+    <button :class="{active:state.filters.contentStatus==='待审'}" @click="state.filters.contentStatus='待审'"><span>待审核</span><strong>{{ productAuditSummary.pending }}</strong><em>需运营负责人处理</em></button>
+    <button :class="{active:state.filters.contentStatus==='驳回'}" @click="state.filters.contentStatus='驳回'"><span>已驳回</span><strong>{{ productAuditSummary.rejected }}</strong><em>可复制草稿重提</em></button>
+    <button :class="{active:state.filters.contentStatus==='草稿'}" @click="state.filters.contentStatus='草稿'"><span>草稿</span><strong>{{ productAuditSummary.draft }}</strong><em>前端不展示</em></button>
+    <button :class="{active:state.filters.contentStatus==='已上架'}" @click="state.filters.contentStatus='已上架'"><span>已审核</span><strong>{{ productAuditSummary.approved }}</strong><em>正式配置</em></button>
+  </div>
+
+  <div class="audit-filter-row">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索商品名称、审核类型、提交人" />
+    <el-select v-model="state.filters.contentStatus" clearable placeholder="审核状态">
+      <el-option label="待审核" value="待审" />
+      <el-option label="驳回" value="驳回" />
+      <el-option label="草稿" value="草稿" />
+      <el-option label="已上架" value="已上架" />
+      <el-option label="已下架" value="已下架" />
+    </el-select>
+    <el-input v-model="state.auditRejectReason" clearable placeholder="驳回原因，可选" />
+  </div>
+
+  <div class="audit-rule-strip">
+    <div>
+      <strong>需审核</strong>
+      <span>调价、上下架、主推变更、定时上下架配置会进入审核队列。</span>
+    </div>
+    <div>
+      <strong>免审核</strong>
+      <span>封面、普通文案、普通标签、素材补充可快速保存，但仍写入操作日志。</span>
+    </div>
+    <div>
+      <strong>驳回处理</strong>
+      <span>驳回商品保留原因和修改记录，可复制草稿后重新提交。</span>
+    </div>
+  </div>
+
+  <div class="audit-table-card panel">
+    <div class="section-title-row compact">
+      <div>
+        <h3>审核队列</h3>
+        <p>价格、上下架、主推、定时上下架等风险操作会进入待审核。封面、普通文案、普通标签可快速保存，但仍保留操作日志。</p>
+      </div>
+      <el-tag type="info">{{ productAuditRows.length }} 条</el-tag>
+    </div>
+    <el-table :data="pagedList('productAudit', productAuditRows)" border stripe empty-text="暂无符合条件的商品，试试切换状态筛选">
+      <el-table-column label="商品" min-width="280" fixed="left">
+        <template #default="{row}">
+          <div class="audit-product-cell">
+            <img :src="row.cover || row.url" />
+            <div>
+              <strong>{{ row.name || row.title }}</strong>
+              <span>{{ shelfTypeText(row.__key,row) }} / {{ relationText(row) }}</span>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="审核状态" width="120">
+        <template #default="{row}">
+          <el-tag :type="row.auditStatus==='待审' || row.auditStatus==='待审核' ? 'warning' : row.auditStatus==='驳回' ? 'danger' : row.auditStatus==='草稿' ? 'info' : 'success'">{{ row.auditStatus==='待审' ? '待审核' : (row.auditStatus || shelfAuditText(row)) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="变更类型" min-width="160">
+        <template #default="{row}">
+          <div class="audit-change-cell">
+            <strong>{{ row.auditType || '商品配置变更' }}</strong>
+            <span>{{ row.auditStatus==='待审' || row.auditStatus==='待审核' ? '等待负责人审核' : row.auditStatus==='驳回' ? '需修改后重提' : '已形成正式配置' }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="差异摘要" min-width="190">
+        <template #default="{row}">
+          <div class="audit-diff-cell" :class="{danger:auditChangeSummary(row).risk==='高', warning:auditChangeSummary(row).risk==='中'}">
+            <strong>{{ auditChangeSummary(row).text }}</strong>
+            <span>{{ auditChangeSummary(row).fields }}</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="价格/状态" min-width="160">
+        <template #default="{row}">
+          <div class="audit-mini"><strong>{{ money(row.specialPrice || row.price || 0) }}</strong><span>{{ productStatus(row) }}</span></div>
+        </template>
+      </el-table-column>
+      <el-table-column label="提交信息" min-width="190">
+        <template #default="{row}">
+          <div class="audit-mini"><strong>{{ row.auditSubmitter || '运营后台' }}</strong><span>{{ row.auditSubmitAt || '未提交' }}</span></div>
+        </template>
+      </el-table-column>
+      <el-table-column label="审核结果" min-width="190">
+        <template #default="{row}">
+          <div class="audit-mini"><strong>{{ row.auditReviewer || '-' }}</strong><span>{{ row.auditRejectReason || row.auditReviewedAt || '-' }}</span></div>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="220" fixed="right">
+        <template #default="{row}">
+          <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
+          <el-button link @click="showProductAuditCompare(row)">对比</el-button>
+          <el-button link :disabled="!['待审','待审核'].includes(row.auditStatus)" type="success" v-if="can('contentEdit')" @click="reviewProductAudit(row,true)">通过</el-button>
+          <el-button link :disabled="!['待审','待审核'].includes(row.auditStatus)" type="danger" v-if="can('contentEdit')" @click="reviewProductAudit(row,false)">驳回</el-button>
+          <el-button link v-if="row.auditStatus==='驳回' && can('contentEdit')" @click="submitProductAudit(row,'驳回后重新提交')">重提</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="productAuditRows.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="productAuditRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('productAudit').size" :current-page="pager('productAudit').page" @current-change="pager('productAudit').page = $event" @size-change="onListPageSizeChange('productAudit', $event)" />
+      <span class="pager-info">第 {{ Math.min(productAuditRows.length, (pager('productAudit').page-1)*pager('productAudit').size+1) }}–{{ Math.min(productAuditRows.length, pager('productAudit').page*pager('productAudit').size) }} 条 / 共 {{ productAuditRows.length }} 条</span>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,4502 @@
+[
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 4,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 38,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 38,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 40,
+    "value": "无角标"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 40,
+    "value": "🔥 热门"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 41,
+    "value": "⭐ 推荐"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 41,
+    "value": "🆕 新上线"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 42,
+    "value": "💎 精选"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 42,
+    "value": "🏆 爆款"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 54,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 55,
+    "value": "请选择打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 56,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 56,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 58,
+    "value": "无"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 58,
+    "value": "最受欢迎"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 58,
+    "value": "爆款"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 59,
+    "value": "网红同款"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 59,
+    "value": "限时优惠"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 59,
+    "value": "情侣必选"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 70,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 71,
+    "value": "请选择打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 72,
+    "value": "请选择照片单品"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 84,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 101,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 101,
+    "value": "📊概览"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 102,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 102,
+    "value": "📋订单"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 103,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 103,
+    "value": "👥人员"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 104,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 104,
+    "value": "⚙️设置"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 134,
+    "value": "待确认"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 134,
+    "value": "已接单"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 134,
+    "value": "拍摄中"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 134,
+    "value": "修片中"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 134,
+    "value": "已完成"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 179,
+    "value": "请输入名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 187,
+    "value": "保存成功"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 191,
+    "value": "保存失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 193,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 200,
+    "value": "上传中"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 205,
+    "value": "上传失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 235,
+    "value": "加载首页配置失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 236,
+    "value": "加载配置失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 257,
+    "value": "保存成功"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 259,
+    "value": "保存失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 262,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 276,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 280,
+    "value": "请选择打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 320,
+    "value": "确认删除？"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 324,
+    "value": "已删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 325,
+    "value": "删除失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 326,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 356,
+    "value": "请输入套餐名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 371,
+    "value": "保存成功"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 375,
+    "value": "保存失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 377,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 384,
+    "value": "上传中"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 389,
+    "value": "上传失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 404,
+    "value": "确认删除？"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 408,
+    "value": "已删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 409,
+    "value": "删除失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 410,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 474,
+    "value": "请输入系列名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 481,
+    "value": "无角标"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 492,
+    "value": "保存成功"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 496,
+    "value": "保存失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 498,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 504,
+    "value": "上传中"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 509,
+    "value": "上传失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 524,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 528,
+    "value": "请选择打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 532,
+    "value": "请选择照片单品"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 558,
+    "value": "未命名文件"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 571,
+    "value": "请选择文件"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 572,
+    "value": "上传中"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 597,
+    "value": "上传成功"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 601,
+    "value": "保存失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 603,
+    "value": "上传失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 608,
+    "value": "确认删除？"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 612,
+    "value": "已删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 613,
+    "value": "删除失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 614,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 638,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 666,
+    "value": "确认删除？"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 670,
+    "value": "已删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 671,
+    "value": "删除失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 672,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 683,
+    "value": "请输入照片单品名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 692,
+    "value": "保存成功"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 696,
+    "value": "保存失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 698,
+    "value": "网络错误"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 705,
+    "value": "上传中"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.js",
+    "line": 710,
+    "value": "上传失败"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 5,
+    "value": "管理后台"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 8,
+    "value": "退出"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 14,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 14,
+    "value": "客服"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 17,
+    "value": "今日扫码"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 18,
+    "value": "今日预约"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 19,
+    "value": "待处理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 20,
+    "value": "本月成交"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 26,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 26,
+    "value": "客服"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 26,
+    "value": "商家"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 30,
+    "value": ">状态: {{statusFilter ==="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 30,
+    "value": "全部"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 45,
+    "value": "商家"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 46,
+    "value": "派单"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 47,
+    "value": "联系客户"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 55,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 58,
+    "value": "人员列表"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 59,
+    "value": "角色管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 60,
+    "value": "商家管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 63,
+    "value": "+ 新增人员"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 72,
+    "value": "编辑"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 73,
+    "value": "停用"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 73,
+    "value": "启用"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 88,
+    "value": "超管"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 91,
+    "value": "📦 套餐管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 92,
+    "value": "🎨 系列管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 93,
+    "value": "📍 打卡点管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 94,
+    "value": "🖼️ 样片管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 95,
+    "value": "📁 照片单品管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 96,
+    "value": "⚙️ 首页配置"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 97,
+    "value": "📖 攻略管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 98,
+    "value": "🛍️ 周边管理"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 99,
+    "value": "📋 操作日志"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 100,
+    "value": "🗑️ 回收站"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 105,
+    "value": "+ 新增套餐"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 110,
+    "value": "未关联系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 115,
+    "value": "编辑"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 116,
+    "value": "删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 124,
+    "value": "+ 新增系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 129,
+    "value": "🎬短视频"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 129,
+    "value": "📷拍照"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 133,
+    "value": "编辑"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 134,
+    "value": "删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 142,
+    "value": "+ 新增打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 150,
+    "value": "编辑"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 151,
+    "value": "删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 159,
+    "value": "+ 上传样片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 165,
+    "value": "未关联系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 166,
+    "value": "未关联打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 167,
+    "value": "轮播"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 169,
+    "value": "删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 177,
+    "value": "+ 新增照片单品"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 182,
+    "value": "未关联系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 186,
+    "value": "编辑"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 187,
+    "value": "删除"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 196,
+    "value": "首页配置"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 198,
+    "value": "活动滚动文字（用 | 分隔多条）"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 199,
+    "value": "例如：🎉新客首单立减50元|📸古风系列8折优惠"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 202,
+    "value": "已服务客人数字"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 203,
+    "value": "已服务客人数量"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 205,
+    "value": "保存配置"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 212,
+    "value": "摄影师"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 219,
+    "value": "上传成片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 226,
+    "value": "摄影师"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 233,
+    "value": "商家"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 236,
+    "value": "本月扫码"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 237,
+    "value": "本月订单"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 238,
+    "value": "预计收益"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 239,
+    "value": "已结算"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 241,
+    "value": "收益明细"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 266,
+    "value": "编辑打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 266,
+    "value": "新增打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 267,
+    "value": "名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 267,
+    "value": "><text>名称</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 268,
+    "value": "封面图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 268,
+    "value": "上传图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 268,
+    "value": "><text>封面图片</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 269,
+    "value": "简介"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 269,
+    "value": "><text>简介</text><textarea placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 270,
+    "value": "取消"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 270,
+    "value": "保存"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 270,
+    "value": ">取消</button><button class="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 277,
+    "value": "编辑系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 277,
+    "value": "新增系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 278,
+    "value": "系列名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 278,
+    "value": "><text>系列名称</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 279,
+    "value": "产品类型"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 284,
+    "value": "封面图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 284,
+    "value": "上传图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 284,
+    "value": "><text>封面图片</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 285,
+    "value": "风格标签（用 | 分隔）"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 285,
+    "value": "><text>风格标签（用 | 分隔）</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 286,
+    "value": "简介"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 286,
+    "value": "><text>简介</text><textarea placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 287,
+    "value": "角标类型"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 292,
+    "value": "适用打卡点（多选）"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 301,
+    "value": "关联套餐（多选）"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 310,
+    "value": "取消"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 310,
+    "value": "保存"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 310,
+    "value": ">取消</button><button class="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 317,
+    "value": "编辑套餐"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 317,
+    "value": "新增套餐"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 318,
+    "value": "套餐名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 318,
+    "value": "><text>套餐名称</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 319,
+    "value": "所属系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 321,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 324,
+    "value": "所属打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 326,
+    "value": "请选择打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 329,
+    "value": "拍摄类型"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 334,
+    "value": "服务标签（点击添加）"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 336,
+    "value": "标签内容"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 337,
+    "value": "添加"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 343,
+    "value": "封面图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 343,
+    "value": "上传图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 343,
+    "value": "><text>封面图片</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 344,
+    "value": "原价"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 344,
+    "value": "><text>原价</text><input type="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 345,
+    "value": "专享价"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 345,
+    "value": "><text>专享价</text><input type="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 346,
+    "value": "描述"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 346,
+    "value": "><text>描述</text><textarea placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 347,
+    "value": "是否热门"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 347,
+    "value": "><text>是否热门</text><switch checked="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 348,
+    "value": "是否上架"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 348,
+    "value": "><text>是否上架</text><switch checked="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 349,
+    "value": "推荐标签"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 354,
+    "value": "取消"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 354,
+    "value": "保存"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 354,
+    "value": ">取消</button><button class="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 357,
+    "value": "主推套餐"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 364,
+    "value": "上传样片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 366,
+    "value": "选择文件（图片/视频）"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 367,
+    "value": "选择文件"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 370,
+    "value": "关联系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 372,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 375,
+    "value": "关联打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 377,
+    "value": "请选择打卡点"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 380,
+    "value": "所属照片单品"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 382,
+    "value": "请选择照片单品"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 385,
+    "value": "是否首页轮播"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 385,
+    "value": "><text>是否首页轮播</text><switch checked="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 386,
+    "value": "取消"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 386,
+    "value": "上传"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 386,
+    "value": ">取消</button><button class="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 393,
+    "value": "编辑照片单品"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 393,
+    "value": "新增照片单品"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 394,
+    "value": "照片单品名称"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 394,
+    "value": "><text>照片单品名称</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 395,
+    "value": "所属系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 397,
+    "value": "请选择系列"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 400,
+    "value": "简介"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 400,
+    "value": "><text>简介</text><textarea placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 401,
+    "value": "封面图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 401,
+    "value": "上传图片"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 401,
+    "value": "><text>封面图片</text><input placeholder="
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 402,
+    "value": "取消"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 402,
+    "value": "保存"
+  },
+  {
+    "page": "admin",
+    "file": "admin/admin.wxml",
+    "line": 402,
+    "value": ">取消</button><button class="
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 4,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 25,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 28,
+    "value": "加载打卡点失败"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 33,
+    "value": "加载中"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 41,
+    "value": "橘子洲避开人头的3个机位"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 42,
+    "value": "橘子洲头"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 47,
+    "value": "教你避开人流高峰，找到最佳拍摄角度，附详细路线图和样片参考"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 48,
+    "value": "readCount: 1250"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 54,
+    "value": "IFS国金中心拍照光线时间全攻略"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 55,
+    "value": "IFS国金中心"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 60,
+    "value": "专业摄影师总结最佳光线时段，教你用自然光拍出高级感"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 61,
+    "value": "readCount: 986"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 67,
+    "value": "岳麓山古风拍摄全攻略"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 68,
+    "value": "岳麓山"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 73,
+    "value": "古风爱好者必看！从服装搭配到取景构图，一站式指南"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 74,
+    "value": "readCount: 756"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 80,
+    "value": "谢子龙影像馆极简风出片指南"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 81,
+    "value": "谢子龙影像馆"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 86,
+    "value": "极简主义者的天堂，教你用建筑线条拍出空间感大片"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 87,
+    "value": "readCount: 523"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 93,
+    "value": "太平街复古港风拍照攻略"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 94,
+    "value": "太平街"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 99,
+    "value": "一秒穿越到80年代，解锁老街巷里的港风拍照密码"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 100,
+    "value": "readCount: 412"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 121,
+    "value": "加载攻略失败"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.js",
+    "line": 122,
+    "value": "加载失败"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.wxml",
+    "line": 5,
+    "value": "打卡攻略"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.wxml",
+    "line": 6,
+    "value": "发现长沙最美拍摄机位"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.wxml",
+    "line": 14,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.wxml",
+    "line": 36,
+    "value": "热门打卡点"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.wxml",
+    "line": 37,
+    "value": "🔥 热门攻略"
+  },
+  {
+    "page": "allGuides",
+    "file": "allGuides/allGuides.wxml",
+    "line": 45,
+    "value": "专业摄影师实地踩点，为你整理最全拍摄攻略，附详细路线和样片参考。"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.js",
+    "line": 5,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.js",
+    "line": 8,
+    "value": "pageSize: 10"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.js",
+    "line": 18,
+    "value": "全部拍照系列"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.js",
+    "line": 20,
+    "value": "全部短视频系列"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.js",
+    "line": 30,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.js",
+    "line": 43,
+    "value": "加载中"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.js",
+    "line": 65,
+    "value": "加载失败"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.wxml",
+    "line": 10,
+    "value": "重置"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.wxml",
+    "line": 23,
+    "value": "查看详情 →"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.wxml",
+    "line": 39,
+    "value": "暂无系列"
+  },
+  {
+    "page": "allSeries",
+    "file": "allSeries/allSeries.wxml",
+    "line": 40,
+    "value": "即将呈现，敬请期待"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.js",
+    "line": 31,
+    "value": "limit: 100"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.js",
+    "line": 43,
+    "value": "打卡点加载失败"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.js",
+    "line": 47,
+    "value": "网络异常，请稍后重试"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 4,
+    "value": "长沙热门打卡点"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 5,
+    "value": "选一个心动地标，定格属于你的城市故事"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 7,
+    "value": "鹿小鸣"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 23,
+    "value": "加载失败"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 25,
+    "value": "重新加载"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 30,
+    "value": "暂无打卡点"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 31,
+    "value": "新的拍摄地正在整理中"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 32,
+    "value": "刷新看看"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 48,
+    "value": "适合拍摄写真、情侣照和短视频打卡。"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 57,
+    "value": "看系列"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 58,
+    "value": "看攻略"
+  },
+  {
+    "page": "allSpots",
+    "file": "allSpots/allSpots.wxml",
+    "line": 59,
+    "value": "立即预约"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.js",
+    "line": 34,
+    "value": "加载中"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.js",
+    "line": 74,
+    "value": "加载失败"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.js",
+    "line": 152,
+    "value": "请先选择套餐"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 6,
+    "value": "预约拍摄"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 19,
+    "value": "热门打卡点"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 27,
+    "value": "✓ 专业摄影师  ✓ 底片全送  ✓ 不满意重修"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 46,
+    "value": "全部"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 64,
+    "value": "多种风格可选"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 71,
+    "value": "暂无系列，请选择其他打卡点"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 84,
+    "value": "全部"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 102,
+    "value": "打卡点"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 104,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 105,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 121,
+    "value": "暂无热门套餐"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 130,
+    "value": "暂未选择套餐"
+  },
+  {
+    "page": "booking",
+    "file": "booking/booking.wxml",
+    "line": 132,
+    "value": "📸 立即预约"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 47,
+    "value": "加载中"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 69,
+    "value": "加载订单详情失败"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 117,
+    "value": "暂无打卡点"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 153,
+    "value": "加载中"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 171,
+    "value": "加载照片单品失败"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 177,
+    "value": "网络错误"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 245,
+    "value": "暂无样片可预览"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 274,
+    "value": "请至少选择一个照片单品"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 298,
+    "value": "已添加"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 301,
+    "value": "请选择一个套餐"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 328,
+    "value": "已添加"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 365,
+    "value": "预约须知"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 366,
+    "value": "1. 请提前1天预约。\\n2. 拍摄当天请准时到达。\\n3. 如遇天气原因可免费改期。\\n4. 底片将在拍摄后3个工作日内通过微信发送。"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 372,
+    "value": "请输入姓名"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 373,
+    "value": "手机号格式错误"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 374,
+    "value": "请选择日期"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 375,
+    "value": "请选择时间"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 376,
+    "value": "请同意预约须知"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 377,
+    "value": "请至少添加一个拍摄项目"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 401,
+    "value": "提交失败"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.js",
+    "line": 404,
+    "value": "网络异常"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 11,
+    "value": "删除项目"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 15,
+    "value": "+ 添加拍摄项目"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 18,
+    "value": "👤 联系人信息"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 19,
+    "value": "请输入您的姓名"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 20,
+    "value": "请输入手机号"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 24,
+    "value": "⏰ 拍摄时间"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 26,
+    "value": "请选择日期"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 29,
+    "value": "请选择具体时间"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 34,
+    "value": "💬 特殊需求（选填）"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 35,
+    "value": "如有特殊需求请说明"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 39,
+    "value": "💰 费用明细"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 45,
+    "value": "合计"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 55,
+    "value": "我已阅读并同意"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 56,
+    "value": "《预约须知》"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 60,
+    "value": "提交中..."
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 60,
+    "value": "📸 确认预约"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 69,
+    "value": "完成"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 107,
+    "value": "多种风格可选"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 114,
+    "value": "该打卡点暂无系列"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 122,
+    "value": "← 返回"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 136,
+    "value": "👁 预览"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 143,
+    "value": "该系列暂无照片单品"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 149,
+    "value": "📦 可选套餐"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 169,
+    "value": "打卡点"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 171,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 172,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 187,
+    "value": "该打卡点暂无热门套餐"
+  },
+  {
+    "page": "bookingInfo",
+    "file": "bookingInfo/bookingInfo.wxml",
+    "line": 206,
+    "value": "确认添加"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.js",
+    "line": 38,
+    "value": "已复制"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.js",
+    "line": 52,
+    "value": "请联系客服微信：xxxx"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 5,
+    "value": "预约提交成功！"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 6,
+    "value": "记录城市与你的故事"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 7,
+    "value": "客服将在10分钟内联系您确认"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 8,
+    "value": "请保持手机畅通"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 13,
+    "value": "预约信息"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 17,
+    "value": "预约编号"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 20,
+    "value": "复制"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 28,
+    "value": "拍摄套餐"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 34,
+    "value": "拍摄地点"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 40,
+    "value": "拍摄系列"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 46,
+    "value": "拍摄时间"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 52,
+    "value": "联系人"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 58,
+    "value": "手机号"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 64,
+    "value": "微信号"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 70,
+    "value": "特殊需求"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 77,
+    "value": "💬 联系客服"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 78,
+    "value": "📋 查看我的订单"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 79,
+    "value": "🏠 返回首页"
+  },
+  {
+    "page": "bookingSuccess",
+    "file": "bookingSuccess/bookingSuccess.wxml",
+    "line": 84,
+    "value": "💡 温馨提示"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 15,
+    "value": "readCount: 0"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 32,
+    "value": "加载中"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 41,
+    "value": "未找到真实攻略数据，使用模拟数据展示效果"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 48,
+    "value": "橘子洲避开人头的3个机位"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 51,
+    "value": "橘子洲头"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 52,
+    "value": "古风系列"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 55,
+    "value": "橘子洲是长沙必打卡的地标景点，但人流密集很难拍出干净的照片。这篇攻略将教你避开人头，找到3个宝藏机位，轻松拍出大片感。"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 56,
+    "value": "📍 机位一：毛爷爷雕像左侧\\n\\n这里是大多数人忽略的角度，站在雕像左侧的花坛边，以雕像侧面为背景，可以完美避开正面的人流。建议使用中长焦镜头，虚化背景突出人物。\\n\\n最佳时间：上午9点前，光线从侧面打过来，面部光影柔和。\\n\\n📍 机位二：江边观景台\\n\\n从观景台往西拍，可以避开人群，以湘江和对岸建筑为背景。这里特别适合拍古风和情侣系列，傍晚时分逆光拍摄效果最佳。\\n\\n最佳时间：下午4-6点，夕阳暖光。\\n\\n📍 机位三：橘子洲大桥下\\n\\n桥下的光影和结构非常适合极简风拍摄。利用桥墩的框架构图，可以拍出很有空间感的照片。这里人流量最少，适合慢慢创作。\\n\\n最佳时间：全天可用，阴天也有独特氛围。\\n\\n💡 小贴士：\\n1. 建议穿浅色系服装，在深色背景下更突出\\n2. 工作日前往人更少\\n3. 提前预约可以锁定心仪的时间段"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 57,
+    "value": "readCount: 1250"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 61,
+    "value": "6月20日更新"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 101,
+    "value": "加载攻略失败"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 102,
+    "value": "加载失败"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.js",
+    "line": 117,
+    "value": "加载相关攻略失败"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.wxml",
+    "line": 10,
+    "value": "热门打卡点"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.wxml",
+    "line": 11,
+    "value": "🔥 热门攻略"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.wxml",
+    "line": 23,
+    "value": "近期更新"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.wxml",
+    "line": 34,
+    "value": "暂未添加正文内容，请关注后续更新。"
+  },
+  {
+    "page": "guideDetail",
+    "file": "guideDetail/guideDetail.wxml",
+    "line": 40,
+    "value": "📖 相关攻略推荐"
+  },
+  {
+    "page": "index",
+    "file": "index/index.js",
+    "line": 30,
+    "value": "加载中"
+  },
+  {
+    "page": "index",
+    "file": "index/index.js",
+    "line": 56,
+    "value": "数据加载失败"
+  },
+  {
+    "page": "index",
+    "file": "index/index.js",
+    "line": 60,
+    "value": "网络异常"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 6,
+    "value": "鹿"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 8,
+    "value": "合作商家"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 9,
+    "value": "合作旅拍服务"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 13,
+    "value": "鹿小鸣旅拍"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 14,
+    "value": "长沙专业旅拍"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 50,
+    "value": "长沙地标"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 54,
+    "value": "定格心动"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 58,
+    "value": "当天出片"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 65,
+    "value": "📍 热门打卡点"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 75,
+    "value": "立即预约"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 81,
+    "value": "暂无热门打卡点"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 88,
+    "value": "✨ 特色专区"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 93,
+    "value": "摄影周边"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 94,
+    "value": "相册·打印·装裱·DIY"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 95,
+    "value": "去看看"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 99,
+    "value": "打卡攻略"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 100,
+    "value": "橘子洲·岳麓山"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 101,
+    "value": "去看看"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 105,
+    "value": "长沙故事"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 106,
+    "value": "老长沙·新网红"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 107,
+    "value": "去看看"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 115,
+    "value": "🔥 热门榜单"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 123,
+    "value": ">🏅 热度 {{item.hotScore ||"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 130,
+    "value": "系列 ›"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 131,
+    "value": "攻略 ›"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 132,
+    "value": "故事 ›"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 140,
+    "value": "暂无热门榜单"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 147,
+    "value": "🔥 套餐推荐"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 155,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 155,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 167,
+    "value": "暂无推荐套餐"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 174,
+    "value": "🛍️ 摄影周边"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 188,
+    "value": "暂无摄影周边"
+  },
+  {
+    "page": "index",
+    "file": "index/index.wxml",
+    "line": 194,
+    "value": "📸 立即预约拍照 / 短视频"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "记"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "录"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "城"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "市"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "与"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "你"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "的"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "故"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.js",
+    "line": 4,
+    "value": "事"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.wxml",
+    "line": 16,
+    "value": "鹿 小 鸣 旅 拍"
+  },
+  {
+    "page": "launch",
+    "file": "launch/launch.wxml",
+    "line": 17,
+    "value": "定 格 每 一 刻 的 心 动"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 5,
+    "value": "游客"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 15,
+    "value": "发送验证码"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 43,
+    "value": "游客"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 45,
+    "value": "超管"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 45,
+    "value": "🔴 管理员"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 46,
+    "value": "客服"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 46,
+    "value": "🔵 客服"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 47,
+    "value": "摄影师"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 47,
+    "value": "🟣 摄影师"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 48,
+    "value": "商家"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 48,
+    "value": "🟠 商家"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 59,
+    "value": "🟢 游客"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 64,
+    "value": "获取角色失败"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 65,
+    "value": "🟢 游客"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 78,
+    "value": "获取订单状态数量失败"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 98,
+    "value": "暂无优惠券"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 107,
+    "value": "预约须知"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 108,
+    "value": "1. 请提前1天预约，以便安排摄影师。\\n2. 拍摄当天请准时到达。\\n3. 如遇天气原因可免费改期。\\n4. 底片将在拍摄后3个工作日内通过微信发送。"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 115,
+    "value": "关于我们"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 116,
+    "value": "鹿小鸣·长沙旅拍，专注长沙本地旅拍服务。覆盖橘子洲、岳麓山、IFS等热门打卡点，提供拍照和短视频服务。"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 127,
+    "value": "客服调用失败"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 143,
+    "value": "发送验证码"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 160,
+    "value": "请输入正确手机号"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 164,
+    "value": "发送中..."
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 168,
+    "value": "验证码已发送"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 175,
+    "value": "重新发送"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 181,
+    "value": "发送失败"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 182,
+    "value": "发送验证码"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 185,
+    "value": "网络异常"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 186,
+    "value": "发送验证码"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 193,
+    "value": "请填写完整"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 196,
+    "value": "验证中"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 205,
+    "value": "验证失败"
+  },
+  {
+    "page": "my",
+    "file": "my/my.js",
+    "line": 209,
+    "value": "网络错误"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 9,
+    "value": "游客"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 12,
+    "value": "用镜头记录你的长沙之旅"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 20,
+    "value": "管理后台"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 29,
+    "value": "我的订单"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 30,
+    "value": "全部 ›"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 37,
+    "value": "待确认"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 44,
+    "value": "拍摄中"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 51,
+    "value": "修片中"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 58,
+    "value": "已完成"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 65,
+    "value": "常用服务"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 68,
+    "value": "📋 我的预约"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 72,
+    "value": "🎁 优惠券"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 78,
+    "value": "影像周边"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 83,
+    "value": "查看影像周边"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 84,
+    "value": "定制相册·照片打印·相框装裱·创意DIY"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 91,
+    "value": "服务帮助"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 94,
+    "value": "💬 联系客服"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 96,
+    "value": "🟢 在线"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 101,
+    "value": "📋 预约须知"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 105,
+    "value": "ℹ️ 关于我们"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 116,
+    "value": "身份验证"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 117,
+    "value": "手机号"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 119,
+    "value": "验证码"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 122,
+    "value": "验证进入"
+  },
+  {
+    "page": "my",
+    "file": "my/my.wxml",
+    "line": 123,
+    "value": "取消"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 6,
+    "value": "pageSize: 10"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 46,
+    "value": "加载失败"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 50,
+    "value": "网络异常"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 57,
+    "value": "待确认"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 58,
+    "value": "已确认"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 59,
+    "value": "拍摄中"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 60,
+    "value": "修片中"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 61,
+    "value": "已完成"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 62,
+    "value": "已取消"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 82,
+    "value": "确认取消"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 83,
+    "value": "确定要取消这个订单吗？取消后无法恢复。"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 84,
+    "value": "确定取消"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 85,
+    "value": "再想想"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 94,
+    "value": "订单已取消"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 98,
+    "value": "未知错误"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 99,
+    "value": "duration: 2500"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 100,
+    "value": "云函数返回错误："
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 104,
+    "value": "请求失败，请重试"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.js",
+    "line": 105,
+    "value": "调用云函数失败"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.wxml",
+    "line": 4,
+    "value": "全部"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.wxml",
+    "line": 5,
+    "value": "待确认"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.wxml",
+    "line": 6,
+    "value": "拍摄中"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.wxml",
+    "line": 7,
+    "value": "修片中"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.wxml",
+    "line": 8,
+    "value": "已完成"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.wxml",
+    "line": 31,
+    "value": "取消订单"
+  },
+  {
+    "page": "myOrders",
+    "file": "myOrders/myOrders.wxml",
+    "line": 39,
+    "value": "暂无相关订单"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 12,
+    "value": "📅 需提前1天预约"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 13,
+    "value": "⏰ 拍摄时长约1小时"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 14,
+    "value": "👗 服装套数1-2套"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 15,
+    "value": "📦 底片全送"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 16,
+    "value": "🌧️ 雨天可改期"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 17,
+    "value": "🔄 支持取消，详见规则"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 33,
+    "value": "加载中"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 49,
+    "value": "系列不存在"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 53,
+    "value": "加载失败"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.js",
+    "line": 82,
+    "value": "请先选择套餐"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 13,
+    "value": "待确认"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 18,
+    "value": "已接单"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 23,
+    "value": "拍摄中"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 28,
+    "value": "修片中"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 33,
+    "value": "已完成"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 41,
+    "value": "拍摄信息"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 42,
+    "value": "套餐"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 42,
+    "value": "><text>套餐</text><text class="
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 43,
+    "value": "打卡点"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 44,
+    "value": "系列"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 45,
+    "value": "时间"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 46,
+    "value": "类型"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 46,
+    "value": "><text>类型</text><text>{{order.type ==="
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 46,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 46,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 51,
+    "value": "联系信息"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 52,
+    "value": "姓名"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 53,
+    "value": "手机"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 54,
+    "value": "微信"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 59,
+    "value": "特殊需求"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 65,
+    "value": "📦 我的成片"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 71,
+    "value": "下载全部成片"
+  },
+  {
+    "page": "orderDetail",
+    "file": "orderDetail/orderDetail.wxml",
+    "line": 76,
+    "value": "📞 联系客服"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.js",
+    "line": 1,
+    "value": "PAGE_SIZE = 10"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.js",
+    "line": 31,
+    "value": "获取打卡点失败"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.js",
+    "line": 103,
+    "value": "获取套餐失败"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.js",
+    "line": 104,
+    "value": "加载失败"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 8,
+    "value": "全部"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 10,
+    "value": "拍照"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 12,
+    "value": "拍照"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 13,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 15,
+    "value": "短视频"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 17,
+    "value": "短视频"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 18,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 28,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 62,
+    "value": "短视频"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 63,
+    "value": "短视频"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 63,
+    "value": "🎬 视频"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 63,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 76,
+    "value": "/套"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 87,
+    "value": "加载中..."
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 88,
+    "value": "— 已加载全部套餐 —"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 89,
+    "value": "上拉加载更多"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 96,
+    "value": "暂无套餐"
+  },
+  {
+    "page": "packageList",
+    "file": "packageList/packageList.wxml",
+    "line": 102,
+    "value": "加载中..."
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.js",
+    "line": 10,
+    "value": "加载中"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.js",
+    "line": 21,
+    "value": "加载失败"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.wxml",
+    "line": 3,
+    "value": "摄影周边"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.wxml",
+    "line": 7,
+    "value": "全部"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.wxml",
+    "line": 8,
+    "value": "相册"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.wxml",
+    "line": 9,
+    "value": "打印"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.wxml",
+    "line": 10,
+    "value": "装裱"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.wxml",
+    "line": 23,
+    "value": "🔥热卖"
+  },
+  {
+    "page": "peripherals",
+    "file": "peripherals/peripherals.wxml",
+    "line": 27,
+    "value": "暂无相关周边"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.js",
+    "line": 16,
+    "value": "缺少系列ID"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.js",
+    "line": 22,
+    "value": "加载中"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.js",
+    "line": 32,
+    "value": "系列不存在"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.js",
+    "line": 49,
+    "value": "系列不存在"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.js",
+    "line": 53,
+    "value": "❌ 加载照片单品失败"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.js",
+    "line": 55,
+    "value": "加载失败"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 27,
+    "value": "⭐ 主推套餐"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 34,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 35,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 45,
+    "value": "立即抢购"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 50,
+    "value": "更多主推套餐敬请期待"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 54,
+    "value": "🔥 套餐推荐"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 61,
+    "value": "🎬 视频"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 61,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 78,
+    "value": "更多套餐敬请期待"
+  },
+  {
+    "page": "photoCollection",
+    "file": "photoCollection/photoCollection.wxml",
+    "line": 110,
+    "value": "暂无照片单品，敬请期待"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 20,
+    "value": "建议提前 1 天预约，方便为你锁定拍摄时段"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 21,
+    "value": "拍摄当天请准时到达，客服会提前确认集合信息"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 22,
+    "value": "如遇天气原因，可联系客服免费改期"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 23,
+    "value": "成片将通过微信发送给你，不提供小程序内下载入口"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 43,
+    "value": "缺少系列ID"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 59,
+    "value": "系列加载失败"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 87,
+    "value": "网络异常，请稍后重试"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 127,
+    "value": "暂无样片可预览"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.js",
+    "line": 148,
+    "value": "请先选择套餐"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 10,
+    "value": "加载失败"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 12,
+    "value": "重新加载"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 34,
+    "value": "起"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 39,
+    "value": "适用打卡点"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 53,
+    "value": "照片单品"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 54,
+    "value": "独立商品，可单独预约购买"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 56,
+    "value": "样片"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 68,
+    "value": "立即预约"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 74,
+    "value": "该系列暂无照片单品"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 80,
+    "value": "套餐选择"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 81,
+    "value": "主推套餐跨打卡点展示，本打卡点套餐仅展示当前地点"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 83,
+    "value": "优惠"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 87,
+    "value": "🔥 主推套餐"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 94,
+    "value": "主推"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 99,
+    "value": "适合想快速锁定热门服务的客人"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 112,
+    "value": "📍 本打卡点套餐"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 123,
+    "value": "仅适用于当前打卡点"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 133,
+    "value": "暂无可预约套餐"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 137,
+    "value": "样片预览"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 146,
+    "value": "拍摄说明"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 155,
+    "value": "选择套餐后预约"
+  },
+  {
+    "page": "seriesDetail",
+    "file": "seriesDetail/seriesDetail.wxml",
+    "line": 157,
+    "value": "立即预约"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 5,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 6,
+    "value": "全部系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 8,
+    "value": "全部"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 9,
+    "value": "📷 拍照"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 10,
+    "value": "🎬 短视频"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 25,
+    "value": "加载中"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 54,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 55,
+    "value": "全部系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 61,
+    "value": "加载失败"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 101,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 115,
+    "value": "全部系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 125,
+    "value": "全部打卡点"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.js",
+    "line": 126,
+    "value": "全部系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 22,
+    "value": "重置"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 30,
+    "value": "📷 拍照系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 50,
+    "value": "查看详情 →"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 58,
+    "value": "暂无拍照系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 59,
+    "value": "即将呈现，敬请期待"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 63,
+    "value": "查看全部拍照系列 →"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 77,
+    "value": "🎬 短视频系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 97,
+    "value": "查看详情 →"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 105,
+    "value": "暂无短视频系列"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 106,
+    "value": "即将呈现，敬请期待"
+  },
+  {
+    "page": "seriesList",
+    "file": "seriesList/seriesList.wxml",
+    "line": 110,
+    "value": "查看全部短视频系列 →"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 18,
+    "value": "加载中"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 27,
+    "value": "老长沙的烟火气"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 28,
+    "value": "📍 太平街"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 30,
+    "value": "太"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 31,
+    "value": "平街是长沙保存最完整的老街，每一块青石板都记录着这座城市的历史。这里不仅有美食，更有藏在巷子里的故事。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 32,
+    "value": "清晨的太平街，还带着昨晚宵夜的余温。石板路被岁月打磨得光滑，映着晨光。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 33,
+    "value": "巷子深处，老茶馆的竹椅还在吱呀作响，茶香混着长沙话的喧闹，构成了这座城市最真实的底色。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 34,
+    "value": "💡 拍摄灵感：清晨6:00-8:00光线最柔和，石板路映着晨光，适合拍出有温度的人文照片。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 35,
+    "value": "📍 太平街 · 古风系列\\n🎨 推荐套餐：古风单人写真 ¥399"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 40,
+    "value": "人文"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 41,
+    "value": "街拍"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 42,
+    "value": "夜景"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 43,
+    "value": "古风"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 44,
+    "value": "小清新"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 50,
+    "value": "一座城的网红基因"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 51,
+    "value": "📍 IFS国金中心"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 53,
+    "value": "从"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 54,
+    "value": "IFS的巨型KAWS雕塑到谢子龙影像馆的极简建筑，长沙的每一处网红地标都藏着这座城市的新潮基因。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 55,
+    "value": "年轻人在IFS天台排着长队，只为和那两只公仔合一张影。他们说，这是长沙的新名片。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 56,
+    "value": "永远年轻，永远热泪盈眶。这是属于这一代人的长沙记忆。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 57,
+    "value": "💡 拍摄灵感：IFS天台下午4点光线最佳，谢子龙影像馆上午人少适合极简风创作。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 58,
+    "value": "📍 IFS国金中心 · 短视频系列\\n🎨 推荐套餐：短视频打卡 ¥599"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 63,
+    "value": "潮流"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 64,
+    "value": "短视频"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 70,
+    "value": "湘江边的晨昏光影"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 71,
+    "value": "📍 橘子洲头"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 73,
+    "value": "湘"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 74,
+    "value": "江的水，日夜流淌。清晨的薄雾中，橘子洲若隐若现；傍晚的霞光里，对岸的天际线被染成金色。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 75,
+    "value": "有人说，长沙最美的时刻在早晨六点和傍晚六点。那个时候，光线会穿过江面，在城市上空画出最美的弧线。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 76,
+    "value": "光线穿过江面，在城市上空画出最美的弧线。这是属于长沙的晨昏。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 77,
+    "value": "💡 拍摄灵感：早晨6点和傍晚6点是光线最美的时刻，建议提前到达机位等待。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 78,
+    "value": "📍 橘子洲头 · 古风系列\\n🎨 推荐套餐：古风单人写真 ¥399"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 83,
+    "value": "晨光"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 84,
+    "value": "黄昏"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 128,
+    "value": "加载故事失败"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.js",
+    "line": 129,
+    "value": "加载失败"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 5,
+    "value": "📖 长沙故事"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 12,
+    "value": "📍 长沙"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 19,
+    "value": "📍 长沙"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 24,
+    "value": "长"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 25,
+    "value": "沙故事，从这里开始。"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 52,
+    "value": "📸 同款样片"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 55,
+    "value": "样片"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 70,
+    "value": "📚 翻开其他故事"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 89,
+    "value": "📸 记录你的故事"
+  },
+  {
+    "page": "stories",
+    "file": "stories/stories.wxml",
+    "line": 90,
+    "value": "记录城市与你的故事"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 15,
+    "value": "readCount: 0"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 31,
+    "value": "加载中"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 40,
+    "value": "未找到真实故事数据，使用模拟数据"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 47,
+    "value": "老长沙的烟火气"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 48,
+    "value": "藏在太平街的青石板路上"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 49,
+    "value": "🏷️ 老长沙 · 人文故事"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 50,
+    "value": "太平街"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 51,
+    "value": "古风系列 · 人文系列"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 56,
+    "value": "readCount: 856"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 57,
+    "value": "太平街是长沙保存最完整的老街，每一块青石板都记录着这座城市的历史。这里不仅有美食，更有藏在巷子里的故事。\\n\\n清晨的太平街，还带着昨晚宵夜的余温。石板路被岁月打磨得光滑，映着晨光。\\n\\n阿婆的臭豆腐摊冒着热气，那是老街人最熟悉的味道。她说，这条街上，每块石板都有故事。\\n\\n巷子深处，老茶馆的竹椅还在吱呀作响，茶香混着长沙话的喧闹，构成了这座城市最真实的底色。\\n\\n夜幕降临，太平街的灯笼亮起，红色的光照在青石板上，整条街都变得温柔起来。这是属于长沙的夜晚，属于每一个来过这里的人。"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 76,
+    "value": "人文故事"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 77,
+    "value": "长沙"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 92,
+    "value": "加载故事失败"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.js",
+    "line": 93,
+    "value": "加载失败"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.wxml",
+    "line": 6,
+    "value": "返回"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.wxml",
+    "line": 24,
+    "value": "长沙"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.wxml",
+    "line": 29,
+    "value": "人文故事"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.wxml",
+    "line": 47,
+    "value": "长沙"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.wxml",
+    "line": 51,
+    "value": "记录城市与你的故事"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.wxml",
+    "line": 58,
+    "value": "✦ 预约拍摄 ✦"
+  },
+  {
+    "page": "storyDetail",
+    "file": "storyDetail/storyDetail.wxml",
+    "line": 59,
+    "value": "记录城市与你的故事"
+  }
+]

@@ -1,0 +1,112 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">拍摄风格</span>
+      <h3 class="lxm-page-head__title">拍摄风格（分类）</h3>
+      <p class="lxm-page-head__desc">拍摄风格是<b>分类标签</b>，不是独立内容。维护古装 / 胶片 / 现代等取值，供「照片单品」「短视频」「套餐」在各自页面下拉选择。小程序按此风格做入口与筛选。</p>
+    </div>
+    <div class="lxm-page-head__actions">
+      <el-button plain @click="openContentLogs('拍摄风格')">操作日志</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openSeries()">新增拍摄风格</el-button>
+    </div>
+  </header>
+
+  <div class="lxm-kpi-grid">
+    <div class="lxm-kpi"><span class="lxm-kpi__label">风格总数</span><strong class="lxm-kpi__value">{{ data.series.length }}</strong><span class="lxm-kpi__hint">分类取值</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">热推</span><strong class="lxm-kpi__value">{{ data.series.filter(s => s.isHot).length }}</strong><span class="lxm-kpi__hint">标记优先展示</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">短视频类</span><strong class="lxm-kpi__value">{{ data.series.filter(s => s.productType === 'video').length }}</strong><span class="lxm-kpi__hint">用于短视频</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">拍照类</span><strong class="lxm-kpi__value">{{ data.series.filter(s => s.productType !== 'video').length }}</strong><span class="lxm-kpi__hint">用于照片</span></div>
+  </div>
+
+  <div class="lxm-toolbar">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索拍摄风格名称 / 风格" />
+    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
+      <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+    <el-button @click="clearContentFilters">重置</el-button>
+  </div>
+
+  <div class="lxm-cards" v-if="data.series.filter(s => !s.deleted).length">
+    <article v-for="item in data.series.filter(s => !s.deleted && (!state.filters.keyword || (s.name || '').toLowerCase().includes(state.filters.keyword.toLowerCase()) || (s.style || '').includes(state.filters.keyword)) && (!state.filters.contentSpotId || !item.spotId || item.spotId === state.filters.contentSpotId || (item.spotIds && item.spotIds.includes(state.filters.contentSpotId))) )" :key="item.id" class="lxm-card">
+      <div class="lxm-card__cover">
+        <img :src="item.cover" />
+        <span v-if="item.isHot" class="lxm-card__badge lxm-card__badge--hot">热推</span>
+        <span class="lxm-card__badge" :class="item.productType === 'video' ? 'lxm-card__badge--video' : ''">{{ item.productType === 'video' ? '短视频' : '拍照' }}</span>
+      </div>
+      <div class="lxm-card__body">
+        <h4 class="lxm-card__title">{{ item.name }}</h4>
+        <div class="lxm-card__meta">
+          <span>{{ item.style || '未设风格' }}</span>
+          <span>{{ spotName(item.spotId) }}</span>
+          <span :class="(item.status || '启用') === '停用' ? 'is-off' : ''">{{ item.status || '启用' }}</span>
+        </div>
+        <div class="lxm-card__tags" v-if="item.intro">
+          <span class="lxm-pill lxm-pill--muted">{{ item.intro }}</span>
+        </div>
+      </div>
+      <div class="lxm-card__actions">
+        <el-button link type="primary" v-if="can('contentEdit')" @click="openSeries(item)">编辑</el-button>
+        <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteSeries(item)">删除</el-button>
+        <el-button link @click="openContentLogs('拍摄风格')">日志</el-button>
+      </div>
+    </article>
+  </div>
+  <div v-else class="lxm-empty-inline">
+    <strong>暂无拍摄风格</strong>
+    <span>先新增一个风格取值（如古装 / 胶片 / 现代），再在照片单品、短视频页面选择。</span>
+    <el-button type="primary" v-if="can('contentEdit')" @click="openSeries()">新增拍摄风格</el-button>
+  </div>
+
+  <el-dialog v-model="state.seriesDialog" :title="(state.seriesForm && state.seriesForm.id && data.series.find(s => s.id === state.seriesForm.id)) ? '编辑拍摄风格' : '新增拍摄风格'" width="620px" destroy-on-close>
+    <div v-if="state.seriesForm" class="lxm-form">
+      <div class="lxm-form__row">
+        <label>风格名称</label>
+        <el-input v-model="state.seriesForm.name" placeholder="如：复古胶片、新中式" />
+      </div>
+      <div class="lxm-form__row lxm-form__row--split">
+        <div>
+          <label>风格类型</label>
+          <el-input v-model="state.seriesForm.style" placeholder="如：胶片 / 古装 / 街拍" />
+        </div>
+        <div>
+          <label>归属</label>
+          <el-select v-model="state.seriesForm.productType" style="width:100%">
+            <el-option label="拍照" value="photo" />
+            <el-option label="短视频" value="video" />
+          </el-select>
+        </div>
+      </div>
+      <div class="lxm-form__row">
+        <label>关联打卡点</label>
+        <el-select v-model="state.seriesForm.spotId" filterable placeholder="选择打卡点" style="width:100%">
+          <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+        </el-select>
+      </div>
+      <div class="lxm-form__row">
+        <label>封面图</label>
+        <el-input v-model="state.seriesForm.cover" placeholder="封面图 URL（留空将用占位图）" />
+      </div>
+      <div class="lxm-form__row">
+        <label>简介</label>
+        <el-input v-model="state.seriesForm.intro" type="textarea" :rows="2" placeholder="风格说明" />
+      </div>
+      <div class="lxm-form__row lxm-form__row--split">
+        <div>
+          <label>状态</label>
+          <el-select v-model="state.seriesForm.status" style="width:100%">
+            <el-option label="启用" value="启用" />
+            <el-option label="停用" value="停用" />
+          </el-select>
+        </div>
+        <div>
+          <label>热推</label>
+          <el-switch v-model="state.seriesForm.isHot" />
+        </div>
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="state.seriesDialog = false">取消</el-button>
+      <el-button type="primary" @click="saveSeries">保存</el-button>
+    </template>
+  </el-dialog>
+</div>

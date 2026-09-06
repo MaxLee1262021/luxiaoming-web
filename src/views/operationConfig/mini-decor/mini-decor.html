@@ -1,0 +1,415 @@
+<div class="lxm-page">
+  <header class="lxm-page-head">
+    <div>
+      <span class="lxm-eyebrow">小程序装修</span>
+      <h3 class="lxm-page-head__title">小程序首页装修配置</h3>
+      <p class="lxm-page-head__desc">这里配置游客扫码打开小程序看到的首页。改完点「保存并同步小程序」，云端模式下游客端立即生效：轮播、板块开关、活动公告、推荐位、快捷入口都会同步更新。</p>
+    </div>
+    <div class="lxm-page-head__actions">
+      <el-button plain @click="miniPreviewReset">回到首页</el-button>
+      <el-button plain v-if="can('contentEdit')" @click="uploadHomeMaterial">上传轮播素材</el-button>
+      <el-button plain v-if="can('contentEdit')" @click="exportHomeConfigJson">导出配置</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="saveHomeConfig">保存并同步小程序</el-button>
+    </div>
+  </header>
+
+  <div class="decor-workbench">
+    <!-- 左栏：导航 / 板块开关 / 快捷入口 -->
+    <aside class="decor-panel decor-panel-left">
+      <div class="decor-panel-head">
+        <strong>页面预览导航</strong><span>模拟小程序跳转链路</span>
+      </div>
+      <div class="decor-page-list">
+        <button v-for="p in miniPreviewPages" :key="p.key" :class="{active: state.miniPreviewPage === p.key}" @click="miniPreviewGo(p.key)">
+          <strong>{{ p.label }}</strong><em>{{ p.desc }}</em>
+        </button>
+      </div>
+
+      <div class="decor-panel-head compact">
+        <strong>首页板块显隐</strong><span>后台控制小程序首页各区块</span>
+      </div>
+      <div class="decor-module-list">
+        <button v-for="m in homeModuleOptions" :key="m.key" :class="{active: (state.homeConfig.enabledModules || []).includes(m.key)}" @click="toggleHomeModule(m.key)">
+          <strong>{{ m.label }}</strong><em>{{ m.desc }}</em>
+        </button>
+      </div>
+
+      <div class="decor-panel-head compact">
+        <strong>首页快捷入口</strong><span>相当于可配置的小程序导航</span>
+      </div>
+      <div class="quicknav-edit">
+        <div v-if="!state.homeConfig.quickNav || !state.homeConfig.quickNav.length" class="quicknav-empty">
+          尚未添加快捷入口，从下方选择添加
+        </div>
+        <div v-for="(q, qi) in (state.homeConfig.quickNav || [])" :key="qi" class="quicknav-row">
+          <span class="quicknav-icon">{{ q.icon }}</span>
+          <el-input :value="q.label" size="small" @input="(v) => updateQuickNavLabel(qi, v)" />
+          <button class="qn-btn" @click="moveQuickNav(qi, -1)" :disabled="qi === 0">↑</button>
+          <button class="qn-btn" @click="moveQuickNav(qi, 1)" :disabled="qi === (state.homeConfig.quickNav.length - 1)">↓</button>
+          <button class="qn-btn danger" @click="removeQuickNav(qi)">✕</button>
+        </div>
+        <div class="quicknav-presets">
+          <button v-for="p in quickNavPresets" :key="p.targetType" class="preset-btn" @click="addQuickNav(p.targetType)">+ {{ p.label }}</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中栏：表单 -->
+    <main class="decor-panel decor-content">
+      <div class="decor-panel-head">
+        <strong>基础文案</strong><span>首页顶部展示文案</span>
+      </div>
+      <div class="decor-form wide-form">
+        <label><span>城市名称</span><el-input v-model="state.homeConfig.cityName" /></label>
+        <label><span>服务标识</span><el-input v-model="state.homeConfig.shopServiceText" /></label>
+        <label><span>首页主标题</span><el-input v-model="state.homeConfig.activity" /></label>
+        <label><span>首页副标题</span><el-input v-model="state.homeConfig.heroSubtitle" /></label>
+        <label><span>预约人数</span><el-input-number v-model="state.homeConfig.trustOrders" :min="0" /></label>
+        <label><span>好评率</span><el-input v-model="state.homeConfig.trustRate" /></label>
+        <label class="wide"><span>活动公告</span><el-input v-model="state.homeConfig.notice" type="textarea" :rows="2" /></label>
+      </div>
+
+      <div class="decor-panel-head compact">
+        <strong>首页轮播</strong><span>最多 6 张，来自样片素材</span>
+      </div>
+      <div class="decor-material-grid">
+        <button v-for="s in publicMiniPreview.samples.slice(0, 12)" :key="s.id" :class="{active: (state.homeConfig.carouselIds || []).includes(s.id)}" @click="toggleHomeSelection('carouselIds', s.id, 6)">
+          <img :src="s.url" /><span>{{ s.name }}</span>
+        </button>
+      </div>
+
+      <!-- 首页 Banner（高级图文轮播）：与「样片快速选」「探索页轮播」均独立，支持封面/视频+标题+生效时间+跳转 -->
+      <div class="decor-panel-head compact">
+        <strong>首页 Banner（高级图文）</strong><span>完整控制首页顶部 Banner，与样片快速选并存可择一</span>
+      </div>
+      <div class="explore-banner-editor home-banner-editor">
+        <div v-for="(b, bi) in (state.homeConfig.homeBanners || [])" :key="b._id" class="eb-item">
+          <div class="eb-media">
+            <img v-if="b.type !== 'video' && b.url" :src="b.url" class="eb-thumb" />
+            <video v-else-if="b.type === 'video' && b.url" :src="b.url" class="eb-thumb" controls></video>
+            <div v-else class="eb-thumb eb-thumb--empty">未设素材</div>
+            <div class="eb-media-actions">
+              <button @click="uploadHomeBannerMedia(bi, 'image')">传图</button>
+              <button @click="uploadHomeBannerMedia(bi, 'video')">传视频</button>
+            </div>
+          </div>
+          <div class="eb-fields">
+            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" /></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" /></label>
+            <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在 Banner 上的文案" /></label>
+            <label class="eb-row"><span>生效时间</span><el-date-picker v-model="b.effectiveTime" type="datetime" placeholder="留空=立即生效" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" style="width:100%" /></label>
+            <label class="eb-row"><span>跳转类型</span>
+              <el-select v-model="b.targetType" placeholder="选择跳转">
+                <el-option v-for="p in homeBannerJumpPresets" :key="p.value" :label="p.label" :value="p.value" />
+              </el-select>
+            </label>
+            <label v-if="b.targetType === 'link'" class="eb-row"><span>链接地址</span><el-input v-model="b.linkUrl" placeholder="https://..." /></label>
+            <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" /></label>
+          </div>
+          <div class="eb-tools">
+            <button @click="moveHomeBanner(bi, -1)" :disabled="bi === 0">↑</button>
+            <button @click="moveHomeBanner(bi, 1)" :disabled="bi === (state.homeConfig.homeBanners.length - 1)">↓</button>
+            <button class="eb-del" @click="removeHomeBanner(bi)">删除</button>
+          </div>
+        </div>
+        <button class="eb-add" @click="addHomeBanner">+ 添加首页 Banner</button>
+        <p v-if="!state.homeConfig.homeBanners || !state.homeConfig.homeBanners.length" class="eb-empty">尚未配置，游客端首页顶部将显示「样片快速选」轮播（如有）或品牌兜底。</p>
+      </div>
+
+      <!-- 探索页轮播：与首页轮播「单独一套」，后台独立配置（不共用） -->
+      <div class="decor-panel-head compact">
+        <strong>探索页轮播</strong><span>最多 6 张，与首页轮播独立配置（不共用）</span>
+      </div>
+      <div class="explore-banner-editor">
+        <div v-for="(b, bi) in (state.homeConfig.exploreBanners || [])" :key="b._id" class="eb-item">
+          <div class="eb-media">
+            <img v-if="b.type !== 'video' && b.url" :src="b.url" class="eb-thumb" />
+            <video v-else-if="b.type === 'video' && b.url" :src="b.url" class="eb-thumb" controls></video>
+            <div v-else class="eb-thumb eb-thumb--empty">未设素材</div>
+            <div class="eb-media-actions">
+              <button @click="uploadExploreBannerMedia(bi, 'image')">传图</button>
+              <button @click="uploadExploreBannerMedia(bi, 'video')">传视频</button>
+            </div>
+          </div>
+          <div class="eb-fields">
+            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" /></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" /></label>
+            <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在轮播上的文案" /></label>
+            <label class="eb-row"><span>跳转类型</span>
+              <el-select v-model="b.targetType" placeholder="选择跳转">
+                <el-option v-for="p in exploreBannerJumpPresets" :key="p.value" :label="p.label" :value="p.value" />
+              </el-select>
+            </label>
+            <label v-if="b.targetType === 'link'" class="eb-row"><span>链接地址</span><el-input v-model="b.linkUrl" placeholder="https://..." /></label>
+            <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" /></label>
+          </div>
+          <div class="eb-tools">
+            <button @click="moveExploreBanner(bi, -1)" :disabled="bi === 0">↑</button>
+            <button @click="moveExploreBanner(bi, 1)" :disabled="bi === (state.homeConfig.exploreBanners.length - 1)">↓</button>
+            <button class="eb-del" @click="removeExploreBanner(bi)">删除</button>
+          </div>
+        </div>
+        <button class="eb-add" @click="addExploreBanner">+ 添加探索页轮播</button>
+        <p v-if="!state.homeConfig.exploreBanners || !state.homeConfig.exploreBanners.length" class="eb-empty">尚未配置，游客端探索页将显示默认品牌文案。</p>
+      </div>
+
+      <div class="decor-panel-head compact">
+        <strong>首页推荐位</strong><span>决定首页各区块优先展示哪些商品</span>
+      </div>
+      <div class="decor-pick-grid compact-picks">
+        <section>
+          <h4>主推套餐</h4>
+          <div class="decor-choice-list">
+            <button v-for="p in publicMiniPreview.packages" :key="p.id" :class="{active: (state.homeConfig.featuredPackageIds || []).includes(p.id) || p.isMainPush}" @click="toggleHomeSelection('featuredPackageIds', p.id, 4)">
+              <span>{{ p.name }}</span><em>{{ money(p.specialPrice || p.price) }}</em>
+            </button>
+          </div>
+        </section>
+        <section>
+          <h4>照片单品</h4>
+          <div class="decor-choice-list">
+            <button v-for="a in publicMiniPreview.albums" :key="a.id" :class="{active: (state.homeConfig.featuredAlbumIds || []).includes(a.id)}" @click="toggleHomeSelection('featuredAlbumIds', a.id, 4)">
+              <span>{{ a.name }}</span><em>{{ money(a.price) }}</em>
+            </button>
+          </div>
+        </section>
+        <section>
+          <h4>摄影周边</h4>
+          <div class="decor-choice-list">
+            <button v-for="p in publicMiniPreview.peripherals" :key="p.id" :class="{active: (state.homeConfig.featuredPeripheralIds || []).includes(p.id)}" @click="toggleHomeSelection('featuredPeripheralIds', p.id, 4)">
+              <span>{{ p.name }}</span><em>{{ money(p.price) }}</em>
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div class="decor-panel-head compact">
+        <strong>页面级模块配置</strong><span>控制各页面展示区块与关联商品</span>
+      </div>
+      <div class="page-config-tabs">
+        <button v-for="page in pageConfigPages" :key="page.key" :class="{active: state.pageConfigActive === page.key}" @click="selectPageConfig(page.key)">
+          <strong>{{ page.label }}</strong><em>{{ page.desc }}</em>
+        </button>
+      </div>
+      <div class="page-config-card">
+        <div class="page-config-title">
+          <div><strong>{{ activePageConfigMeta.label }}</strong><span>{{ activePageConfigMeta.desc }}</span></div>
+          <el-input v-model="activePageConfig.title" placeholder="页面运营标题" />
+        </div>
+        <div class="page-module-switches">
+          <button v-for="m in activePageModuleOptions" :key="m.key" :class="{active: (activePageConfig.enabledModules || []).includes(m.key)}" @click="togglePageModule(m.key)">{{ m.label }}</button>
+        </div>
+
+        <!-- 全部打卡点页专属：后台可配的筛选标签 / 排序选项（小程序端 allSpots 已支持读取并回退默认值） -->
+        <div v-if="activePageConfigMeta.key === 'spotList'" class="spot-filters-editor">
+          <div class="sf-group">
+            <div class="sf-group-head">
+              <strong>筛选标签</strong>
+              <span class="sf-hint">显示名=客人看到的文字；匹配词=value，需能命中打卡点名称/描述/标签（如"古风"要能匹配到打了古风标签的打卡点）</span>
+              <button class="sf-add" @click="addSpotCategory">+ 添加标签</button>
+            </div>
+            <div v-for="(c, ci) in (activePageConfig.categories || [])" :key="ci" class="sf-row">
+              <el-input v-model="c.name" placeholder="显示名，如 古风写真" />
+              <el-input v-model="c.value" placeholder="匹配词，如 古风" />
+              <button class="sf-del" @click="removeSpotCategory(ci)" :disabled="ci === 0">删除</button>
+            </div>
+            <div v-if="!(activePageConfig.categories || []).length" class="sf-empty">暂无标签，点"添加标签"新增</div>
+          </div>
+
+          <div class="sf-group">
+            <div class="sf-group-head">
+              <strong>排序选项</strong>
+              <span class="sf-hint">显示名可改；匹配词=value 固定为 hot（热门）/ new（最新）/ name（名称），请勿改成其它值</span>
+              <button class="sf-add" @click="addSpotSort">+ 添加排序</button>
+            </div>
+            <div v-for="(s, si) in (activePageConfig.sortOptions || [])" :key="si" class="sf-row">
+              <el-input v-model="s.name" placeholder="显示名，如 热门优先" />
+              <el-input v-model="s.value" placeholder="hot / new / name" />
+              <button class="sf-del" @click="removeSpotSort(si)">删除</button>
+            </div>
+            <div v-if="!(activePageConfig.sortOptions || []).length" class="sf-empty">暂无排序，点"添加排序"新增</div>
+          </div>
+        </div>
+      </div>
+      <div class="decor-pick-grid page-relation-grid">
+        <section v-for="group in activePageRelationGroups" :key="group.field">
+          <h4>{{ group.title }}</h4>
+          <div class="decor-choice-list">
+            <button v-for="item in group.rows.slice(0, 12)" :key="item.id" :class="{active: (activePageConfig[group.field] || []).includes(item.id)}" @click="togglePageRelation(group.field, item.id, group.limit)">
+              <span>{{ item.name || item.title }}</span>
+              <em>{{ group.price ? money(item.specialPrice || item.price || 0) : (item.tag || item.status || '可配置') }}</em>
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- 右栏：手机仿真预览 -->
+    <aside class="decor-phone-wrap">
+      <div class="decor-phone">
+        <div class="phone-status"></div>
+        <div class="phone-nav">
+          <button @click="miniPreviewBack">‹</button>
+          <strong>{{ miniPreviewCurrentPage.label }}</strong>
+          <button @click="miniPreviewReset">⌂</button>
+        </div>
+
+        <div v-if="state.miniPreviewPage === 'home'" class="phone-screen">
+          <div class="phone-head">{{ state.homeConfig.cityName }} · {{ state.homeConfig.shopServiceText }}</div>
+          <div class="phone-hero" @click="miniPreviewGo('packageList')">
+            <img v-if="firstHomeBanner() && firstHomeBanner().url" :src="firstHomeBanner().url" />
+            <img v-else-if="homePreview.carousel[0]" :src="homePreview.carousel[0].url" />
+            <div><strong>{{ state.homeConfig.activity }}</strong><span>{{ state.homeConfig.heroSubtitle }}</span></div>
+          </div>
+          <div class="phone-trust"><span>{{ state.homeConfig.trustOrders }}+ 人预约</span><span>{{ state.homeConfig.trustRate }} 好评</span></div>
+          <div class="phone-notice">{{ state.homeConfig.notice }}</div>
+
+          <!-- 首页快捷入口（后台可配置的"导航"） -->
+          <div v-if="state.homeConfig.quickNav && state.homeConfig.quickNav.length" class="phone-quicknav">
+            <button v-for="(q, qi) in state.homeConfig.quickNav" :key="qi" class="phone-quicknav-item" @click="miniPreviewGo(quickNavPreviewPage(q))">
+              <span>{{ q.icon }}</span>{{ q.label }}
+            </button>
+          </div>
+
+          <div v-if="homePreview.has('mainPush')" class="phone-module">
+            <div class="phone-module-title">主推套餐</div>
+            <div class="phone-package" v-for="p in homePreview.packages" :key="p.id" @click="miniPreviewGo('packageDetail', p.id)">
+              <img :src="p.cover" />
+              <div><strong>{{ p.name }}</strong><span>{{ (p.serviceTags || []).slice(0, 3).join(' · ') }}</span><em>{{ money(p.specialPrice || p.price) }}</em></div>
+            </div>
+          </div>
+          <div v-if="homePreview.has('spots')" class="phone-module">
+            <div class="phone-module-title">热门打卡点</div>
+            <div class="phone-spot-row">
+              <div v-for="s in homePreview.spots" :key="s.id" @click="miniPreviewGo('seriesList', s.id)"><img :src="s.cover" /><span>{{ s.name }}</span></div>
+            </div>
+          </div>
+          <div v-if="homePreview.has('albums')" class="phone-module">
+            <div class="phone-module-title">照片单品</div>
+            <div class="phone-album-grid">
+              <div v-for="a in homePreview.albums" :key="a.id" @click="miniPreviewGo('albumDetail', a.id)"><img :src="a.cover" /><strong>{{ a.name }}</strong><span>{{ money(a.price) }}</span></div>
+            </div>
+          </div>
+          <div v-if="homePreview.has('peripherals')" class="phone-module">
+            <div class="phone-module-title">摄影周边</div>
+            <div class="phone-peripheral" v-for="p in homePreview.peripherals" :key="p.id" @click="miniPreviewGo('peripherals')">
+              <img :src="p.cover" /><span>{{ p.name }}</span><em>{{ money(p.price) }}</em>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'packageList'" class="phone-screen">
+          <div class="phone-tabs"><button class="active">全部套餐</button><button>主推</button><button>拍照</button><button>短视频</button></div>
+          <div class="phone-package" v-for="p in publicMiniPreview.packages.slice(0, 6)" :key="p.id" @click="miniPreviewGo('packageDetail', p.id)">
+            <img :src="p.cover" />
+            <div><strong>{{ p.name }}</strong><span>{{ (p.serviceTags || []).slice(0, 3).join(' · ') }}</span><em>{{ money(p.specialPrice || p.price) }}</em></div>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'packageDetail'" class="phone-screen">
+          <div class="detail-cover"><img :src="miniPreviewCurrentPackage.cover" /></div>
+          <div class="detail-card">
+            <h3>{{ miniPreviewCurrentPackage.name }}</h3>
+            <p>{{ (miniPreviewCurrentPackage.serviceTags || []).join(' · ') }}</p>
+            <strong>{{ money(miniPreviewCurrentPackage.specialPrice || miniPreviewCurrentPackage.price) }}</strong>
+            <div class="tag-row"><span v-for="t in (miniPreviewCurrentPackage.serviceTags || []).slice(0, 5)" :key="t">{{ t }}</span></div>
+            <button @click="miniPreviewGo('booking', miniPreviewCurrentPackage.id)">立即预约</button>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'spotList'" class="phone-screen">
+          <div class="phone-module-title">长沙打卡点</div>
+          <div class="phone-large-card" v-for="s in publicMiniPreview.spots" :key="s.id" @click="miniPreviewGo('seriesList', s.id)">
+            <img :src="s.cover" />
+            <div><strong>{{ s.name }}</strong><span>{{ s.location }} · 热度 {{ s.hotScore }}</span></div>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'seriesList'" class="phone-screen">
+          <div class="phone-module-title">风格系列</div>
+          <div class="phone-large-card" v-for="s in (state.miniPreviewCurrentId ? miniPreviewSpotSeries : data.series).slice(0, 6)" :key="s.id" @click="miniPreviewGo('seriesDetail', s.id)">
+            <img :src="s.cover" />
+            <div><strong>{{ s.name }}</strong><span>{{ (s.styles || []).join(' · ') || '多种风格可选' }}</span></div>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'seriesDetail'" class="phone-screen">
+          <div class="detail-cover"><img :src="miniPreviewCurrentSeries.cover" /></div>
+          <div class="detail-card">
+            <h3>{{ miniPreviewCurrentSeries.name }}</h3>
+            <p>{{ (miniPreviewCurrentSeries.styles || []).join(' · ') }}</p>
+          </div>
+          <div class="phone-module">
+            <div class="phone-module-title">照片单品</div>
+            <div class="phone-album-grid">
+              <div v-for="a in miniPreviewSeriesAlbums" :key="a.id" @click="miniPreviewGo('albumDetail', a.id)"><img :src="a.cover" /><strong>{{ a.name }}</strong><span>{{ money(a.price) }}</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'albumDetail'" class="phone-screen">
+          <div class="detail-card">
+            <h3>{{ miniPreviewCurrentAlbum.name }}</h3>
+            <p>查看照片单品内样片，喜欢即可预约</p>
+            <strong>{{ money(miniPreviewCurrentAlbum.price) }}</strong>
+          </div>
+          <div class="sample-grid"><img v-for="s in miniPreviewAlbumSamples" :key="s.id" :src="s.url" /></div>
+          <button class="phone-bottom-btn" @click="miniPreviewGo('booking', miniPreviewCurrentAlbum.id)">预约这个照片单品</button>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'peripherals'" class="phone-screen">
+          <div class="phone-module-title">摄影周边</div>
+          <div class="phone-peripheral" v-for="p in publicMiniPreview.peripherals" :key="p.id"><img :src="p.cover" /><span>{{ p.name }}</span><em>{{ money(p.price) }}</em></div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'booking'" class="phone-screen">
+          <div class="booking-card">
+            <h3>确认预约</h3>
+            <p>项目：{{ miniPreviewCurrentPackage.name || miniPreviewCurrentAlbum.name || '旅拍项目' }}</p>
+            <input placeholder="请输入您的姓名" />
+            <input placeholder="请输入手机号" />
+            <div class="fake-picker">请选择日期</div>
+            <div class="fake-picker">请选择具体时间</div>
+            <textarea placeholder="如有特殊需求请说明"></textarea>
+            <div class="fee-row"><span>合计</span><strong>{{ money(miniPreviewCurrentPackage.price || miniPreviewCurrentAlbum.price || 0) }}</strong></div>
+            <button @click="miniPreviewGo('orderDetail')">确认预约</button>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'my'" class="phone-screen">
+          <div class="my-head"><strong>游客</strong><span>用镜头记录你的长沙之旅</span></div>
+          <div class="my-status">
+            <button @click="miniPreviewGo('orderList')">待确认</button>
+            <button @click="miniPreviewGo('orderList')">拍摄中</button>
+            <button @click="miniPreviewGo('orderList')">修片中</button>
+            <button @click="miniPreviewGo('orderList')">已完成</button>
+          </div>
+          <div class="my-menu">
+            <button @click="miniPreviewGo('orderList')">我的预约</button>
+            <button @click="miniPreviewGo('peripherals')">影像周边</button>
+            <button>联系客服</button>
+            <button>预约须知</button>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'orderList'" class="phone-screen">
+          <div class="phone-tabs"><button class="active">全部</button><button>待确认</button><button>拍摄中</button><button>已完成</button></div>
+          <div class="order-card" v-for="o in scopedOrders.slice(0, 5)" :key="o.id" @click="miniPreviewGo('orderDetail', o.id)">
+            <strong>{{ o.orderNo }}</strong>
+            <span>{{ o.customer }} · {{ statusMeta(o.status).label }}</span>
+            <em>{{ money(o.totalAmount) }}</em>
+          </div>
+        </div>
+
+        <div v-else-if="state.miniPreviewPage === 'orderDetail'" class="phone-screen">
+          <div class="detail-card">
+            <h3>{{ miniPreviewCurrentOrder.orderNo }}</h3>
+            <p>{{ miniPreviewCurrentOrder.customer }} · {{ statusMeta(miniPreviewCurrentOrder.status).label }}</p>
+            <strong>{{ money(miniPreviewCurrentOrder.totalAmount) }}</strong>
+          </div>
+          <div class="service-note"><span>需提前1天预约</span><span>拍摄时长约1小时</span><span>底片全送</span><span>雨天可改期</span></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>

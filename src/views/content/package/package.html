@@ -1,0 +1,179 @@
+<div class="package-design-page">
+  <div class="pkg-toolbar">
+    <div>
+      <span class="eyebrow">{{ state.active==='videoProducts' ? '短视频产品' : '内容商品' }}</span>
+      <h3>{{ state.active==='videoProducts' ? '短视频' : '套餐设置' }}</h3>
+      <p>
+        {{ state.active==='videoProducts'
+          ? '统一维护短视频商品的成片时长、条数、航拍、剪辑、价格、素材关联、上下架与审核记录。'
+          : '统一维护照片套餐与短视频的价格、服务内容、素材关联、预约限流、上下架和审核记录。' }}
+      </p>
+    </div>
+    <div class="pkg-toolbar-actions">
+      <div class="pkg-seg" role="tablist" aria-label="套餐类型">
+        <button role="tab" :aria-selected="true" :class="{active: true}" @click="switchMenu('packages')">照片套餐</button>
+      </div>
+      <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
+        <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
+        <span class="remote-dot"></span>{{ remoteOn ? '数据源：真实后端' : '数据源：演示数据' }}
+      </label>
+      <el-button v-if="state.role==='super' && remoteOn" plain @click="refreshFromServer">刷新真实数据</el-button>
+      <el-button plain @click="clearContentFilters">重置筛选</el-button>
+      <el-button plain @click="openContentLogs(state.active==='videoProducts' ? '短视频' : '套餐')">操作日志</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
+      <el-button @click="switchMenu('shelfProducts', { preserveFilters: true })">商品货架</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="state.active==='videoProducts' ? openContent() : openContentQuick('packages', { type: 'photo' })">
+        {{ state.active==='videoProducts' ? '新增短视频' : '新增套餐' }}
+      </el-button>
+    </div>
+  </div>
+
+  <div class="pkg-stat-grid">
+    <div class="metric-card">
+      <span>{{ state.active==='videoProducts' ? '短视频总数' : '套餐总数' }}</span>
+      <strong>{{ packageSummary.total }}</strong>
+      <em>{{ state.active==='videoProducts' ? '独立短视频商品' : `拍照 ${packageSummary.photo} / 短视频 ${packageSummary.video}` }}</em>
+    </div>
+    <div class="metric-card">
+      <span>{{ state.active==='videoProducts' ? '在售短视频' : '在售套餐' }}</span>
+      <strong>{{ packageSummary.onSale }}</strong>
+      <em>满足小程序货架展示条件</em>
+    </div>
+    <div class="metric-card">
+      <span>{{ state.active==='videoProducts' ? '主推短视频' : '主推套餐' }}</span>
+      <strong>{{ packageSummary.mainPush }}</strong>
+      <em>首页、点位详情优先展示</em>
+    </div>
+    <div class="metric-card warning">
+      <span>待处理审核</span>
+      <strong>{{ packageSummary.needAudit }}</strong>
+      <em>调价、上下架、主推变更需留痕</em>
+    </div>
+    <div class="metric-card">
+      <span>{{ state.active==='videoProducts' ? '短视频成交额' : '套餐成交额' }}</span>
+      <strong>{{ money(packageSummary.revenue) }}</strong>
+      <em>来自当前订单演示数据</em>
+    </div>
+  </div>
+
+  <div class="pkg-filter-row">
+    <el-input v-model="state.filters.keyword" clearable :placeholder="state.active==='videoProducts' ? '搜索短视频名称、标签、说明' : '搜索套餐名称、标签、说明'" />
+    <el-select v-if="state.active!=='videoProducts'" v-model="state.filters.shelfType" clearable placeholder="套餐类型">
+      <el-option label="照片套餐" value="packages" />
+      <el-option label="短视频" value="video" />
+    </el-select>
+    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
+      <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+    </el-select>
+    <el-select v-model="state.filters.contentStatus" clearable placeholder="上下架状态">
+      <el-option label="上架" value="上架" />
+      <el-option label="下架" value="下架" />
+      <el-option label="草稿" value="草稿" />
+      <el-option label="待审核" value="待审核" />
+    </el-select>
+  </div>
+
+  <div class="pkg-editor">
+    <!-- 左：列表 -->
+    <aside class="pkg-list">
+      <div class="pkg-list-head">
+        <strong>{{ state.active==='videoProducts' ? '短视频' : '照片套餐' }}</strong>
+        <span>{{ listSource.length }} 项</span>
+      </div>
+      <div class="pkg-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
+        <button v-for="pkg in listSource" v-if="pkg" :key="pkg.id||pkg._id" class="pkg-list-item" :class="{active: isSelected(pkg)}" @click="selectPackage(pkg)">
+          <span class="pli-cover"><img v-if="pkg.cover" :src="pkg.cover" /><i v-else>套</i></span>
+          <span class="pli-main">
+            <strong>{{ pkg.name || (pkg.type==='video' ? '未命名短视频' : '未命名套餐') }}</strong>
+            <em>{{ money(pkg.price||0) }} · {{ productStatus(pkg) }}</em>
+          </span>
+        </button>
+        <div v-if="listSource.length===0" class="empty-state">
+          <strong>暂无{{ state.active==='videoProducts' ? '短视频' : '套餐' }}</strong><span>先新增{{ state.active==='videoProducts' ? '短视频' : '套餐' }}再配置。</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中：表单 -->
+    <section class="pkg-form" v-if="selectedPackage">
+      <div class="pkg-form-head">
+        <div>
+          <strong>编辑{{ state.active==='videoProducts' ? '短视频' : '套餐' }}</strong>
+          <p>改完点「保存」；开关类直接切换即时生效。完整 6 区块配置走「高级编辑」。</p>
+        </div>
+        <div class="pkg-form-actions">
+          <el-button type="primary" @click="saveSelectedPackage">保存</el-button>
+          <el-button @click="openContent(selectedPackage)">高级编辑</el-button>
+          <el-button @click="previewContent(selectedPackage)">预览</el-button>
+          <el-button type="danger" v-if="can('contentEdit')" @click="requestDeletePackage(selectedPackage)">删除</el-button>
+        </div>
+      </div>
+
+      <div class="pkg-form-body">
+        <label class="pf-field"><span>名称</span><el-input v-model="selectedPackage.name" /></label>
+        <div class="pf-row">
+          <label class="pf-field"><span>关联打卡点</span>
+            <el-select v-model="selectedPackage.spotId" filterable clearable placeholder="选择打卡点">
+              <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </label>
+          <label class="pf-field"><span>拍摄风格</span>
+            <el-select v-model="selectedPackage.seriesId" filterable clearable placeholder="选择拍摄风格">
+              <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+            </el-select>
+          </label>
+        </div>
+        <div class="pf-row">
+          <label class="pf-field"><span>售价（元）</span><el-input-number v-model="selectedPackage.price" :min="0" :step="10" /></label>
+          <label class="pf-field"><span>原价（元）</span><el-input-number v-model="selectedPackage.originalPrice" :min="0" :step="10" /></label>
+        </div>
+        <label class="pf-field"><span>简介 / 商品说明</span><el-input type="textarea" :rows="3" v-model="selectedPackage.intro" /></label>
+
+        <div class="pf-switches">
+          <label><span>上架展示</span><el-switch v-model="selectedPackage.isShow" /></label>
+          <label><span>主页主推</span><el-switch v-model="selectedPackage.isMainPush" /></label>
+        </div>
+
+        <div class="pf-meta">
+          <span>价格：{{ packagePriceText(selectedPackage) }}</span>
+          <span>服务：{{ packageServiceText(selectedPackage) }}</span>
+          <span>预约：{{ packageBookingText(selectedPackage) }}</span>
+          <span>审核：{{ packageAuditText(selectedPackage) }}</span>
+          <span>关联：{{ relationText(selectedPackage) }}</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右：手机实时预览（小程序客人端真实效果） -->
+    <aside class="pkg-preview" v-if="selectedPackage">
+      <div class="lxm-phone">
+        <div class="lxm-phone-notch"></div>
+        <div class="lxm-phone-screen">
+          <div class="phone-banner">{{ state.active==='videoProducts' ? '短视频' : '旅拍套餐' }}</div>
+          <div class="pd-card">
+            <div class="pd-cover" :class="{off: productStatus(selectedPackage)==='下架'}">
+              <img v-if="selectedPackage.cover" :src="selectedPackage.cover" />
+              <i v-else>套</i>
+              <span v-if="productStatus(selectedPackage)!=='下架'" class="pd-badge">在售</span>
+              <span v-else class="pd-badge off">下架</span>
+            </div>
+            <div class="pd-info">
+              <strong class="pd-title">{{ selectedPackage.name || (state.active==='videoProducts' ? '未命名短视频' : '未命名套餐') }}</strong>
+              <div class="pd-price">{{ money(selectedPackage.price||0) }}</div>
+              <div class="pd-note">{{ selectedPackage.intro || '暂无套餐说明' }}</div>
+              <div class="pd-tags">
+                <span v-if="selectedPackage.isMainPush" class="ok">主页主推</span>
+                <span v-else class="warn">非主推</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="preview-tip">↑ 小程序客人端真实效果预览（与小程序展示一致）</p>
+    </aside>
+  </div>
+
+  <div v-if="!selectedPackage" class="empty-state">
+    <strong>请选择左侧{{ state.active==='videoProducts' ? '短视频' : '套餐' }}</strong><span>点击列表项即可在中栏编辑、右栏预览。</span>
+  </div>
+</div>

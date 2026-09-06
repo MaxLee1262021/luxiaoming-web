@@ -1,0 +1,49 @@
+<div class="channel-config-page">
+  <div class="config-page-head">
+    <div>
+      <h3>分销员账号配置</h3>
+      <p>分销员是个人推广账号，只维护身份信息、登录账号、分销分成比例和结算周期。商家绑定由总部在「商家管理」里完成，分销员不能自行新增商家。</p>
+    </div>
+    <el-button type="primary" @click="openDistributor()">新增分销员</el-button>
+  </div>
+
+  <div class="config-metric-grid">
+    <div><span>分销员账号</span><strong>{{ distributorRows.length }}</strong></div>
+    <div><span>启用账号</span><strong>{{ distributorRows.filter(d => d.status === '启用').length }}</strong></div>
+    <div><span>共推门店关系</span><strong>{{ scopedShops.reduce((n, s) => n + ((s.distributorIds || []).length), 0) }}</strong></div>
+    <div><span>待推广门店</span><strong>{{ scopedShops.filter(s => !(s.distributorIds || []).length).length }}</strong></div>
+  </div>
+
+  <div class="filter-card">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索分销员姓名/手机号/账号" />
+  </div>
+
+  <div class="table-card">
+    <el-table :data="pagedList('distributors', distributorRows)" stripe border max-height="calc(100vh - 360px)" empty-text="暂无分销员，点击右上角新增">
+      <el-table-column prop="name" label="分销员姓名" min-width="140" />
+      <el-table-column prop="phone" label="手机号" width="130" />
+      <el-table-column prop="account" label="登录账号" width="130" />
+      <el-table-column label="共推门店" width="110" align="center">
+        <template #default="{row}">{{ scopedShops.filter(s => (s.distributorIds||[]).includes(row.id)).length }} 家</template>
+      </el-table-column>
+      <el-table-column label="默认分销比例" width="130">
+        <template #default="{row}">{{ row.commissionRate }}%</template>
+      </el-table-column>
+      <el-table-column prop="settlementCycle" label="结算周期" width="110" />
+      <el-table-column label="账号状态" width="100">
+        <template #default="{row}">
+          <el-tag :type="row.status === '停用' ? 'danger' : 'success'" size="small">{{ row.status || '启用' }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column fixed="right" label="配置操作" width="120">
+        <template #default="{row}">
+          <el-button link type="primary" @click="openDistributor(row)">编辑配置</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="distributorRows.length > 0">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="distributorRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('distributors').size" :current-page="pager('distributors').page" @current-change="pager('distributors').page = $event" @size-change="onListPageSizeChange('distributors', $event)" />
+      <span class="pager-info">第 {{ Math.min(distributorRows.length, (pager('distributors').page-1)*pager('distributors').size+1) }}–{{ Math.min(distributorRows.length, pager('distributors').page*pager('distributors').size) }} 条 / 共 {{ distributorRows.length }} 条</span>
+    </div>
+  </div>
+</div>

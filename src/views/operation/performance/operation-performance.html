@@ -1,0 +1,63 @@
+<div class="page-head-bar">
+  <div><h2>经营分析</h2><p>基于当前数据范围的订单与商品汇总，帮助判断营收结构与趋势。</p></div>
+</div>
+
+<div class="dashboard-kpi-row">
+  <div class="dashboard-kpi-card is-order">
+    <div class="dashboard-kpi-head"><span class="kpi-icon">约</span><b>订单总数</b><em>当前范围</em></div>
+    <strong>{{ scopedOrders.length }}</strong>
+    <div class="dashboard-kpi-links"><button>待处理 <span>{{ scopedOrders.filter(o=>!['completed','cancelled','已取消','done'].includes(o.status)).length }}</span></button></div>
+  </div>
+  <div class="dashboard-kpi-card is-revenue">
+    <div class="dashboard-kpi-head"><span class="kpi-icon">收</span><b>成交额</b><em>订单总额</em></div>
+    <strong>{{ money(sumOrders(scopedOrders,'total')) }}</strong>
+    <div class="dashboard-kpi-links"><button>已收定金 <span>{{ money(sumOrders(scopedOrders,'deposit')) }}</span></button><button class="danger">待收尾款 <span>{{ money(sumOrders(scopedOrders,'due')) }}</span></button></div>
+  </div>
+  <div class="dashboard-kpi-card is-scan">
+    <div class="dashboard-kpi-head"><span class="kpi-icon">客</span><b>客单价</b><em>成交额 / 订单数</em></div>
+    <strong>{{ scopedOrders.length ? money(Math.round(sumOrders(scopedOrders,'total')/scopedOrders.length)) : money(0) }}</strong>
+    <div class="dashboard-kpi-links"><button>已完结 <span>{{ scopedOrders.filter(o=>o.status==='completed').length }}</span></button></div>
+  </div>
+</div>
+
+<div class="analysis-grid">
+  <div class="panel">
+    <div class="section-title-row"><div><h3>近 7 天预约趋势</h3><span>按订单创建分布估算（演示数据）</span></div></div>
+    <div class="mini-bar-chart">
+      <div class="bar-col" v-for="b in [{d:'周一',v:42},{d:'周二',v:58},{d:'周三',v:50},{d:'周四',v:73},{d:'周五',v:88},{d:'周六',v:95},{d:'周日',v:67}]" :key="b.d">
+        <div class="bar" :style="{height: b.v + '%'}"><em>{{ b.v }}</em></div>
+        <span>{{ b.d }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="section-title-row"><div><h3>在售商品结构</h3><span>数量分布与套餐占比</span></div></div>
+    <div class="struct-list">
+      <div class="struct-row"><span>照片套餐</span><strong>{{ data.packages.filter(p=>p.type!=='video').length }}</strong><div class="struct-bar"><i :style="{width: (data.packages.filter(p=>p.type!=='video').length / Math.max(1,data.packages.length)*100)+'%'}"></i></div></div>
+      <div class="struct-row"><span>短视频</span><strong>{{ data.packages.filter(p=>p.type==='video').length }}</strong><div class="struct-bar"><i :style="{width: (data.packages.filter(p=>p.type==='video').length / Math.max(1,data.packages.length)*100)+'%'}"></i></div></div>
+      <div class="struct-row"><span>照片单品</span><strong>{{ data.albums.length }}</strong><div class="struct-bar"><i :style="{width: Math.min(100, data.albums.length*4)+'%'}"></i></div></div>
+      <div class="struct-row"><span>摄影周边</span><strong>{{ data.peripherals.length }}</strong><div class="struct-bar"><i :style="{width: Math.min(100, data.peripherals.length*5)+'%'}"></i></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="section-title-row"><div><h3>订单来源分布</h3><span>扫码来源决定分成与归属</span></div></div>
+  <div class="src-grid">
+    <div class="src-card" v-for="s in [{k:'headquarter',t:'总部二维码'},{k:'shop',t:'商家二维码'},{k:'natural',t:'小程序自然'},{k:'manual',t:'客服手动'}]" :key="s.k">
+      <strong>{{ scopedOrders.filter(o=>o.sourceType===s.k).length }}</strong>
+      <span>{{ s.t }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="section-title-row"><div><h3>订单状态分布</h3><span>当前范围各状态订单数</span></div></div>
+  <div class="status-dist">
+    <div class="status-chip" v-for="s in statusDict" :key="s.value">
+      <span class="dot" :style="{background: orderWorkflowStatusMeta({status:s.value}).color}"></span>
+      <b>{{ s.label }}</b>
+      <em>{{ scopedOrders.filter(o=>o.status===s.value).length }}</em>
+    </div>
+  </div>
+</div>

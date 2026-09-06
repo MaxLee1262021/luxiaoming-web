@@ -1,0 +1,390 @@
+<div class="reconcile-page finance-grade-page" :class="{ 'recon-compact': state.reconciliationCompactMode }">
+  <div class="recon-topbar">
+    <div class="recon-title-block">
+      <div class="breadcrumb">财务管理 / 月度对账</div>
+      <h2>月度分账对账管理 <em>{{ canUseHeadquarterReconciliation ? '总部全量口径' : roleName(state.role) + '个人口径' }}</em></h2>
+      <p>实际可分账以订单实收基数为底层口径：全部已审核收款 - 已审核退款。静置期订单只进预计池，期满合规后自动进入下一次可结算周期。</p>
+    </div>
+    <div class="recon-actions">
+      <el-tag :type="isReconciliationClosed ? 'success' : 'warning'">{{ isReconciliationClosed ? '月度快照已封存' : '月度快照未封存' }}</el-tag>
+      <span class="role-chip">{{ roleName(state.role) }}</span>
+      <el-button @click="state.reconciliationCompactMode=!state.reconciliationCompactMode">{{ state.reconciliationCompactMode ? '标准模式' : '极简模式' }}</el-button>
+      <el-button @click="resetReconciliationFilters">重置筛选</el-button>
+      <el-button type="primary" @click="openExportDialog('reconciliation')">导出报表</el-button>
+      <el-dropdown v-if="canCloseReconciliationMonth()" trigger="click">
+        <el-button>更多操作</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-if="!isReconciliationClosed" @click="closeReconciliationMonth">封存月度快照</el-dropdown-item>
+            <el-dropdown-item v-if="isReconciliationClosed" @click="unlockReconciliationMonth">解锁月份</el-dropdown-item>
+            <el-dropdown-item @click="switchMenu('logs')">操作日志</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+    </div>
+  </div>
+
+  <div class="recon-filter-shell">
+    <div v-if="canUseHeadquarterReconciliation" class="finance-parameter-bar">
+      <div>
+        <strong>财务参数</strong>
+        <span>影响订单静置期、预计池与大额结算复核</span>
+      </div>
+      <label><span>订单静置期</span><el-input-number v-model="data.financeSettings.settlementObservationDays" :min="1" :max="15" :step="1" size="small" @change="normalizeFinanceSettings" /><em>天</em></label>
+      <label><span>大额复核阈值</span><el-input-number v-model="data.financeSettings.largeSettlementThreshold" :min="0" :step="500" size="small" @change="normalizeFinanceSettings" /></label>
+    </div>
+    <div class="filter-title">
+      <div>
+        <strong>高级筛选</strong>
+        <span>{{ reconciliationFilterSummary }}</span>
+      </div>
+      <div class="filter-title-actions">
+        <el-tag type="info">订单静置期 {{ settlementObservationDays() }} 天</el-tag>
+        <el-button text @click="state.reconciliationFiltersExpanded=!state.reconciliationFiltersExpanded">{{ state.reconciliationFiltersExpanded ? '收起高级项' : '展开高级项' }}</el-button>
+      </div>
+    </div>
+    <div class="recon-filter-main">
+      <el-date-picker v-model="state.filters.reconcileMonth" type="month" placeholder="月份" />
+      <el-date-picker v-model="state.filters.dateRange" type="daterange" start-placeholder="开始日期" end-placeholder="结束日期" />
+      <el-select v-if="canUseHeadquarterReconciliation" v-model="state.filters.sourceType" clearable placeholder="订单来源">
+        <el-option label="商家二维码" value="shop" />
+        <el-option label="总部二维码" value="headquarter" />
+        <el-option label="客服手动创建" value="manual" />
+        <el-option label="小程序/自然来源" value="natural" />
+      </el-select>
+      <el-select v-model="state.filters.status" clearable placeholder="订单状态">
+        <el-option v-for="s in statusDict" :key="s.value" :label="s.label" :value="s.value" />
+      </el-select>
+      <el-input v-model="state.filters.keyword" clearable placeholder="订单号/客户/手机号" />
+    </div>
+    <div v-if="state.reconciliationFiltersExpanded" class="recon-filter-advanced">
+      <el-select v-if="canUseHeadquarterReconciliation" v-model="state.filters.shopId" clearable filterable placeholder="商家">
+        <el-option v-for="s in scopedShops" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-select v-if="canUseHeadquarterReconciliation" v-model="state.filters.distributorId" clearable filterable placeholder="分销员">
+        <el-option v-for="d in visibleDistributors" :key="d.id" :label="d.name" :value="d.id" />
+      </el-select>
+      <el-select v-if="canUseHeadquarterReconciliation" v-model="state.filters.photographerId" clearable filterable placeholder="摄影师">
+        <el-option v-for="s in photographers" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-select v-if="canUseHeadquarterReconciliation" v-model="state.filters.assigneeId" clearable filterable placeholder="客服">
+        <el-option v-for="s in services" :key="s.id" :label="s.name" :value="s.id" />
+      </el-select>
+      <el-select v-model="state.filters.settlementStatus" clearable placeholder="结算状态">
+        <el-option label="待结算" value="待结算" />
+        <el-option label="已结算" value="已结算" />
+        <el-option label="已封存" value="已封存" />
+      </el-select>
+    </div>
+    <div class="quick-filter-row">
+      <button type="button" @click="applyReconciliationQuickScope('eligible')">实际可分账</button>
+      <button type="button" @click="applyReconciliationQuickScope('estimated')">预计可入池</button>
+      <button type="button" @click="applyReconciliationQuickScope('observation')">静置期暂缓</button>
+      <button type="button" @click="applyReconciliationQuickScope('blocked')">售后/退款暂缓</button>
+      <button type="button" @click="applyReconciliationQuickScope('retained')">取消后留存收入</button>
+    </div>
+    <div class="recon-preset-row">
+      <span>常用模板</span>
+      <button v-for="preset in state.reconciliationFilterPresets" :key="preset.id" type="button" @click="applyReconciliationFilterPreset(preset)">
+        {{ preset.name }}
+        <i @click.stop="removeReconciliationFilterPreset(preset)">×</i>
+      </button>
+      <el-button size="small" plain @click="saveReconciliationFilterPreset">保存当前筛选</el-button>
+    </div>
+    <div v-if="reconciliationFilterTags.length" class="recon-filter-tags">
+      <span>已选条件</span>
+      <el-tag v-for="tag in reconciliationFilterTags" :key="tag.key" closable @close="clearReconciliationFilter(tag.key)">{{ tag.label }}</el-tag>
+    </div>
+  </div>
+
+  <div v-if="activeReconciliationAlerts.length" class="risk-alert">
+    <strong>对账差异提醒</strong>
+    <button v-for="row in activeReconciliationAlerts" :key="row.type" type="button" @click="openReconciliationDifference(row)">
+      <span>{{ row.type }}</span>
+      <b>{{ money(row.amount) }}</b>
+    </button>
+  </div>
+
+  <div class="metric-section">
+    <div class="metric-group neutral">
+      <div class="metric-group-title">业务规模</div>
+      <button class="metric-card" @click="openReconciliationDetail('total','本月订单总额')">
+        <span>本月订单总额</span><strong>{{ money(reconciliationSummary.totalAmount) }}</strong><em>{{ reconciliationSummary.totalOrders }} 单</em>
+      </button>
+      <button class="metric-card" @click="openReconciliationDetail('total','本月订单笔数')">
+        <span>订单总笔数</span><strong>{{ reconciliationSummary.totalOrders }}</strong><em>当前筛选范围</em>
+      </button>
+      <button class="metric-card" @click="openReconciliationDetail('blocked','已审核退款')">
+        <span>已审核退款</span><strong>{{ money(reconciliationSummary.reviewedRefundAmount) }}</strong><em>扣减实收基数</em>
+      </button>
+    </div>
+
+    <div class="metric-group warn">
+      <div class="metric-group-title">暂缓风险</div>
+      <button class="metric-card" @click="openReconciliationDetail('pending','未完成暂缓')">
+        <span>未完成暂缓</span><strong>{{ money(reconciliationSummary.pendingAmount) }}</strong><em>{{ reconciliationSummary.pendingOrders }} 单</em>
+      </button>
+      <button class="metric-card" @click="openReconciliationDetail('observation','订单静置期暂缓')">
+        <span>静置期暂缓</span><strong>{{ money(reconciliationSummary.observationAmount) }}</strong><em>{{ reconciliationSummary.observationOrders }} 单</em>
+      </button>
+      <button class="metric-card" @click="openReconciliationDetail('retained','取消后留存收入')">
+        <span>取消后留存收入</span><strong>{{ money(reconciliationSummary.retainedCancelledAmount) }}</strong><em>{{ reconciliationSummary.retainedCancelledOrders }} 单</em>
+      </button>
+    </div>
+
+    <div class="metric-group primary">
+      <div class="metric-group-title">分账结果</div>
+      <button class="metric-card" @click="openReconciliationDetail('eligible','实际可分账净额')">
+        <span>实际可分账净额</span><strong>{{ money(reconciliationSummary.eligibleAmount) }}</strong><em>已完成+已审收款+过静置期+无售后</em>
+      </button>
+      <button class="metric-card" @click="openReconciliationDetail('estimated','预计可入分账池')">
+        <span>预计可入分账池</span><strong>{{ money(reconciliationSummary.estimatedAmount) }}</strong><em>仅预算参考</em>
+      </button>
+      <button class="metric-card" @click="openReconciliationDifference({type:'结算差异',amount:reconciliationSummary.pendingTransferAmount,desc:'当前待确认结算金额'})">
+        <span>待结算</span><strong>{{ money(reconciliationSummary.pendingTransferAmount) }}</strong><em>已计提未打款</em>
+      </button>
+    </div>
+  </div>
+
+  <div class="recon-gap-panel">
+    <div class="gap-panel-head">
+      <div>
+        <strong>订单总额与实际可分账差额拆解</strong>
+        <span>本月订单总额不是直接分账金额；系统按财务已审核实收、退款、静置期、售后状态拆分。</span>
+      </div>
+      <em>{{ money(reconciliationSummary.totalAmount) }} → {{ money(reconciliationSummary.eligibleAmount) }}</em>
+    </div>
+    <div class="gap-breakdown-grid">
+      <button v-for="row in reconciliationGapBreakdown" :key="row.key" type="button" :class="['gap-break-card', row.type]" @click="row.action && row.action()">
+        <span>{{ row.label }}</span>
+        <strong>{{ money(row.amount) }}</strong>
+        <small>{{ row.count }} 单</small>
+        <em>{{ row.desc }}</em>
+      </button>
+    </div>
+  </div>
+
+  <div v-if="canUseHeadquarterReconciliation" class="recon-board-grid">
+    <section class="actual-board">
+      <div class="board-title">
+        <div>
+          <h3>实际分账汇总</h3>
+          <p>最终结算依据，可直接用于打款对账</p>
+        </div>
+        <el-tag type="primary">实际口径</el-tag>
+      </div>
+      <div class="formula-line">
+        <span>实际可分账净额</span><b>-</b><span>商家应计</span><b>-</b><span>分销员应计</span><b>-</b><span>摄影师应计</span><b>=</b><strong>总部收入</strong>
+      </div>
+      <div class="board-metrics">
+        <div><span>实际可分账净额</span><strong>{{ money(reconciliationSummary.eligibleAmount) }}</strong></div>
+        <div><span>商家总应计</span><strong>{{ money(reconciliationSummary.shopCommissionAmount) }}</strong></div>
+        <div><span>分销员总应计</span><strong>{{ money(reconciliationSummary.distributorCommissionAmount) }}</strong></div>
+        <div><span>摄影师总应计</span><strong>{{ money(reconciliationSummary.photographerCommissionAmount) }}</strong></div>
+        <div class="hq"><span>总部收入</span><strong>{{ money(reconciliationSummary.headquarterAmount) }}</strong></div>
+        <div><span>已确认结算</span><strong>{{ money(reconciliationSummary.confirmedSettlementAmount || reconciliationSummary.transferredAmount) }}</strong><em>{{ reconciliationSummary.confirmedSettlementOrders || 0 }} 单 / {{ reconciliationSummary.confirmedSettlementBatches || 0 }} 批</em></div>
+        <div><span>待结算</span><strong>{{ money(reconciliationSummary.pendingTransferAmount) }}</strong></div>
+      </div>
+    </section>
+
+    <section class="estimate-board">
+      <div class="board-title">
+        <div>
+          <h3>预计分账预览</h3>
+          <p>仅资金预算，不作为结算凭证</p>
+        </div>
+        <el-tag>预算口径</el-tag>
+      </div>
+      <div class="board-metrics">
+        <div><span>预计入池净额</span><strong>{{ money(reconciliationSummary.estimatedAmount) }}</strong></div>
+        <div><span>预计商家应计</span><strong>{{ money(reconciliationSummary.estimatedShopCommissionAmount) }}</strong></div>
+        <div><span>预计分销员应计</span><strong>{{ money(reconciliationSummary.estimatedDistributorCommissionAmount) }}</strong></div>
+        <div><span>预计摄影师应计</span><strong>{{ money(reconciliationSummary.estimatedPhotographerCommissionAmount) }}</strong></div>
+        <div class="hq"><span>预计总部收入</span><strong>{{ money(reconciliationSummary.estimatedHeadquarterAmount) }}</strong></div>
+      </div>
+    </section>
+  </div>
+
+  <div v-else class="role-reconcile-focus">
+    <div>
+      <strong>{{ reconciliationFocus.title }}</strong>
+      <p>{{ reconciliationFocus.desc }}</p>
+    </div>
+    <div><span>可见核对对象</span><strong>{{ reconciliationFocus.rows.length }}</strong></div>
+    <div><span>当前订单</span><strong>{{ scopedOrders.length }} 单</strong></div>
+  </div>
+
+  <div v-if="canUseHeadquarterReconciliation && settlementDueReminderRows.length" class="settlement-reminder-panel">
+    <div class="table-card-toolbar">
+      <div>
+        <h3>到期结算提醒</h3>
+        <p>按商家、分销员、摄影师各自的结算周期汇总，已到期但尚未确认结算的主体会出现在这里。</p>
+      </div>
+      <el-tag type="warning">{{ settlementDueReminderRows.length }} 个待结算主体</el-tag>
+    </div>
+    <div class="settlement-reminder-grid">
+      <button v-for="row in settlementDueReminderRows.slice(0, 6)" :key="row.transferKey" type="button" @click="confirmSettlementBatch(row)">
+        <span>{{ row.typeName }} · {{ row.name }}</span>
+        <strong>{{ money(row.dueAmount) }}</strong>
+        <em>{{ row.settlementCycle }} / {{ row.settlementPeriod }}</em>
+        <small>{{ row.orderCount }} 单 · {{ row.dueText }}</small>
+      </button>
+    </div>
+  </div>
+
+  <el-tabs v-model="state.reconciliationTab" class="recon-tabs">
+    <el-tab-pane v-if="showReconciliationSection('settlement')" name="settlement">
+      <template #label><span>分账应计明细 <b>{{ reconciliationTabBadges.settlement }}</b><em>核心结算对账</em></span></template>
+      <div class="table-card finance-table-card">
+        <div v-if="state.loading" class="recon-skeleton"><i></i><i></i><i></i><i></i></div>
+        <div v-else-if="!visibleReconciliationSettlementRows.length" class="recon-empty-state">
+          <strong>暂无可结算对象</strong>
+          <span>当前筛选条件下没有满足入池条件的商家、分销员或摄影师。可切换月份、放宽筛选，或到暂缓订单明细查看未入池原因。</span>
+        </div>
+        <div v-if="canUseHeadquarterReconciliation" class="finance-batch-toolbar">
+          <span>已选 {{ selectedReconciliationRows.length }} 个对象</span>
+          <el-button size="small" type="primary" plain @click="batchConfirmSettlement">批量确认结算</el-button>
+          <el-button size="small" type="warning" plain @click="batchSealSettlement">批量封存账单</el-button>
+        </div>
+        <el-table :data="pagedList('reconSettlement', visibleReconciliationSettlementRows)" height="430" stripe @selection-change="onReconciliationSelectionChange">
+          <el-table-column v-if="canUseHeadquarterReconciliation" type="selection" width="44" />
+          <el-table-column fixed prop="typeName" label="主体类型" width="105" />
+          <el-table-column fixed prop="name" label="结算主体" min-width="150" />
+          <el-table-column label="入池净额" width="125" align="right"><template #default="{row}">{{ money(row.amount) }}</template></el-table-column>
+          <el-table-column prop="rateText" label="分成比例" width="105" />
+          <el-table-column label="应计金额" width="125" align="right"><template #default="{row}">{{ money(row.commission) }}</template></el-table-column>
+          <el-table-column prop="settlementCycle" label="周期" width="80" />
+          <el-table-column prop="settlementPeriod" label="结算范围" width="190" />
+          <el-table-column label="结算状态" width="160"><template #default="{row}"><el-tag :type="row.transferStatus==='已封存' ? 'success' : row.transferStatus==='已结算' ? 'primary' : row.transferStatus==='待结算' ? 'warning' : 'info'">{{ row.transferStatus }}</el-tag><div class="muted">{{ row.transferText }}</div></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="260"><template #default="{row}"><el-button link @click="openReconciliationDetail(row.type, row.name + '关联订单')">查看订单</el-button><el-button v-if="row.transferRecord" link type="primary" @click="openSettlementRecordOrders(row.transferRecord)">结算记录</el-button><el-button v-if="canUseHeadquarterReconciliation && row.transferStatus==='待结算'" link type="primary" :disabled="isReconciliationClosed || Number(row.commission||0)<=0" @click="confirmSettlementBatch(row)">确认结算</el-button><el-button v-if="canUseHeadquarterReconciliation && row.transferStatus==='已结算'" link type="warning" :disabled="isReconciliationClosed" @click="closeSettlementBatch(row)">封存账单</el-button><el-button v-if="state.role==='super' && row.transferStatus==='已封存'" link type="danger" @click="unlockSettlementBatch(row)">解封</el-button></template></el-table-column>
+        </el-table>
+        <div class="table-pager" v-if="visibleReconciliationSettlementRows.length > 0">
+          <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="visibleReconciliationSettlementRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconSettlement').size" :current-page="pager('reconSettlement').page" @current-change="pager('reconSettlement').page = $event" @size-change="onListPageSizeChange('reconSettlement', $event)" />
+          <span class="pager-info">第 {{ Math.min(visibleReconciliationSettlementRows.length, (pager('reconSettlement').page-1)*pager('reconSettlement').size+1) }}–{{ Math.min(visibleReconciliationSettlementRows.length, pager('reconSettlement').page*pager('reconSettlement').size) }} 条 / 共 {{ visibleReconciliationSettlementRows.length }} 条</span>
+        </div>
+      </div>
+    </el-tab-pane>
+
+    <el-tab-pane name="overview">
+      <template #label><span>结算对象概览 <b>{{ reconciliationTabBadges.overview }}</b><em>主体数据总览</em></span></template>
+      <div class="table-card finance-table-card">
+        <div v-if="!reconciliationFocus.rows.length" class="recon-empty-state">
+          <strong>暂无核对对象</strong>
+          <span>当前角色或筛选范围下没有可查看对象。总部财务可按商家、分销员、摄影师、客服继续筛选核对。</span>
+        </div>
+        <el-table :data="reconciliationFocus.rows" height="430" stripe empty-text="当前角色暂无可核对数据">
+          <el-table-column fixed prop="typeName" label="对象类型" width="105" />
+          <el-table-column fixed prop="name" label="对象名称" min-width="150" />
+          <el-table-column prop="totalOrders" label="关联订单" width="90" align="center" />
+          <el-table-column prop="orders" label="可分订单" width="90" align="center" />
+          <el-table-column label="暂缓订单" width="100" align="center"><template #default="{row}"><el-tag type="warning">{{ row.pendingOrders + row.observationOrders + row.blockedOrders }} 单</el-tag></template></el-table-column>
+          <el-table-column label="入池净额" width="125" align="right"><template #default="{row}">{{ money(row.amount) }}</template></el-table-column>
+          <el-table-column label="分成比例" width="90"><template #default="{row}">{{ row.rateValue !== undefined && row.rateValue !== '' ? row.rateValue + '%' : '-' }}</template></el-table-column>
+          <el-table-column label="应计/待收" width="125" align="right"><template #default="{row}">{{ money(row.type==='service' ? row.due : row.commission || row.due || 0) }}</template></el-table-column>
+        </el-table>
+      </div>
+    </el-tab-pane>
+
+    <el-tab-pane v-if="showReconciliationSection('hold')" name="hold">
+      <template #label><span>暂缓订单明细 <b>{{ reconciliationTabBadges.hold }}</b><em>异常订单处理</em></span></template>
+      <div class="table-card finance-table-card">
+        <div v-if="!reconciliationHoldRows.length" class="recon-empty-state success">
+          <strong>暂无暂缓订单</strong>
+          <span>当前范围内订单均未触发静置期、收款审核、退款审核、售后未结案等暂缓原因。</span>
+        </div>
+        <el-table :data="pagedList('reconHold', reconciliationHoldRows)" height="430" stripe empty-text="暂无暂缓订单">
+          <el-table-column fixed prop="orderNo" label="订单号" width="130" />
+          <el-table-column prop="customer" label="客户" width="100" />
+          <el-table-column label="订单来源" width="130"><template #default="{row}">{{ orderSourceTypeText(row) }}</template></el-table-column>
+          <el-table-column label="商家" min-width="130"><template #default="{row}">{{ shopName(row.shopId) }}</template></el-table-column>
+          <el-table-column label="订单金额" width="115" align="right"><template #default="{row}">{{ money(row.totalAmount) }}</template></el-table-column>
+          <el-table-column label="静置期截止" width="165"><template #default="{row}">{{ settlementObservationText(row) }}</template></el-table-column>
+          <el-table-column prop="holdReason" label="暂缓原因" min-width="260" />
+          <el-table-column fixed="right" label="操作" width="150"><template #default="{row}"><el-button link @click="openOrder(row,{readonly:true})">查看</el-button><el-button v-if="canReleaseSettlementObservation(row)" link type="warning" @click.stop="releaseSettlementObservation(row)">结束静置期</el-button></template></el-table-column>
+        </el-table>
+        <div class="table-pager" v-if="reconciliationHoldRows.length > 0">
+          <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="reconciliationHoldRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconHold').size" :current-page="pager('reconHold').page" @current-change="pager('reconHold').page = $event" @size-change="onListPageSizeChange('reconHold', $event)" />
+          <span class="pager-info">第 {{ Math.min(reconciliationHoldRows.length, (pager('reconHold').page-1)*pager('reconHold').size+1) }}–{{ Math.min(reconciliationHoldRows.length, pager('reconHold').page*pager('reconHold').size) }} 条 / 共 {{ reconciliationHoldRows.length }} 条</span>
+        </div>
+      </div>
+    </el-tab-pane>
+
+    <el-tab-pane v-if="canUseHeadquarterReconciliation" name="records">
+      <template #label><span>结算台账 <b>{{ reconciliationTabBadges.records }}</b><em>结算记录溯源</em></span></template>
+      <div class="table-card finance-table-card">
+        <h3>结算确认记录</h3>
+        <div v-if="!reconciliationTransferRows.length" class="recon-empty-state">
+          <strong>暂无结算确认记录</strong>
+          <span>确认结算后会生成批次台账，记录实结分成金额、结算范围、凭证号、操作人和关联订单。</span>
+        </div>
+        <el-table :data="pagedList('reconTransfer', reconciliationTransferRows)" height="430" stripe empty-text="暂无结算确认记录">
+          <el-table-column fixed prop="time" label="确认时间" width="150" />
+          <el-table-column prop="period" label="结算范围" width="190" />
+          <el-table-column prop="settlementCycle" label="周期" width="80" />
+          <el-table-column prop="objectType" label="主体类型" width="100" />
+          <el-table-column prop="objectName" label="主体名称" min-width="130" />
+          <el-table-column label="实结分成金额" width="135" align="right"><template #default="{row}">{{ money(row.amount) }}</template></el-table-column>
+          <el-table-column label="账单状态" width="170"><template #default="{row}"><el-tag :type="settlementRecordStageType(row)">{{ settlementRecordStage(row) }}</el-tag><div v-if="row.paidAt" class="muted">打款：{{ row.paidBy }} · {{ row.paidAt }}</div><div v-if="settlementRecordStage(row)==='已封存'" class="muted">封存：{{ row.sealedBy }} · {{ row.sealedAt }}</div></template></el-table-column>
+          <el-table-column label="付款/凭证" width="150"><template #default="{row}"><span>{{ row.method || '-' }}</span><div class="muted">{{ row.voucherNo || '无凭证号' }}</div></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="220"><template #default="{row}"><el-button link type="primary" @click="openSettlementRecordOrders(row)">批次详情</el-button><el-button v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已确认待打款'" link type="warning" @click="markSettlementPaid(row)">确认打款</el-button><el-button v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已打款待复核'" link type="success" @click="sealSettlementRecord(row)">复核封存</el-button></template></el-table-column>
+        </el-table>
+        <div class="table-pager" v-if="reconciliationTransferRows.length > 0">
+          <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="reconciliationTransferRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconTransfer').size" :current-page="pager('reconTransfer').page" @current-change="pager('reconTransfer').page = $event" @size-change="onListPageSizeChange('reconTransfer', $event)" />
+          <span class="pager-info">第 {{ Math.min(reconciliationTransferRows.length, (pager('reconTransfer').page-1)*pager('reconTransfer').size+1) }}–{{ Math.min(reconciliationTransferRows.length, pager('reconTransfer').page*pager('reconTransfer').size) }} 条 / 共 {{ reconciliationTransferRows.length }} 条</span>
+        </div>
+      </div>
+    </el-tab-pane>
+
+    <el-tab-pane v-if="showReconciliationSection('service')" name="service">
+      <template #label><span>客服业绩 <b>{{ reconciliationTabBadges.service }}</b><em>经手数据统计</em></span></template>
+      <div class="table-card finance-table-card">
+        <div v-if="!servicePerformanceRows.length" class="recon-empty-state">
+          <strong>暂无客服业绩</strong>
+          <span>客服只展示经手订单、成交净额和待跟进压力，不展示商家、摄影师、分销员分成金额。</span>
+        </div>
+        <el-table :data="servicePerformanceRows" height="430" stripe>
+          <el-table-column fixed prop="name" label="客服" width="120" />
+          <el-table-column prop="totalOrders" label="经手订单" width="100" />
+          <el-table-column label="经手成交" width="130" align="right"><template #default="{row}">{{ money(row.performanceAmount) }}</template></el-table-column>
+          <el-table-column label="已完成净额" width="130" align="right"><template #default="{row}">{{ money(row.completedAmount) }}</template></el-table-column>
+          <el-table-column label="待收/暂缓" min-width="160"><template #default="{row}">{{ money(row.due) }} / {{ row.pendingOrders + row.observationOrders + row.blockedOrders }} 单</template></el-table-column>
+        </el-table>
+      </div>
+    </el-tab-pane>
+
+    <el-tab-pane v-if="canUseHeadquarterReconciliation" name="adjustments">
+      <template #label><span>冲正台账 <b>{{ reconciliationTabBadges.adjustments }}</b><em>退款调账记录</em></span></template>
+      <div class="table-card finance-table-card">
+        <div class="table-card-toolbar">
+          <div>
+            <h3>退款 & 冲正调账台账</h3>
+            <p>封存后退款、人工调账、红字冲正统一留痕，优先抵扣该主体下一期待结算金额。</p>
+          </div>
+          <el-button type="primary" @click="openAdjustmentDialog()">发起冲正</el-button>
+        </div>
+        <div v-if="!adjustmentRecordRows.length" class="recon-empty-state">
+          <strong>暂无冲正记录</strong>
+          <span>封存后退款、人工调账、红字冲正会进入这里，默认优先抵扣对应主体下一期待结算金额。</span>
+        </div>
+        <el-table :data="pagedList('reconAdjustments', adjustmentRecordRows)" height="430" stripe empty-text="暂无退款冲正记录">
+          <el-table-column fixed label="关联订单号" width="130"><template #default="{row}"><el-button link type="primary" @click="openAdjustmentOrder(row)">{{ row.orderNo }}</el-button></template></el-table-column>
+          <el-table-column prop="time" label="发生时间" width="150" />
+          <el-table-column prop="type" label="冲正类型" width="110" />
+          <el-table-column label="冲正金额" width="120" align="right"><template #default="{row}"><span class="negative-money">{{ money(row.amount) }}</span></template></el-table-column>
+          <el-table-column prop="targetType" label="扣减主体" width="100" />
+          <el-table-column prop="targetName" label="主体名称" width="130" />
+          <el-table-column prop="operator" label="操作人" width="110" />
+          <el-table-column prop="approvalStatus" label="审批状态" width="110" />
+          <el-table-column label="抵扣状态" width="160"><template #default="{row}">{{ row.offsetStatus || '优先抵扣下一期待结算' }}</template></el-table-column>
+          <el-table-column prop="note" label="备注" min-width="220" />
+          <el-table-column prop="attachment" label="凭证附件" width="150" />
+          <el-table-column fixed="right" label="操作" width="120"><template #default="{row}"><el-button v-if="state.role==='super' && row.approvalStatus!=='已审批'" link type="primary" @click="approveAdjustmentRecord(row)">审批</el-button><el-button link @click="openAdjustmentDialog(row)">复制发起</el-button></template></el-table-column>
+        </el-table>
+        <div class="table-pager" v-if="adjustmentRecordRows.length > 0">
+          <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="adjustmentRecordRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconAdjustments').size" :current-page="pager('reconAdjustments').page" @current-change="pager('reconAdjustments').page = $event" @size-change="onListPageSizeChange('reconAdjustments', $event)" />
+          <span class="pager-info">第 {{ Math.min(adjustmentRecordRows.length, (pager('reconAdjustments').page-1)*pager('reconAdjustments').size+1) }}–{{ Math.min(adjustmentRecordRows.length, pager('reconAdjustments').page*pager('reconAdjustments').size) }} 条 / 共 {{ adjustmentRecordRows.length }} 条</span>
+        </div>
+      </div>
+    </el-tab-pane>
+  </el-tabs>
+</div>
