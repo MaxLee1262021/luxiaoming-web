@@ -479,12 +479,15 @@
   }
   .lxm-topbar > div:first-child {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: 36px minmax(0, 1fr);
     align-items: start;
     gap: 8px;
     width: 100%;
   }
-  .mobile-menu-toggle { display: inline-flex; grid-row: span 2; }
+  .mobile-menu-toggle { display: inline-flex; grid-column: 1; grid-row: 1 / span 3; }
+  .lxm-topbar > div:first-child .topbar-breadcrumb { grid-column: 2; grid-row: 1; min-width: 0; }
+  .lxm-topbar > div:first-child h1 { grid-column: 2; grid-row: 2; width: auto !important; min-width: 0; }
+  .lxm-topbar > div:first-child p { grid-column: 2; grid-row: 3; min-width: 0; overflow-wrap: anywhere; }
   .lxm-topbar h1 { font-size: 17px !important; }
   .top-actions {
     width: 100% !important;
