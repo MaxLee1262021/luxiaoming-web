@@ -8,13 +8,21 @@ const https = require("https");
 
 module.exports = async function rpc(source, name, body = {}, ctx = {}) {
   const data = body.data || body; // 兼容 {data:{...}} 与直接传 {...}
-  const openid = body.openid || (data && data.openid) || "";
+  const identity = ctx.identity || null;
+  // openid is trusted only when it was resolved by the API layer from a
+  // verified public session. A caller-supplied body.openid is never used.
+  const openid = identity && identity.kind === "public" ? String(identity.openid || "") : "";
+  const withIdentity = (value = data) => ({ ...(value || {}), openid });
   switch (name) {
     case "login": return await rpcLogin(source, data, ctx);
-    case "bindPhone": return await rpcBindPhone(source, data, ctx);
+    case "bindPhone":
+      if (!openid) return { success: false, error: "请先完成微信登录" };
+      return await rpcBindPhone(source, withIdentity(), ctx);
     case "getHomeData": return await rpcGetHomeData(source, data);
     case "getDashboard": return await source.dashboard();
-    case "getOrderStatusCount": return await rpcOrderStatusCount(source, openid);
+    case "getOrderStatusCount":
+      if (!openid) return { success: false, error: "请先完成微信登录" };
+      return await rpcOrderStatusCount(source, openid);
     case "getSpots": return await rpcGetSpots(source, data);
     case "getBookingData": return await rpcGetBookingData(source);
     case "getSeriesList": return await rpcGetSeriesList(source, data);
@@ -22,12 +30,20 @@ module.exports = async function rpc(source, name, body = {}, ctx = {}) {
     case "getPhotoCollection": return await rpcGetPhotoCollection(source, data);
     case "getPeripherals": return await rpcGetPeripherals(source, data);
     case "getGuides": return await rpcGetGuides(source, data);
-    case "getMyOrders": return await rpcGetMyOrders(source, openid, data);
-    case "getOrderDetail": return await rpcGetOrderDetail(source, openid, data);
+    case "getMyOrders":
+      if (!openid) return { success: false, error: "请先完成微信登录" };
+      return await rpcGetMyOrders(source, openid, data);
+    case "getOrderDetail":
+      if (!openid) return { success: false, error: "请先完成微信登录" };
+      return await rpcGetOrderDetail(source, openid, data);
     case "createBooking":
-    case "createOrder": return await rpcCreateBooking(source, data);
-    case "updateOrderStatus": return await rpcUpdateOrderStatus(source, openid, data);
-    case "submitAfterSale": return await rpcSubmitAfterSale(source, openid, data);
+    case "createOrder": return await rpcCreateBooking(source, withIdentity(), ctx);
+    case "updateOrderStatus":
+      if (!openid) return { success: false, error: "请先完成微信登录" };
+      return await rpcUpdateOrderStatus(source, openid, data);
+    case "submitAfterSale":
+      if (!openid) return { success: false, error: "请先完成微信登录" };
+      return await rpcSubmitAfterSale(source, openid, data);
     case "resolveMerchantCode": return await rpcResolveMerchantCode(source, data);
     case "generateMerchantQR": return await source.generateMerchantCode(data);
     case "getCities": return await rpcGetCities(source);
@@ -410,8 +426,12 @@ async function rpcLogin(source, data = {}, ctx = {}) {
       return { success: false, message: "微信登录请求失败: " + e.message };
     }
   }
-  // 开发期（未配置 appid/secret）：沿用小程序本地生成的匿名 openid，保证流程可测
-  const devOpenid = (data.openid && String(data.openid).trim()) || "dev_openid";
+  // Development fallback is explicit and uses one fixed synthetic identity. A
+  // caller cannot select an arbitrary openid and impersonate another user.
+  if (!ctx.allowDevOpenid) {
+    return { success: false, message: "微信登录服务未配置" };
+  }
+  const devOpenid = "dev_openid";
   await source.upsert("userProfiles", devOpenid, { openid: devOpenid, dev: true, updateTime: new Date().toISOString() });
   return { success: true, openid: devOpenid, dev: true, message: "开发模式：未配置微信 AppID/Secret，使用本地匿名 openid" };
 }
@@ -795,6 +815,7 @@ function getOrderOpenid(order) { return order.openid || order._openid || ""; }
 
 async function rpcGetMyOrders(source, openid, data = {}) {
   try {
+    if (!openid) return { success: false, error: "请先完成微信登录" };
     const { status, page = 1, pageSize = 10 } = data;
     let list = await source.list("orders");
     list = list.filter(o => !o.isDeleted && !o.deleted && (!openid || getOrderOpenid(o) === openid));
@@ -826,6 +847,7 @@ async function rpcGetOrderDetail(source, openid, data = {}) {
   const { orderId, orderNo = "" } = data;
   if (!orderId && !orderNo) return { success: false, error: "缺少订单ID" };
   try {
+    if (!openid) return { success: false, error: "请先完成微信登录" };
     const order = await findOrder(source, orderId, orderNo);
     if (!order || order.isDeleted || order.deleted) return { success: false, error: "订单不存在" };
     if (openid && getOrderOpenid(order) !== openid) return { success: false, error: "无权限" };
@@ -837,7 +859,7 @@ async function rpcGetOrderDetail(source, openid, data = {}) {
     return {
       success: true,
       data: {
-        _id: d._id, orderNo: d.orderNo, status: d.status, statusText: d.customerStatus, customerStatus: d.customerStatus,
+        _id: getItemId(d), orderNo: d.orderNo, status: d.status, statusText: d.customerStatus, customerStatus: d.customerStatus,
         packageName: d.packageName || (d.packageSnapshot && d.packageSnapshot.packageName) || (d.products && d.products[0] && d.products[0].name) || "",
         packagePrice: d.totalPrice || d.price || d.totalAmount || 0,
         productItems: d.productItems || d.items || d.products || [],
@@ -858,6 +880,7 @@ async function rpcGetOrderDetail(source, openid, data = {}) {
 
 async function rpcOrderStatusCount(source, openid) {
   try {
+    if (!openid) return { success: false, error: "请先完成微信登录" };
     const all = (await source.list("orders")).filter(o => !o.isDeleted && !o.deleted && (!openid || getOrderOpenid(o) === openid));
     const groups = { pending: ["pending", "new", "contacted", "deposit_pending"], shooting: ["shooting"], editing: ["editing", "final_pending"], completed: ["delivered", "completed"] };
     const result = {};
@@ -908,9 +931,15 @@ async function rpcCreateBooking(source, data = {}) {
   const {
     shopId, spotId, seriesId, packageId, name, phone, contactPhones = [], wechat, date, timePeriod, timeSlot, time, message, price, scene, items = [], totalPrice
   } = data;
-  const normalizedItems = items.length ? items : [{ spotId: spotId || "", seriesId: seriesId || "", packageId: packageId || "", price: price || 0 }];
+  if (!openid) return { success: false, error: "请先完成微信登录" };
+  const itemList = Array.isArray(items) ? items : [];
+  const normalizedItems = itemList.length ? itemList : [{ spotId: spotId || "", seriesId: seriesId || "", packageId: packageId || "", price: price || 0 }];
   const packageIds = Array.from(new Set(normalizedItems.map(i => i.packageId).filter(Boolean)));
   const timeValue = time || timePeriod || timeSlot || "";
+  if (!String(name || "").trim() || !String(phone || "").trim() || !String(date || "").trim() || !String(timeValue || "").trim()) {
+    return { success: false, error: "请完整填写姓名、手机号、预约日期和时间" };
+  }
+  if (!packageId && !packageIds.length) return { success: false, error: "请选择预约套餐" };
   const src = buildSource({ shopId, scene });
   const normalizedContactPhones = [phone, ...(contactPhones || [])].map(String).map(s => s.trim()).filter((s, i, l) => s && l.indexOf(s) === i);
 
@@ -922,9 +951,9 @@ async function rpcCreateBooking(source, data = {}) {
   try {
     let pkgNameMap = {};
     if (packageIds.length) {
-      const pkgs = (await source.list("packages")).filter(p => packageIds.includes(p._id));
+      const pkgs = (await source.list("packages")).filter(p => packageIds.includes(getItemId(p)));
       if (pkgs.length !== packageIds.length) return { success: false, error: "部分套餐不存在或已下架" };
-      pkgNameMap = Object.fromEntries(pkgs.map(p => [p._id, p.name || ""]));
+      pkgNameMap = Object.fromEntries(pkgs.map(p => [getItemId(p), p.name || ""]));
       for (const pkg of pkgs) {
         if (!isVisibleSimple(pkg)) return { success: false, error: `${pkg.name || "套餐"}暂不可预约` };
         const conflict = [...(pkg.mutexPackageIds || []), ...(pkg.conflictPackageIds || []), ...(pkg.exclusivePackageIds || [])].find(id => packageIds.includes(id));
@@ -933,7 +962,7 @@ async function rpcCreateBooking(source, data = {}) {
         if (minAdvance > 0 && daysUntil(date) < minAdvance) return { success: false, error: `${pkg.name || "套餐"}需至少提前${minAdvance}天预约` };
         const dayLimit = Number(pkg.dailyLimit || pkg.maxDailyBookings || pkg.appointmentLimit || 0);
         if (dayLimit > 0) {
-          const active = (await source.list("orders")).filter(o => !o.isDeleted && ACTIVE_ORDER_STATUSES.includes(o.status) && o.date === date && orderHasPackage(o, pkg._id) && orderMatchesTime(o, timeValue));
+          const active = (await source.list("orders")).filter(o => !o.isDeleted && ACTIVE_ORDER_STATUSES.includes(o.status) && o.date === date && orderHasPackage(o, getItemId(pkg)) && orderMatchesTime(o, timeValue));
           if (active.length >= dayLimit) return { success: false, error: `${pkg.name || "套餐"}当前日期预约已满` };
         }
       }
@@ -985,7 +1014,7 @@ async function rpcCreateBooking(source, data = {}) {
       createTime: new Date().toISOString()
     };
     const created = await source.create("orders", doc);
-    return { success: true, orderId: created._id, orderNo };
+    return { success: true, orderId: getItemId(created), orderNo };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -994,6 +1023,7 @@ async function rpcCreateBooking(source, data = {}) {
 /* ============================ 订单状态变更（客人自助取消/删除） ============================ */
 const GUEST_CANCELABLE = ["pending", "new", "deposit_paid"];
 async function rpcUpdateOrderStatus(source, openid, data = {}) {
+  if (!openid) return { success: false, error: "请先完成微信登录" };
   const { orderId, newStatus, note = "" } = data;
   if (!orderId || !newStatus) return { success: false, error: "参数不全" };
   try {
@@ -1026,6 +1056,7 @@ async function applyStatusChange(source, { orderId, beforeStatus, newStatus, ope
 
 /* ============================ 售后 ============================ */
 async function rpcSubmitAfterSale(source, openid, data = {}) {
+  if (!openid) return { success: false, error: "请先完成微信登录" };
   const { orderId = "", orderNo = "", packageName = "", reason = "" } = data;
   const normalizedReason = String(reason || "").trim();
   if (!orderId && !orderNo) return { success: false, error: "缺少订单信息" };
@@ -1035,11 +1066,12 @@ async function rpcSubmitAfterSale(source, openid, data = {}) {
     if (!order || order.isDeleted || order.deleted) return { success: false, error: "订单不存在" };
     if (openid && getOrderOpenid(order) !== openid) return { success: false, error: "无权限申请该订单售后" };
     const record = { type: "afterSale", status: "pending", reason: normalizedReason, packageName: packageName || order.packageName || "", operator: "customer", operatorId: openid, createTime: new Date().toISOString() };
-    const updated = await source.update("orders", order._id, {
+    const orderKey = getItemId(order);
+    const updated = await source.update("orders", orderKey, {
       afterSaleStatus: "pending", afterSaleReason: normalizedReason, afterSaleCreateTime: new Date().toISOString(),
       followRecords: [...(order.followRecords || []), record]
     });
-    await source.create("logs", { action: "submitAfterSale", operator: openid, targetType: "order", targetId: order._id, detail: normalizedReason, createTime: new Date().toISOString() });
+    await source.create("logs", { action: "submitAfterSale", operator: openid, targetType: "order", targetId: orderKey, detail: normalizedReason, createTime: new Date().toISOString() });
     return { success: true, data: { status: updated.afterSaleStatus } };
   } catch (err) {
     return { success: false, error: err.message || "提交失败" };

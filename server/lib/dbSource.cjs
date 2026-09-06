@@ -12,8 +12,18 @@ const ALL_KEYS = [
   "albums", "samples", "packages", "addonServices", "peripherals", "tagLibrary",
   "guides", "stories", "scans", "orders", "afterSales", "reconciliationTransfers",
   "financeSettings", "monthlyClosings", "adjustmentRecords", "homeConfig", "logs", "trash",
-  "merchantCodes", "siteConfig", "userProfiles"
+  "merchantCodes", "siteConfig", "userProfiles", "config"
 ];
+const KEY_SET = new Set(ALL_KEYS);
+
+function assertKey(key) {
+  if (!KEY_SET.has(key)) {
+    const err = new Error("不支持的数据集合");
+    err.code = "DATA_KEY_INVALID";
+    throw err;
+  }
+  return key;
+}
 
 module.exports = function (cfg = {}) {
   const backend = cfg.backend || "json";
@@ -27,18 +37,53 @@ module.exports.ALL_KEYS = ALL_KEYS;
 function makeJson(cfg) {
   const dataFile = cfg.jsonFile || path.join(__dirname, "..", "data", "db.json");
   let mem = null;
+  let loadState = "missing";
+  let loadError = "";
   function load() {
     if (mem) return mem;
-    try { mem = JSON.parse(fs.readFileSync(dataFile, "utf8")); }
-    catch { mem = { collections: {} }; }
+    try {
+      mem = JSON.parse(fs.readFileSync(dataFile, "utf8"));
+      loadState = "ready";
+    } catch (e) {
+      if (e && e.code === "ENOENT") {
+        mem = { collections: {} };
+        loadState = "empty";
+      } else {
+        loadState = "invalid";
+        loadError = "json_invalid";
+        const err = new Error("JSON 数据文件无效");
+        err.code = "DATA_SOURCE_INVALID";
+        throw err;
+      }
+    }
+    if (!mem || typeof mem !== "object") {
+      const err = new Error("JSON 数据文件格式无效");
+      err.code = "DATA_SOURCE_INVALID";
+      throw err;
+    }
     if (!mem.collections) mem.collections = {};
     return mem;
   }
   function persist() {
+    load();
     fs.mkdirSync(path.dirname(dataFile), { recursive: true });
-    fs.writeFileSync(dataFile, JSON.stringify(mem, null, 2));
+    const tmp = `${dataFile}.${process.pid}.${Date.now()}.tmp`;
+    const text = JSON.stringify(mem, null, 2);
+    fs.writeFileSync(tmp, text, { encoding: "utf8", mode: 0o600 });
+    try {
+      // Rename is atomic on the supported POSIX deployment targets. Windows
+      // may reject replacing an existing file, so retain a safe copy fallback.
+      fs.renameSync(tmp, dataFile);
+    } catch (e) {
+      fs.copyFileSync(tmp, dataFile);
+      try { fs.unlinkSync(tmp); } catch (_) {}
+    }
+    try { fs.chmodSync(dataFile, 0o600); } catch (_) {}
+    loadState = "ready";
+    loadError = "";
   }
   function col(key) {
+    assertKey(key);
     const m = load();
     if (!m.collections[key]) m.collections[key] = {};
     return m.collections[key];
@@ -48,58 +93,102 @@ function makeJson(cfg) {
   }
   return {
     mode: "json",
-    async list(key) { return Object.values(col(key)); },
-    async get(key, id) { const d = col(key)[id]; return d ? { ...d, id, _id: id } : null; },
+    backend: "json",
+    async list(key) { return Object.values(col(key)).map(clone); },
+    async get(key, id) { const d = col(key)[id]; return d ? clone({ ...d, id, _id: id }) : null; },
     async create(key, doc) {
       const id = doc.id || doc._id || genId(key);
+      if (Object.prototype.hasOwnProperty.call(col(key), id)) {
+        const err = new Error("记录已存在");
+        err.code = "DUPLICATE_RECORD";
+        throw err;
+      }
       const item = { ...doc, id, _id: id };
-      col(key)[id] = item; persist(); return item;
+      col(key)[id] = item; persist(); return clone(item);
     },
     async update(key, id, patch) {
       const c = col(key);
       if (!c[id]) return null;
       c[id] = { ...c[id], ...patch, id, _id: id };
-      persist(); return c[id];
+      persist(); return clone(c[id]);
     },
     async remove(key, id) { const c = col(key); if (!(id in c)) return false; delete c[id]; persist(); return true; },
     async upsert(key, id, patch) {
       const c = col(key);
       c[id] = { ...(c[id] || {}), ...patch, id, _id: id };
-      persist(); return c[id];
+      persist(); return clone(c[id]);
     },
-    async object(key) { return col(key); }
+    async object(key) { return clone(col(key)); },
+    async health() {
+      try {
+        load();
+        return { backend: "json", configured: true, ready: true, persistent: true, file: loadState === "empty" ? "missing" : "present" };
+      } catch (e) {
+        return { backend: "json", configured: true, ready: false, persistent: true, error: loadError || "invalid" };
+      }
+    },
+    async close() {}
   };
 }
 
 /* ---------------------- MySQL 后端（生产，宝塔装的 MySQL） ---------------------- */
 function makeMysql(cfg) {
-  const mysql = require("mysql2/promise");
+  let mysql;
+  try { mysql = require("mysql2/promise"); }
+  catch (e) {
+    const err = new Error("MySQL 驱动未安装");
+    err.code = "DATA_SOURCE_UNAVAILABLE";
+    throw err;
+  }
+  if (!cfg.dbHost || !cfg.dbUser || !cfg.dbName) {
+    const err = new Error("MySQL 连接配置不完整");
+    err.code = "DATA_SOURCE_CONFIG_INVALID";
+    throw err;
+  }
   const pool = mysql.createPool({
     host: cfg.dbHost, user: cfg.dbUser, password: cfg.dbPassword,
-    database: cfg.dbName, waitForConnections: true, connectionLimit: 10
+    database: cfg.dbName, waitForConnections: true, connectionLimit: 10,
+    multipleStatements: false, enableKeepAlive: true, connectTimeout: cfg.connectTimeout || 3000
   });
-  const table = (key) => "lxm_" + key;
+  const table = (key) => "lxm_" + assertKey(key);
   async function q(sql, p = []) { const [rows] = await pool.query(sql, p); return rows; }
   async function run(sql, p = []) { const [r] = await pool.query(sql, p); return r; }
   let ensured = false;
+  let ensurePromise = null;
   async function ensure() {
-    if (ensured) return; ensured = true;
-    for (const key of ALL_KEYS) {
-      await run(`CREATE TABLE IF NOT EXISTS \`${table(key)}\` (id VARCHAR(64) PRIMARY KEY, doc MEDIUMTEXT)`);
+    if (ensured) return;
+    if (ensurePromise) return ensurePromise;
+    ensurePromise = (async () => {
+      for (const key of ALL_KEYS) {
+        await run(`CREATE TABLE IF NOT EXISTS \`${table(key)}\` (id VARCHAR(64) PRIMARY KEY, doc MEDIUMTEXT NOT NULL)`);
+      }
+      ensured = true;
+    })();
+    try { await ensurePromise; }
+    finally { ensurePromise = null; }
+  }
+  function hydrate(r) {
+    try {
+      const d = JSON.parse(r.doc);
+      return { ...d, id: r.id, _id: r.id };
+    } catch (e) {
+      const err = new Error("MySQL 数据记录格式无效");
+      err.code = "DATA_SOURCE_INVALID";
+      throw err;
     }
   }
-  function hydrate(r) { const d = JSON.parse(r.doc); return { ...d, id: r.id, _id: r.id }; }
   function strip(doc) { const { id, _id, ...rest } = doc; return rest; }
   return {
     mode: "mysql",
-    async list(key) { await ensure(); const rows = await q(`SELECT id,doc FROM \`${table(key)}\``); return rows.map(hydrate); },
-    async get(key, id) { await ensure(); const rows = await q(`SELECT doc FROM \`${table(key)}\` WHERE id=?`, [id]); return rows.length ? hydrate(rows[0]) : null; },
+    backend: "mysql",
+    async list(key) { await ensure(); const rows = await q(`SELECT id,doc FROM \`${table(key)}\` ORDER BY id`); return rows.map(hydrate); },
+    async get(key, id) { await ensure(); const rows = await q(`SELECT id,doc FROM \`${table(key)}\` WHERE id=?`, [id]); return rows.length ? hydrate(rows[0]) : null; },
     async create(key, doc) {
       await ensure();
       const id = doc.id || doc._id || (key.slice(0, 2) + "_" + crypto.randomBytes(6).toString("hex"));
       const item = { ...doc, id, _id: id };
-      await run(`INSERT INTO \`${table(key)}\` (id,doc) VALUES (?,?) ON DUPLICATE KEY UPDATE doc=VALUES(doc)`, [id, JSON.stringify(strip(item))]);
-      return item;
+      await run(`INSERT INTO \`${table(key)}\` (id,doc) VALUES (?,?)`, [id, JSON.stringify(strip(item))]);
+      return { ...item };
     },
     async update(key, id, patch) {
       await ensure();
@@ -108,7 +197,7 @@ function makeMysql(cfg) {
       await run(`UPDATE \`${table(key)}\` SET doc=? WHERE id=?`, [JSON.stringify(strip(next)), id]);
       return next;
     },
-    async remove(key, id) { await ensure(); await run(`DELETE FROM \`${table(key)}\` WHERE id=?`, [id]); return true; },
+    async remove(key, id) { await ensure(); const result = await run(`DELETE FROM \`${table(key)}\` WHERE id=?`, [id]); return Number(result.affectedRows || 0) > 0; },
     async upsert(key, id, patch) {
       await ensure();
       const cur = await this.get(key, id);
@@ -116,7 +205,17 @@ function makeMysql(cfg) {
       await run(`INSERT INTO \`${table(key)}\` (id,doc) VALUES (?,?) ON DUPLICATE KEY UPDATE doc=VALUES(doc)`, [id, JSON.stringify(strip(next))]);
       return next;
     },
-    async object() { return null; }
+    async object() { return null; },
+    async health() {
+      try {
+        await ensure();
+        await q("SELECT 1 AS ok");
+        return { backend: "mysql", configured: true, ready: true, persistent: true };
+      } catch (e) {
+        return { backend: "mysql", configured: true, ready: false, persistent: true, error: e && e.code === "DATA_SOURCE_INVALID" ? "invalid" : "unavailable" };
+      }
+    },
+    async close() { try { await pool.end(); } catch (_) {} }
   };
 }
 
@@ -126,7 +225,7 @@ function withComputed(base) {
     async snapshot() {
       const out = {};
       for (const k of ["orders", "shops", "merchantCodes", "spots", "albums", "series", "packages", "peripherals", "afterSales"]) {
-        try { out[k] = await base.list(k); } catch { out[k] = []; }
+        out[k] = await base.list(k);
       }
       return out;
     },
@@ -147,8 +246,18 @@ function withComputed(base) {
         deals: codes.reduce((s, c) => s + (Number(c.dealCount) || 0), 0),
         codeCount: codes.length
       };
-    }
+    },
+    async health() {
+      if (typeof base.health === "function") return base.health();
+      return { backend: base.mode || "unknown", configured: true, ready: true, persistent: false };
+    },
+    async close() { if (typeof base.close === "function") await base.close(); }
   });
+}
+
+function clone(value) {
+  if (value === undefined || value === null) return value;
+  return JSON.parse(JSON.stringify(value));
 }
 
 function computeDashboard(db) {

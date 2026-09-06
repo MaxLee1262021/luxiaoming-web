@@ -123,6 +123,16 @@ module.exports = function (cfg) {
       } catch (e) {
         return { scans: 0, orders: 0, deals: 0, codeCount: 0 };
       }
-    }
+    },
+    async health() {
+      try {
+        const c = await coll("cities");
+        await c.limit(1).get();
+        return { backend: "cloud", configured: true, ready: true, persistent: true };
+      } catch (e) {
+        return { backend: "cloud", configured: true, ready: false, persistent: true, error: "unavailable" };
+      }
+    },
+    async close() {}
   };
 };
