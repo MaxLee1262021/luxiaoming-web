@@ -942,6 +942,50 @@ function daysUntil(dateText) {
   return Math.floor((target.getTime() - today.getTime()) / 86400000);
 }
 
+async function resolveBookingItems(source, items) {
+  const [packages, albums, peripherals, site] = await Promise.all([
+    source.list("packages"),
+    source.list("albums"),
+    source.list("peripherals"),
+    getSiteGlobal(source),
+  ]);
+  const packageMap = new Map((packages || []).map((row) => [getItemId(row), row]));
+  const albumMap = new Map((albums || []).map((row) => [getItemId(row), row]));
+  const peripheralMap = new Map((peripherals || []).map((row) => [getItemId(row), row]));
+  const customConfig = site && site.customPrice ? site.customPrice : {};
+  let total = 0;
+  const resolved = [];
+  for (const input of items) {
+    const item = input && typeof input === "object" ? { ...input } : {};
+    let product = null;
+    let productType = "";
+    if (item.packageId) { product = packageMap.get(String(item.packageId)); productType = "package"; }
+    else if (item.albumId) { product = albumMap.get(String(item.albumId)); productType = "album"; }
+    else if (item.peripheralId) { product = peripheralMap.get(String(item.peripheralId)); productType = "peripheral"; }
+    if (item.custom === true) {
+      const count = Math.min(Math.max(Number(item.participantCount || item.count || 1), 1), 20);
+      const base = Number(customConfig.singlePersonPrice ?? customConfig.single ?? 200);
+      const extra = Number(customConfig.perExtraPerson ?? customConfig.extraPerPerson ?? 100);
+      item.price = Math.max(0, base + Math.max(count - 1, 0) * extra);
+      item.participantCount = count;
+      productType = "custom";
+    } else {
+      if (!product || !isVisibleSimple(product)) return { error: "预约商品不存在或已下架" };
+      const canonicalId = getItemId(product);
+      if (productType === "package") item.packageId = canonicalId;
+      if (productType === "album") item.albumId = canonicalId;
+      if (productType === "peripheral") item.peripheralId = canonicalId;
+      item.name = item.name || product.name || product.title || "";
+      item.price = Number(product.specialPrice || product.price || product.salePrice || 0);
+    }
+    item.productType = item.productType || productType;
+    if (!Number.isFinite(Number(item.price)) || Number(item.price) < 0) return { error: "预约商品价格无效" };
+    total += Number(item.price);
+    resolved.push(item);
+  }
+  return { items: resolved, totalPrice: total };
+}
+
 async function rpcCreateBooking(source, data = {}) {
   const openid = data.openid || "";
   const {
@@ -949,13 +993,13 @@ async function rpcCreateBooking(source, data = {}) {
   } = data;
   if (!openid) return { success: false, error: "请先完成微信登录" };
   const itemList = Array.isArray(items) ? items : [];
-  const normalizedItems = itemList.length ? itemList : [{ spotId: spotId || "", seriesId: seriesId || "", packageId: packageId || "", price: price || 0 }];
+  const normalizedItems = itemList.length ? itemList : [{ spotId: spotId || "", seriesId: seriesId || "", albumId: data.albumId || "", packageId: packageId || "", price: price || 0 }];
   const packageIds = Array.from(new Set(normalizedItems.map(i => i.packageId).filter(Boolean)));
   const timeValue = time || timePeriod || timeSlot || "";
   if (!String(name || "").trim() || !String(phone || "").trim() || !String(date || "").trim() || !String(timeValue || "").trim()) {
     return { success: false, error: "请完整填写姓名、手机号、预约日期和时间" };
   }
-  const hasBookingItem = !!packageId || normalizedItems.some(item => item && (item.packageId || item.albumId || item.seriesId));
+  const hasBookingItem = !!packageId || !!data.albumId || !!seriesId || normalizedItems.some(item => item && (item.custom === true || item.packageId || item.albumId || item.seriesId));
   if (!hasBookingItem) return { success: false, error: "请选择预约拍摄项目" };
   const src = buildSource({ shopId, scene, codeId, placementType, placementLabel });
   const normalizedContactPhones = [phone, ...(contactPhones || [])].map(String).map(s => s.trim()).filter((s, i, l) => s && l.indexOf(s) === i);
@@ -966,6 +1010,10 @@ async function rpcCreateBooking(source, data = {}) {
   const orderNo = `LS${dateStr}${rand}`;
 
   try {
+    const resolvedItems = await resolveBookingItems(source, normalizedItems);
+    if (resolvedItems.error) return { success: false, error: resolvedItems.error };
+    const bookingItems = resolvedItems.items;
+    const serverTotalPrice = resolvedItems.totalPrice;
     let pkgNameMap = {};
     if (packageIds.length) {
       const pkgs = (await source.list("packages")).filter(p => packageIds.includes(getItemId(p)));
@@ -1012,11 +1060,11 @@ async function rpcCreateBooking(source, data = {}) {
       timeSlot: timeValue,
       time: timeValue,
       message: message || "",
-      items: normalizedItems,
-      productItems: normalizedItems,
-      packageSnapshot: normalizedItems[0] || {},
-      price: parseFloat(totalPrice || price) || 0,
-      totalPrice: parseFloat(totalPrice || price) || 0,
+      items: bookingItems,
+      productItems: bookingItems,
+      packageSnapshot: bookingItems[0] || {},
+      price: serverTotalPrice,
+      totalPrice: serverTotalPrice,
       depositDue: 0,
       depositPaid: 0,
       finalPaid: 0,

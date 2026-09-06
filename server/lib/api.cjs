@@ -556,6 +556,11 @@ module.exports = function createApi(source, mode, options = {}) {
     } else if (action === "assign") {
       const photographerId = String(body.photographerId || "").trim();
       if (!photographerId) return json(res, 400, { error: "请选择摄影师" });
+      const staffRows = await source.list("staff");
+      const photographer = (Array.isArray(staffRows) ? staffRows : []).find((staff) =>
+        staff && String(staff.id || staff._id) === photographerId && String(staff.role || "") === "photo" && !["停用", "禁用", "disabled"].includes(String(staff.status || "").toLowerCase())
+      );
+      if (!photographer) return json(res, 400, { error: "摄影师账号不存在或已停用" });
       if (!canTransition(["new", "pending", "confirmed"], "confirmed")) return json(res, 409, { error: "订单当前状态不能派单" });
       patch.photographerId = photographerId;
       label = "安排摄影师";
@@ -580,14 +585,21 @@ module.exports = function createApi(source, mode, options = {}) {
     } else if (action === "deliver") {
       if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能交付自己的拍摄任务");
       if (!canTransition(["shooting", "retouching"], "delivered")) return json(res, 409, { error: "订单当前状态不能标记交付" });
+      if (Number(current.finalPaid || 0) > 0 && current.finalFinanceStatus !== "已审") return json(res, 409, { error: "尾款尚未完成财务审核，不能标记交付" });
       patch.deliveryNote = reason;
       label = "标记成片交付";
     } else if (action === "complete") {
       if (!canTransition(["delivered", "shooting", "final_pending"], "completed")) return json(res, 409, { error: "订单当前状态不能完成" });
+      if (Number(current.depositPaid || 0) > 0 && current.depositFinanceStatus !== "已审") return json(res, 409, { error: "定金尚未完成财务审核，不能完成订单" });
+      if (Number(current.finalPaid || 0) > 0 && current.finalFinanceStatus !== "已审") return json(res, 409, { error: "尾款尚未完成财务审核，不能完成订单" });
       patch.completedAt = now;
       label = "完成订单";
     } else if (action === "cancel") {
       if (["completed", "cancelled", "canceled"].includes(beforeStatus)) return json(res, 409, { error: "订单当前状态不能取消" });
+      try {
+        const activeTickets = (await source.list("afterSales")).filter((ticket) => ticket && String(ticket.orderId || "") === String(orderId) && !["已完", "已结案", "completed", "closed"].includes(String(ticket.status || "")));
+        if (activeTickets.length) return json(res, 409, { error: "订单存在处理中售后，不能取消" });
+      } catch (_) {}
       patch.status = "cancelled";
       patch.customerStatus = "已取消";
       patch.isDeleted = true;
