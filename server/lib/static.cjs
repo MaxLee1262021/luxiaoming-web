@@ -16,9 +16,12 @@ module.exports = function (root) {
     ".ico": "image/x-icon"
   };
   return function (req, res, urlPath) {
-    const clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, "");
+    let clean = "";
+    try { clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, ""); }
+    catch (_) { clean = ""; }
     let candidate = path.resolve(root, clean || "index.html");
-    if (!candidate.startsWith(root)) candidate = path.join(root, "index.html");
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) candidate = path.join(root, "index.html");
     if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) {
       candidate = path.join(root, "index.html");
     }

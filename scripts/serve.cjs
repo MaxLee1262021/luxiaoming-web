@@ -28,9 +28,12 @@ const types = {
 };
 
 function resolveFile(urlPath) {
-  const clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, "");
+  let clean = "";
+  try { clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, ""); }
+  catch (_) { clean = ""; }
   const candidate = path.resolve(root, clean || "index.html");
-  if (!candidate.startsWith(root)) return path.join(root, "index.html");
+  const relative = path.relative(root, candidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return path.join(root, "index.html");
   if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
   return path.join(root, "index.html");
 }

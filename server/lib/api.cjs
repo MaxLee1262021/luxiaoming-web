@@ -25,7 +25,7 @@ const FINANCE_KEYS = new Set(["reconciliationTransfers", "financeSettings", "mon
 // are rejected unless an authenticated admin policy explicitly allows them.
 const PUBLIC_RPC_NAMES = new Set([
   "login", "bindPhone", "getHomeData", "getSpots", "getBookingData", "getSeriesList",
-  "getSeriesDetail", "getPhotoCollection", "getPeripherals", "getGuides", "getMyOrders",
+  "getSeriesDetail", "getPhotoCollection", "getPeripherals", "getGuides", "listGuides", "getGuide", "getMyOrders",
   "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "updateOrderStatus",
   "submitAfterSale", "resolveMerchantCode", "getCities", "getPrivacyPolicy", "getSearchConfig",
   "getBookingConfig", "getFootprintConfig", "getCorpConfig", "getVideoSingles"

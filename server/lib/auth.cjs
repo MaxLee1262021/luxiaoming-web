@@ -294,7 +294,9 @@ function redisUrlFromConfig(options = {}) {
   const database = Number(options.redisDb !== undefined ? options.redisDb : process.env.REDIS_DB || 0);
   const username = String(options.redisUsername !== undefined ? options.redisUsername : process.env.REDIS_USERNAME || "").trim();
   const password = options.redisPassword !== undefined ? String(options.redisPassword) : String(process.env.REDIS_PASSWORD || "");
-  const auth = username || password ? `${encodeURIComponent(username || "default")}:${encodeURIComponent(password)}@` : "";
+  const auth = username
+    ? `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`
+    : password ? `:${encodeURIComponent(password)}@` : "";
   const scheme = String(options.redisTls !== undefined ? options.redisTls : process.env.REDIS_TLS || "").toLowerCase() === "true" ? "rediss" : "redis";
   const safePort = Number.isInteger(port) && port > 0 && port < 65536 ? port : 6379;
   const safeDb = Number.isInteger(database) && database >= 0 ? database : 0;

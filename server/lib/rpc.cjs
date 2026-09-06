@@ -29,7 +29,9 @@ module.exports = async function rpc(source, name, body = {}, ctx = {}) {
     case "getSeriesDetail": return await rpcGetSeriesDetail(source, data);
     case "getPhotoCollection": return await rpcGetPhotoCollection(source, data);
     case "getPeripherals": return await rpcGetPeripherals(source, data);
-    case "getGuides": return await rpcGetGuides(source, data);
+    case "getGuides":
+    case "listGuides": return await rpcGetGuides(source, data);
+    case "getGuide": return await rpcGetGuide(source, data);
     case "getMyOrders":
       if (!openid) return { success: false, error: "请先完成微信登录" };
       return await rpcGetMyOrders(source, openid, data);
@@ -812,6 +814,18 @@ async function rpcGetGuides(source, data = {}) {
     return { success: true, data: list };
   } catch (err) {
     return { success: false, error: err.message };
+  }
+}
+
+async function rpcGetGuide(source, data = {}) {
+  const id = String(data.id || data.guideId || "").trim();
+  if (!id) return { success: false, error: "缺少攻略 ID" };
+  try {
+    const guide = await source.get("guides", id);
+    if (!guide || guide.isDeleted === true || guide.isShow === false) return { success: false, error: "攻略不存在" };
+    return { success: true, data: guide };
+  } catch (error) {
+    return { success: false, error: error.message || "攻略读取失败" };
   }
 }
 

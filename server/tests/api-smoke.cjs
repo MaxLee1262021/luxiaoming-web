@@ -180,7 +180,7 @@ function makeFixture() {
   };
   collections.financeSettings["smoke-finance"] = { id: "smoke-finance", currency: "CNY" };
   collections.albums["smoke-album"] = { id: "smoke-album", name: "Smoke Album", status: "已上架" };
-  collections.packages["smoke-package"] = { id: "smoke-package", name: "Smoke Package", status: "已上架" };
+  collections.packages["smoke-package"] = { id: "smoke-package", name: "Smoke Package", status: "已上架", price: 100 };
   collections.spots["smoke-spot"] = { id: "smoke-spot", name: "Smoke Spot", status: "启用" };
 
   return { db: { collections }, accounts };
@@ -604,8 +604,8 @@ async function runSmoke(options = {}) {
               date: "2099-01-01",
               time: "10:00",
               codeId: "smoke-code",
-              items: [{ packageId: "smoke-package", price: 100 }],
-              totalPrice: 100,
+              items: [{ packageId: "smoke-package", price: 9999 }],
+              totalPrice: 9999,
             },
           },
         });
@@ -617,6 +617,7 @@ async function runSmoke(options = {}) {
         assert.equal(created.openid, "dev_openid", "booking identity must come from the verified public session");
         assert.equal(created.sourceCodeId, "smoke-code", "source code must be persisted for attribution");
         assert.equal(created.source && created.source.codeId, "smoke-code", "nested source code must be persisted");
+        assert.equal(created.totalPrice, 100, "booking total must be calculated from the server product price");
         return result.body.orderId;
       });
 
