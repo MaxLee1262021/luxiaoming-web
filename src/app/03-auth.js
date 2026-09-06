@@ -172,6 +172,9 @@ async function login() {
       log("登录失败", "后台", "服务端未返回有效会话或角色", account, { level: "高" });
       return ElMessage.error("登录服务返回无效会话，请联系管理员");
     }
+    // Drop the bundled demo snapshot before loading scoped server rows. This
+    // prevents a role with a denied collection from seeing stale demo data.
+    clearRuntimeData();
     applyLogin(session, { source: "server" });
     await loadAuthenticatedData();
     ElMessage.success("登录成功");
