@@ -218,12 +218,19 @@ async function getSiteGlobal(source) {
         const fragment = { ...row };
         delete fragment.id;
         delete fragment._id;
-        assembled[id] = fragment;
+        assembled[id] = normalizeSiteConfigFragment(id, fragment);
       }
       if (Object.keys(assembled).length) return assembled;
     }
     return {};
   } catch (e) { return {}; }
+}
+
+function normalizeSiteConfigFragment(id, fragment) {
+  const numericKeys = Object.keys(fragment).every((key) => /^\d+$/.test(key));
+  if (id === "bookingNotice" && numericKeys) return Object.keys(fragment).sort((a, b) => Number(a) - Number(b)).map((key) => fragment[key]);
+  if (id === "privacyText" && numericKeys) return Object.keys(fragment).sort((a, b) => Number(a) - Number(b)).map((key) => fragment[key]).join("");
+  return fragment;
 }
 
 // 预约须知归一化：编辑页存字符串数组（一行一条），小程序端要单个带编号字符串；已有编号的行不重复加

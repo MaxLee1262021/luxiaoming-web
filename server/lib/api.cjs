@@ -281,7 +281,7 @@ module.exports = function createApi(source, mode, options = {}) {
     ? !!options.allowDevOpenid
     : (process.env.ALLOW_DEV_OPENID !== undefined
       ? process.env.ALLOW_DEV_OPENID === "true"
-      : process.env.NODE_ENV !== "production" && ["json", "mock"].includes(mode));
+      : ["development", "test", ""].includes(String(process.env.NODE_ENV || "").trim().toLowerCase()) && ["json", "mock"].includes(mode));
   const allowedOrigins = String(process.env.ADMIN_CORS_ORIGINS || "").split(",").map((x) => x.trim()).filter(Boolean);
   let authInit = null;
   function initAuth() {
@@ -366,11 +366,11 @@ module.exports = function createApi(source, mode, options = {}) {
       const merchant = (Array.isArray(shopList) ? shopList : []).find((item) => item && item.account === account && verifyPassword(item.password, password));
       if (staff && merchant) return json(res, 409, { ok: false, error: "账号配置冲突，请联系管理员" });
       const candidate = staff || merchant;
-      if (staff && ["停用", "disabled", "禁用"].includes(String(staff.status || "").toLowerCase())) {
+      if (staff && ["停用", "已停用", "disabled", "禁用"].includes(String(staff.status || "").toLowerCase())) {
         await auditDenied({ account }, "/api/auth/login", "人员账号已停用");
         return json(res, 403, { ok: false, error: "该账号已被停用，请联系管理员启用后再登录" });
       }
-      if (merchant && ["暂停合作", "已终止", "停用", "disabled", "禁用"].includes(String(merchant.status || "").toLowerCase())) {
+      if (merchant && ["暂停合作", "已终止", "停用", "已停用", "disabled", "禁用"].includes(String(merchant.status || "").toLowerCase())) {
         await auditDenied({ account }, "/api/auth/login", "商家合作状态不允许登录");
         return json(res, 403, { ok: false, error: "该商家合作已暂停或终止，账号暂无法登录" });
       }
@@ -470,9 +470,15 @@ module.exports = function createApi(source, mode, options = {}) {
       const fragment = { ...row };
       delete fragment.id;
       delete fragment._id;
-      assembled[fragmentId] = fragment;
+      assembled[fragmentId] = normalizeConfigFragment(fragmentId, fragment);
     }
     return Object.keys(assembled).length ? { ...assembled, id: "global", _id: "global" } : null;
+  }
+  function normalizeConfigFragment(id, fragment) {
+    const numericKeys = Object.keys(fragment).every((key) => /^\d+$/.test(key));
+    if (id === "bookingNotice" && numericKeys) return Object.keys(fragment).sort((a, b) => Number(a) - Number(b)).map((key) => fragment[key]);
+    if (id === "privacyText" && numericKeys) return Object.keys(fragment).sort((a, b) => Number(a) - Number(b)).map((key) => fragment[key]).join("");
+    return fragment;
   }
   async function collectionRoute(req, res, parts, session, pathname) {
     const key = decodePart(parts[1]); const id = parts[2] ? decodePart(parts[2]) : "";
