@@ -412,7 +412,11 @@ module.exports = function createApi(source, mode, options = {}) {
     const current = await source.get(key, id);
     if (!current) return true;
     const role = normalizeRole(session.role);
-    if (["super", "finance", "content"].includes(role)) return true;
+    if (role === "super") return true;
+    if (role === "finance") {
+      const allowedFinance = key === "orders" ? ORDER_FINANCE_FIELDS : new Set(["status", "customerVisibleStatus", "financeStatus", "refundAmount", "approvedBy", "approvedAt", "logs", "updatedAt"]);
+      return Object.keys(body || {}).every((field) => allowedFinance.has(field));
+    }
     if (!(await filterRows(source, session, key, [current])).length) return false;
     const allowed = role === "service" ? (key === "orders" ? ORDER_SERVICE_FIELDS : new Set(["status", "customerVisibleStatus", "assigneeId", "logs", "updatedAt", "financeStatus", "refundAmount"])) : role === "photo" ? ORDER_PHOTO_FIELDS : role === "merchant" ? ORDER_MERCHANT_FIELDS : new Set();
     return Object.keys(body || {}).every((field) => allowed.has(field));

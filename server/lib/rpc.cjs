@@ -939,7 +939,8 @@ async function rpcCreateBooking(source, data = {}) {
   if (!String(name || "").trim() || !String(phone || "").trim() || !String(date || "").trim() || !String(timeValue || "").trim()) {
     return { success: false, error: "请完整填写姓名、手机号、预约日期和时间" };
   }
-  if (!packageId && !packageIds.length) return { success: false, error: "请选择预约套餐" };
+  const hasBookingItem = !!packageId || normalizedItems.some(item => item && (item.packageId || item.albumId || item.seriesId));
+  if (!hasBookingItem) return { success: false, error: "请选择预约拍摄项目" };
   const src = buildSource({ shopId, scene });
   const normalizedContactPhones = [phone, ...(contactPhones || [])].map(String).map(s => s.trim()).filter((s, i, l) => s && l.indexOf(s) === i);
 
