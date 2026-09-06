@@ -73,7 +73,7 @@ function openStaff(row = null) {
   state.editStaff = base;
   state.staffDialog = true;
 }
-function saveStaff() {
+async function saveStaff() {
   const row = state.editStaff;
   if (!row.name || !row.account) return ElMessage.warning("请填写姓名和账号");
   // 密码规则：新增必填强密码；编辑填了才校验（留空=不修改）。
@@ -87,12 +87,18 @@ function saveStaff() {
     row.settlementCycle = row.settlementCycle || "月结";
   }
   let saved;
+  const previous = row.id ? { ...(data.staff.find((s) => s.id === row.id) || {}) } : null;
   if (row.id) { saved = data.staff.find((s) => s.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `st${Date.now()}` }; data.staff.unshift(saved); }
+  const synced = await persistAccountToCloud("staff", saved);
+  if (!synced && ctx.isServerConnected()) {
+    if (previous) Object.assign(saved, previous);
+    else data.staff = data.staff.filter((item) => item !== saved);
+    return;
+  }
   state.staffDialog = false;
   log("保存人员", row.name, roleName(row.role));
   ElMessage.success("人员账号已保存");
-  persistAccountToCloud("staff", saved);
 }
 async function resetPassword(row) {
   const tempPwd = generateTempPassword();
@@ -141,10 +147,15 @@ async function toggleStaffStatus(row) {
       { type: "warning", confirmButtonText: `确认${verb}`, cancelButtonText: "取消" }
     );
   } catch (e) { return; }
+  const previousStatus = target.status;
   target.status = disabling ? "停用" : "启用";
+  const synced = await persistAccountToCloud("staff", target);
+  if (!synced && ctx.isServerConnected()) {
+    target.status = previousStatus;
+    return;
+  }
   log(`${verb}人员`, target.name, `账号已${verb}，${disabling ? "登录入口已同步关闭" : "恢复登录"}`, currentOperatorName(), { level: "中" });
   ElMessage.success(`已${verb}「${target.name}」的账号`);
-  persistAccountToCloud("staff", target);
 }
 function openDistributor(row = null) {
   const defaultAgentId = state.role === "agent" ? roleProfile.value.agentId : "agent1";
@@ -152,7 +163,7 @@ function openDistributor(row = null) {
   state.editDistributor = row ? { ...row, password: "" } : { id: "", cityId: defaultCityId, agentId: defaultAgentId, name: "", phone: "", commissionRate: 5, settlementCycle: "月结", status: "启用", account: "", password: "" };
   state.distributorDialog = true;
 }
-function saveDistributor() {
+async function saveDistributor() {
   const row = state.editDistributor;
   if (!row.name || !row.agentId) return ElMessage.warning("请填写分销员名称和所属代");
   const pwdError = accountPasswordError(row.password);
@@ -163,12 +174,18 @@ function saveDistributor() {
   row.cityId = row.cityId || (data.agents.find((a) => a.id === row.agentId) || {}).cityId || "city1";
   row.settlementCycle = row.settlementCycle || "月结";
   let saved;
+  const previous = row.id ? { ...(data.distributors.find((d) => d.id === row.id) || {}) } : null;
   if (row.id) { saved = data.distributors.find((d) => d.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `dist${Date.now()}` }; data.distributors.unshift(saved); }
+  const synced = await persistAccountToCloud("distributors", saved);
+  if (!synced && ctx.isServerConnected()) {
+    if (previous) Object.assign(saved, previous);
+    else data.distributors = data.distributors.filter((item) => item !== saved);
+    return;
+  }
   state.distributorDialog = false;
   log("保存分销", row.name, `分销比例 ${row.commissionRate}%`);
   ElMessage.success("分销员信息已保存");
-  persistAccountToCloud("distributors", saved);
 }
 function openShop(row = null) {
   if (!canManageShopBinding()) return ElMessage.warning("分销员只能查看总部绑定给自己的商家，不能新增或编辑商家");
@@ -178,7 +195,7 @@ function openShop(row = null) {
   syncShopDistributorRates();
   state.shopDialog = true;
 }
-function saveShop() {
+async function saveShop() {
   if (!canManageShopBinding()) return ElMessage.warning("分销员没有新增、编辑或绑定商家的权");
   const row = state.editShop;
   if (!row.name || !row.account) return ElMessage.warning("请填写商家名称和登录账号");
@@ -197,12 +214,18 @@ function saveShop() {
     }
   });
   let saved;
+  const previous = row.id ? { ...(data.shops.find((s) => s.id === row.id) || {}) } : null;
   if (row.id) { saved = data.shops.find((s) => s.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `shop${Date.now()}` }; data.shops.unshift(saved); }
+  const synced = await persistAccountToCloud("shops", saved);
+  if (!synced && ctx.isServerConnected()) {
+    if (previous) Object.assign(saved, previous);
+    else data.shops = data.shops.filter((item) => item !== saved);
+    return;
+  }
   state.shopDialog = false;
   log("保存商家", row.name, `分账比例 ${row.commissionRate || row.shareRatio}%，绑定分销员：${(row.distributorIds && row.distributorIds.length) ? row.distributorIds.map(distributorName).join("、") : "未绑"}`);
   ElMessage.success("商家信息已保存");
-  persistAccountToCloud("shops", saved);
 }
 function openQr(row) {
   state.currentShop = row;

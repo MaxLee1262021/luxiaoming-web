@@ -320,20 +320,26 @@ function generateTempPassword() {
 }
 // 账号资料写回服务端：服务端会自动把明文密码哈希落库；密码留空则不下发该字段（= 不改密码）。
 async function persistAccountToCloud(key, row) {
-  if (!ctx.isServerConnected() || !row) return;
+  if (!row || !ctx.isServerConnected() || !window.LXM_CLOUD) return true;
   try {
     const doc = { ...row };
     if (!doc.password) delete doc.password;
     let res;
     if (row.id) {
-      res = await window.LXM_CLOUD.update(key, row.id, doc);
-      if (!res || res.error) res = await window.LXM_CLOUD.create(key, doc);
+      try {
+        res = await window.LXM_CLOUD.update(key, row.id, doc);
+      } catch (error) {
+        if (!error || error.status !== 404) throw error;
+        res = await window.LXM_CLOUD.create(key, doc);
+      }
     } else {
       res = await window.LXM_CLOUD.create(key, doc);
     }
     if (res && res.error) throw new Error(res.error);
+    return true;
   } catch (e) {
-    ElMessage.warning("账号已保存到本地，但同步服务端失败：" + (e && e.message ? e.message : e));
+    ElMessage.error("服务端保存失败，本地改动未生效：" + (e && e.message ? e.message : e));
+    return false;
   }
 }
 // 跨四个账号集合（运营人员/商家/分销员/代理）按引用或 id 定位记录所属集合名。
