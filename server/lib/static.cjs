@@ -15,17 +15,39 @@ module.exports = function (root) {
     ".svg": "image/svg+xml; charset=utf-8",
     ".ico": "image/x-icon"
   };
-  return function (req, res, urlPath) {
+  const publicDirs = new Set(["public", "src"]);
+  const publicRootFiles = new Set(["index.html", "favicon.ico"]);
+  const publicExtensions = new Set(Object.keys(types));
+
+  function resolvePublicFile(urlPath) {
     let clean = "";
     try { clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, ""); }
-    catch (_) { clean = ""; }
-    let candidate = path.resolve(root, clean || "index.html");
+    catch (_) { return { blocked: true }; }
+    if (!clean) return { file: path.join(root, "index.html") };
+    let candidate = path.resolve(root, clean);
     const relative = path.relative(root, candidate);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) candidate = path.join(root, "index.html");
-    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) {
-      candidate = path.join(root, "index.html");
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return { blocked: true };
+    const parts = relative.split(path.sep);
+    if (parts.some((part) => !part || part === "." || part === ".." || part.startsWith("."))) return { blocked: true };
+    const first = String(parts[0] || "").toLowerCase();
+    const rootFile = parts.length === 1 && publicRootFiles.has(first);
+    const directoryFile = publicDirs.has(first) && publicExtensions.has(path.extname(relative).toLowerCase());
+    if (!rootFile && !directoryFile) return { blocked: true };
+    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return { missing: true };
+    return { file: candidate };
+  }
+
+  return function (req, res, urlPath) {
+    const resolved = resolvePublicFile(urlPath || "");
+    if (resolved.blocked || resolved.missing) {
+      res.statusCode = 404;
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      return res.end("Not found");
     }
+    const candidate = resolved.file;
     const ext = path.extname(candidate).toLowerCase();
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Type", types[ext] || "application/octet-stream");
     res.setHeader("Cache-Control", "no-store");
     fs.createReadStream(candidate)

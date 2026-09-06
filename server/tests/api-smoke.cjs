@@ -196,11 +196,13 @@ function createTempFixture(root) {
   const dir = fs.mkdtempSync(path.join(fixtureRoot, ".project-hub-10522-"));
   const file = path.join(dir, "db.json");
   const envFile = path.join(dir, ".env");
+  const staticSentinel = path.join(dir, "static-sentinel.txt");
   const fixture = makeFixture();
   fs.writeFileSync(file, JSON.stringify(fixture.db, null, 2), { encoding: "utf8", mode: 0o600 });
   // Prevent dotenv in the child server from reading a developer's real .env.
   fs.writeFileSync(envFile, "# isolated smoke environment\n", { encoding: "utf8", mode: 0o600 });
-  return { ...fixture, dir, file, envFile };
+  fs.writeFileSync(staticSentinel, `STATIC_PRIVATE_SENTINEL_${crypto.randomBytes(8).toString("hex")}`, { encoding: "utf8", mode: 0o600 });
+  return { ...fixture, dir, file, envFile, staticSentinel };
 }
 
 function assertSyntheticFixtureSafe(fixture) {
@@ -524,6 +526,15 @@ async function runSmoke(options = {}) {
       assert.equal(result.status, 200, "health must return HTTP 200");
       assertHealthShape(result.body);
       assert.equal(result.body.auth.sessionStore, "memory", "local smoke must use memory sessions");
+    });
+
+    await check(report, "static server denies private files", async () => {
+      const relative = path.relative(root, fixture.staticSentinel).replace(/\\/g, "/");
+      const result = await requestJson(server.baseUrl, `/${relative}`);
+      assert.notEqual(result.status, 200, "private fixture file must not be served");
+      assert.equal(result.text.includes("STATIC_PRIVATE_SENTINEL_"), false, "private fixture contents must not be exposed");
+      const packageResult = await requestJson(server.baseUrl, "/package.json");
+      assert.notEqual(packageResult.status, 200, "root metadata must not be served");
     });
 
     for (const route of ["/api/dashboard", "/api/collection/orders", "/api/collection/staff", "/api/collection/shops"]) {

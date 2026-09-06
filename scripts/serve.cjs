@@ -14,29 +14,7 @@ const { source, mode, status: sourceStatus } = selected;
 const { createAuthStore } = require(path.join(root, "server/lib/auth.cjs"));
 const auth = createAuthStore();
 const apiHandler = require(path.join(root, "server/lib/api.cjs"))(source, mode, { auth, sourceStatus });
-
-const types = {
-  ".html": "text/html; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".js": "application/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".webp": "image/webp",
-  ".svg": "image/svg+xml; charset=utf-8"
-};
-
-function resolveFile(urlPath) {
-  let clean = "";
-  try { clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, ""); }
-  catch (_) { clean = ""; }
-  const candidate = path.resolve(root, clean || "index.html");
-  const relative = path.relative(root, candidate);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) return path.join(root, "index.html");
-  if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
-  return path.join(root, "index.html");
-}
+const staticHandler = require(path.join(root, "server/lib/static.cjs"))(root);
 
 async function bootstrap() {
   if (process.argv.includes("--check-only")) {
@@ -58,16 +36,7 @@ async function bootstrap() {
     .createServer((req, res) => {
       const p = (req.url || "/").split("?")[0];
       if (p.startsWith("/api/")) return apiHandler(req, res, p);
-      const file = resolveFile(req.url || "/");
-      const ext = path.extname(file).toLowerCase();
-      res.setHeader("Content-Type", types[ext] || "application/octet-stream");
-      res.setHeader("Cache-Control", "no-store");
-      fs.createReadStream(file)
-        .on("error", () => {
-          res.statusCode = 500;
-          res.end("Server error");
-        })
-        .pipe(res);
+      return staticHandler(req, res, p);
     })
     .listen(port, host, () => {
       console.log(`鹿小鸣管理后台已启动: http://${host}:${port}/  [数据模式: ${mode}]`);
