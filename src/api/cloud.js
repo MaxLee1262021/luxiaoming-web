@@ -231,6 +231,17 @@
     return jsonResponse(response);
   }
 
+  async function orderAction(id, action, payload = {}) {
+    if (!hasSession()) throw authError("需要登录后操作订单", 401);
+    const response = await request(`${base}/orders/${encodeURIComponent(id)}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...(payload || {}) })
+    });
+    const result = await jsonResponse(response);
+    return result && result.data ? result.data : result;
+  }
+
   function normalizeIds(value) {
     if (Array.isArray(value)) value.forEach((item) => { if (item && item._id && !item.id) item.id = item._id; });
     return value;
@@ -257,7 +268,7 @@
           const value = normalizeIds(await getColl(key));
           if (value === undefined || value === null) continue;
           // 服务端已经剥离 password；这里再次防御，避免未来适配器误下发凭据。
-          const safe = (key === "staff" || key === "shops") && Array.isArray(value)
+          const safe = ["staff", "shops", "distributors", "agents"].includes(key) && Array.isArray(value)
             ? value.map(({ password, ...rest }) => rest)
             : value;
           if ((cfg.stateKeys || []).includes(key)) {
@@ -280,5 +291,5 @@
     return loadPromise;
   }
 
-  window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, loadAdminData, mode: () => window.LXM_CLOUD_MODE };
+  window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, orderAction, loadAdminData, mode: () => window.LXM_CLOUD_MODE };
 })();

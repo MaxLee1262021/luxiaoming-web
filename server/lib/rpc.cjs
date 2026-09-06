@@ -201,7 +201,12 @@ const SITE_DEFAULTS = {
 
 // 读 siteConfig('global')：集合 / 文档不存在或异常时返回 {}，由各 RPC 用默认值兜底
 async function getSiteGlobal(source) {
-  try { return (await source.get("siteConfig", "global")) || {}; } catch (e) { return {}; }
+  try {
+    return (await source.get("siteConfig", "global"))
+      || (await source.get("siteConfig", "homeStats"))
+      || (await source.get("config", "global"))
+      || {};
+  } catch (e) { return {}; }
 }
 
 // 预约须知归一化：编辑页存字符串数组（一行一条），小程序端要单个带编号字符串；已有编号的行不重复加
@@ -902,12 +907,23 @@ function parseScene(scene = "") {
   try { decoded = decodeURIComponent(scene); } catch (e) {}
   return decoded.split("&").reduce((r, pair) => { const [k, v = ""] = pair.split("="); if (k) r[k] = v; return r; }, {});
 }
-function buildSource({ shopId, scene }) {
+function buildSource({ shopId, scene, codeId, placementType, placementLabel }) {
   const sp = parseScene(scene);
   const sourceShopId = shopId || sp.shopId || "";
   const distributorId = sp.distributorId || sp.distributor || sp.promoterId || "";
   const sourceType = sp.sourceType || sp.channel || (sourceShopId ? "merchant_qrcode" : "direct");
-  return { shopId: sourceShopId, distributorId, scene: scene || "", sourceType, channel: sourceType };
+  const sourceCodeId = String(codeId || sp.c || sp.codeId || "").trim();
+  return {
+    shopId: sourceShopId,
+    distributorId,
+    codeId: sourceCodeId,
+    sourceCodeId,
+    placementType: String(placementType || sp.placementType || "").trim(),
+    placementLabel: String(placementLabel || sp.placementLabel || "").trim(),
+    scene: scene || "",
+    sourceType,
+    channel: sourceType,
+  };
 }
 function orderHasPackage(order, packageId) {
   if (order.packageId === packageId) return true;
@@ -929,7 +945,7 @@ function daysUntil(dateText) {
 async function rpcCreateBooking(source, data = {}) {
   const openid = data.openid || "";
   const {
-    shopId, spotId, seriesId, packageId, name, phone, contactPhones = [], wechat, date, timePeriod, timeSlot, time, message, price, scene, items = [], totalPrice
+    shopId, spotId, seriesId, packageId, name, phone, contactPhones = [], wechat, date, timePeriod, timeSlot, time, message, price, scene, items = [], totalPrice, codeId, placementType, placementLabel
   } = data;
   if (!openid) return { success: false, error: "请先完成微信登录" };
   const itemList = Array.isArray(items) ? items : [];
@@ -941,7 +957,7 @@ async function rpcCreateBooking(source, data = {}) {
   }
   const hasBookingItem = !!packageId || normalizedItems.some(item => item && (item.packageId || item.albumId || item.seriesId));
   if (!hasBookingItem) return { success: false, error: "请选择预约拍摄项目" };
-  const src = buildSource({ shopId, scene });
+  const src = buildSource({ shopId, scene, codeId, placementType, placementLabel });
   const normalizedContactPhones = [phone, ...(contactPhones || [])].map(String).map(s => s.trim()).filter((s, i, l) => s && l.indexOf(s) === i);
 
   const now = new Date();
@@ -974,6 +990,7 @@ async function rpcCreateBooking(source, data = {}) {
       shopId: src.shopId || "",
       scene: scene || "",
       source: src,
+      sourceCodeId: src.sourceCodeId || "",
       sourceType: src.sourceType,
       sourceChannel: src.channel,
       distributorId: src.distributorId,
@@ -1058,7 +1075,7 @@ async function applyStatusChange(source, { orderId, beforeStatus, newStatus, ope
 /* ============================ 售后 ============================ */
 async function rpcSubmitAfterSale(source, openid, data = {}) {
   if (!openid) return { success: false, error: "请先完成微信登录" };
-  const { orderId = "", orderNo = "", packageName = "", reason = "" } = data;
+  const { orderId = "", orderNo = "", packageName = "", reason = "", type = "退款申请" } = data;
   const normalizedReason = String(reason || "").trim();
   if (!orderId && !orderNo) return { success: false, error: "缺少订单信息" };
   if (normalizedReason.length < 5) return { success: false, error: "售后原因至少填写 5 个字" };
@@ -1066,14 +1083,43 @@ async function rpcSubmitAfterSale(source, openid, data = {}) {
     const order = await findOrder(source, orderId, orderNo);
     if (!order || order.isDeleted || order.deleted) return { success: false, error: "订单不存在" };
     if (openid && getOrderOpenid(order) !== openid) return { success: false, error: "无权限申请该订单售后" };
-    const record = { type: "afterSale", status: "pending", reason: normalizedReason, packageName: packageName || order.packageName || "", operator: "customer", operatorId: openid, createTime: new Date().toISOString() };
     const orderKey = getItemId(order);
+    // A customer can submit only one active ticket per order. This keeps retries
+    // idempotent when the mobile network repeats the request.
+    let tickets = [];
+    try { tickets = await source.list("afterSales"); } catch (_) { tickets = []; }
+    const duplicate = (Array.isArray(tickets) ? tickets : []).find((ticket) =>
+      ticket && String(ticket.orderId || "") === String(orderKey) &&
+      String(ticket.openid || ticket.operatorId || "") === String(openid) &&
+      !["completed", "closed", "已完", "已结案"].includes(String(ticket.status || ""))
+    );
+    if (duplicate) return { success: true, data: { status: duplicate.status || "pending", ticketId: getItemId(duplicate), existed: true } };
+    const now = new Date().toISOString();
+    const ticketId = `as_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
+    const ticket = {
+      id: ticketId,
+      _id: ticketId,
+      orderId: orderKey,
+      orderNo: order.orderNo || orderNo || "",
+      openid,
+      type: String(type || "退款申请").trim() || "退款申请",
+      status: "pending",
+      customerVisibleStatus: "处理中",
+      reason: normalizedReason,
+      packageName: packageName || order.packageName || "",
+      submitSource: "mini_program",
+      logs: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+    await source.create("afterSales", ticket);
     const updated = await source.update("orders", orderKey, {
-      afterSaleStatus: "pending", afterSaleReason: normalizedReason, afterSaleCreateTime: new Date().toISOString(),
-      followRecords: [...(order.followRecords || []), record]
+      afterSaleStatus: "pending", afterSaleReason: normalizedReason, afterSaleCreateTime: now,
+      afterSaleId: ticketId,
+      followRecords: [...(order.followRecords || []), { type: "afterSale", status: "pending", reason: normalizedReason, packageName: packageName || order.packageName || "", operator: "customer", operatorId: openid, createTime: now }]
     });
-    await source.create("logs", { action: "submitAfterSale", operator: openid, targetType: "order", targetId: orderKey, detail: normalizedReason, createTime: new Date().toISOString() });
-    return { success: true, data: { status: updated.afterSaleStatus } };
+    await source.create("logs", { action: "submitAfterSale", operator: openid, targetType: "order", targetId: orderKey, detail: normalizedReason, createTime: now });
+    return { success: true, data: { status: updated.afterSaleStatus, ticketId } };
   } catch (err) {
     return { success: false, error: err.message || "提交失败" };
   }

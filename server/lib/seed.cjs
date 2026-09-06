@@ -3,6 +3,22 @@
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const crypto = require("crypto");
+
+const ACCOUNT_KEYS = new Set(["staff", "shops", "distributors", "agents"]);
+
+function hashPassword(plain) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(String(plain), salt, 64).toString("hex");
+  return `lxm1$${salt}$${hash}`;
+}
+
+function prepareItem(key, item) {
+  if (!ACCOUNT_KEYS.has(key) || !item || typeof item !== "object") return item;
+  const copy = { ...item };
+  if (typeof copy.password === "string" && copy.password && !copy.password.startsWith("lxm1$")) copy.password = hashPassword(copy.password);
+  return copy;
+}
 
 module.exports = function (source) {
   return async function seed() {
@@ -26,7 +42,7 @@ module.exports = function (source) {
         if (Array.isArray(val)) {
           for (const item of val) {
             const id = item.id || item._id || (key.slice(0, 2) + "_seed_" + cryptoId());
-            await source.upsert(key, id, item);
+            await source.upsert(key, id, prepareItem(key, item));
             count++;
           }
         } else if (val && typeof val === "object") {
@@ -35,9 +51,13 @@ module.exports = function (source) {
           if (key === "homeConfig" || key === "config") {
             await source.upsert(key, "homeStats", val);
             count++;
+          } else if (key === "siteConfig") {
+            // The mobile client and admin editor share this stable document id.
+            await source.upsert(key, "global", val);
+            count++;
           } else {
             for (const id of Object.keys(val)) {
-              await source.upsert(key, id, val[id]);
+              await source.upsert(key, id, prepareItem(key, val[id]));
               count++;
             }
           }

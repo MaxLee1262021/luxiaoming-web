@@ -222,7 +222,11 @@ window.LXM_PAGES = (() => {
     link.rel = 'stylesheet';
     link.href = href;
     link.dataset.pageStyle = href;
-    document.head.appendChild(link);
+    // Keep the shared operations layer last so asynchronously loaded page CSS
+    // cannot reintroduce a different surface or focus treatment.
+    const sharedLayer = document.head.querySelector('link[data-admin-ops]');
+    if (sharedLayer) document.head.insertBefore(link, sharedLayer);
+    else document.head.appendChild(link);
   }
 
   function loadScript(src) {

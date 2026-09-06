@@ -183,6 +183,40 @@ function addOrderTimeline(order, action, operator) {
   log("订单操作", order.orderNo, action, actor);
   return item;
 }
+
+// Critical fulfilment actions must be acknowledged by the server.  The helper
+// keeps the UI object in sync with the authoritative response and makes a
+// failed write visible instead of leaving a success-only local mutation.
+async function persistOrderAction(order, action, payload = {}) {
+  const id = order && (order.id || order._id);
+  if (!id) throw new Error("订单缺少标识，无法保存");
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH && window.LXM_AUTH.hasSession && window.LXM_AUTH.hasSession();
+  if (!connected || !window.LXM_CLOUD || !window.LXM_CLOUD.orderAction) {
+    if (payload && payload.fields && typeof payload.fields === "object") Object.assign(order, payload.fields);
+    if (action === "assign" && payload.photographerId) {
+      order.photographerId = payload.photographerId;
+      if (["pending", "new"].includes(order.status)) { order.status = "confirmed"; order.customerStatus = "confirmed"; }
+    }
+    if (action === "accept") { order.status = "confirmed"; order.customerStatus = "confirmed"; }
+    if (action === "start") { order.status = "shooting"; order.customerStatus = "shooting"; }
+    if (action === "deliver") { order.status = "delivered"; order.customerStatus = "done"; }
+    if (action === "complete") { order.status = "completed"; order.customerStatus = "done"; }
+    if (action === "cancel") { order.status = "cancelled"; order.customerStatus = "已取消"; order.deleted = true; order.isDeleted = true; }
+    if (action === "unassign") { order.photographerId = ""; order.status = "confirmed"; order.customerStatus = "confirmed"; }
+    if (action === "note" && payload.reason) order.internalNote = [order.internalNote, payload.reason].filter(Boolean).join("\n");
+    if (!(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) schedulePersist();
+    return null;
+  }
+  try {
+    const updated = await window.LXM_CLOUD.orderAction(id, action, payload);
+    if (updated && typeof updated === "object") Object.assign(order, updated);
+    return updated;
+  } catch (error) {
+    const message = (error && error.message) || "订单保存失败";
+    ElMessage.error(message);
+    throw error;
+  }
+}
 function statusMeta(value) {
   return statusDict.find((s) => s.value === value) || statusDict[0];
 }
@@ -902,6 +936,7 @@ function canCompleteOrderPayment(order) {
     inferLogLevel,
     log,
     currentOperatorName,
+    persistOrderAction,
     resetPageState,
     timelineText,
     addOrderTimeline,

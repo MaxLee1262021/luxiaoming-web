@@ -285,14 +285,31 @@ function withTimeout(promise, ms, message) {
   ]).finally(() => clearTimeout(timer));
 }
 
+function redisUrlFromConfig(options = {}) {
+  const explicit = options.redisUrl !== undefined ? options.redisUrl : process.env.REDIS_URL;
+  if (explicit && String(explicit).trim()) return String(explicit).trim();
+  const host = String(options.redisHost !== undefined ? options.redisHost : process.env.REDIS_HOST || "").trim();
+  if (!host) return "";
+  const port = Number(options.redisPort !== undefined ? options.redisPort : process.env.REDIS_PORT || 6379);
+  const database = Number(options.redisDb !== undefined ? options.redisDb : process.env.REDIS_DB || 0);
+  const username = String(options.redisUsername !== undefined ? options.redisUsername : process.env.REDIS_USERNAME || "").trim();
+  const password = options.redisPassword !== undefined ? String(options.redisPassword) : String(process.env.REDIS_PASSWORD || "");
+  const auth = username || password ? `${encodeURIComponent(username || "default")}:${encodeURIComponent(password)}@` : "";
+  const scheme = String(options.redisTls !== undefined ? options.redisTls : process.env.REDIS_TLS || "").toLowerCase() === "true" ? "rediss" : "redis";
+  const safePort = Number.isInteger(port) && port > 0 && port < 65536 ? port : 6379;
+  const safeDb = Number.isInteger(database) && database >= 0 ? database : 0;
+  return `${scheme}://${auth}${host}:${safePort}/${safeDb}`;
+}
+
 function createAuthStore(options = {}) {
-  const redisUrl = options.redisUrl !== undefined ? options.redisUrl : process.env.REDIS_URL;
+  const redisUrl = redisUrlFromConfig(options);
   const requestedStore = String(options.sessionStore !== undefined ? options.sessionStore : process.env.SESSION_STORE || "").trim().toLowerCase();
   const ttlMs = options.ttlMs !== undefined ? options.ttlMs : Number(process.env.SESSION_TTL_SECONDS || 0) * 1000 || DEFAULT_TTL_MS;
   const common = {
     ttlMs,
     lockMs: options.lockMs || Number(process.env.LOGIN_LOCK_SECONDS || 0) * 1000 || DEFAULT_LOCK_MS,
-    maxFails: options.maxFails || Number(process.env.LOGIN_MAX_FAILS || 0) || DEFAULT_MAX_FAILS
+    maxFails: options.maxFails || Number(process.env.LOGIN_MAX_FAILS || 0) || DEFAULT_MAX_FAILS,
+    connectTimeoutMs: options.connectTimeoutMs || Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 0) || 1500
   };
   if (requestedStore === "redis" && !(redisUrl && String(redisUrl).trim())) {
     return new UnavailableAuthStore("redis_config_missing");

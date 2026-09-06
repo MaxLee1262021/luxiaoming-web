@@ -72,12 +72,14 @@ const ORDER_SERVICE_FIELDS = new Set([
   "customer", "contactName", "phone", "contactPhone", "contactPhones", "wechat", "contactWechat",
   "appointmentAt", "time", "timePeriod", "timeSlot", "customerRemark", "internalNote", "assigneeId",
   "photographerId", "status", "customerStatus", "statusLogs", "followRecords", "sourceName", "sourceType",
-  "sourceScene", "shopId", "distributorId"
+  "sourceScene", "shopId", "distributorId", "afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId",
+  "totalAmount", "price", "priceAdjustReason", "depositPaid", "finalPaid", "finalDiscountAmount", "finalDiscountReason",
+  "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt", "paymentVerify"
 ]);
 const ORDER_FINANCE_FIELDS = new Set([
   "depositFinanceStatus", "finalFinanceStatus", "depositPaid", "finalPaid", "depositPaidAt", "finalPaidAt",
   "finalDiscountAmount", "finalDiscountReason", "paymentVerify", "refundAmount", "financeStatus", "statusLogs",
-  "followRecords", "internalNote"
+  "followRecords", "internalNote", "status", "customerStatus", "afterSaleStatus", "afterSaleId"
 ]);
 const ORDER_PHOTO_FIELDS = new Set(["status", "customerStatus", "statusLogs", "followRecords", "completedAt"]);
 const ORDER_MERCHANT_FIELDS = new Set(["customerRemark"]);
@@ -268,7 +270,9 @@ module.exports = function createApi(source, mode, options = {}) {
   const sourceStatus = options.sourceStatus || { configured: true, ready: true, persistent: mode !== "mock" };
   const allowDevOpenid = options.allowDevOpenid !== undefined
     ? !!options.allowDevOpenid
-    : process.env.ALLOW_DEV_OPENID === "true" && process.env.NODE_ENV !== "production" && ["json", "mock"].includes(mode);
+    : (process.env.ALLOW_DEV_OPENID !== undefined
+      ? process.env.ALLOW_DEV_OPENID === "true"
+      : process.env.NODE_ENV !== "production" && ["json", "mock"].includes(mode));
   const allowedOrigins = String(process.env.ADMIN_CORS_ORIGINS || "").split(",").map((x) => x.trim()).filter(Boolean);
   let authInit = null;
   function initAuth() {
@@ -376,7 +380,21 @@ module.exports = function createApi(source, mode, options = {}) {
         shopId: merchant ? String(merchant.id || merchant._id || merchant.shopId || "") : String(candidate.shopId || ""),
         shopCode: merchant ? String(merchant.shopId || "") : "", distributorId: String(candidate.distributorId || ""), agentId: String(candidate.agentId || "")
       });
-      return json(res, 200, { ok: true, role, account, name: candidate.name || account, staffId: subjectId, token: session.token, expiresAt: session.expiresAt, expiresIn: Math.floor(session.ttlMs / 1000) });
+      return json(res, 200, {
+        ok: true,
+        role,
+        account,
+        name: candidate.name || account,
+        staffId: subjectId,
+        shopId: session.shopId || "",
+        distributorId: session.distributorId || "",
+        agentId: session.agentId || "",
+        permissions: Array.isArray(session.permissions) ? session.permissions : [],
+        actions: [...roleActions(session)],
+        token: session.token,
+        expiresAt: session.expiresAt,
+        expiresIn: Math.floor(session.ttlMs / 1000),
+      });
     } catch (e) {
       if (safeErrorStatus(e) === 503) return json(res, 503, { ok: false, error: "认证或数据服务暂不可用" });
       throw e;
@@ -470,6 +488,115 @@ module.exports = function createApi(source, mode, options = {}) {
     const body = await readBody(req); if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "请求体无效" });
     return json(res, 200, redactRow(key, await source.upsert(key, id, body), session));
   }
+
+  async function orderActionRoute(req, res, parts, session, pathname) {
+    if (req.method !== "POST") return json(res, 405, { error: "请使用 POST" });
+    const orderId = decodePart(parts[1]);
+    if (!orderId) return json(res, 400, { error: "缺少订单 id" });
+    const current = await source.get("orders", orderId);
+    if (!current || current.isDeleted || current.deleted) return json(res, 404, { error: "订单不存在" });
+    if (!(await filterRows(source, session, "orders", [current])).length) return forbidden(res, session, pathname, "当前角色不能操作该订单");
+    const body = await readBody(req);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "请求体无效" });
+    const action = String(body.action || "").trim().toLowerCase();
+    const role = normalizeRole(session.role);
+    const actionRoles = {
+      accept: ["super", "service"],
+      assign: ["super", "service"],
+      unassign: ["super", "photo"],
+      reschedule: ["super", "service"],
+      start: ["super", "service", "photo"],
+      deliver: ["super", "service", "photo"],
+      complete: ["super", "service"],
+      cancel: ["super", "service"],
+      note: ["super", "service"],
+      update: ["super", "service", "finance", "photo"],
+    };
+    if (!actionRoles[action] || !actionRoles[action].includes(role)) return forbidden(res, session, pathname, "当前角色不能执行该订单操作");
+    const actionPermission = role === "super" ? "*" : ["photo"].includes(role) ? "shootUpdate" : ["finance"].includes(role) ? "financeReview" : "orderEdit";
+    if (actionPermission !== "*" && !hasAction(session, actionPermission)) return forbidden(res, session, pathname, "当前账号未授予该订单操作权限");
+
+    const now = new Date().toISOString();
+    const beforeStatus = String(current.status || "new");
+    const patch = {};
+    let label = "";
+    const reason = String(body.reason || body.note || "").trim();
+    const requireReason = ["accept", "assign", "unassign", "reschedule", "start", "deliver", "complete", "cancel", "note", "update"].includes(action);
+    if (requireReason && reason.length < 2) return json(res, 400, { error: "请填写操作原因" });
+    const canTransition = (allowedFrom, next) => {
+      if (beforeStatus === next) return true;
+      if (!allowedFrom.includes(beforeStatus)) return false;
+      patch.status = next;
+      patch.customerStatus = next === "confirmed" ? "confirmed" : next === "shooting" ? "shooting" : next === "delivered" || next === "completed" ? "done" : next === "cancelled" ? "已取消" : current.customerStatus;
+      return true;
+    };
+    if (action === "accept") {
+      if (!canTransition(["new", "pending"], "confirmed")) return json(res, 409, { error: "订单当前状态不能接单" });
+      if (role === "service" && !current.assigneeId) patch.assigneeId = session.subjectId;
+      label = "客服接单";
+    } else if (action === "assign") {
+      const photographerId = String(body.photographerId || "").trim();
+      if (!photographerId) return json(res, 400, { error: "请选择摄影师" });
+      if (!canTransition(["new", "pending", "confirmed"], "confirmed")) return json(res, 409, { error: "订单当前状态不能派单" });
+      patch.photographerId = photographerId;
+      label = "安排摄影师";
+    } else if (action === "unassign") {
+      if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能取消自己的拍摄任务");
+      if (!["confirmed", "shooting"].includes(beforeStatus)) return json(res, 409, { error: "订单当前状态不能取消接单" });
+      patch.photographerId = "";
+      patch.status = "confirmed";
+      patch.customerStatus = "confirmed";
+      label = "摄影师取消接单";
+    } else if (action === "reschedule") {
+      if (!canTransition(["new", "pending", "confirmed"], beforeStatus)) return json(res, 409, { error: "订单当前状态不能改期" });
+      const appointmentAt = String(body.appointmentAt || "").trim();
+      if (!appointmentAt) return json(res, 400, { error: "请选择新的拍摄时间" });
+      patch.appointmentAt = appointmentAt;
+      if (body.timePeriod) patch.timePeriod = String(body.timePeriod).trim();
+      label = "改期拍摄";
+    } else if (action === "start") {
+      if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能开始自己的拍摄任务");
+      if (!canTransition(["confirmed", "assigned"], "shooting")) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
+      label = "开始拍摄";
+    } else if (action === "deliver") {
+      if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能交付自己的拍摄任务");
+      if (!canTransition(["shooting", "retouching"], "delivered")) return json(res, 409, { error: "订单当前状态不能标记交付" });
+      patch.deliveryNote = reason;
+      label = "标记成片交付";
+    } else if (action === "complete") {
+      if (!canTransition(["delivered", "shooting", "final_pending"], "completed")) return json(res, 409, { error: "订单当前状态不能完成" });
+      patch.completedAt = now;
+      label = "完成订单";
+    } else if (action === "cancel") {
+      if (["completed", "cancelled", "canceled"].includes(beforeStatus)) return json(res, 409, { error: "订单当前状态不能取消" });
+      patch.status = "cancelled";
+      patch.customerStatus = "已取消";
+      patch.isDeleted = true;
+      patch.deleted = true;
+      label = "取消订单";
+    } else if (action === "note") {
+      patch.internalNote = [current.internalNote, reason].filter(Boolean).join("\n");
+      label = "补充订单备注";
+    } else if (action === "update") {
+      const allowed = role === "finance" ? ORDER_FINANCE_FIELDS : role === "photo" ? ORDER_PHOTO_FIELDS : ORDER_SERVICE_FIELDS;
+      for (const [key, value] of Object.entries(body.fields && typeof body.fields === "object" ? body.fields : {})) if (allowed.has(key)) patch[key] = value;
+      if (!Object.keys(patch).length) return json(res, 400, { error: "没有可更新的订单字段" });
+      label = "更新订单信息";
+    }
+    const timeline = { type: "后台订单操作", action: `${label}${reason ? `：${reason}` : ""}`, operator: session.account, operatorId: session.subjectId, from: beforeStatus, to: patch.status || beforeStatus, createTime: now };
+    patch.statusLogs = [...(Array.isArray(current.statusLogs) ? current.statusLogs : []), timeline];
+    patch.followRecords = [...(Array.isArray(current.followRecords) ? current.followRecords : []), timeline];
+    patch.updateTime = now;
+    const updated = await source.update("orders", orderId, patch);
+    if (!updated) return json(res, 404, { error: "订单不存在" });
+    await source.create("logs", { action: label, operator: session.account, operatorId: session.subjectId, targetType: "order", targetId: orderId, detail: reason || `${beforeStatus} -> ${updated.status}`, createTime: now });
+    if (action === "cancel") {
+      try {
+        await source.create("trash", { id: `trash_${orderId}_${Date.now()}`, refId: orderId, type: "订单", name: updated.orderNo || orderId, reason, operator: session.account, time: now, restorable: true });
+      } catch (_) { /* the order flag remains authoritative if trash projection fails */ }
+    }
+    return json(res, 200, { ok: true, data: redactRow("orders", updated, session) });
+  }
   async function merchantRoute(req, res, parsed, session, pathname) {
     const role = normalizeRole(session.role);
     if (!hasAction(session, "view") || !["super", "merchant", "distributor", "agent"].includes(role)) return forbidden(res, session, pathname);
@@ -512,7 +639,21 @@ module.exports = function createApi(source, mode, options = {}) {
         try { if (token) await auth.revokeSession(token); } catch (e) { if (e.code === "AUTH_STORE_UNAVAILABLE") return json(res, 503, { error: "认证服务暂不可用" }); throw e; }
         return json(res, 200, { ok: true });
       }
-      if (parts[0] === "auth" && parts[1] === "me") { const session = await requireSession(req, res, "/api/auth/me", "admin"); if (!session) return; return json(res, 200, { ok: true, account: session.account, role: session.role, staffId: session.subjectId, expiresAt: session.expiresAt }); }
+      if (parts[0] === "auth" && parts[1] === "me") {
+        const session = await requireSession(req, res, "/api/auth/me", "admin");
+        if (!session) return;
+        return json(res, 200, {
+          ok: true,
+          account: session.account,
+          role: session.role,
+          staffId: session.subjectId,
+          shopId: session.shopId || "",
+          distributorId: session.distributorId || "",
+          agentId: session.agentId || "",
+          permissions: Array.isArray(session.permissions) ? session.permissions : [],
+          expiresAt: session.expiresAt,
+        });
+      }
       if (parts[0] === "auth" && parts[1] === "change-password") {
         const session = await requireSession(req, res, "/api/auth/change-password", "admin"); if (!session) return;
         if (req.method !== "POST") return json(res, 405, { error: "请使用 POST" });
@@ -538,6 +679,11 @@ module.exports = function createApi(source, mode, options = {}) {
       if (parts[0] === "meta" && parts[1] === "keys") {
         const session = await requireSession(req, res, "/api/meta/keys", "admin"); if (!session) return;
         return json(res, 200, { keys: ALL_KEYS.filter((key) => canReadKey(session, key) || canWriteKey(session, key)) });
+      }
+      if (parts[0] === "orders" && parts[1] && parts[2] === "action") {
+        const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin");
+        if (!session) return;
+        return orderActionRoute(req, res, parts, session, `/api/${parts.join("/")}`);
       }
       if (parts[0] === "dashboard" || (parts[0] === "orders" && parts[1] === "stats") || parts[0] === "home") {
         const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin"); if (!session) return;

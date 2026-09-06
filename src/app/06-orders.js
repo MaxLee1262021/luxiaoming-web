@@ -24,6 +24,7 @@
     money,
     onMounted,
     orderFinanceReviews,
+    persistOrderAction,
     roleProfile,
     scopedOrders,
     selectedOrders,
@@ -62,16 +63,20 @@ function batchCancelOrders() {
   if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订");
   if (selectedOrders.value.some((order) => isOrderAfterSaleLocked(order))) return ElMessage.warning("选中的订单包含售后处理中订单，请先完成售后处");
   if (selectedOrders.value.some((order) => order.status === "completed")) return ElMessage.warning("选中的订单包含已完成订单，已完成订单不能取消");
-  ElMessageBox.confirm(`确认取消已"${selectedOrders.value.length} 个订单？取消后进入回收站。`, "批量取消订单", { type: "warning", confirmButtonText: "确认取消", cancelButtonText: "暂不取消" }).then(() => {
-    selectedOrders.value.forEach((order) => {
-      addOrderTimeline(order, "批量取消订单，订单进入回收站", roleProfile.value.name);
-      order.deleted = true;
-      order.status = "cancelled";
-      state.trash.unshift({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "批量取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
-    });
-    log("批量取消订单", "订单管理", `${state.selectedOrderIds.length} 个订单进入回收站`);
-    state.selectedOrderIds = [];
-    ElMessage.success("已批量取消并进入回收");
+  ElMessageBox.confirm(`确认取消已"${selectedOrders.value.length} 个订单？取消后进入回收站。`, "批量取消订单", { type: "warning", confirmButtonText: "确认取消", cancelButtonText: "暂不取消" }).then(async () => {
+    let changed = 0;
+    for (const order of selectedOrders.value) {
+      try {
+        await persistOrderAction(order, "cancel", { reason: "批量取消订单" });
+        state.trash.unshift({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "批量取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
+        changed += 1;
+      } catch (_) {}
+    }
+    if (changed) {
+      log("批量取消订单", "订单管理", `${changed} 个订单进入回收站`);
+      state.selectedOrderIds = [];
+      ElMessage.success(`已批量取消 ${changed} 单并进入回收站`);
+    }
   }).catch(() => {});
 }
 function canBatchAcceptOrder(order) {
@@ -82,16 +87,19 @@ function batchAcceptOrders() {
   if (!canEditOrder()) return ElMessage.error("当前角色无权批量接单");
   if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订");
   if (!rows.length) return ElMessage.warning("已选订单中没有可批量接单的待确认订");
-  ElMessageBox.confirm(`确认批量接单 ${rows.length} 个待确认订单？`, "批量接单", { type: "warning", confirmButtonText: "确认接单", cancelButtonText: "取消" }).then(() => {
-    rows.forEach((order) => {
-      order.status = "confirmed";
-      order.customerStatus = "confirmed";
-      if (!order.assigneeId && state.role === "service") order.assigneeId = roleProfile.value.staffId || state.currentStaffId || "";
-      addOrderTimeline(order, "批量接单：客服已确认需求，订单进入已接", currentOperatorName());
-    });
-    log("批量接单", "订单管理", `${rows.length} 个待确认订单已接单`);
-    state.selectedOrderIds = [];
-    ElMessage.success(`已批量接"${rows.length} 单`);
+  ElMessageBox.confirm(`确认批量接单 ${rows.length} 个待确认订单？`, "批量接单", { type: "warning", confirmButtonText: "确认接单", cancelButtonText: "取消" }).then(async () => {
+    let changed = 0;
+    for (const order of rows) {
+      try {
+        await persistOrderAction(order, "accept", { reason: "批量接单" });
+        changed += 1;
+      } catch (_) {}
+    }
+    if (changed) {
+      log("批量接单", "订单管理", `${changed} 个待确认订单已接单`);
+      state.selectedOrderIds = [];
+      ElMessage.success(`已批量接单 ${changed} 单`);
+    }
   }).catch(() => {});
 }
 function openBatchNoteDialog() {
@@ -100,20 +108,24 @@ function openBatchNoteDialog() {
   state.batchNoteText = "";
   state.batchNoteDialog = true;
 }
-function confirmBatchNote() {
+async function confirmBatchNote() {
   const text = String(state.batchNoteText || "").trim();
   if (!text) return ElMessage.warning("请填写批量备注内");
   const rows = selectedOrders.value.filter((order) => !isOrderAfterSaleLocked(order) && !["completed", "cancelled"].includes(order.status));
   if (!rows.length) return ElMessage.warning("已选订单均已锁定，不能批量备注");
-  rows.forEach((order) => {
-    order.internalNote = [order.internalNote, `批量备注：${text}`].filter(Boolean).join("\n");
-    addOrderTimeline(order, `批量备注：${text}`, currentOperatorName());
-  });
-  log("批量备注", "订单管理", `${rows.length} 个订单添加备注：${text}`);
+  let changed = 0;
+  for (const order of rows) {
+    try {
+      await persistOrderAction(order, "note", { reason: `批量备注：${text}` });
+      changed += 1;
+    } catch (_) {}
+  }
+  if (!changed) return;
+  log("批量备注", "订单管理", `${changed} 个订单添加备注：${text}`);
   state.batchNoteDialog = false;
   state.batchNoteText = "";
   state.selectedOrderIds = [];
-  ElMessage.success(`已为 ${rows.length} 单添加批量备注`);
+  ElMessage.success(`已为 ${changed} 单添加批量备注`);
 }
 
 function onOrderPageSizeChange(size) {
@@ -159,7 +171,7 @@ function createManualOrder() {
   resetManualOrderForm();
   state.manualOrderDialog = true;
 }
-function confirmCreateManualOrder() {
+async function confirmCreateManualOrder() {
   if (!canEditOrder()) return ElMessage.error("当前角色无权创建订单");
   const form = state.manualOrderForm;
   if (!String(form.customer || "").trim()) return ElMessage.warning("请填写客户姓");
@@ -212,6 +224,16 @@ function confirmCreateManualOrder() {
     ],
     deleted: false
   };
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  if (connected && window.LXM_CLOUD?.create) {
+    try {
+      const saved = await window.LXM_CLOUD.create("orders", order);
+      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "订单保存失败");
+      Object.assign(order, saved, { id: saved.id || saved._id || order.id, _id: saved._id || saved.id || order.id });
+    } catch (error) {
+      return ElMessage.error((error && error.message) || "订单未保存，请稍后重试");
+    }
+  }
   data.orders.unshift(order);
   state.manualOrderDialog = false;
   state.filters.status = "";
@@ -241,7 +263,7 @@ function openAfterSaleSubmit(order = state.currentOrder) {
   };
   state.afterSaleSubmitDialog = true;
 }
-function submitAfterSale() {
+async function submitAfterSale() {
   const order = state.currentOrder;
   if (!order) return;
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单已有售后处理中，请先完成当前售后处理，避免重复提交");
@@ -264,10 +286,24 @@ function submitAfterSale() {
     approvedAt: "",
     logs: [`${currentOperatorName()}提交售后：${form.reason.trim()}`],
   };
-  data.afterSales.unshift(item);
-  addOrderTimeline(order, `提交售后：${item.type} ${item.reason}`);
-  state.afterSaleSubmitDialog = false;
-  ElMessage.success("售后已提交，可在售后服务页面继续处理");
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  try {
+    if (connected && window.LXM_CLOUD?.create) {
+      const saved = await window.LXM_CLOUD.create("afterSales", item);
+      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "售后工单保存失败");
+      Object.assign(item, saved, { id: saved.id || saved._id || item.id, _id: saved._id || saved.id || item.id });
+      await persistOrderAction(order, "update", {
+        fields: { afterSaleStatus: "pending", afterSaleReason: item.reason, afterSaleCreateTime: new Date().toISOString(), afterSaleId: item.id },
+        reason: `提交售后：${item.type}`
+      });
+    }
+    data.afterSales.unshift(item);
+    addOrderTimeline(order, `提交售后：${item.type} ${item.reason}`);
+    state.afterSaleSubmitDialog = false;
+    ElMessage.success("售后已提交，可在售后服务页面继续处理");
+  } catch (error) {
+    ElMessage.error((error && error.message) || "售后未保存，请稍后重试");
+  }
 }
 function openAfterSaleProcess(row) {
   state.currentAfterSale = row;
@@ -314,7 +350,7 @@ function confirmAfterSaleRefundAmount() {
     ElMessage.success("退款金额已确认");
   }).catch(() => {});
 }
-function saveAfterSaleProcess(complete = false, confirmed = false) {
+async function saveAfterSaleProcess(complete = false, confirmed = false) {
   const row = state.currentAfterSale;
   if (!row) return;
   const source = data.afterSales.find((item) => item.id === row.id);
@@ -365,6 +401,27 @@ function saveAfterSaleProcess(complete = false, confirmed = false) {
   source.logs = source.logs || [];
   source.logs.unshift(`${currentOperatorName()} ${complete ? "处理完成" : "保存跟进记录"}：${form.note.trim()}`);
   log("售后处理", order.orderNo, `${source.type} / ${source.status} / ${form.note.trim()}`);
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  if (connected && window.LXM_CLOUD?.update) {
+    try {
+      const saved = await window.LXM_CLOUD.update("afterSales", source.id || source._id, {
+        status: source.status,
+        customerVisibleStatus: source.customerVisibleStatus,
+        refundAmount: Number(source.refundAmount || 0),
+        refundConfirmed: !!source.refundConfirmed,
+        financeStatus: source.financeStatus || "",
+        logs: source.logs,
+        updatedAt: source.updatedAt,
+      });
+      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "售后工单保存失败");
+      await persistOrderAction(order, "update", {
+        fields: { afterSaleStatus: source.status, afterSaleId: source.id || source._id },
+        reason: `售后${complete ? "处理完成" : "跟进"}：${form.note.trim()}`
+      });
+    } catch (error) {
+      return ElMessage.error((error && error.message) || "售后未保存，请稍后重试");
+    }
+  }
   state.orderWorkMode = "afterSale";
   if (!complete) {
     state.afterSaleProcessForm.note = "";
@@ -439,7 +496,7 @@ function reviewFinanceItem(row, approved = true) {
     cancelButtonText: "再核对一下",
   }).then(() => applyFinanceReview(row, approved)).catch(() => {});
 }
-function applyFinanceReview(row, approved = true) {
+async function applyFinanceReview(row, approved = true) {
   const order = data.orders.find((item) => item.id === row.orderId);
   if (!order) return;
   const status = approved ? "已审" : "已驳";
@@ -458,6 +515,19 @@ function applyFinanceReview(row, approved = true) {
   }
   addOrderTimeline(order, `财务${approved ? "审核通过" : "审核驳回"}${typeText} ${amountText}`, currentOperatorName());
   log("财务审核", order.orderNo, `${typeText} / ${status} / ${amountText}`);
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  if (connected && window.LXM_CLOUD?.update) {
+    try {
+      const saved = await window.LXM_CLOUD.update("orders", order.id || order._id, {
+        [row.field]: status,
+        status: order.status,
+        customerStatus: order.customerStatus,
+      });
+      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "财务审核保存失败");
+    } catch (error) {
+      return ElMessage.error((error && error.message) || "财务审核未保存，请稍后重试");
+    }
+  }
   ElMessage.success(`${typeText} ${approved ? "审核通过" : "审核驳回"}`);
 }
 function openFinanceReview(row) {
@@ -477,7 +547,7 @@ function reviewRefund(row, approved = true) {
     cancelButtonText: "再核对一下",
   }).then(() => applyRefundReview(row, approved)).catch(() => {});
 }
-function applyRefundReview(row, approved = true) {
+async function applyRefundReview(row, approved = true) {
   const source = data.afterSales.find((item) => item.id === (row.afterSaleId || row.id));
   const order = data.orders.find((item) => item.id === row.orderId);
   if (!source || !order) return;
@@ -486,12 +556,30 @@ function applyRefundReview(row, approved = true) {
   if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = source.financeStatus;
   source.financeReviewedBy = currentOperatorName();
   source.financeReviewedAt = LXMFormat.nowText();
+  source.updatedAt = LXMFormat.nowText();
   source.status = approved ? "已完" : "处理";
   source.customerVisibleStatus = approved ? "已完" : "处理";
   source.logs = source.logs || [];
   source.logs.unshift(`${currentOperatorName()} ${approved ? "财务审核通过" : "财务审核驳回"}，退款金额 ${money(source.refundAmount || 0)}`);
   addOrderTimeline(order, `${approved ? "财务审核通过退" : "财务驳回退"} ${money(source.refundAmount || 0)}`);
   log("退款财务审", order.orderNo, `${approved ? "通过" : "驳回"} / ${money(source.refundAmount || 0)}`);
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  if (connected && window.LXM_CLOUD?.update) {
+    try {
+      const saved = await window.LXM_CLOUD.update("afterSales", source.id || source._id, {
+        status: source.status,
+        financeStatus: source.financeStatus,
+        customerVisibleStatus: source.customerVisibleStatus,
+        refundAmount: Number(source.refundAmount || 0),
+        logs: source.logs,
+        updatedAt: source.updatedAt,
+      });
+      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "退款审核保存失败");
+      await persistOrderAction(order, "update", { fields: { afterSaleStatus: source.status, afterSaleId: source.id || source._id }, reason: "退款审核状态更新" });
+    } catch (error) {
+      return ElMessage.error((error && error.message) || "退款审核未保存，请稍后重试");
+    }
+  }
   ElMessage.success(approved ? "退款已通过财务审核，并同步月度对账" : "退款审核已驳回，订单回到售后处理中");
 }
 onMounted(() => {

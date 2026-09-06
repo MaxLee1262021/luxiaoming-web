@@ -27,6 +27,7 @@
     orderSourceType,
     orderSourceTypeText,
     paid,
+    persistOrderAction,
     photographerDisplayName,
     roleProfile,
     selectedOrders,
@@ -187,10 +188,10 @@ function serviceFlowBadgeClass(order, type) {
   if (["done", "delivered"].includes(order.customerStatus)) return "delivered";
   return order.status || "";
 }
-function setServiceFlowStep(step) {
+async function setServiceFlowStep(step) {
   if (!step) return;
   if (!canSetServiceFlowStep(step, state.currentOrder)) return ElMessage.warning(serviceFlowDisabledReason(step, state.currentOrder) || "当前状态不能重复点击或跳转，请按订单流程顺序推");
-  setOrderStatus(step.status, step.customerStatus, `客服处理状态更新：${step.label} ${step.note}`);
+  await setOrderStatus(step.status, step.customerStatus, `客服处理状态更新：${step.label} ${step.note}`);
 }
 function canSetServiceFlowStep(step, order = state.currentOrder) {
   if (!step || !order || !canEditCurrentOrder()) return false;
@@ -255,13 +256,18 @@ function cancelDisabledReason(order = state.currentOrder) {
   if (order.status === "completed") return "已完成订单只能通过售后退款和财务冲正处理";
   return "";
 }
-function setOrderStatus(status, customerStatus, label) {
+async function setOrderStatus(status, customerStatus, label) {
   if (!state.currentOrder) return;
   if (!canEditOrder()) return ElMessage.error("当前角色无权编辑客服处理状");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能更改订单状");
-  state.currentOrder.status = status;
-  state.currentOrder.customerStatus = customerStatus;
-  addFollowLog(label || `订单状态更新为 ${statusMeta(status).label}`);
+  const order = state.currentOrder;
+  const action = status === "confirmed" ? "accept" : status === "shooting" ? "start" : status === "delivered" ? "deliver" : status === "completed" ? "complete" : "update";
+  try {
+    await persistOrderAction(order, action, action === "update"
+      ? { fields: { status, customerStatus }, reason: label || `订单状态更新为 ${statusMeta(status).label}` }
+      : { reason: label || `订单状态更新为 ${statusMeta(status).label}` });
+    log("订单状态更新", order.orderNo, label || `订单状态更新为 ${statusMeta(status).label}`);
+  } catch (_) {}
 }
 function openCompleteOrderDialog(order = state.currentOrder) {
   if (!order) return;
@@ -291,16 +297,16 @@ function confirmCompleteOrder() {
     ElMessage.warning("请先完成尾款财务审核，再提交订单完成");
     return;
   }
-  const finishOrder = () => {
-  order.status = "completed";
-  order.customerStatus = "done";
+  const finishOrder = async () => {
   const note = state.completeOrderNote ? `；核对备注：${state.completeOrderNote}` : "";
   const pendingText = tailGap > 0 ? `；尾款差"${money(tailGap)}，需继续跟进或添加优惠券登记优惠原因` : "";
-  addOrderTimeline(order, `订单完成确认：客服已核对交付，财务需复核收款${pendingText}${note}`);
-  log("订单完成", order.orderNo, `客服登记实收 ${money(paid(order))}，财务待审核入账 ${money(financePendingAmount(order))}`);
-  state.completeOrderDialog = false;
-  state.completeOrderNote = "";
-  ElMessage.success("订单已完成；未通过财务审核的金额不会进入月度对");
+    try {
+      await persistOrderAction(order, "complete", { reason: `客服已核对交付，财务需复核收款${pendingText}${note}` });
+      log("订单完成", order.orderNo, `客服登记实收 ${money(paid(order))}，财务待审核入账 ${money(financePendingAmount(order))}`);
+      state.completeOrderDialog = false;
+      state.completeOrderNote = "";
+      ElMessage.success("订单已完成；未通过财务审核的金额不会进入月度对");
+    } catch (_) {}
   };
   if (tailGap > 0) {
     ElMessageBox.confirm(`当前应收尾款 ${money(expectedFinalAmount(order))}，客服已登记尾款 ${money(order.finalPaid)}，仍有尾款差"${money(tailGap)}。若是优惠，请先添加优惠券填写优惠原因；若确认仍要完成订单，将在时间线记录该差额。是否继续？`, "尾款未对平确", {
@@ -312,25 +318,36 @@ function confirmCompleteOrder() {
   }
   finishOrder();
 }
-function saveOrder() {
+async function saveOrder() {
   if (!canEditOrder()) return ElMessage.error("当前角色无权保存客服处理信息");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能保存客服处理信息");
   if (!String(state.currentOrder?.customer || "").trim() || !String(state.currentOrder?.phone || "").trim()) return ElMessage.warning("请先填写客户姓名和手机号");
   if (state.role === "service" && !state.currentOrder.assigneeId) state.currentOrder.assigneeId = roleProfile.value.staffId || state.currentStaffId || "";
   state.saving = true;
-  setTimeout(() => {
+  try {
+    const order = state.currentOrder;
+    const fields = {
+      customer: String(order.customer || "").trim(),
+      contactName: String(order.customer || "").trim(),
+      phone: String(order.phone || "").trim(),
+      contactPhone: String(order.phone || "").trim(),
+      wechat: String(order.wechat || "").trim(),
+      contactWechat: String(order.wechat || "").trim(),
+      appointmentAt: order.appointmentAt || "",
+      timePeriod: order.timePeriod || "",
+      internalNote: order.internalNote || "",
+      assigneeId: order.assigneeId || "",
+    };
+    await persistOrderAction(order, "update", { fields, reason: "确认客户信息" });
+    state.moneyEdit = "";
+    state.moneyDraft = 0;
+    log("确认客户信息", order.orderNo, `状态：${statusMeta(order.status).label}，负责客服：${serviceOwnerName(order)}，待收：${money(due(order))}`);
+    ElMessage.success("客户信息已保存，操作日志已记");
+  } catch (_) {
+    // persistOrderAction has already shown the server failure; do not report success.
+  } finally {
     state.saving = false;
-    if (state.currentOrder) {
-      state.currentOrder.totalAmount = Number(state.currentOrder.totalAmount || 0);
-      state.currentOrder.depositPaid = Number(state.currentOrder.depositPaid || 0);
-      state.currentOrder.finalPaid = Number(state.currentOrder.finalPaid || 0);
-      state.moneyEdit = "";
-      state.moneyDraft = 0;
-      addOrderTimeline(state.currentOrder, `确认客户信息，待"${money(due(state.currentOrder))}`);
-      log("确认客户信息", state.currentOrder.orderNo, `状态：${statusMeta(state.currentOrder.status).label}，负责客服：${serviceOwnerName(state.currentOrder)}，待收：${money(due(state.currentOrder))}`);
-    }
-    ElMessage.success("客户信息已确认，操作日志已记");
-  }, 220);
+  }
 }
 function moneyFieldMeta(field) {
   return {
@@ -349,7 +366,7 @@ function enableMoneyEdit(field) {
   addOrderTimeline(state.currentOrder, `开启${moneyFieldMeta(field).label}调整，等待填写原因`);
   ElMessage.warning(`已开启${moneyFieldMeta(field).label}调整，请填写原因并确认`);
 }
-function confirmMoneyEdit(field) {
+async function confirmMoneyEdit(field) {
   if (!state.currentOrder) return;
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能调整金额");
   const meta = moneyFieldMeta(field);
@@ -378,10 +395,18 @@ function confirmMoneyEdit(field) {
   state.moneyEdit = "";
   state.moneyDraft = 0;
   const discountText = (field === "finalPaid" || field === "couponAmount") && state.currentOrder.finalDiscountAmount > 0 ? `；优惠券减免 ${money(state.currentOrder.finalDiscountAmount)}` : "";
-  addOrderTimeline(state.currentOrder, `确认${meta.label}调整 ${money(previous)} 调整为 ${money(next)}${discountText}；原因：${state.currentOrder.priceAdjustReason}`);
-  ElMessage.success(`${meta.label}已确认修改`);
+  const order = state.currentOrder;
+  const fields = { [field === "couponAmount" ? "finalDiscountAmount" : field]: field === "couponAmount" ? order.finalDiscountAmount : order[field], priceAdjustReason: order.priceAdjustReason || "" };
+  if (field === "couponAmount" || field === "finalPaid" || field === "totalAmount") {
+    fields.finalDiscountReason = order.finalDiscountReason || order.priceAdjustReason || "";
+  }
+  try {
+    await persistOrderAction(order, "update", { fields, reason: order.priceAdjustReason || `${meta.label}调整` });
+    addOrderTimeline(order, `确认${meta.label}调整 ${money(previous)} 调整为 ${money(next)}${discountText}；原因：${order.priceAdjustReason}`);
+    ElMessage.success(`${meta.label}已确认保存`);
+  } catch (_) {}
 }
-function confirmPaymentRegistration(field) {
+async function confirmPaymentRegistration(field) {
   const order = state.currentOrder;
   if (!order) return;
   if (!canEditCurrentOrder()) return ElMessage.error("当前状态不能登记收");
@@ -400,9 +425,12 @@ function confirmPaymentRegistration(field) {
   if (field === "finalPaid" && finalGap(order) > 0) return ElMessage.warning(`尾款差额仍有 ${money(finalGap(order))}，请先添加优惠券或重新核对应收尾款`);
   order[statusField] = "待审";
   order[timeField] = LXMFormat.nowText();
-  addOrderTimeline(order, `客服确认登记${moneyFieldMeta(field).label} ${money(amount)}，待财务审核`, currentOperatorName());
-  log("登记收款", order.orderNo, `${moneyFieldMeta(field).label} ${money(amount)} 待财务审核`);
-  ElMessage.success(`${moneyFieldMeta(field).label}已登记，待财务审核确认`);
+  try {
+    await persistOrderAction(order, "update", { fields: { [field]: amount, [statusField]: order[statusField], [timeField]: order[timeField] }, reason: `登记${moneyFieldMeta(field).label}` });
+    addOrderTimeline(order, `客服确认登记${moneyFieldMeta(field).label} ${money(amount)}，待财务审核`, currentOperatorName());
+    log("登记收款", order.orderNo, `${moneyFieldMeta(field).label} ${money(amount)} 待财务审核`);
+    ElMessage.success(`${moneyFieldMeta(field).label}已登记，待财务审核确认`);
+  } catch (_) {}
 }
 function confirmFinalPaymentWithCheck() {
   const order = state.currentOrder;
@@ -435,23 +463,20 @@ function openDispatchDialog(order = state.currentOrder) {
   };
   state.dispatchDialog = true;
 }
-function confirmDispatchPhotographer() {
+async function confirmDispatchPhotographer() {
   const order = state.currentOrder;
   if (!order) return;
   if (!canDispatchOrder(order)) return ElMessage.error("拍摄开始后不可在客服处理页安排或改派摄影师");
   if (!state.dispatchForm.photographerId) return ElMessage.warning("请选择摄影");
   const previous = photographerDisplayName(order.photographerId);
   const next = photographerDisplayName(state.dispatchForm.photographerId);
-  order.photographerId = state.dispatchForm.photographerId;
-  if (order.status === "pending") {
-    order.status = "confirmed";
-    order.customerStatus = "confirmed";
-  }
   const note = state.dispatchForm.note ? `；备注：${state.dispatchForm.note}` : "";
-  addOrderTimeline(order, `安排摄影师：${previous} "${next}${note}`, currentOperatorName());
-  log("安排摄影", order.orderNo, `${previous} "${next}${note}`);
-  state.dispatchDialog = false;
-  ElMessage.success("摄影师已安排，订单已留痕");
+  try {
+    await persistOrderAction(order, "assign", { photographerId: state.dispatchForm.photographerId, reason: note || "客服安排摄影师" });
+    log("安排摄影", order.orderNo, `${previous} -> ${next}${note}`);
+    state.dispatchDialog = false;
+    ElMessage.success("摄影师已安排，操作已保存");
+  } catch (_) {}
 }
 function openTransferDialog(order = state.currentOrder) {
   const isBatch = !order && selectedOrders.value.length > 0;
@@ -467,32 +492,39 @@ function openTransferDialog(order = state.currentOrder) {
   };
   state.transferDialog = true;
 }
-function confirmTransferOrder() {
+async function confirmTransferOrder() {
   const rows = state.transferForm.batch ? selectedOrders.value : [state.currentOrder].filter(Boolean);
   if (!rows.length) return;
   let changed = 0;
-  rows.forEach((order) => {
+  for (const order of rows) {
     const parts = [];
-    if (canTransferCustomerService(order) && state.transferForm.assigneeId && state.transferForm.assigneeId !== order.assigneeId) {
+    const canService = canTransferCustomerService(order);
+    const canPhoto = canTransferPhotographer(order);
+    const nextAssigneeId = state.transferForm.assigneeId;
+    const nextPhotographerId = state.transferForm.photographerId;
+    if (canService && nextAssigneeId && nextAssigneeId !== order.assigneeId) {
       const previousService = staffName(order.assigneeId);
-      const nextService = staffName(state.transferForm.assigneeId);
-      order.assigneeId = state.transferForm.assigneeId;
+      const nextService = staffName(nextAssigneeId);
       parts.push(`转客服：${previousService} -> ${nextService}`);
     }
-    if (canTransferPhotographer(order) && state.transferForm.photographerId && state.transferForm.photographerId !== order.photographerId) {
+    if (canPhoto && nextPhotographerId && nextPhotographerId !== order.photographerId) {
       const previousPhoto = photographerDisplayName(order.photographerId);
-      const nextPhoto = photographerDisplayName(state.transferForm.photographerId);
-      order.photographerId = state.transferForm.photographerId;
+      const nextPhoto = photographerDisplayName(nextPhotographerId);
       parts.push(`转摄影师 ${previousPhoto} -> ${nextPhoto}`);
     }
     if (parts.length) {
       const note = state.transferForm.note ? `；原因：${state.transferForm.note}` : "";
       const text = `${parts.join("")}${note}`;
-      addOrderTimeline(order, text, currentOperatorName());
-      log("订单转派", order.orderNo, text, currentOperatorName(), { module: "订单履约", level: "", objectType: "订单", objectName: order.orderNo });
-      changed += 1;
+      try {
+        const fields = {};
+        if (canService && nextAssigneeId && nextAssigneeId !== order.assigneeId) fields.assigneeId = nextAssigneeId;
+        if (canPhoto && nextPhotographerId && nextPhotographerId !== order.photographerId) fields.photographerId = nextPhotographerId;
+        await persistOrderAction(order, "update", { fields, reason: text });
+        log("订单转派", order.orderNo, text, currentOperatorName(), { module: "订单履约", level: "", objectType: "订单", objectName: order.orderNo });
+        changed += 1;
+      } catch (_) {}
     }
-  });
+  }
   if (!changed) {
     return ElMessage.warning("请选择新的客服或摄影师");
   }
@@ -511,37 +543,39 @@ function openRescheduleDialog(order = state.currentOrder) {
   };
   state.rescheduleDialog = true;
 }
-function confirmReschedule() {
+async function confirmReschedule() {
   const order = state.currentOrder;
   if (!order) return;
   if (!canRescheduleOrder(order)) return ElMessage.error("拍摄开始后不可在客服处理页改期，请走售后或异常流程");
   if (!state.rescheduleForm.appointmentAt) return ElMessage.warning("请选择新的拍摄时间");
   const previous = `${order.appointmentAt || "-"} ${order.timePeriod || ""}`.trim();
-  order.appointmentAt = state.rescheduleForm.appointmentAt;
-  order.timePeriod = state.rescheduleForm.timePeriod || "待客服确";
-  const next = `${order.appointmentAt} ${order.timePeriod || ""}`.trim();
+  const next = `${state.rescheduleForm.appointmentAt} ${state.rescheduleForm.timePeriod || ""}`.trim();
   const reason = state.rescheduleForm.reason ? `；原因：${state.rescheduleForm.reason}` : "";
-  addOrderTimeline(order, `改期拍摄 ${previous} 调整为 ${next}${reason}`, currentOperatorName());
-  log("改期拍摄", order.orderNo, `${previous} "${next}${reason}`);
-  state.rescheduleDialog = false;
-  ElMessage.success("拍摄时间已改期，操作日志已记");
+  try {
+    await persistOrderAction(order, "reschedule", { appointmentAt: state.rescheduleForm.appointmentAt, timePeriod: state.rescheduleForm.timePeriod || "待客服确认", reason: reason || "客服调整拍摄时间" });
+    log("改期拍摄", order.orderNo, `${previous} -> ${next}${reason}`);
+    state.rescheduleDialog = false;
+    ElMessage.success("拍摄时间已改期，操作已保存");
+  } catch (_) {}
 }
-function recordScheduleChange() {
+async function recordScheduleChange() {
   if (!state.currentOrder) return;
   if (!canEditOrder()) return ElMessage.error("当前角色无权修改预约时间");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能修改预约时间");
-  addOrderTimeline(state.currentOrder, `预约时间调整"${state.currentOrder.appointmentAt} ${state.currentOrder.timePeriod || ""}`.trim());
-  ElMessage.success("预约时间改动已记");
+  try {
+    await persistOrderAction(state.currentOrder, "reschedule", { appointmentAt: state.currentOrder.appointmentAt, timePeriod: state.currentOrder.timePeriod || "待客服确认", reason: "客服确认预约时间" });
+    ElMessage.success("预约时间改动已保存");
+  } catch (_) {}
 }
-function updateTaskStatus(order, status) {
+async function updateTaskStatus(order, status) {
   if (!can("shootUpdate")) return ElMessage.error("当前角色无权更新拍摄任务");
   if (status === "shooting" && !canStartTask(order)) return ElMessage.warning("当前订单不能重复开始拍摄，只有已接单且未开始的任务可以开始拍");
   if (status === "completed" && !canCompleteTask(order)) return ElMessage.warning("当前订单不能重复标记完成，只有拍摄中的任务可以标记完");
-  order.status = status;
-  if (status === "shooting") order.customerStatus = "shooting";
-  if (status === "completed") order.customerStatus = "done";
-  addOrderTimeline(order, `摄影师更新为 ${statusMeta(status).label}`);
-  ElMessage.success("任务状态已更新");
+  try {
+    const action = status === "shooting" ? "start" : status === "completed" ? "deliver" : "update";
+    await persistOrderAction(order, action, action === "update" ? { fields: { status, customerStatus: status === "completed" ? "done" : status }, reason: "摄影师更新任务状态" } : { reason: `摄影师更新为 ${statusMeta(status).label}` });
+    ElMessage.success("任务状态已保存");
+  } catch (_) {}
 }
 function canStartTask(order) {
   return !!order && order.status === "confirmed" && !isOrderAfterSaleLocked(order);
@@ -559,27 +593,27 @@ function rejectTask(order) {
     type: "warning",
     confirmButtonText: "确认取消接单",
     cancelButtonText: "暂不取消",
-  }).then(() => {
+  }).then(async () => {
     const photographer = staffName(order.photographerId);
-    order.photographerId = "";
-    order.status = "confirmed";
-    order.customerStatus = "confirmed";
-    addOrderTimeline(order, `${photographer} 取消接单，订单退回客服重新安排摄影师`, photographer);
-    log("摄影师取消接", order.orderNo, `${photographer} 取消接单，待客服重新派单`);
-    ElMessage.success("已取消接单，订单已退回客服重新安排摄影师");
+    try {
+      await persistOrderAction(order, "unassign", { reason: `${photographer} 取消接单` });
+      log("摄影师取消接", order.orderNo, `${photographer} 取消接单，待客服重新派单`);
+      ElMessage.success("已取消接单，订单已退回客服重新安排摄影师");
+    } catch (_) {}
   }).catch(() => {});
 }
 function cancelOrder(order) {
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单售后处理中，暂不能取消订单");
   if (!can("cancelOrder")) return ElMessage.error("当前角色无权取消订单");
   if (order.status === "completed") return ElMessage.warning("已完成订单不能取");
-  ElMessageBox.confirm("取消订单后进入回收站。客服不能永久删除，只有超管可在回收站处理。是否继续？", "二次确认", { type: "warning", confirmButtonText: "确认取消订单", cancelButtonText: "暂不取消" }).then(() => {
-    addOrderTimeline(order, "取消订单，订单进入回收站");
-    order.deleted = true;
-    order.status = "cancelled";
-    state.trash.unshift({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
-    log("取消订单", order.orderNo, "订单进入回收");
-    state.orderDrawer = false;
+  ElMessageBox.confirm("取消订单后进入回收站。客服不能永久删除，只有超管可在回收站处理。是否继续？", "二次确认", { type: "warning", confirmButtonText: "确认取消订单", cancelButtonText: "暂不取消" }).then(async () => {
+    try {
+      await persistOrderAction(order, "cancel", { reason: "客服取消订单" });
+      state.trash.unshift({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
+      log("取消订单", order.orderNo, "订单进入回收站");
+      state.orderDrawer = false;
+      ElMessage.success("订单已取消并进入回收站");
+    } catch (_) {}
   }).catch(() => {});
 }
 

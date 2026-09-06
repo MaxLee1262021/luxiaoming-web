@@ -536,9 +536,13 @@ async function runSmoke(options = {}) {
       assert.equal([401, 403].includes(result.status), false, "public browsing RPC must not require admin auth");
       assert.ok(result.status >= 200 && result.status < 500, "public browsing RPC must return a handled response");
     });
+    let publicToken = null;
     await check(report, "public RPC login remains anonymous", async () => {
       const result = await requestJson(server.baseUrl, "/api/rpc/login", { method: "POST", body: {} });
       assert.equal([401, 403].includes(result.status), false, "public RPC login must not require admin auth");
+      assert.equal(result.body && result.body.success, true, "local non-production smoke must issue a public session");
+      assert.equal(typeof result.body.token, "string", "public login must return a session token");
+      publicToken = result.body.token;
     });
     for (const name of ["getMyOrders", "createBooking"]) {
       await check(report, `order RPC ${name} rejects missing主体`, async () => {
@@ -574,6 +578,61 @@ async function runSmoke(options = {}) {
         const result = await requestJson(server.baseUrl, "/api/collection/shops", { headers: authHeaders(superToken) });
         assert.equal(result.status, 200);
         assertNoPasswordFields(result.body, "shop collection");
+      });
+
+      await check(report, "order action persists timeline", async () => {
+        const result = await requestJson(server.baseUrl, "/api/orders/smoke-order-shop/action", {
+          method: "POST",
+          headers: authHeaders(superToken),
+          body: { action: "note", reason: "synthetic persistence check" },
+        });
+        assert.equal(result.status, 200, "authorized order action must succeed");
+        const detail = await requestJson(server.baseUrl, "/api/collection/orders/smoke-order-shop", { headers: authHeaders(superToken) });
+        assert.equal(detail.status, 200);
+        assert.ok((detail.body.statusLogs || []).some((row) => String(row.action || "").includes("synthetic persistence check")), "timeline must contain the action reason");
+      });
+
+      await check(report, "public booking records verified identity and source code", async () => {
+        assert.ok(publicToken, "public login token is required");
+        const result = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
+          method: "POST",
+          headers: authHeaders(publicToken),
+          body: {
+            data: {
+              name: "Synthetic User",
+              phone: "13800000000",
+              date: "2099-01-01",
+              time: "10:00",
+              codeId: "smoke-code",
+              items: [{ packageId: "smoke-package", price: 100 }],
+              totalPrice: 100,
+            },
+          },
+        });
+        assert.equal(result.status, 200);
+        assert.equal(result.body && result.body.success, true, "verified public booking must succeed");
+        const orders = await requestJson(server.baseUrl, "/api/collection/orders", { headers: authHeaders(superToken) });
+        const created = responseRows(orders.body).find((row) => row && (row.id === result.body.orderId || row._id === result.body.orderId));
+        assert.ok(created, "created booking must be readable by admin");
+        assert.equal(created.openid, "dev_openid", "booking identity must come from the verified public session");
+        assert.equal(created.sourceCodeId, "smoke-code", "source code must be persisted for attribution");
+        assert.equal(created.source && created.source.codeId, "smoke-code", "nested source code must be persisted");
+        return result.body.orderId;
+      });
+
+      await check(report, "public after-sale creates an independent ticket", async () => {
+        const orders = await requestJson(server.baseUrl, "/api/collection/orders", { headers: authHeaders(superToken) });
+        const created = responseRows(orders.body).find((row) => row && row.openid === "dev_openid" && row.sourceCodeId === "smoke-code");
+        assert.ok(created, "booking fixture must exist before after-sale probe");
+        const result = await requestJson(server.baseUrl, "/api/rpc/submitAfterSale", {
+          method: "POST",
+          headers: authHeaders(publicToken),
+          body: { data: { orderId: created.id || created._id, reason: "synthetic after-sale reason" } },
+        });
+        assert.equal(result.status, 200);
+        assert.equal(result.body && result.body.success, true, "after-sale submission must succeed");
+        const tickets = await requestJson(server.baseUrl, "/api/collection/afterSales", { headers: authHeaders(superToken) });
+        assert.ok(responseRows(tickets.body).some((row) => row && (row.id === result.body.data.ticketId || row._id === result.body.data.ticketId)), "after-sale ticket must be persisted separately");
       });
 
       const marker = `smoke-${crypto.randomBytes(10).toString("hex")}`;

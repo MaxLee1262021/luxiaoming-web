@@ -9,6 +9,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const crypto = require("crypto");
 const { init } = require("@cloudbase/node-sdk");
 
 const ENV_ID = process.env.CLOUDBASE_ENV_ID;
@@ -41,6 +42,20 @@ function realName(key) {
   return map[key] || key;
 }
 
+function hashPassword(plain) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(String(plain), salt, 64).toString("hex");
+  return `lxm1$${salt}$${hash}`;
+}
+
+function prepareItem(key, item) {
+  const accountKeys = new Set(["staff", "shops", "distributors", "agents"]);
+  if (!accountKeys.has(key) || !item || typeof item !== "object") return item;
+  const copy = Object.assign({}, item);
+  if (typeof copy.password === "string" && copy.password && !copy.password.startsWith("lxm1$")) copy.password = hashPassword(copy.password);
+  return copy;
+}
+
 async function ensureCollection(name) {
   try {
     await db.createCollection(name);
@@ -54,7 +69,8 @@ async function seedKey(key) {
   const collName = realName(key);
   const raw = DATA[key];
   if (raw === undefined || raw === null) return;
-  const items = Array.isArray(raw) ? raw : [raw];
+  const isStableObject = key === "siteConfig" || key === "homeConfig" || key === "config";
+  const items = isStableObject ? [{ id: key === "siteConfig" ? "global" : "homeStats", ...raw }] : (Array.isArray(raw) ? raw : [raw]);
   if (items.length === 0) return;
   await ensureCollection(collName);
   const coll = db.collection(collName);
@@ -67,7 +83,7 @@ async function seedKey(key) {
       id = key + "_" + (i + 1);
     }
     // 云开发 doc(id).set(body) 不允许 body 里再带 _id，否则报"不能更新_id的值"
-    const body = Object.assign({}, item);
+    const body = Object.assign({}, prepareItem(key, item));
     delete body._id;
     await coll.doc(id).set(body);
     ok++;

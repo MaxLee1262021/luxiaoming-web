@@ -1,0 +1,121 @@
+/* Flat operations surface for dense admin workflows. */
+:root {
+  --lxm-surface: #ffffff !important;
+  --lxm-bg: #faf7f3 !important;
+  --lxm-line: #efe6dd !important;
+  --lxm-line-strong: #e2d5c8 !important;
+  --el-bg-color: #ffffff !important;
+  --el-fill-color-blank: #ffffff !important;
+  --el-fill-color: #fdfbf8 !important;
+  --el-fill-color-light: #faf7f3 !important;
+}
+
+html,
+body {
+  background: var(--lxm-bg) !important;
+  background-image: none !important;
+}
+
+body::before,
+body::after {
+  display: none !important;
+}
+
+.admin-shell,
+.lxm-main,
+.lxm-content {
+  background: transparent !important;
+}
+
+.lxm-sidebar {
+  background: var(--lxm-ink) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-right: 1px solid rgba(255, 255, 255, .12) !important;
+  box-shadow: 2px 0 18px rgba(42, 33, 27, .16) !important;
+}
+
+.lxm-brand {
+  background: var(--lxm-ink) !important;
+  border-bottom-color: rgba(255, 255, 255, .12) !important;
+}
+
+.lxm-topbar {
+  background: var(--lxm-surface) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-bottom: 1px solid var(--lxm-line) !important;
+}
+
+.table-card,
+.panel,
+.stat-card,
+.filter-card,
+.order-summary > div,
+.kpi-card,
+.tenant-scope-bar,
+.table-pager,
+.lxm-page-head,
+.lxm-toolbar,
+.lxm-panel,
+.lxm-card,
+.config-page-head,
+.config-metric-grid > div {
+  background: var(--lxm-surface) !important;
+  border-color: var(--lxm-line) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--lxm-shadow-sm) !important;
+}
+
+.filter-card {
+  border-left: 4px solid var(--lxm-brand) !important;
+}
+
+.el-button--primary,
+.lxm-btn--primary {
+  background: var(--lxm-brand-strong) !important;
+  border-color: var(--lxm-brand-strong) !important;
+  box-shadow: 0 4px 12px rgba(238, 44, 44, .18) !important;
+}
+
+.el-button--primary:hover:not(.is-disabled),
+.lxm-btn--primary:hover:not(:disabled) {
+  background: var(--lxm-brand-deep) !important;
+  border-color: var(--lxm-brand-deep) !important;
+}
+
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper,
+.el-date-editor.el-input__wrapper {
+  background: #ffffff !important;
+  box-shadow: 0 0 0 1px var(--lxm-line-strong) inset !important;
+}
+
+.el-table {
+  --el-table-header-bg-color: var(--lxm-cream);
+  --el-table-border-color: var(--lxm-line);
+  background: var(--lxm-surface) !important;
+}
+
+.el-table th.el-table__cell {
+  background: var(--lxm-cream) !important;
+}
+
+.el-table__body tr:hover > td.el-table__cell {
+  background: var(--lxm-brand-soft) !important;
+}
+
+.page-route-login .login-hero {
+  background: var(--lxm-brand-strong) !important;
+}
+
+.page-route-login .login-panel {
+  background: var(--lxm-surface) !important;
+}
+
+@media (max-width: 760px) {
+  .lxm-content {
+    background: var(--lxm-bg) !important;
+  }
+}
