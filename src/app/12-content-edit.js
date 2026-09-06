@@ -427,7 +427,8 @@ async function pushContentToCloud(key, payload) {
 }
 // 是否已连接自托管/云服务端（/api/health 返回的 mode 不是 mock 即视为已连接）。
 function isServerConnected() {
-  return !!(window.LXM_CLOUD && window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock");
+  const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+  return !!(window.LXM_CLOUD && window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
 }
 // 删除：软删除同步到服务端（小程序按 isDeleted 过滤，删除项不再展示）。失败仅告警，不影响本地回收站。
 async function syncDeleteToServer(key, id) {

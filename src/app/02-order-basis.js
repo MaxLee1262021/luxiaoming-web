@@ -190,7 +190,9 @@ function addOrderTimeline(order, action, operator) {
 async function persistOrderAction(order, action, payload = {}) {
   const id = order && (order.id || order._id);
   if (!id) throw new Error("订单缺少标识，无法保存");
-  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH && window.LXM_AUTH.hasSession && window.LXM_AUTH.hasSession();
+  const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+  const connected = window.LXM_AUTH && window.LXM_AUTH.hasSession && window.LXM_AUTH.hasSession()
+    && window.LXM_CLOUD_MODE !== "mock" && reachable !== false;
   if (!connected || !window.LXM_CLOUD || !window.LXM_CLOUD.orderAction) {
     if (payload && payload.fields && typeof payload.fields === "object") Object.assign(order, payload.fields);
     if (action === "assign" && payload.photographerId) {

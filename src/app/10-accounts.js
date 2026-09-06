@@ -30,6 +30,11 @@
     visibleDistributors
   } = ctx;
 
+function isRemoteSession() {
+  const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+  return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+}
+
 const staffRows = computed(() => {
   let list = data.staff;
   if (state.filters.staffRole) list = list.filter((s) => s.role === state.filters.staffRole);
@@ -91,7 +96,7 @@ async function saveStaff() {
   if (row.id) { saved = data.staff.find((s) => s.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `st${Date.now()}` }; data.staff.unshift(saved); }
   const synced = await persistAccountToCloud("staff", saved);
-  if (!synced && ctx.isServerConnected()) {
+  if (!synced && isRemoteSession()) {
     if (previous) Object.assign(saved, previous);
     else data.staff = data.staff.filter((item) => item !== saved);
     return;
@@ -150,7 +155,7 @@ async function toggleStaffStatus(row) {
   const previousStatus = target.status;
   target.status = disabling ? "停用" : "启用";
   const synced = await persistAccountToCloud("staff", target);
-  if (!synced && ctx.isServerConnected()) {
+  if (!synced && isRemoteSession()) {
     target.status = previousStatus;
     return;
   }
@@ -178,7 +183,7 @@ async function saveDistributor() {
   if (row.id) { saved = data.distributors.find((d) => d.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `dist${Date.now()}` }; data.distributors.unshift(saved); }
   const synced = await persistAccountToCloud("distributors", saved);
-  if (!synced && ctx.isServerConnected()) {
+  if (!synced && isRemoteSession()) {
     if (previous) Object.assign(saved, previous);
     else data.distributors = data.distributors.filter((item) => item !== saved);
     return;
@@ -218,7 +223,7 @@ async function saveShop() {
   if (row.id) { saved = data.shops.find((s) => s.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `shop${Date.now()}` }; data.shops.unshift(saved); }
   const synced = await persistAccountToCloud("shops", saved);
-  if (!synced && ctx.isServerConnected()) {
+  if (!synced && isRemoteSession()) {
     if (previous) Object.assign(saved, previous);
     else data.shops = data.shops.filter((item) => item !== saved);
     return;

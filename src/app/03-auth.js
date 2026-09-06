@@ -320,7 +320,9 @@ function generateTempPassword() {
 }
 // 账号资料写回服务端：服务端会自动把明文密码哈希落库；密码留空则不下发该字段（= 不改密码）。
 async function persistAccountToCloud(key, row) {
-  if (!row || !ctx.isServerConnected() || !window.LXM_CLOUD) return true;
+  const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+  const connected = ctx.isServerConnected() || (window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+  if (!row || !connected || !window.LXM_CLOUD) return true;
   try {
     const doc = { ...row };
     if (!doc.password) delete doc.password;
