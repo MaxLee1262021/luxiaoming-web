@@ -513,9 +513,30 @@ async function runSmoke(options = {}) {
   const fixture = createTempFixture(root);
   let server = null;
   try {
-    await check(report, "synthetic fixture contains no plaintext/customer data", async () => {
+    await check(report, "synthetic fixture starts without plaintext/customer data", async () => {
       assertSyntheticFixtureSafe(fixture);
     });
+    // Add contact aliases only after the fixture-safety assertion. These are
+    // synthetic values used to prove role-specific redaction, never real data.
+    fixture.db.collections.orders["smoke-order-redaction"] = {
+      id: "smoke-order-redaction", shopId: "smoke-shop", photographerId: "smoke-photo", status: "new",
+      phone: "13800138000", contactPhone: "13900139000", customerPhone: "13700137000",
+      contactPhones: ["13600136000", "13500135000"], extraPhones: ["13400134000"],
+      wechat: "wx-primary", contactWechat: "wx-contact", customerWechat: "wx-customer", extraWechats: ["wx-extra"],
+      openid: "synthetic-openid", customerOpenid: "synthetic-customer-openid", internalNote: "synthetic internal", paymentRecords: [{ amount: 1 }],
+    };
+    fixture.db.collections.orders["smoke-order-public"] = {
+      id: "smoke-order-public", openid: "dev_openid", status: "new", customerStatus: "预约待确认",
+      orderNo: "LS-SMOKE-PUBLIC", packageName: "Smoke Package", totalPrice: 100,
+      phone: "13800138000", contactPhone: "13800138000", customerPhone: "13800138000",
+      contactPhones: ["13800138000"], wechat: "wx-private", customerWechat: "wx-private",
+      source: { codeId: "private-code", distributorId: "private-distributor" }, sourceCodeId: "private-code",
+      internalNote: "private note", paymentRecords: [{ amount: 100, operator: "finance" }],
+      items: [{ packageId: "smoke-package", name: "Smoke Package", price: 100, internalCost: 1 }],
+      createTime: new Date().toISOString(),
+    };
+    fs.writeFileSync(fixture.file, JSON.stringify(fixture.db, null, 2), { encoding: "utf8", mode: 0o600 });
+
     server = await startServer(root, fixture.file, { sessionStore: "memory" });
     if (!server.ready) {
       addFailure(report, "server startup", new Error("local JSON server did not become healthy"));
@@ -568,6 +589,27 @@ async function runSmoke(options = {}) {
       assert.equal(typeof result.body.token, "string", "public login must return a session token");
       publicToken = result.body.token;
     });
+    await check(report, "public order responses use a customer-safe projection", async () => {
+      assert.ok(publicToken, "public login token is required");
+      const list = await requestJson(server.baseUrl, "/api/rpc/getMyOrders", {
+        method: "POST", headers: authHeaders(publicToken), body: { data: {} },
+      });
+      assert.equal(list.status, 200);
+      assert.equal(list.body && list.body.success, true);
+      const row = responseRows(list.body).find((item) => item && item.orderNo === "LS-SMOKE-PUBLIC");
+      assert.ok(row, "owned synthetic order must be listed");
+      for (const field of ["openid", "_openid", "customerOpenid", "source", "sourceCodeId", "internalNote", "paymentRecords", "customerPhone", "customerWechat", "contactPhones"]) {
+        assert.equal(Object.prototype.hasOwnProperty.call(row, field), false, `public list must not expose ${field}`);
+      }
+      const detail = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
+        method: "POST", headers: authHeaders(publicToken), body: { data: { orderId: "smoke-order-public" } },
+      });
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body && detail.body.success, true);
+      for (const field of ["openid", "source", "internalNote", "paymentRecords", "customerPhone", "customerWechat", "contactPhones"]) {
+        assert.equal(Object.prototype.hasOwnProperty.call(detail.body.data || {}, field), false, `public detail must not expose ${field}`);
+      }
+    });
     for (const name of ["getMyOrders", "createBooking"]) {
       await check(report, `order RPC ${name} rejects missing主体`, async () => {
         const result = await requestJson(server.baseUrl, `/api/rpc/${name}`, { method: "POST", body: {} });
@@ -603,6 +645,28 @@ async function runSmoke(options = {}) {
         assert.equal(result.status, 200);
         assertNoPasswordFields(result.body, "shop collection");
       });
+      await check(report, "restricted order responses redact contact aliases", async () => {
+        const merchantToken = await login(server.baseUrl, fixture.accounts.merchant);
+        const photoToken = await login(server.baseUrl, fixture.accounts.photo);
+        const paths = [
+          ["merchant", merchantToken, ["phone", "contactPhone", "customerPhone", "contactPhones", "extraPhones"]],
+          ["photo", photoToken, ["phone", "contactPhone", "customerPhone", "contactPhones", "extraPhones"]],
+        ];
+        const rawPhones = new Set(["13800138000", "13900139000", "13700137000", "13600136000", "13500135000", "13400134000"]);
+        for (const [role, token, fields] of paths) {
+          const detail = await requestJson(server.baseUrl, "/api/collection/orders/smoke-order-redaction", { headers: authHeaders(token) });
+          assert.equal(detail.status, 200, `${role} detail must be readable for the scoped synthetic order`);
+          const row = detail.body || {};
+          for (const field of fields) {
+            if (role === "photo") assert.equal(Object.prototype.hasOwnProperty.call(row, field), false, `${role} must not receive ${field}`);
+            else if (Array.isArray(row[field])) assert.ok(row[field].every((value) => !rawPhones.has(String(value))), `${role} list alias ${field} must be masked`);
+            else if (row[field]) assert.equal(rawPhones.has(String(row[field])), false, `${role} alias ${field} must be masked`);
+          }
+          for (const field of ["wechat", "contactWechat", "customerWechat", "extraWechats", "openid", "customerOpenid", "internalNote", "paymentRecords"]) {
+            assert.equal(Object.prototype.hasOwnProperty.call(row, field), false, `${role} must not receive ${field}`);
+          }
+        }
+      });
       await check(report, "legacy site config fragments read as canonical document", async () => {
         const result = await requestJson(server.baseUrl, "/api/collection/siteConfig/global", { headers: authHeaders(superToken) });
         assert.equal(result.status, 200);
@@ -623,6 +687,18 @@ async function runSmoke(options = {}) {
         const detail = await requestJson(server.baseUrl, "/api/collection/orders/smoke-order-shop", { headers: authHeaders(superToken) });
         assert.equal(detail.status, 200);
         assert.ok((detail.body.statusLogs || []).some((row) => String(row.action || "").includes("synthetic persistence check")), "timeline must contain the action reason");
+      });
+
+      await check(report, "generic order PUT cannot bypass workflow audit", async () => {
+        const result = await requestJson(server.baseUrl, "/api/collection/orders/smoke-order-shop", {
+          method: "PUT",
+          headers: authHeaders(superToken),
+          body: { status: "completed", depositPaid: 999, depositFinanceStatus: "已审" },
+        });
+        assert.equal(result.status, 403, "generic order PUT must be rejected");
+        const detail = await requestJson(server.baseUrl, "/api/collection/orders/smoke-order-shop", { headers: authHeaders(superToken) });
+        assert.equal(detail.body.status, "new", "rejected PUT must not mutate status");
+        assert.equal(detail.body.depositPaid || 0, 0, "rejected PUT must not mutate payment");
       });
 
       await check(report, "public booking records verified identity and source code", async () => {

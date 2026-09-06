@@ -13,6 +13,7 @@ const ALL_KEYS = [
   "merchantCodes", "siteConfig", "userProfiles", "config"
 ];
 const KEY_SET = new Set(ALL_KEYS);
+const DOCUMENT_KEYS = new Set(["homeConfig", "siteConfig", "config"]);
 const PASSWORD_KEYS = new Set(["staff", "shops", "distributors", "agents"]);
 const CONTENT_KEYS = new Set([
   "cities", "spots", "series", "albums", "samples", "packages", "addonServices",
@@ -173,6 +174,10 @@ function maskPhone(value) {
   const text = String(value || "");
   return text.length >= 7 ? text.slice(0, 3) + "****" + text.slice(-4) : "***";
 }
+const PHONE_FIELDS = ["phone", "contactPhone", "customerPhone", "customer_phone"];
+const PHONE_LIST_FIELDS = ["contactPhones", "extraPhones", "phones"];
+const WECHAT_FIELDS = ["wechat", "contactWechat", "customerWechat", "customer_wechat", "extraWechats", "wechats"];
+const IDENTITY_FIELDS = ["openid", "_openid", "customerOpenid", "customer_openid", "userOpenid", "user_openid"];
 
 async function filterRows(source, session, key, value) {
   const rows = Array.isArray(value) ? value : (value && typeof value === "object" ? Object.values(value) : []);
@@ -206,22 +211,21 @@ function redactRow(key, row, session) {
   if (key === "orders") {
     out = { ...out };
     if (["merchant", "distributor", "agent"].includes(role)) {
-      if (out.phone) out.phone = maskPhone(out.phone);
-      if (out.contactPhone) out.contactPhone = maskPhone(out.contactPhone);
-      delete out.wechat; delete out.contactWechat; delete out.openid; delete out._openid;
+      PHONE_FIELDS.forEach((field) => { if (out[field]) out[field] = maskPhone(out[field]); });
+      PHONE_LIST_FIELDS.forEach((field) => { if (Array.isArray(out[field])) out[field] = out[field].map(maskPhone); });
+      [...WECHAT_FIELDS, ...IDENTITY_FIELDS].forEach((field) => { delete out[field]; });
       delete out.internalNote; delete out.paymentRecords;
     }
     if (role === "photo") {
-      delete out.phone; delete out.contactPhone; delete out.wechat; delete out.contactWechat;
-      delete out.openid; delete out._openid; delete out.internalNote; delete out.paymentRecords;
+      [...PHONE_FIELDS, ...PHONE_LIST_FIELDS, ...WECHAT_FIELDS, ...IDENTITY_FIELDS].forEach((field) => { delete out[field]; });
+      delete out.internalNote; delete out.paymentRecords;
     }
   }
   if (key === "afterSales" && !["super", "finance"].includes(role)) {
     out = { ...out };
-    delete out.openid;
-    delete out._openid;
-    if (out.phone) out.phone = maskPhone(out.phone);
-    if (out.contactPhone) out.contactPhone = maskPhone(out.contactPhone);
+    [...WECHAT_FIELDS, ...IDENTITY_FIELDS].forEach((field) => { delete out[field]; });
+    PHONE_FIELDS.forEach((field) => { if (out[field]) out[field] = maskPhone(out[field]); });
+    PHONE_LIST_FIELDS.forEach((field) => { if (Array.isArray(out[field])) out[field] = out[field].map(maskPhone); });
   }
   return out;
 }
@@ -525,6 +529,11 @@ module.exports = function createApi(source, mode, options = {}) {
     }
     if (method === "PUT") {
       if (!id) return json(res, 400, { error: "缺少记录 id" });
+      // Order status, payment, assignment and deletion changes must go through
+      // /api/orders/:id/action so the server can enforce the state machine and
+      // append an audit timeline. Generic collection PUT is intentionally not
+      // an alternate workflow command.
+      if (key === "orders") return forbidden(res, session, pathname, "订单变更必须通过专用操作接口");
       if (!(await enforceOrderPatch(session, key, id, body))) return forbidden(res, session, pathname, "当前角色不能修改该记录或字段");
       const current = await source.get(key, id);
       if (!current || !(await filterRows(source, session, key, [current])).length) return json(res, 404, { error: "未找到记录" });
@@ -535,7 +544,7 @@ module.exports = function createApi(source, mode, options = {}) {
   }
   async function docRoute(req, res, parts, session, pathname) {
     const key = decodePart(parts[1]); const id = decodePart(parts[2]);
-    if (!KEY_SET.has(key) || !id) { const e = new Error("文档参数无效"); e.code = "DATA_KEY_INVALID"; throw e; }
+    if (!DOCUMENT_KEYS.has(key) || !id) { const e = new Error("文档参数无效"); e.code = "DATA_KEY_INVALID"; throw e; }
     if (req.method === "GET") {
       if (!canReadKey(session, key)) return forbidden(res, session, pathname);
       let value = await readConfigDocument(key, id);

@@ -518,12 +518,14 @@ async function applyFinanceReview(row, approved = true) {
   const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
   if (connected && window.LXM_CLOUD?.update) {
     try {
-      const saved = await window.LXM_CLOUD.update("orders", order.id || order._id, {
-        [row.field]: status,
-        status: order.status,
-        customerStatus: order.customerStatus,
+      await persistOrderAction(order, "update", {
+        fields: {
+          [row.field]: status,
+          status: order.status,
+          customerStatus: order.customerStatus,
+        },
+        reason: `财务审核${approved ? "通过" : "驳回"}${typeText}`,
       });
-      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "财务审核保存失败");
     } catch (error) {
       return ElMessage.error((error && error.message) || "财务审核未保存，请稍后重试");
     }

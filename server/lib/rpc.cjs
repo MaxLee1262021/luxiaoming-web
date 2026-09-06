@@ -854,6 +854,52 @@ async function rpcGetGuide(source, data = {}) {
 /* ============================ 我的订单 ============================ */
 function getOrderOpenid(order) { return order.openid || order._openid || ""; }
 
+// Public order responses are an explicit customer-facing projection. Do not
+// spread the persisted order here: internal notes, payment records, source
+// attribution and alternate identity/contact aliases are admin-only fields.
+const PUBLIC_ORDER_ITEM_FIELDS = [
+  "id", "_id", "name", "title", "price", "quantity", "count", "productType",
+  "packageId", "packageName", "albumId", "albumName", "seriesId", "seriesName",
+  "spotId", "spotName", "type", "duration", "cover", "coverUrl", "image"
+];
+function projectPublicOrder(order = {}) {
+  const id = getItemId(order);
+  const rawItems = Array.isArray(order.productItems) ? order.productItems : (Array.isArray(order.items) ? order.items : []);
+  const productItems = rawItems.map((item) => {
+    const out = {};
+    if (!item || typeof item !== "object") return out;
+    PUBLIC_ORDER_ITEM_FIELDS.forEach((field) => { if (item[field] !== undefined) out[field] = item[field]; });
+    return out;
+  });
+  return {
+    id,
+    _id: id,
+    orderNo: order.orderNo || "",
+    status: order.status || "",
+    customerStatus: order.customerStatus || "",
+    statusText: order.statusText || "",
+    packageName: order.packageName || (productItems[0] && (productItems[0].packageName || productItems[0].albumName)) || "",
+    packagePrice: Number(order.packagePrice || order.totalPrice || order.price || order.totalAmount || 0),
+    productItems,
+    items: productItems,
+    spotName: order.spotName || (productItems[0] && productItems[0].spotName) || "",
+    seriesName: order.seriesName || (productItems[0] && productItems[0].seriesName) || "",
+    date: order.date || order.bookingDate || order.appointmentAt || "",
+    appointmentAt: order.appointmentAt || "",
+    timePeriod: order.timePeriod || order.time || order.bookingTime || "",
+    type: order.type || (productItems[0] && productItems[0].type) || "photo",
+    contactName: order.contactName || order.name || "",
+    contactPhone: order.contactPhone || order.phone || "",
+    contactWechat: order.contactWechat || order.wechat || "",
+    message: order.message || order.customerRemark || order.remark || "",
+    afterSaleStatus: order.afterSaleStatus || "",
+    bookingMode: order.bookingMode || "consult",
+    deliverFiles: Array.isArray(order.deliverFiles) ? order.deliverFiles : (Array.isArray(order.photos) ? order.photos : []),
+    createTime: order.createTime || "",
+    createdAt: order.createdAt || order.createTime || "",
+  };
+}
+
 async function rpcGetMyOrders(source, openid, data = {}) {
   try {
     if (!openid) return { success: false, error: "请先完成微信登录" };
@@ -870,7 +916,7 @@ async function rpcGetMyOrders(source, openid, data = {}) {
     const paged = list.slice(start, start + Number(pageSize)).map(o => {
       const computed = customerStatusText(o.status);
       const customerStatus = shouldUseComputedStatus(o.status) ? computed : (o.customerStatus || computed);
-      return { ...o, customerStatus, statusText: customerStatus };
+      return { ...projectPublicOrder(o), customerStatus, statusText: customerStatus };
     });
     return { success: true, data: paged, total, page: Number(page), pageSize: Number(pageSize) };
   } catch (err) {
@@ -893,26 +939,13 @@ async function rpcGetOrderDetail(source, openid, data = {}) {
     if (!order || order.isDeleted || order.deleted) return { success: false, error: "订单不存在" };
     if (openid && getOrderOpenid(order) !== openid) return { success: false, error: "无权限" };
 
-    const d = { ...order };
+    const d = projectPublicOrder(order);
     d.customerStatus = shouldUseComputedStatus(d.status) ? customerStatusText(d.status) : (d.customerStatus || customerStatusText(d.status));
-    d.paidAmount = Number(d.depositPaid || d.depositAmount || 0) + Number(d.finalPaid || 0);
-    d.dueAmount = Math.max(Number(d.totalPrice || d.price || d.totalAmount || 0) - d.paidAmount, 0);
+    d.paidAmount = Number(order.depositPaid || order.depositAmount || 0) + Number(order.finalPaid || 0);
+    d.dueAmount = Math.max(Number(order.totalPrice || order.price || order.totalAmount || 0) - d.paidAmount, 0);
     return {
       success: true,
-      data: {
-        _id: getItemId(d), orderNo: d.orderNo, status: d.status, statusText: d.customerStatus, customerStatus: d.customerStatus,
-        packageName: d.packageName || (d.packageSnapshot && d.packageSnapshot.packageName) || (d.products && d.products[0] && d.products[0].name) || "",
-        packagePrice: d.totalPrice || d.price || d.totalAmount || 0,
-        productItems: d.productItems || d.items || d.products || [],
-        spotName: d.spotName || "", seriesName: d.seriesName || "",
-        date: d.date || d.appointmentAt || "", timePeriod: d.timePeriod || d.time || "",
-        type: d.type || (d.packageSnapshot && d.packageSnapshot.serviceType) || "photo",
-        contactName: d.contactName || d.name || d.customer || "",
-        contactPhone: d.contactPhone || d.phone || "",
-        contactWechat: d.contactWechat || d.wechat || "",
-        message: d.message || d.customerRemark || "",
-        paidAmount: d.paidAmount, dueAmount: d.dueAmount
-      }
+      data: { ...d, statusText: d.customerStatus, paidAmount: d.paidAmount, dueAmount: d.dueAmount }
     };
   } catch (err) {
     return { success: false, error: err.message };
