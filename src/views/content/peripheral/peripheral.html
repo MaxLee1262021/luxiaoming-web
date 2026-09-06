@@ -68,29 +68,29 @@
           <p>改完点「保存」；开关类直接切换即时生效。</p>
         </div>
         <div class="ppl-form-actions">
-          <el-button type="primary" @click="saveSelectedPeripheral">保存</el-button>
-          <el-button @click="openContent(selectedPeripheral)">高级编辑</el-button>
+           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedPeripheral">保存</el-button>
+           <el-button v-if="can('contentEdit')" @click="openContent(selectedPeripheral)">高级编辑</el-button>
           <el-button @click="previewContent(selectedPeripheral)">预览</el-button>
           <el-button type="danger" v-if="can('contentEdit')" @click="requestDeletePeripheral(selectedPeripheral)">删除</el-button>
         </div>
       </div>
 
       <div class="ppl-form-body">
-        <label class="pf-field"><span>名称</span><el-input v-model="selectedPeripheral.name" /></label>
+         <label class="pf-field"><span>名称</span><el-input v-model="selectedPeripheral.name" :disabled="!can('contentEdit')" /></label>
         <div class="pf-row">
-          <label class="pf-field"><span>分类</span><el-input v-model="selectedPeripheral.category" placeholder="相册 / 钥匙扣 / 明信片" /></label>
-          <label class="pf-field"><span>规格</span><el-input v-model="selectedPeripheral.specs" placeholder="标准款" /></label>
+           <label class="pf-field"><span>分类</span><el-input v-model="selectedPeripheral.category" placeholder="相册 / 钥匙扣 / 明信片" :disabled="!can('contentEdit')" /></label>
+           <label class="pf-field"><span>规格</span><el-input v-model="selectedPeripheral.specs" placeholder="标准款" :disabled="!can('contentEdit')" /></label>
         </div>
         <div class="pf-row">
-          <label class="pf-field"><span>售价（元）</span><el-input-number v-model="selectedPeripheral.price" :min="0" :step="10" /></label>
-          <label class="pf-field"><span>库存</span><el-input-number v-model="selectedPeripheral.stock" :min="0" :step="1" /></label>
+           <label class="pf-field"><span>售价（元）</span><el-input-number v-model="selectedPeripheral.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
+           <label class="pf-field"><span>库存</span><el-input-number v-model="selectedPeripheral.stock" :min="0" :step="1" :disabled="!can('contentEdit')" /></label>
         </div>
-        <label class="pf-field"><span>发货周期</span><el-input v-model="selectedPeripheral.deliveryCycle" placeholder="3-5天发" /></label>
-        <label class="pf-field"><span>简介 / 商品说明</span><el-input type="textarea" :rows="3" v-model="selectedPeripheral.intro" /></label>
+         <label class="pf-field"><span>发货周期</span><el-input v-model="selectedPeripheral.deliveryCycle" placeholder="3-5天发" :disabled="!can('contentEdit')" /></label>
+         <label class="pf-field"><span>简介 / 商品说明</span><el-input type="textarea" :rows="3" v-model="selectedPeripheral.intro" :disabled="!can('contentEdit')" /></label>
 
         <div class="pf-switches">
-          <label><span>上架展示</span><el-switch v-model="selectedPeripheral.isShow" /></label>
-          <label><span>标记新品</span><el-switch v-model="selectedPeripheral.isHot" /></label>
+           <label><span>上架展示</span><el-switch v-model="selectedPeripheral.isShow" :disabled="!can('contentEdit')" /></label>
+           <label><span>标记新品</span><el-switch v-model="selectedPeripheral.isHot" :disabled="!can('contentEdit')" /></label>
         </div>
 
         <div class="pf-meta">

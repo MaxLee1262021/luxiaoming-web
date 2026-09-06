@@ -7,6 +7,7 @@
       <div class="login-panel">
         <h2>统一后台登录</h2>
         <p>请使用分配给你的账号密码登录；忘记密码请联系主理人重置。</p>
+        <p v-if="state.authNotice" class="auth-notice" role="status">{{ state.authNotice }}</p>
         <el-input v-model="state.login.account" size="large" placeholder="账号" />
         <el-input v-model="state.login.password" size="large" type="password" show-password placeholder="密码" @keyup.enter="login" />
         <el-button type="primary" size="large" :loading="state.loading" @click="login">登录</el-button>

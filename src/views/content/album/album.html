@@ -74,33 +74,33 @@
           <p>改完点「保存」；开关类直接切换即时生效。</p>
         </div>
         <div class="album-form-actions">
-          <el-button type="primary" @click="saveSelectedAlbum">保存</el-button>
-          <el-button @click="openContent(selectedAlbum)">高级编辑</el-button>
+           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedAlbum">保存</el-button>
+           <el-button v-if="can('contentEdit')" @click="openContent(selectedAlbum)">高级编辑</el-button>
           <el-button @click="previewContent(selectedAlbum)">预览</el-button>
           <el-button type="danger" v-if="can('contentEdit')" @click="requestDeleteAlbum(selectedAlbum)">删除</el-button>
         </div>
       </div>
 
       <div class="album-form-body">
-        <label class="af-field"><span>名称</span><el-input v-model="selectedAlbum.name" /></label>
+         <label class="af-field"><span>名称</span><el-input v-model="selectedAlbum.name" :disabled="!can('contentEdit')" /></label>
         <div class="af-row">
           <label class="af-field"><span>打卡点</span>
-            <el-select v-model="selectedAlbum.spotId" filterable placeholder="选择打卡点">
+             <el-select v-model="selectedAlbum.spotId" filterable placeholder="选择打卡点" :disabled="!can('contentEdit')">
               <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
           <label class="af-field"><span>拍摄风格</span>
-            <el-select v-model="selectedAlbum.seriesId" filterable placeholder="选择拍摄风格">
+             <el-select v-model="selectedAlbum.seriesId" filterable placeholder="选择拍摄风格" :disabled="!can('contentEdit')">
               <el-option v-for="s in data.series" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
         </div>
-        <label class="af-field"><span>价格（元）</span><el-input-number v-model="selectedAlbum.price" :min="0" :step="10" /></label>
-        <label class="af-field"><span>简介 / 拍摄说明</span><el-input type="textarea" :rows="3" v-model="selectedAlbum.intro" /></label>
+         <label class="af-field"><span>价格（元）</span><el-input-number v-model="selectedAlbum.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
+         <label class="af-field"><span>简介 / 拍摄说明</span><el-input type="textarea" :rows="3" v-model="selectedAlbum.intro" :disabled="!can('contentEdit')" /></label>
 
         <div class="af-switches">
-          <label><span>作为商品售卖</span><el-switch v-model="selectedAlbum.isSellable" @change="toggleAlbumSellable(selectedAlbum)" /></label>
-          <label><span>允许素材展示</span><el-switch v-model="selectedAlbum.allowMaterialUse" @change="toggleAlbumMaterialUse(selectedAlbum)" /></label>
+           <label><span>作为商品售卖</span><el-switch v-model="selectedAlbum.isSellable" :disabled="!can('contentEdit')" @change="toggleAlbumSellable(selectedAlbum)" /></label>
+           <label><span>允许素材展示</span><el-switch v-model="selectedAlbum.allowMaterialUse" :disabled="!can('contentEdit')" @change="toggleAlbumMaterialUse(selectedAlbum)" /></label>
         </div>
 
         <div class="af-meta">

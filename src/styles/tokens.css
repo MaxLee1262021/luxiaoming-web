@@ -32,6 +32,7 @@
 
   /* ---------- 2. 语义色（成功/警告/危险/信息） ---------- */
   --lxm-success:      #1F9254;
+  --lxm-success-dark-2: #186F40;
   --lxm-success-soft: #E7F5EC;
   --lxm-warning:      #B7791F;
   --lxm-warning-soft: #FBF1DD;

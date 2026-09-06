@@ -9,7 +9,7 @@
       <el-button plain @click="clearContentFilters">重置筛选</el-button>
       <el-button plain @click="openContentTrash">回收站</el-button>
       <el-button @click="switchMenu('packages')">套餐设置</el-button>
-      <el-button type="primary" v-if="can('orderEdit')" @click="openContentQuick('addonServices')">新增增值服务</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('addonServices')">新增增值服务</el-button>
     </div>
   </div>
 
@@ -86,9 +86,9 @@
             <em>{{ svc.includeInOrderAmount===false ? '不计入订单总额' : '计入订单总额' }}</em>
           </div>
           <div class="addon-actions">
-            <el-button link type="primary" v-if="can('orderEdit')" @click="openContent(svc)">编辑</el-button>
-            <el-button link :type="svc.enabled===false ? 'success' : 'warning'" v-if="can('orderEdit')" @click="toggleAddonEnabled(svc)">{{ svc.enabled===false ? '启用' : '停用' }}</el-button>
-            <el-button link type="danger" v-if="can('orderEdit')" @click="requestDeleteAddon(svc)">删除</el-button>
+            <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(svc)">编辑</el-button>
+            <el-button link :type="svc.enabled===false ? 'success' : 'warning'" v-if="can('contentEdit')" @click="toggleAddonEnabled(svc)">{{ svc.enabled===false ? '启用' : '停用' }}</el-button>
+            <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteAddon(svc)">删除</el-button>
           </div>
         </article>
       </div>

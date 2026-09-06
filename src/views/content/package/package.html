@@ -102,36 +102,36 @@
           <p>改完点「保存」；开关类直接切换即时生效。完整 6 区块配置走「高级编辑」。</p>
         </div>
         <div class="pkg-form-actions">
-          <el-button type="primary" @click="saveSelectedPackage">保存</el-button>
-          <el-button @click="openContent(selectedPackage)">高级编辑</el-button>
+           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedPackage">保存</el-button>
+           <el-button v-if="can('contentEdit')" @click="openContent(selectedPackage)">高级编辑</el-button>
           <el-button @click="previewContent(selectedPackage)">预览</el-button>
           <el-button type="danger" v-if="can('contentEdit')" @click="requestDeletePackage(selectedPackage)">删除</el-button>
         </div>
       </div>
 
       <div class="pkg-form-body">
-        <label class="pf-field"><span>名称</span><el-input v-model="selectedPackage.name" /></label>
+         <label class="pf-field"><span>名称</span><el-input v-model="selectedPackage.name" :disabled="!can('contentEdit')" /></label>
         <div class="pf-row">
           <label class="pf-field"><span>关联打卡点</span>
-            <el-select v-model="selectedPackage.spotId" filterable clearable placeholder="选择打卡点">
+             <el-select v-model="selectedPackage.spotId" filterable clearable placeholder="选择打卡点" :disabled="!can('contentEdit')">
               <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
           <label class="pf-field"><span>拍摄风格</span>
-            <el-select v-model="selectedPackage.seriesId" filterable clearable placeholder="选择拍摄风格">
+             <el-select v-model="selectedPackage.seriesId" filterable clearable placeholder="选择拍摄风格" :disabled="!can('contentEdit')">
               <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
         </div>
         <div class="pf-row">
-          <label class="pf-field"><span>售价（元）</span><el-input-number v-model="selectedPackage.price" :min="0" :step="10" /></label>
-          <label class="pf-field"><span>原价（元）</span><el-input-number v-model="selectedPackage.originalPrice" :min="0" :step="10" /></label>
+           <label class="pf-field"><span>售价（元）</span><el-input-number v-model="selectedPackage.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
+           <label class="pf-field"><span>原价（元）</span><el-input-number v-model="selectedPackage.originalPrice" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
         </div>
-        <label class="pf-field"><span>简介 / 商品说明</span><el-input type="textarea" :rows="3" v-model="selectedPackage.intro" /></label>
+         <label class="pf-field"><span>简介 / 商品说明</span><el-input type="textarea" :rows="3" v-model="selectedPackage.intro" :disabled="!can('contentEdit')" /></label>
 
         <div class="pf-switches">
-          <label><span>上架展示</span><el-switch v-model="selectedPackage.isShow" /></label>
-          <label><span>主页主推</span><el-switch v-model="selectedPackage.isMainPush" /></label>
+           <label><span>上架展示</span><el-switch v-model="selectedPackage.isShow" :disabled="!can('contentEdit')" /></label>
+           <label><span>主页主推</span><el-switch v-model="selectedPackage.isMainPush" :disabled="!can('contentEdit')" /></label>
         </div>
 
         <div class="pf-meta">

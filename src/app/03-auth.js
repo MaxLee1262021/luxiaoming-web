@@ -10,6 +10,7 @@
     contentKeys,
     currentOperatorName,
     data,
+    hydrateFromStorage,
     log,
     menus,
     resetPageState,
@@ -18,68 +19,269 @@
     state
   } = ctx;
 
+  // 运行时数据只在已验证会话后载入；登出/会话失效时清空，避免同一浏览器留下上一位管理员的数据。
+  const RUNTIME_DATA_KEYS = [
+    "cities", "agents", "distributors", "shops", "staff", "spots", "series", "albums", "samples",
+    "packages", "addonServices", "peripherals", "videoSingles", "tagLibrary", "guides", "stories", "scans",
+    "orders", "afterSales", "reconciliationTransfers", "financeSettings", "monthlyClosings", "adjustmentRecords"
+  ];
+  const RUNTIME_STATE_KEYS = ["homeConfig", "siteConfig", "logs", "trash"];
+  const roleDefaults = Object.fromEntries(Object.entries(LXM_CONFIG.roles || {}).map(([key, profile]) => [key, {
+    ...profile,
+    menus: Array.isArray(profile.menus) ? profile.menus.slice() : [],
+    actions: Array.isArray(profile.actions) ? profile.actions.slice() : []
+  }]));
+  const serverRoleOverrides = Object.create(null);
+  const knownMenuKeys = new Set([
+    ...(LXM_CONFIG.menus || []).map((item) => item.key),
+    ...((window.LXM_PAGES && window.LXM_PAGES.manifest) || []).map((item) => item.key)
+  ]);
+
+  // 这些字段在 01-core-state 中以演示数据初始化；在 Vue 挂载前清空，未认证页面不会持有管理列表副本。
+  state.authChecking = true;
+  state.authNotice = "";
+  state.authSource = "";
+  state.serverReachable = window.LXM_API_STATE ? window.LXM_API_STATE.reachable : null;
+  state.dataLoading = false;
+  state.mobileMenuOpen = false;
+
+  function cloneValue(value) {
+    if (value === undefined || value === null) return value;
+    try {
+      if (typeof structuredClone === "function") return structuredClone(value);
+    } catch (e) {}
+    try { return JSON.parse(JSON.stringify(value)); } catch (e) { return value; }
+  }
+
+  function clearRuntimeData() {
+    RUNTIME_DATA_KEYS.forEach((key) => {
+      if (Array.isArray(data[key])) data[key] = [];
+      else if (data[key] && typeof data[key] === "object") data[key] = {};
+    });
+  RUNTIME_STATE_KEYS.forEach((key) => {
+    if (Array.isArray(state[key])) state[key] = [];
+    else state[key] = {};
+  });
+    state.currentOrder = null;
+    state.currentAfterSale = null;
+    state.currentFinanceReview = null;
+    state.selectedOrderIds = [];
+    state.merchantCodes = [];
+    state.merchantCodeStats = { scans: 0, orders: 0, deals: 0, codeCount: 0 };
+  }
+
+  function restoreDemoData() {
+    RUNTIME_DATA_KEYS.forEach((key) => {
+      const source = window.LXM_DATA && window.LXM_DATA[key];
+      data[key] = cloneValue(source !== undefined ? source : (Array.isArray(data[key]) ? [] : {}));
+    });
+    state.homeConfig = cloneValue((window.LXM_DATA && window.LXM_DATA.homeConfig) || {});
+    state.siteConfig = cloneValue((window.LXM_DATA && window.LXM_DATA.siteConfig) || {});
+    state.logs = cloneValue((window.LXM_DATA && window.LXM_DATA.logs) || []);
+    state.trash = cloneValue((window.LXM_DATA && window.LXM_DATA.trash) || []);
+  }
+
+  function restoreRoleDefaults(key) {
+    const target = LXM_CONFIG.roles && LXM_CONFIG.roles[key];
+    const base = roleDefaults[key];
+    if (!target || !base) return;
+    Object.assign(target, {
+      ...base,
+      menus: base.menus.slice(),
+      actions: base.actions.slice()
+    });
+  }
+
+  function applyRoleConfig(key, payload = {}) {
+    const target = LXM_CONFIG.roles && LXM_CONFIG.roles[key];
+    if (!target) return false;
+    restoreRoleDefaults(key);
+    const permissions = payload.permissions && typeof payload.permissions === "object" ? payload.permissions : {};
+    const menus = Array.isArray(payload.menus) ? payload.menus : (Array.isArray(permissions.menus) ? permissions.menus : permissions.menuKeys);
+    const actions = Array.isArray(payload.actions) ? payload.actions : (Array.isArray(permissions.actions) ? permissions.actions : permissions.actionKeys);
+    if (Array.isArray(menus)) target.menus = [...new Set(menus.filter((item) => knownMenuKeys.has(item)))];
+    if (Array.isArray(actions)) target.actions = [...new Set(actions.map(String))];
+    if (payload.scope || permissions.scope) target.scope = payload.scope || permissions.scope;
+    if (payload.shopId || permissions.shopId) target.shopId = payload.shopId || permissions.shopId;
+    if (payload.staffId || permissions.staffId) target.staffId = payload.staffId || permissions.staffId;
+    if (payload.home && knownMenuKeys.has(payload.home)) target.home = payload.home;
+    return true;
+  }
+
+  function normalizeSession(raw, fallback = {}) {
+    const envelope = raw && typeof raw === "object" ? raw : {};
+    const source = envelope.session && typeof envelope.session === "object"
+      ? envelope.session
+      : envelope.user && typeof envelope.user === "object" ? envelope.user : envelope;
+    const permissions = source.permissions && typeof source.permissions === "object" ? source.permissions : (envelope.permissions || {});
+    return {
+      ok: envelope.ok !== false,
+      token: source.token || envelope.token || fallback.token || "",
+      role: source.role || envelope.role || fallback.role || "",
+      account: source.account || envelope.account || fallback.account || "",
+      name: source.name || envelope.name || fallback.name || "",
+      staffId: source.staffId || envelope.staffId || fallback.staffId || "",
+      menus: Array.isArray(source.menus) ? source.menus : (Array.isArray(envelope.menus) ? envelope.menus : permissions.menus),
+      actions: Array.isArray(source.actions) ? source.actions : (Array.isArray(envelope.actions) ? envelope.actions : permissions.actions),
+      scope: source.scope || envelope.scope || permissions.scope || fallback.scope || "",
+      shopId: source.shopId || envelope.shopId || permissions.shopId || fallback.shopId || "",
+      permissions
+    };
+  }
+
+function isExplicitDemoMode() {
+  const protocol = window.location && window.location.protocol;
+  const query = window.location && window.location.search;
+  return protocol === "file:" || window.LXM_DEMO_MODE === true || /(?:^|[?&])demo=1(?:&|$)/.test(query || "");
+}
+
+function serverErrorMessage(error) {
+  if (!error) return "登录失败，请重试";
+  if (error.status === 401) return error.message || "账号或密码错误";
+  if (error.status === 403) return error.message || "该账号当前不可登录";
+  if (error.status === 429) return error.message || "登录尝试过于频繁，请稍后再试";
+  return error.message || "登录失败，请重试";
+}
+
 async function login() {
-  state.loading = true;
   const account = (state.login.account || "").trim();
   const password = state.login.password || "";
+  if (!account) return ElMessage.warning("请输入账号");
+  if (!password) return ElMessage.warning("请输入密码");
+  state.loading = true;
+  state.authNotice = "";
   try {
-    const base = (window.LXM_API_CONFIG && window.LXM_API_CONFIG.base) || "/api";
-    let j = null, netErr = false;
+    let j;
     try {
-      const r = await fetch(`${base}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account, password })
-      });
-      j = await r.json().catch(() => null);
-    } catch (e) {
-      netErr = true;
+      j = await window.LXM_AUTH.login(account, password);
+    } catch (error) {
+      // 只有明确处于离线演示环境时才允许本地兜底；服务端 401/403 或已探测到服务端时绝不绕过。
+      if (error && error.status) {
+        log("登录失败", "后台", "服务端拒绝登录", account, { level: "高" });
+        return ElMessage.error(serverErrorMessage(error));
+      }
+      const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+      if (!isExplicitDemoMode() || reachable === true) {
+        log("登录失败", "后台", "无法连接后台服务，未启用本地演示兜底", account, { level: "高" });
+        return ElMessage.error("无法连接后台服务，请检查服务状态后重试");
+      }
+      return loginDemo(account, password);
     }
-    if (j && j.ok === true) { applyLogin(j); return; }
-    if (netErr) {
-      // 无后端服务：用本地演示数据（含明文密码）兜底比对，仅用于离线演示。
-      const staff = (data.staff || []).find((u) => u && u.account === account && u.password === password);
-      const merchant = (data.shops || []).find((s) => s && s.account === account && s.password === password);
-      // 离线兜底同样校验账号状态：停用人员 / 暂停合作商家不允许登录（与服务端拦截同一规则）。
-      if (staff && staff.status === "停用") {
-        log("登录拦截", "后台", `停用人员「${staff.name || account}」密码正确但被状态拦截（离线模式）`, account, { level: "高" });
-        return ElMessage.error("该账号已被停用，请联系管理员启用后再登录");
-      }
-      if (merchant && ["暂停合作", "已终止", "停用"].includes(merchant.status || "")) {
-        log("登录拦截", "后台", `商家「${merchant.name || account}」合作状态为「${merchant.status}」，登录被拦截（离线模式）`, account, { level: "高" });
-        return ElMessage.error("该商家合作已暂停或终止，账号暂无法登录");
-      }
-      if (staff || merchant) {
-        applyLogin({
-          role: merchant ? "merchant" : (staff.role || "super"),
-          account,
-          name: (staff && staff.name) || (merchant && merchant.name) || account,
-          staffId: (staff && staff.id) || (merchant && merchant.id) || "st1"
-        });
-        return;
-      }
+    const session = normalizeSession(j);
+    if (!session.ok || !session.role || !session.token || !LXM_CONFIG.roles[session.role]) {
+      log("登录失败", "后台", "服务端未返回有效会话或角色", account, { level: "高" });
+      return ElMessage.error("登录服务返回无效会话，请联系管理员");
     }
-    // 登录失败留痕（无论服务端拒绝还是离线兜底失败），审计里可追溯到具体账号。
-    log("登录失败", "后台", `账号「${account}」登录失败`, account, { level: "高" });
-    ElMessage.error((j && j.error) || "账号或密码错");
-  } catch (e) {
-    ElMessage.error("登录失败，请重试");
+    applyLogin(session, { source: "server" });
+    await loadAuthenticatedData();
+    ElMessage.success("登录成功");
+  } catch (error) {
+    ElMessage.error(serverErrorMessage(error));
   } finally {
     state.loading = false;
   }
 }
-function applyLogin(j) {
+
+function loginDemo(account, password) {
+  const sourceStaff = ((window.LXM_DATA && window.LXM_DATA.staff) || []).find((u) => u && u.account === account && u.password === password);
+  const sourceMerchant = ((window.LXM_DATA && window.LXM_DATA.shops) || []).find((s) => s && s.account === account && s.password === password);
+  if (sourceStaff && sourceStaff.status === "停用") return ElMessage.error("该账号已被停用，请联系管理员启用后再登录");
+  if (sourceMerchant && ["暂停合作", "已终止", "停用"].includes(sourceMerchant.status || "")) return ElMessage.error("该商家合作已暂停或终止，账号暂无法登录");
+  if (!sourceStaff && !sourceMerchant) {
+    log("登录失败", "后台", "本地演示账号校验失败", account, { level: "高" });
+    return ElMessage.error("账号或密码错误");
+  }
+  window.LXM_AUTH.clearSession();
+  restoreDemoData();
+  hydrateFromStorage();
+  applyLogin({
+    role: sourceMerchant ? "merchant" : (sourceStaff.role || "super"),
+    account,
+    name: (sourceStaff && sourceStaff.name) || (sourceMerchant && sourceMerchant.name) || account,
+    staffId: (sourceStaff && sourceStaff.id) || (sourceMerchant && sourceMerchant.id) || "st1"
+  }, { source: "demo" });
+  state.authNotice = "当前为本地演示模式，改动不会写入数据库";
+  ElMessage.warning(state.authNotice);
+}
+
+function applyLogin(raw, options = {}) {
+  const session = normalizeSession(raw);
+  const role = session.role || "super";
+  if (!LXM_CONFIG.roles[role]) throw new Error("服务端返回了未知角色");
+  if (options.source === "server") {
+    window.LXM_AUTH.setSession(session);
+    serverRoleOverrides[role] = { ...session, token: "" };
+  } else {
+    window.LXM_AUTH.clearSession();
+  }
+  applyRoleConfig(role, session);
   state.authed = true;
-  state.role = j.role || "super";
-  if (j.role === "merchant") LXM_CONFIG.roles.merchant.shopId = j.staffId;
-  state.loginRole = state.role;
-  state.currentStaffId = j.staffId || "st1";
-  state.currentAccount = j.account || state.login.account || "";
-  state.previewRole = state.role;
+  state.authSource = options.source || "server";
+  state.role = role;
+  state.loginRole = role;
+  state.currentStaffId = session.staffId || roleProfile.value.staffId || "st1";
+  state.currentAccount = session.account || state.login.account || "";
+  state.previewRole = role;
+  state.mobileMenuOpen = false;
   resetPageState();
-  state.active = roleProfile.value.home;
-  log("登录", "后台", `${j.name || j.account} 登录`);
-  ElMessage.success("登录成功");
+  state.active = roleProfile.value.menus.includes(roleProfile.value.home) ? roleProfile.value.home : (roleProfile.value.menus[0] || "dashboard");
+  log("登录", "后台", `${session.name || session.account || "账号"} 登录`);
+}
+
+async function loadAuthenticatedData() {
+  if (state.authSource === "demo" || !window.LXM_CLOUD?.loadAdminData || !window.LXM_AUTH?.hasSession()) return;
+  state.dataLoading = true;
+  try {
+    const result = await window.LXM_CLOUD.loadAdminData(data, state);
+    if (result && result.status === 401) handleAuthExpired();
+  } catch (error) {
+    if (error && error.status === 401) handleAuthExpired();
+    else state.authNotice = "部分管理数据载入失败，请刷新后重试";
+  } finally {
+    state.dataLoading = false;
+  }
+}
+
+async function restoreSession() {
+  const stored = window.LXM_AUTH?.getSession?.();
+  if (!stored || !stored.token) {
+    clearRuntimeData();
+    state.authChecking = false;
+    return;
+  }
+  state.authChecking = true;
+  clearRuntimeData();
+  try {
+    const raw = await window.LXM_AUTH.me();
+    const session = normalizeSession(raw, stored);
+    if (!session.ok || !session.role || !LXM_CONFIG.roles[session.role]) throw new Error("会话信息无效");
+    applyLogin(session, { source: "server", restored: true });
+    await loadAuthenticatedData();
+  } catch (error) {
+    window.LXM_AUTH.clearSession();
+    clearRuntimeData();
+    state.authed = false;
+    state.authNotice = error && error.status === 401 ? "登录已过期，请重新登录" : "会话验证失败，请重新登录";
+  } finally {
+    state.authChecking = false;
+  }
+}
+
+function handleAuthExpired() {
+  if (!state.authed) return;
+  state.authed = false;
+  state.authSource = "";
+  state.currentAccount = "";
+  state.currentStaffId = "st1";
+  state.loginRole = "";
+  state.mobileMenuOpen = false;
+  clearRuntimeData();
+  Object.keys(roleDefaults).forEach(restoreRoleDefaults);
+  Object.keys(serverRoleOverrides).forEach((key) => delete serverRoleOverrides[key]);
+  state.role = "super";
+  state.previewRole = "super";
+  state.authNotice = "登录已过期，请重新登录";
+  ElMessage.error(state.authNotice);
 }
 
 // 打开自助改密弹窗（顶栏用户菜单入口），清空上一次输入。
@@ -154,24 +356,27 @@ async function changePassword() {
   cp.loading = true;
   try {
     const account = state.currentAccount || state.login.account || "";
-    const base = (window.LXM_API_CONFIG && window.LXM_API_CONFIG.base) || "/api";
-    let j = null, netErr = false;
+    let j = null;
     try {
-      const r = await fetch(`${base}/auth/change-password`, {
+      const r = await window.LXM_HTTP.request(`${(window.LXM_API_CONFIG && window.LXM_API_CONFIG.base) || "/api"}/auth/change-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account, oldPassword: cp.oldPwd, newPassword: cp.newPwd })
       });
       j = await r.json().catch(() => null);
     } catch (e) {
-      netErr = true;
+      // 仅在明确的本地演示环境中回退明文演示数据；联网模式失败即拒绝修改。
+      if (!isExplicitDemoMode() || (window.LXM_API_STATE && window.LXM_API_STATE.reachable === true)) {
+        return ElMessage.error("无法连接后台服务，密码未修改");
+      }
+      j = null;
     }
     if (j && j.ok === true) {
       cp.open = false;
       log("修改密码", "后台", "本人通过「修改密码」入口更换登录密码", currentOperatorName(), { level: "中" });
       return ElMessage.success("密码修改成功，请牢记新密码");
     }
-    if (netErr) {
+    if (isExplicitDemoMode() && !(window.LXM_API_STATE && window.LXM_API_STATE.reachable === true) && !j) {
       // 离线演示模式：直接改本地集合里的明文密码（仅演示，不落库）。
       const pools = [data.staff, data.shops, data.distributors, data.agents];
       for (let i = 0; i < pools.length; i++) {
@@ -193,15 +398,25 @@ async function changePassword() {
 }
 // 退出登录：清空会话态，回到登录页。
 function logout() {
+  const pending = window.LXM_AUTH?.logout?.();
   state.authed = false;
+  state.authSource = "";
   state.currentAccount = "";
   state.currentStaffId = "st1";
+  state.loginRole = "";
   state.role = "super";
   state.previewRole = "super";
   state.login.password = "";
+  state.mobileMenuOpen = false;
+  state.authNotice = "";
+  clearRuntimeData();
+  Object.keys(roleDefaults).forEach(restoreRoleDefaults);
+  Object.keys(serverRoleOverrides).forEach((key) => delete serverRoleOverrides[key]);
+  Promise.resolve(pending).catch(() => {});
   ElMessage.success("已退出登录");
 }
 function switchMenu(key, options = {}) {
+  if (key === "videoProducts") key = "videoSingles";
   if (!roleProfile.value.menus.includes(key)) {
     ElMessage.warning("当前角色无权访问该页");
     return;
@@ -212,17 +427,20 @@ function switchMenu(key, options = {}) {
     if (key !== "orders") Object.assign(state.filters, { status: "", financeStatus: "", afterSaleStatus: "", refundStatus: "", transferStatus: "", rescheduleStatus: "", assigneeId: "", photographerId: "", productType: "" });
     if (!contentKeys.includes(key)) Object.assign(state.filters, { contentStatus: "", contentSpotId: "", contentSeriesId: "" });
   }
-  if (key === "videoProducts" && !options.preserveFilters) state.filters.shelfType = "video";
+  if (key === "videoSingles" && !options.preserveFilters) state.filters.shelfType = "video";
   if (key === "reconciliation" && ["super", "finance"].includes(state.role) && !options.preserveFilters) {
     Object.assign(state.filters, { cityId: "", agentId: "", distributorId: "", shopId: "" });
   }
   state.active = key;
+  state.mobileMenuOpen = false;
 }
 function switchRole(key) {
   if (!canPreviewRoles.value) {
     ElMessage.warning("只有总部超管可以切换预览其他角色后台");
     return;
   }
+  if (!LXM_CONFIG.roles[key]) return;
+  applyRoleConfig(key, (key === state.loginRole && serverRoleOverrides[key]) || roleDefaults[key] || {});
   state.role = key;
   state.previewRole = key;
   state.currentStaffId = roleProfile.value.staffId || state.currentStaffId;
@@ -231,14 +449,25 @@ function switchRole(key) {
     state.filters.agentId = roleProfile.value.agentId || "";
     state.filters.cityId = "";
   }
-  state.active = roleProfile.value.home;
+  state.active = roleProfile.value.menus.includes(roleProfile.value.home) ? roleProfile.value.home : (roleProfile.value.menus[0] || "dashboard");
+  state.mobileMenuOpen = false;
   log("切换角色", roleName(key), "超级管理员预览角色后");
 }
+
+window.addEventListener("lxm-auth-expired", handleAuthExpired);
+window.addEventListener("lxm-server-status", (event) => {
+  state.serverReachable = !!(event && event.detail && event.detail.reachable);
+});
+
+// 先验证已保存会话，再触发管理数据加载；无会话时 loadAdminData 会保持跳过。
+restoreSession();
 
 
   return {
     login,
     applyLogin,
+    loadAuthenticatedData,
+    restoreSession,
     openChangePwd,
     passwordStrength,
     accountPasswordError,

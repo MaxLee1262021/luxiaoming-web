@@ -29,7 +29,7 @@
         <strong>首页板块显隐</strong><span>后台控制小程序首页各区块</span>
       </div>
       <div class="decor-module-list">
-        <button v-for="m in homeModuleOptions" :key="m.key" :class="{active: (state.homeConfig.enabledModules || []).includes(m.key)}" @click="toggleHomeModule(m.key)">
+        <button v-for="m in homeModuleOptions" :key="m.key" :class="{active: (state.homeConfig.enabledModules || []).includes(m.key)}" :disabled="!can('contentEdit')" @click="toggleHomeModule(m.key)">
           <strong>{{ m.label }}</strong><em>{{ m.desc }}</em>
         </button>
       </div>
@@ -43,13 +43,13 @@
         </div>
         <div v-for="(q, qi) in (state.homeConfig.quickNav || [])" :key="qi" class="quicknav-row">
           <span class="quicknav-icon">{{ q.icon }}</span>
-          <el-input :value="q.label" size="small" @input="(v) => updateQuickNavLabel(qi, v)" />
-          <button class="qn-btn" @click="moveQuickNav(qi, -1)" :disabled="qi === 0">↑</button>
-          <button class="qn-btn" @click="moveQuickNav(qi, 1)" :disabled="qi === (state.homeConfig.quickNav.length - 1)">↓</button>
-          <button class="qn-btn danger" @click="removeQuickNav(qi)">✕</button>
+          <el-input :value="q.label" size="small" :disabled="!can('contentEdit')" @input="(v) => updateQuickNavLabel(qi, v)" />
+          <button class="qn-btn" @click="moveQuickNav(qi, -1)" :disabled="!can('contentEdit') || qi === 0">↑</button>
+          <button class="qn-btn" @click="moveQuickNav(qi, 1)" :disabled="!can('contentEdit') || qi === (state.homeConfig.quickNav.length - 1)">↓</button>
+          <button class="qn-btn danger" @click="removeQuickNav(qi)" :disabled="!can('contentEdit')">✕</button>
         </div>
         <div class="quicknav-presets">
-          <button v-for="p in quickNavPresets" :key="p.targetType" class="preset-btn" @click="addQuickNav(p.targetType)">+ {{ p.label }}</button>
+          <button v-for="p in quickNavPresets" :key="p.targetType" class="preset-btn" @click="addQuickNav(p.targetType)" :disabled="!can('contentEdit')">+ {{ p.label }}</button>
         </div>
       </div>
     </aside>
@@ -60,20 +60,20 @@
         <strong>基础文案</strong><span>首页顶部展示文案</span>
       </div>
       <div class="decor-form wide-form">
-        <label><span>城市名称</span><el-input v-model="state.homeConfig.cityName" /></label>
-        <label><span>服务标识</span><el-input v-model="state.homeConfig.shopServiceText" /></label>
-        <label><span>首页主标题</span><el-input v-model="state.homeConfig.activity" /></label>
-        <label><span>首页副标题</span><el-input v-model="state.homeConfig.heroSubtitle" /></label>
-        <label><span>预约人数</span><el-input-number v-model="state.homeConfig.trustOrders" :min="0" /></label>
-        <label><span>好评率</span><el-input v-model="state.homeConfig.trustRate" /></label>
-        <label class="wide"><span>活动公告</span><el-input v-model="state.homeConfig.notice" type="textarea" :rows="2" /></label>
+        <label><span>城市名称</span><el-input v-model="state.homeConfig.cityName" :disabled="!can('contentEdit')" /></label>
+        <label><span>服务标识</span><el-input v-model="state.homeConfig.shopServiceText" :disabled="!can('contentEdit')" /></label>
+        <label><span>首页主标题</span><el-input v-model="state.homeConfig.activity" :disabled="!can('contentEdit')" /></label>
+        <label><span>首页副标题</span><el-input v-model="state.homeConfig.heroSubtitle" :disabled="!can('contentEdit')" /></label>
+        <label><span>预约人数</span><el-input-number v-model="state.homeConfig.trustOrders" :min="0" :disabled="!can('contentEdit')" /></label>
+        <label><span>好评率</span><el-input v-model="state.homeConfig.trustRate" :disabled="!can('contentEdit')" /></label>
+        <label class="wide"><span>活动公告</span><el-input v-model="state.homeConfig.notice" type="textarea" :rows="2" :disabled="!can('contentEdit')" /></label>
       </div>
 
       <div class="decor-panel-head compact">
         <strong>首页轮播</strong><span>最多 6 张，来自样片素材</span>
       </div>
       <div class="decor-material-grid">
-        <button v-for="s in publicMiniPreview.samples.slice(0, 12)" :key="s.id" :class="{active: (state.homeConfig.carouselIds || []).includes(s.id)}" @click="toggleHomeSelection('carouselIds', s.id, 6)">
+        <button v-for="s in publicMiniPreview.samples.slice(0, 12)" :key="s.id" :class="{active: (state.homeConfig.carouselIds || []).includes(s.id)}" :disabled="!can('contentEdit')" @click="toggleHomeSelection('carouselIds', s.id, 6)">
           <img :src="s.url" /><span>{{ s.name }}</span>
         </button>
       </div>
@@ -89,30 +89,30 @@
             <video v-else-if="b.type === 'video' && b.url" :src="b.url" class="eb-thumb" controls></video>
             <div v-else class="eb-thumb eb-thumb--empty">未设素材</div>
             <div class="eb-media-actions">
-              <button @click="uploadHomeBannerMedia(bi, 'image')">传图</button>
-              <button @click="uploadHomeBannerMedia(bi, 'video')">传视频</button>
+              <button @click="uploadHomeBannerMedia(bi, 'image')" :disabled="!can('contentEdit')">传图</button>
+              <button @click="uploadHomeBannerMedia(bi, 'video')" :disabled="!can('contentEdit')">传视频</button>
             </div>
           </div>
           <div class="eb-fields">
-            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" /></label>
-            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" /></label>
-            <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在 Banner 上的文案" /></label>
-            <label class="eb-row"><span>生效时间</span><el-date-picker v-model="b.effectiveTime" type="datetime" placeholder="留空=立即生效" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" style="width:100%" /></label>
+            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在 Banner 上的文案" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>生效时间</span><el-date-picker v-model="b.effectiveTime" type="datetime" placeholder="留空=立即生效" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" style="width:100%" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>跳转类型</span>
-              <el-select v-model="b.targetType" placeholder="选择跳转">
+              <el-select v-model="b.targetType" placeholder="选择跳转" :disabled="!can('contentEdit')">
                 <el-option v-for="p in homeBannerJumpPresets" :key="p.value" :label="p.label" :value="p.value" />
               </el-select>
             </label>
-            <label v-if="b.targetType === 'link'" class="eb-row"><span>链接地址</span><el-input v-model="b.linkUrl" placeholder="https://..." /></label>
-            <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" /></label>
+            <label v-if="b.targetType === 'link'" class="eb-row"><span>链接地址</span><el-input v-model="b.linkUrl" placeholder="https://..." :disabled="!can('contentEdit')" /></label>
+            <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" :disabled="!can('contentEdit')" /></label>
           </div>
           <div class="eb-tools">
-            <button @click="moveHomeBanner(bi, -1)" :disabled="bi === 0">↑</button>
-            <button @click="moveHomeBanner(bi, 1)" :disabled="bi === (state.homeConfig.homeBanners.length - 1)">↓</button>
-            <button class="eb-del" @click="removeHomeBanner(bi)">删除</button>
+            <button @click="moveHomeBanner(bi, -1)" :disabled="!can('contentEdit') || bi === 0">↑</button>
+            <button @click="moveHomeBanner(bi, 1)" :disabled="!can('contentEdit') || bi === (state.homeConfig.homeBanners.length - 1)">↓</button>
+            <button class="eb-del" @click="removeHomeBanner(bi)" :disabled="!can('contentEdit')">删除</button>
           </div>
         </div>
-        <button class="eb-add" @click="addHomeBanner">+ 添加首页 Banner</button>
+        <button class="eb-add" @click="addHomeBanner" :disabled="!can('contentEdit')">+ 添加首页 Banner</button>
         <p v-if="!state.homeConfig.homeBanners || !state.homeConfig.homeBanners.length" class="eb-empty">尚未配置，游客端首页顶部将显示「样片快速选」轮播（如有）或品牌兜底。</p>
       </div>
 
@@ -127,29 +127,29 @@
             <video v-else-if="b.type === 'video' && b.url" :src="b.url" class="eb-thumb" controls></video>
             <div v-else class="eb-thumb eb-thumb--empty">未设素材</div>
             <div class="eb-media-actions">
-              <button @click="uploadExploreBannerMedia(bi, 'image')">传图</button>
-              <button @click="uploadExploreBannerMedia(bi, 'video')">传视频</button>
+              <button @click="uploadExploreBannerMedia(bi, 'image')" :disabled="!can('contentEdit')">传图</button>
+              <button @click="uploadExploreBannerMedia(bi, 'video')" :disabled="!can('contentEdit')">传视频</button>
             </div>
           </div>
           <div class="eb-fields">
-            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" /></label>
-            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" /></label>
-            <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在轮播上的文案" /></label>
+            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在轮播上的文案" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>跳转类型</span>
-              <el-select v-model="b.targetType" placeholder="选择跳转">
+              <el-select v-model="b.targetType" placeholder="选择跳转" :disabled="!can('contentEdit')">
                 <el-option v-for="p in exploreBannerJumpPresets" :key="p.value" :label="p.label" :value="p.value" />
               </el-select>
             </label>
-            <label v-if="b.targetType === 'link'" class="eb-row"><span>链接地址</span><el-input v-model="b.linkUrl" placeholder="https://..." /></label>
-            <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" /></label>
+            <label v-if="b.targetType === 'link'" class="eb-row"><span>链接地址</span><el-input v-model="b.linkUrl" placeholder="https://..." :disabled="!can('contentEdit')" /></label>
+            <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" :disabled="!can('contentEdit')" /></label>
           </div>
           <div class="eb-tools">
-            <button @click="moveExploreBanner(bi, -1)" :disabled="bi === 0">↑</button>
-            <button @click="moveExploreBanner(bi, 1)" :disabled="bi === (state.homeConfig.exploreBanners.length - 1)">↓</button>
-            <button class="eb-del" @click="removeExploreBanner(bi)">删除</button>
+            <button @click="moveExploreBanner(bi, -1)" :disabled="!can('contentEdit') || bi === 0">↑</button>
+            <button @click="moveExploreBanner(bi, 1)" :disabled="!can('contentEdit') || bi === (state.homeConfig.exploreBanners.length - 1)">↓</button>
+            <button class="eb-del" @click="removeExploreBanner(bi)" :disabled="!can('contentEdit')">删除</button>
           </div>
         </div>
-        <button class="eb-add" @click="addExploreBanner">+ 添加探索页轮播</button>
+        <button class="eb-add" @click="addExploreBanner" :disabled="!can('contentEdit')">+ 添加探索页轮播</button>
         <p v-if="!state.homeConfig.exploreBanners || !state.homeConfig.exploreBanners.length" class="eb-empty">尚未配置，游客端探索页将显示默认品牌文案。</p>
       </div>
 
@@ -160,7 +160,7 @@
         <section>
           <h4>主推套餐</h4>
           <div class="decor-choice-list">
-            <button v-for="p in publicMiniPreview.packages" :key="p.id" :class="{active: (state.homeConfig.featuredPackageIds || []).includes(p.id) || p.isMainPush}" @click="toggleHomeSelection('featuredPackageIds', p.id, 4)">
+            <button v-for="p in publicMiniPreview.packages" :key="p.id" :class="{active: (state.homeConfig.featuredPackageIds || []).includes(p.id) || p.isMainPush}" :disabled="!can('contentEdit')" @click="toggleHomeSelection('featuredPackageIds', p.id, 4)">
               <span>{{ p.name }}</span><em>{{ money(p.specialPrice || p.price) }}</em>
             </button>
           </div>
@@ -168,7 +168,7 @@
         <section>
           <h4>照片单品</h4>
           <div class="decor-choice-list">
-            <button v-for="a in publicMiniPreview.albums" :key="a.id" :class="{active: (state.homeConfig.featuredAlbumIds || []).includes(a.id)}" @click="toggleHomeSelection('featuredAlbumIds', a.id, 4)">
+            <button v-for="a in publicMiniPreview.albums" :key="a.id" :class="{active: (state.homeConfig.featuredAlbumIds || []).includes(a.id)}" :disabled="!can('contentEdit')" @click="toggleHomeSelection('featuredAlbumIds', a.id, 4)">
               <span>{{ a.name }}</span><em>{{ money(a.price) }}</em>
             </button>
           </div>
@@ -176,7 +176,7 @@
         <section>
           <h4>摄影周边</h4>
           <div class="decor-choice-list">
-            <button v-for="p in publicMiniPreview.peripherals" :key="p.id" :class="{active: (state.homeConfig.featuredPeripheralIds || []).includes(p.id)}" @click="toggleHomeSelection('featuredPeripheralIds', p.id, 4)">
+            <button v-for="p in publicMiniPreview.peripherals" :key="p.id" :class="{active: (state.homeConfig.featuredPeripheralIds || []).includes(p.id)}" :disabled="!can('contentEdit')" @click="toggleHomeSelection('featuredPeripheralIds', p.id, 4)">
               <span>{{ p.name }}</span><em>{{ money(p.price) }}</em>
             </button>
           </div>
@@ -194,10 +194,10 @@
       <div class="page-config-card">
         <div class="page-config-title">
           <div><strong>{{ activePageConfigMeta.label }}</strong><span>{{ activePageConfigMeta.desc }}</span></div>
-          <el-input v-model="activePageConfig.title" placeholder="页面运营标题" />
+          <el-input v-model="activePageConfig.title" placeholder="页面运营标题" :disabled="!can('contentEdit')" />
         </div>
         <div class="page-module-switches">
-          <button v-for="m in activePageModuleOptions" :key="m.key" :class="{active: (activePageConfig.enabledModules || []).includes(m.key)}" @click="togglePageModule(m.key)">{{ m.label }}</button>
+          <button v-for="m in activePageModuleOptions" :key="m.key" :class="{active: (activePageConfig.enabledModules || []).includes(m.key)}" :disabled="!can('contentEdit')" @click="togglePageModule(m.key)">{{ m.label }}</button>
         </div>
 
         <!-- 全部打卡点页专属：后台可配的筛选标签 / 排序选项（小程序端 allSpots 已支持读取并回退默认值） -->
@@ -206,12 +206,12 @@
             <div class="sf-group-head">
               <strong>筛选标签</strong>
               <span class="sf-hint">显示名=客人看到的文字；匹配词=value，需能命中打卡点名称/描述/标签（如"古风"要能匹配到打了古风标签的打卡点）</span>
-              <button class="sf-add" @click="addSpotCategory">+ 添加标签</button>
+              <button class="sf-add" @click="addSpotCategory" :disabled="!can('contentEdit')">+ 添加标签</button>
             </div>
             <div v-for="(c, ci) in (activePageConfig.categories || [])" :key="ci" class="sf-row">
-              <el-input v-model="c.name" placeholder="显示名，如 古风写真" />
-              <el-input v-model="c.value" placeholder="匹配词，如 古风" />
-              <button class="sf-del" @click="removeSpotCategory(ci)" :disabled="ci === 0">删除</button>
+              <el-input v-model="c.name" placeholder="显示名，如 古风写真" :disabled="!can('contentEdit')" />
+              <el-input v-model="c.value" placeholder="匹配词，如 古风" :disabled="!can('contentEdit')" />
+              <button class="sf-del" @click="removeSpotCategory(ci)" :disabled="!can('contentEdit') || ci === 0">删除</button>
             </div>
             <div v-if="!(activePageConfig.categories || []).length" class="sf-empty">暂无标签，点"添加标签"新增</div>
           </div>
@@ -220,12 +220,12 @@
             <div class="sf-group-head">
               <strong>排序选项</strong>
               <span class="sf-hint">显示名可改；匹配词=value 固定为 hot（热门）/ new（最新）/ name（名称），请勿改成其它值</span>
-              <button class="sf-add" @click="addSpotSort">+ 添加排序</button>
+              <button class="sf-add" @click="addSpotSort" :disabled="!can('contentEdit')">+ 添加排序</button>
             </div>
             <div v-for="(s, si) in (activePageConfig.sortOptions || [])" :key="si" class="sf-row">
-              <el-input v-model="s.name" placeholder="显示名，如 热门优先" />
-              <el-input v-model="s.value" placeholder="hot / new / name" />
-              <button class="sf-del" @click="removeSpotSort(si)">删除</button>
+              <el-input v-model="s.name" placeholder="显示名，如 热门优先" :disabled="!can('contentEdit')" />
+              <el-input v-model="s.value" placeholder="hot / new / name" :disabled="!can('contentEdit')" />
+              <button class="sf-del" @click="removeSpotSort(si)" :disabled="!can('contentEdit')">删除</button>
             </div>
             <div v-if="!(activePageConfig.sortOptions || []).length" class="sf-empty">暂无排序，点"添加排序"新增</div>
           </div>
@@ -235,7 +235,7 @@
         <section v-for="group in activePageRelationGroups" :key="group.field">
           <h4>{{ group.title }}</h4>
           <div class="decor-choice-list">
-            <button v-for="item in group.rows.slice(0, 12)" :key="item.id" :class="{active: (activePageConfig[group.field] || []).includes(item.id)}" @click="togglePageRelation(group.field, item.id, group.limit)">
+             <button v-for="item in group.rows.slice(0, 12)" :key="item.id" :class="{active: (activePageConfig[group.field] || []).includes(item.id)}" :disabled="!can('contentEdit')" @click="togglePageRelation(group.field, item.id, group.limit)">
               <span>{{ item.name || item.title }}</span>
               <em>{{ group.price ? money(item.specialPrice || item.price || 0) : (item.tag || item.status || '可配置') }}</em>
             </button>

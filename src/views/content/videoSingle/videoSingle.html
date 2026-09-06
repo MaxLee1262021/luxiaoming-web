@@ -72,53 +72,53 @@
           <p>改完点「保存」；开关类直接切换即时生效。</p>
         </div>
         <div class="vse-form-actions">
-          <el-button type="primary" @click="saveSelectedVideoSingle">保存</el-button>
-          <el-button @click="openVideoSingle(selectedVideoSingle)">高级编辑</el-button>
+          <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedVideoSingle">保存</el-button>
+          <el-button v-if="can('contentEdit')" @click="openVideoSingle(selectedVideoSingle)">高级编辑</el-button>
           <el-button type="danger" v-if="can('contentEdit')" @click="deleteVideoSingle(selectedVideoSingle)">删除</el-button>
         </div>
       </div>
 
       <div class="vse-form-body">
-        <label class="vf-field"><span>名称</span><el-input v-model="selectedVideoSingle.title" placeholder="如：杜甫江阁湘江夜景短片" /></label>
+        <label class="vf-field"><span>名称</span><el-input v-model="selectedVideoSingle.title" placeholder="如：杜甫江阁湘江夜景短片" :disabled="!can('contentEdit')" /></label>
         <div class="vf-row">
           <label class="vf-field"><span>拍摄风格</span>
-            <el-select v-model="selectedVideoSingle.seriesId" filterable placeholder="选择风格">
+            <el-select v-model="selectedVideoSingle.seriesId" filterable placeholder="选择风格" :disabled="!can('contentEdit')">
               <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
           <label class="vf-field"><span>关联打卡点</span>
-            <el-select v-model="selectedVideoSingle.spotId" filterable placeholder="选择打卡点">
+            <el-select v-model="selectedVideoSingle.spotId" filterable placeholder="选择打卡点" :disabled="!can('contentEdit')">
               <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
         </div>
         <label class="vf-field"><span>视频文件 / 链接</span>
-          <el-input v-model="selectedVideoSingle.videoUrl" placeholder="粘贴视频 URL（如 https://...mp4），或下方选择本地文件预览" />
+          <el-input v-model="selectedVideoSingle.videoUrl" placeholder="粘贴视频 URL（如 https://...mp4），或下方选择本地文件预览" :disabled="!can('contentEdit')" />
           <span class="vf-upload">
-            <input type="file" accept="video/*" @change="onVideoFilePick" />
+            <input type="file" accept="video/*" @change="onVideoFilePick" :disabled="!can('contentEdit')" />
             <span class="vf-upload__hint">选择文件仅在本机会话内预览；正式上传需后端配置对象存储 / 上传接口（当前与全站一致用 URL 落库）。</span>
           </span>
         </label>
-        <label class="vf-field"><span>封面图</span><el-input v-model="selectedVideoSingle.cover" placeholder="封面图 URL（留空将用占位图）" /></label>
+        <label class="vf-field"><span>封面图</span><el-input v-model="selectedVideoSingle.cover" placeholder="封面图 URL（留空将用占位图）" :disabled="!can('contentEdit')" /></label>
         <div class="vf-row">
-          <label class="vf-field"><span>时长</span><el-input v-model="selectedVideoSingle.durationText" placeholder="如 60秒" /></label>
-          <label class="vf-field"><span>价格（元）</span><el-input-number v-model="selectedVideoSingle.price" :min="0" :step="10" /></label>
+          <label class="vf-field"><span>时长</span><el-input v-model="selectedVideoSingle.durationText" placeholder="如 60秒" :disabled="!can('contentEdit')" /></label>
+          <label class="vf-field"><span>价格（元）</span><el-input-number v-model="selectedVideoSingle.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
         </div>
-        <label class="vf-field"><span>简介 / 描述</span><el-input type="textarea" :rows="2" v-model="selectedVideoSingle.intro" /></label>
+        <label class="vf-field"><span>简介 / 描述</span><el-input type="textarea" :rows="2" v-model="selectedVideoSingle.intro" :disabled="!can('contentEdit')" /></label>
         <div class="vf-row">
           <label class="vf-field"><span>状态</span>
-            <el-select v-model="selectedVideoSingle.status">
+            <el-select v-model="selectedVideoSingle.status" :disabled="!can('contentEdit')">
               <el-option label="上架" value="上架" />
               <el-option label="下架" value="下架" />
               <el-option label="草稿" value="草稿" />
             </el-select>
           </label>
           <label class="vf-field"><span>主推</span>
-            <el-switch v-model="selectedVideoSingle.isMainPush" />
+            <el-switch v-model="selectedVideoSingle.isMainPush" :disabled="!can('contentEdit')" />
           </label>
         </div>
         <label class="vf-field"><span>标签</span>
-          <el-select v-model="selectedVideoSingle.tags" multiple filterable allow-create default-first-option placeholder="输入或选择标签">
+          <el-select v-model="selectedVideoSingle.tags" multiple filterable allow-create default-first-option placeholder="输入或选择标签" :disabled="!can('contentEdit')">
             <el-option v-for="t in (data.tagLibrary || []).filter(Boolean)" v-if="t" :key="t.id" :label="t.name" :value="t.name" />
           </el-select>
         </label>

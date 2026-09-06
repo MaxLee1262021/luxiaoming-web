@@ -6,8 +6,8 @@
       <p>打卡点是内容资产和商品售卖的根目录。这里维护点位资料、小程序可见、热门权重、下属拍摄风格、照片单品、照片套餐、短视频和定点周边。</p>
     </div>
     <div class="spot-toolbar-actions">
-      <el-button plain @click="batchSetSpotVisible(true)">批量展示</el-button>
-      <el-button plain @click="batchSetSpotVisible(false)">批量隐藏</el-button>
+      <el-button v-if="can('contentEdit')" plain @click="batchSetSpotVisible(true)">批量展示</el-button>
+      <el-button v-if="can('contentEdit')" plain @click="batchSetSpotVisible(false)">批量隐藏</el-button>
       <el-button plain @click="openContentTrash">回收站</el-button>
       <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('spots')">新增打卡点</el-button>
     </div>
@@ -128,7 +128,7 @@
       <section class="relation-block">
         <div class="relation-head"><strong>绑定照片单品</strong><button @click="switchMenu('albums')">管理</button></div>
         <div class="relation-list compact">
-          <button v-for="alb in albumsBySpot(selectedSpot().id).slice(0,5)" :key="alb.id" @click="openContent(alb)">
+           <button v-for="alb in albumsBySpot(selectedSpot().id).slice(0,5)" :key="alb.id" @click="can('contentEdit') ? openContent(alb) : previewContent(alb)">
             <span>{{ alb.name }}</span><em>{{ money(alb.price || 0) }}</em>
           </button>
           <p v-if="!albumsBySpot(selectedSpot().id).length">暂无照片单品</p>
@@ -138,7 +138,7 @@
       <section class="relation-block">
         <div class="relation-head"><strong>拍照/短视频</strong><button @click="switchMenu('packages')">管理</button></div>
         <div class="relation-list compact">
-          <button v-for="pkg in packagesBySpot(selectedSpot().id).slice(0,6)" :key="pkg.id" @click="openContent(pkg)">
+           <button v-for="pkg in packagesBySpot(selectedSpot().id).slice(0,6)" :key="pkg.id" @click="can('contentEdit') ? openContent(pkg) : previewContent(pkg)">
             <span>{{ pkg.name }}</span><em>{{ packageTypeText(pkg) }} · {{ money(pkg.specialPrice || pkg.price || 0) }}</em>
           </button>
           <p v-if="!packagesBySpot(selectedSpot().id).length">暂无套餐</p>
@@ -148,7 +148,7 @@
       <section class="relation-block">
         <div class="relation-head"><strong>周边商品</strong><button @click="switchMenu('peripherals')">管理</button></div>
         <div class="relation-list compact">
-          <button v-for="item in peripheralsBySpot(selectedSpot().id).slice(0,4)" :key="item.id" @click="openContent(item)">
+           <button v-for="item in peripheralsBySpot(selectedSpot().id).slice(0,4)" :key="item.id" @click="can('contentEdit') ? openContent(item) : previewContent(item)">
             <span>{{ item.name }}</span><em>{{ money(item.price || 0) }}</em>
           </button>
           <p v-if="!peripheralsBySpot(selectedSpot().id).length">暂无周边</p>

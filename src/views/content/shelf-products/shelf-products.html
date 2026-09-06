@@ -98,7 +98,7 @@
         <span>成功 {{ state.lastShelfBatchResult.success.length }} 项 / 失败 {{ state.lastShelfBatchResult.failures.length }} 项</span>
       </div>
       <div>
-        <el-button v-if="state.lastShelfBatchResult.failures.length" size="small" type="warning" plain @click="retryShelfBatchFailures">重试失败项</el-button>
+         <el-button v-if="state.lastShelfBatchResult.failures.length && can('contentEdit')" size="small" type="warning" plain @click="retryShelfBatchFailures">重试失败项</el-button>
         <el-button size="small" plain @click="clearShelfBatchResult">收起结果</el-button>
       </div>
     </div>
@@ -168,7 +168,7 @@
         <template #default="{row}">
           <div class="shelf-tags">
             <span>{{ shelfRecommendationText(row) }}</span>
-            <el-input v-model="row.__source.tag" placeholder="热门/推荐/新品" @change="saveShelfInline(row,'标签')" />
+             <el-input v-model="row.__source.tag" placeholder="热门/推荐/新品" :disabled="!can('contentEdit')" @change="saveShelfInline(row,'标签')" />
           </div>
         </template>
       </el-table-column>
@@ -199,14 +199,14 @@
       <el-table-column label="展示" width="105">
         <template #default="{row}">
           <div class="shelf-display-switch">
-            <el-switch v-model="row.__source.isShow" active-text="展示" inactive-text="隐藏" @change="toggleShelf(row)" />
+             <el-switch v-model="row.__source.isShow" active-text="展示" inactive-text="隐藏" :disabled="!can('contentEdit')" @change="toggleShelf(row)" />
             <small v-if="['待审','待审核'].includes(row.auditStatus)">审核后生效</small>
           </div>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{row}">
-          <el-button link type="primary" @click="openContent(row)">编辑</el-button>
+           <el-button v-if="can('contentEdit')" link type="primary" @click="openContent(row)">编辑</el-button>
           <el-button link @click="previewContent(row)">预览</el-button>
           <el-button link @click="openContentLogs(row.name)">日志</el-button>
         </template>

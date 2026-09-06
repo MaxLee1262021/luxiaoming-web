@@ -27,7 +27,7 @@
         <div class="lxm-card__meta"><span>状态 <b>{{ item.status || '草稿' }}</b></span></div>
       </div>
       <div class="lxm-card__actions">
-        <el-button link type="primary" @click="openContent(item)">编辑</el-button>
+        <el-button v-if="can('contentEdit')" link type="primary" @click="openContent(item)">编辑</el-button>
       </div>
     </article>
     <div v-if="!data.guides.length" class="lxm-empty-inline">

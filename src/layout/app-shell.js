@@ -1,9 +1,14 @@
 window.LXM_VIEWS = {
   app: `
   <div>
-    <lxm-page-login v-if="!state.authed" />
+    <lxm-page-login v-if="!state.authed && !state.authChecking" />
+    <div v-else-if="!state.authed && state.authChecking" class="auth-loading" role="status" aria-live="polite">
+      <div class="auth-loading-mark">鹿</div>
+      <strong>正在验证登录状态</strong>
+      <span>{{ state.authNotice || '请稍候…' }}</span>
+    </div>
     <div v-else class="admin-shell">
-      <aside class="lxm-sidebar" :class="{collapsed:state.sidebarCollapsed}">
+      <aside class="lxm-sidebar" :class="{collapsed:state.sidebarCollapsed, 'mobile-open':state.mobileMenuOpen}">
         <div class="lxm-brand">
           <div class="brand-mark">鹿</div>
           <div class="brand-copy"><strong>鹿小鸣旅拍</strong><span>长沙旅拍经营后台</span></div>
@@ -55,10 +60,12 @@ window.LXM_VIEWS = {
           </template>
         </div>
       </aside>
+      <button v-if="state.mobileMenuOpen" class="mobile-nav-backdrop" aria-label="关闭导航" @click="state.mobileMenuOpen=false"></button>
 
       <main class="lxm-main">
         <header class="lxm-topbar">
           <div>
+            <button class="mobile-menu-toggle" aria-label="打开导航" title="打开导航" @click="state.mobileMenuOpen=!state.mobileMenuOpen">☰</button>
             <nav class="topbar-breadcrumb" v-if="breadcrumbTrail.length">
               <span v-for="(crumb, idx) in breadcrumbTrail" :key="idx" :class="{current: idx === breadcrumbTrail.length - 1}">
                 <i v-if="idx">›</i>{{ crumb }}
@@ -89,11 +96,12 @@ window.LXM_VIEWS = {
               <el-option v-for="(r,k) in LXM_CONFIG.roles" :key="k" :label="'预览：'+r.name" :value="k" />
             </el-select>
             <span class="role-pill">{{ roleProfile.name }}</span>
-            <el-button size="small" @click="openExportDialog()">导出报表</el-button>
-            <span class="conn-status" :class="'conn-' + (state.cloudMode || 'mock')" :title="state.cloudMode==='mock' ? '当前未连接后台服务，改动仅保存在本地浏览器' : '已连接后台服务，改动会写入真实数据库'">
+            <el-button v-if="can('export')" size="small" @click="openExportDialog()">导出报表</el-button>
+            <span class="conn-status" :class="'conn-' + (state.serverReachable===false ? 'offline' : (state.cloudMode || 'checking'))" :title="state.serverReachable===false ? '未连接后台服务，当前仅可使用本地演示数据' : state.cloudMode==='mock' ? '已连接后台服务，但当前数据源为演示模式' : '已连接后台服务，改动会写入真实数据库'">
               <i class="dot"></i>
               <template v-if="state.cloudMode==='checking'">连接检测中…</template>
-              <template v-else-if="state.cloudMode==='mock'">演示模式 · 未连接服务</template>
+              <template v-else-if="state.serverReachable===false">未连接服务 · 本地演示</template>
+              <template v-else-if="state.cloudMode==='mock'">已连接 · 演示数据</template>
               <template v-else-if="state.cloudMode==='json'">已连本地真实库</template>
               <template v-else-if="state.cloudMode==='mysql'">已连生产数据库</template>
               <template v-else>已连接服务端</template>
@@ -324,7 +332,7 @@ window.LXM_VIEWS = {
 
               <div class="bottom-actions">
                 <el-button type="primary" :loading="state.saving" :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed'" @click="saveOrder">{{ state.currentOrder.status==='shooting' ? '保存履约备注' : '确认客户信息' }}</el-button>
-                <el-tooltip :content="isOrderAfterSaleLocked(state.currentOrder) ? '售后处理中，请先完成当前售后工单' : '发起新的售后工单'" placement="top" :disabled="!isOrderAfterSaleLocked(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="warning" plain :disabled="isOrderAfterSaleLocked(state.currentOrder)" @click="openAfterSaleSubmit()">提交售后</el-button></span></el-tooltip>
+                <el-tooltip v-if="canEditCurrentOrder()" :content="isOrderAfterSaleLocked(state.currentOrder) ? '售后处理中，请先完成当前售后工单' : '发起新的售后工单'" placement="top" :disabled="!isOrderAfterSaleLocked(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="warning" plain :disabled="isOrderAfterSaleLocked(state.currentOrder)" @click="openAfterSaleSubmit()">提交售后</el-button></span></el-tooltip>
                 <el-tooltip :content="completeDisabledReason(state.currentOrder)" placement="top" :disabled="canEditCurrentOrder() && state.currentOrder.status!=='completed' && canCompleteOrderPayment(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="success" plain :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed' || !canCompleteOrderPayment(state.currentOrder)" @click="openCompleteOrderDialog(state.currentOrder)">订单完成</el-button></span></el-tooltip>
                 <el-tooltip v-if="can('cancelOrder')" :content="cancelDisabledReason(state.currentOrder)" placement="top" :disabled="canEditCurrentOrder() && state.currentOrder.status!=='completed' && !isOrderAfterSaleLocked(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="danger" plain :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed' || isOrderAfterSaleLocked(state.currentOrder)" @click="cancelOrder(state.currentOrder)">订单取消</el-button></span></el-tooltip>
               </div>

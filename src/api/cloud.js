@@ -1,118 +1,283 @@
-// 后台数据接入客户端：把后台数据池对接到 /api 接口。
-// 两种运行模式都会在同源 /api 下提供接口：
-//   - 开发/演示（npm run dev，serve.cjs 挂载 json 模式）：/api 读 server/data/db.json，保存写回 db.json；
-//   - 生产（npm run server，server/index.cjs 挂 mysql/cloud 模式）：/api 读真实数据库。
-// 若接口不可用（如直接双击打开 index.html 而没有起服务），拉取失败会保留本地演示数据，不阻塞页面。
-// loadAdminData(data, state) 在 src/app.js 的 setup 里被调用，逐键拉取真实数据并写入响应式数据池。
+// 后台 API 客户端：健康探测、会话凭证与受保护数据读取。
+// 所有 /api 请求都从这里经过，避免页面模块遗漏 Authorization 头。
 (function () {
-  const cfg = window.LXM_API_CONFIG || { base: "/api", dataKeys: [], stateKeys: [] };
+  const cfg = window.LXM_API_CONFIG || { base: "/api", dataKeys: [], stateKeys: [], docKeys: [] };
+  const base = String(cfg.base || "/api").replace(/\/$/, "");
+  const SESSION_KEY = "lxm_admin_session_v1";
+  const nativeFetch = window.fetch.bind(window);
+  let session = null;
 
-  // 云模式探测：/api/health 在两种模式下都会返回 { ok, mode }。
-  // 据此设置 window.LXM_CLOUD_MODE，保存逻辑用它判断是否把改动写回云。
+  window.LXM_API_STATE = window.LXM_API_STATE || { reachable: null, mode: "checking" };
   window.LXM_CLOUD_MODE = "mock";
-  try {
-    fetch(`${cfg.base}/health`)
-      .then((r) => r.json())
-      .then((j) => { window.LXM_CLOUD_MODE = (j && j.mode) || "mock"; window.dispatchEvent(new CustomEvent("lxm-cloud-mode", { detail: window.LXM_CLOUD_MODE })); })
-      .catch(() => { window.LXM_CLOUD_MODE = "mock"; });
-  } catch (e) {
-    window.LXM_CLOUD_MODE = "mock";
+
+  function readStoredSession() {
+    try {
+      const raw = window.sessionStorage && window.sessionStorage.getItem(SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed.token === "string" && parsed.token ? parsed : null;
+    } catch (e) {
+      return null;
+    }
   }
+
+  session = readStoredSession();
+
+  function sessionMeta(value) {
+    const source = value || {};
+    return {
+      role: source.role || "",
+      account: source.account || "",
+      name: source.name || "",
+      staffId: source.staffId || "",
+      menus: Array.isArray(source.menus) ? source.menus.slice() : undefined,
+      actions: Array.isArray(source.actions) ? source.actions.slice() : undefined,
+      scope: source.scope || "",
+      shopId: source.shopId || ""
+    };
+  }
+
+  function publishAuthChange(authenticated) {
+    try {
+      // 事件只传非敏感元数据，绝不携带 token。
+      window.dispatchEvent(new CustomEvent("lxm-auth-changed", {
+        detail: { authenticated: !!authenticated, ...sessionMeta(session) }
+      }));
+    } catch (e) {}
+  }
+
+  function getSession() {
+    return session ? { ...sessionMeta(session), token: session.token } : null;
+  }
+
+  function hasSession() {
+    return !!(session && session.token);
+  }
+
+  function setSession(value) {
+    const next = value && typeof value.token === "string" && value.token ? {
+      token: value.token,
+      ...sessionMeta(value)
+    } : null;
+    session = next;
+    try {
+      if (next) window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(next));
+      else window.sessionStorage.removeItem(SESSION_KEY);
+    } catch (e) {}
+    publishAuthChange(!!next);
+    return !!next;
+  }
+
+  function clearSession() {
+    session = null;
+    try { window.sessionStorage.removeItem(SESSION_KEY); } catch (e) {}
+    publishAuthChange(false);
+  }
+
+  function isApiRequest(input) {
+    const raw = typeof input === "string" ? input : (input && input.url) || "";
+    try {
+      const parsed = new URL(raw, window.location.href);
+      const apiPath = base.startsWith("/") ? base : `/${base}`;
+      return parsed.origin === window.location.origin && (parsed.pathname === apiPath || parsed.pathname.startsWith(`${apiPath}/`));
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function requestUrl(input) {
+    const raw = typeof input === "string" ? input : (input && input.url) || "";
+    try { return new URL(raw, window.location.href); } catch (e) { return null; }
+  }
+
+  function authError(message, status) {
+    const error = new Error(message || "接口请求失败");
+    error.status = status || 0;
+    error.isLxmHttpError = true;
+    return error;
+  }
+
+  function request(input, init = {}, options = {}) {
+    const url = requestUrl(input);
+    const apiRequest = isApiRequest(input);
+    const pathname = url ? url.pathname : "";
+    const isLoginRequest = /\/auth\/login$/.test(pathname);
+    const requestInit = { ...init };
+    const sourceHeaders = init && init.headers
+      ? init.headers
+      : (typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined);
+    const headers = new Headers(sourceHeaders || {});
+    if (apiRequest && hasSession() && !isLoginRequest && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${session.token}`);
+    }
+    if (apiRequest && !headers.has("Accept")) headers.set("Accept", "application/json");
+    requestInit.headers = headers;
+    if (!requestInit.credentials) requestInit.credentials = "same-origin";
+
+    return nativeFetch(input, requestInit).then((response) => {
+      if (response.status === 401 && apiRequest && !isLoginRequest && !options.suppressAuthEvent) {
+        clearSession();
+        try { window.dispatchEvent(new CustomEvent("lxm-auth-expired")); } catch (e) {}
+      }
+      return response;
+    }).catch((error) => {
+      if (error && error.isLxmNetworkError) throw error;
+      const wrapped = new Error("网络不可用");
+      wrapped.isLxmNetworkError = true;
+      wrapped.cause = error;
+      throw wrapped;
+    });
+  }
+
+  // 页面中仍有少量历史模块直接调用 fetch；仅拦截同源 /api，静态资源请求保持原行为。
+  window.fetch = function lxmFetch(input, init) {
+    return request(input, init || {});
+  };
+  window.LXM_HTTP = { request, nativeFetch };
+
+  async function jsonResponse(response) {
+    const body = await response.json().catch(() => null);
+    if (!response.ok) throw authError((body && (body.error || body.message)) || `接口返回 ${response.status}`, response.status);
+    return body;
+  }
+
+  async function authLogin(account, password) {
+    const response = await request(`${base}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account, password })
+    }, { suppressAuthEvent: true });
+    return jsonResponse(response);
+  }
+
+  async function authMe() {
+    if (!hasSession()) return null;
+    const response = await request(`${base}/auth/me`, { method: "GET" });
+    return jsonResponse(response);
+  }
+
+  async function authLogout() {
+    if (!hasSession()) return null;
+    try {
+      const response = await request(`${base}/auth/logout`, { method: "POST" }, { suppressAuthEvent: true });
+      return await response.json().catch(() => null);
+    } finally {
+      clearSession();
+    }
+  }
+
+  window.LXM_AUTH = { getSession, hasSession, setSession, clearSession, login: authLogin, me: authMe, logout: authLogout };
+
+  function publishCloudMode(mode, reachable) {
+    const safeMode = mode || "mock";
+    window.LXM_CLOUD_MODE = safeMode;
+    window.LXM_API_STATE = { reachable: !!reachable, mode: safeMode };
+    try { window.dispatchEvent(new CustomEvent("lxm-cloud-mode", { detail: safeMode })); } catch (e) {}
+    try { window.dispatchEvent(new CustomEvent("lxm-server-status", { detail: { reachable: !!reachable, mode: safeMode } })); } catch (e) {}
+  }
+
+  // 健康接口保持公开，仅用于显示连接状态；不读取业务数据。
+  nativeFetch(`${base}/health`, { method: "GET", credentials: "same-origin", headers: { Accept: "application/json" } })
+    .then((response) => response.json().then((body) => ({ response, body })))
+    .then(({ response, body }) => publishCloudMode(response.ok ? ((body && body.mode) || "mock") : "mock", response.ok))
+    .catch(() => publishCloudMode("mock", false));
 
   async function getColl(key) {
-    const r = await fetch(`${cfg.base}/collection/${encodeURIComponent(key)}`);
-    if (!r.ok) throw new Error("接口返回 " + r.status);
-    return await r.json();
+    if (!hasSession()) throw authError("需要登录后读取管理数据", 401);
+    const response = await request(`${base}/collection/${encodeURIComponent(key)}`);
+    return jsonResponse(response);
   }
-  // 读取单条文档（用于 config/homeStats 这类"按固定 id 存的配置文档"）
+
   async function getDoc(key, id) {
-    const r = await fetch(`${cfg.base}/collection/${encodeURIComponent(key)}/${encodeURIComponent(id)}`);
-    if (!r.ok) return null;
-    return await r.json();
+    if (!hasSession()) throw authError("需要登录后读取管理数据", 401);
+    const response = await request(`${base}/collection/${encodeURIComponent(key)}/${encodeURIComponent(id)}`);
+    if (response.status === 404) return null;
+    return jsonResponse(response);
   }
+
   async function create(key, doc) {
-    const r = await fetch(`${cfg.base}/collection/${encodeURIComponent(key)}`, {
+    if (!hasSession()) throw authError("需要登录后写入管理数据", 401);
+    const response = await request(`${base}/collection/${encodeURIComponent(key)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc || {})
     });
-    return r.json();
+    return jsonResponse(response);
   }
+
   async function update(key, id, doc) {
-    const r = await fetch(`${cfg.base}/collection/${encodeURIComponent(key)}/${encodeURIComponent(id)}`, {
+    if (!hasSession()) throw authError("需要登录后写入管理数据", 401);
+    const response = await request(`${base}/collection/${encodeURIComponent(key)}/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc || {})
     });
-    return r.json();
+    return jsonResponse(response);
   }
-  // 有则更新、无则创建（用 .set）。用于首页配置这类"按固定 id 存的配置文档"。
+
   async function upsertDoc(key, id, doc) {
-    const r = await fetch(`${cfg.base}/doc/${encodeURIComponent(key)}/${encodeURIComponent(id)}`, {
+    if (!hasSession()) throw authError("需要登录后写入管理数据", 401);
+    const response = await request(`${base}/doc/${encodeURIComponent(key)}/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(doc || {})
     });
-    return r.json();
+    return jsonResponse(response);
   }
+
   async function remove(key, id) {
-    const r = await fetch(`${cfg.base}/collection/${encodeURIComponent(key)}/${encodeURIComponent(id)}`, {
-      method: "DELETE"
-    });
-    return r.json();
+    if (!hasSession()) throw authError("需要登录后删除管理数据", 401);
+    const response = await request(`${base}/collection/${encodeURIComponent(key)}/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return jsonResponse(response);
   }
 
-  // 把云数据库返回的文档规范化：云用 _id，前台代码统一用 id。补上 id 让前台列表/编辑照常工作。
-  function normalizeIds(val) {
-    if (Array.isArray(val)) {
-      val.forEach((d) => { if (d && d._id && !d.id) d.id = d._id; });
-    }
-    return val;
+  function normalizeIds(value) {
+    if (Array.isArray(value)) value.forEach((item) => { if (item && item._id && !item.id) item.id = item._id; });
+    return value;
   }
 
-  // 逐键把接口数据写入后台响应式数据池；某键拉取失败则保留本地默认值，不阻塞整体。
+  let loadPromise = null;
   async function loadAdminData(data, state) {
-    const all = cfg.dataKeys.concat(cfg.stateKeys, cfg.docKeys || []);
-    for (const key of all) {
-      try {
-        // 首页配置是"按固定 id(homeStats)存的文档"，不是集合数组，单独读文档对象。
-        // 云端文档顶部是小程序读取的形状；后台编辑器模型存在 editorConfig 字段里（小程序忽略它），读回时用它无损还原。
-        if (key === "homeConfig") {
-          const doc = await getDoc("homeConfig", "homeStats");
-          if (doc && doc.editorConfig && state && state.homeConfig !== undefined) {
-            state.homeConfig = doc.editorConfig;
+    if (!hasSession()) return { skipped: true, reason: "unauthenticated" };
+    if (loadPromise) return loadPromise;
+    const all = (cfg.dataKeys || []).concat(cfg.stateKeys || [], cfg.docKeys || []);
+    loadPromise = (async () => {
+      for (const key of all) {
+        try {
+          if (key === "homeConfig") {
+            const doc = await getDoc("homeConfig", "homeStats");
+            if (doc && doc.editorConfig && state && state.homeConfig !== undefined) state.homeConfig = doc.editorConfig;
+            continue;
           }
-          continue;
-        }
-        // 小程序全局配置：按固定 id("global") 存的「单文档」，doc 本身就是编辑器模型，
-        // 直接赋给 state.siteConfig，打开页面即读到真实配置（保存也走 upsertDoc 落库）。
-        if (key === "siteConfig") {
-          const doc = await getDoc("siteConfig", "global");
-          if (doc && state && state.siteConfig !== undefined) {
-            state.siteConfig = doc;
+          if (key === "siteConfig") {
+            const doc = await getDoc("siteConfig", "global");
+            if (doc && state && state.siteConfig !== undefined) state.siteConfig = doc;
+            continue;
           }
-          continue;
-        }
-        const val = normalizeIds(await getColl(key));
-        if (val === undefined || val === null) continue;
-        // 安全：staff / shops 含 password 字段，下发到前端会暴露凭据，这里剥离后再进数据池。
-        // 登录校验走 /api/auth/login（后端 scrypt 比对），前端页面无需持有明文密码。
-        const safe = (key === "staff" || key === "shops") && Array.isArray(val)
-          ? val.map(({ password, ...rest }) => rest)
-          : val;
-        if (cfg.stateKeys.includes(key)) {
-          if (state && state[key] !== undefined) state[key] = safe;
-        } else {
-          if (data && data[key] !== undefined) data[key] = safe;
-        }
-      } catch (e) {
-        // 直接打开 index.html 而没有起后端服务时，fetch /api 失败或被浏览器以 HTML 兜底，
-        // r.json() 会抛错 — 这是预期行为，使用本地演示数据即可，无需刷屏误导。
-        if (!(e instanceof SyntaxError && e.message && e.message.includes('<'))) {
-          console.warn("[cloud] 加载", key, "失败，使用本地默认值", e);
+          const value = normalizeIds(await getColl(key));
+          if (value === undefined || value === null) continue;
+          // 服务端已经剥离 password；这里再次防御，避免未来适配器误下发凭据。
+          const safe = (key === "staff" || key === "shops") && Array.isArray(value)
+            ? value.map(({ password, ...rest }) => rest)
+            : value;
+          if ((cfg.stateKeys || []).includes(key)) {
+            if (state && state[key] !== undefined) state[key] = safe;
+          } else if (data && data[key] !== undefined) {
+            data[key] = safe;
+          }
+        } catch (error) {
+          // 401/403 时不回退到演示数据，避免权限边界被本地默认值掩盖。
+          if (error && (error.status === 401 || error.status === 403)) {
+            if (error.status === 401) return { ok: false, status: 401 };
+            continue;
+          }
+          // 网络/单集合故障只保留当前已成功数据，不把未认证或旧 mock 冒充真实数据。
+          if (window.console && console.warn) console.warn(`[cloud] 加载 ${key} 失败，未覆盖当前数据`, error && error.message ? error.message : error);
         }
       }
-    }
+      return { ok: true };
+    })().finally(() => { loadPromise = null; });
+    return loadPromise;
   }
 
   window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, loadAdminData, mode: () => window.LXM_CLOUD_MODE };

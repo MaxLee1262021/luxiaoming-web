@@ -1,3 +1,40 @@
 .page-route-login {
   /* Login: page-specific styles live here. */
 }
+
+.page-route-login .login-panel .auth-notice {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--lxm-brand-soft-2);
+  border-radius: var(--lxm-r-sm);
+  color: var(--lxm-brand-deep);
+  background: var(--lxm-brand-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .page-route-login .login-page {
+    min-height: 100dvh;
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
+  .page-route-login .login-hero {
+    min-height: 220px;
+    padding: 34px 24px 28px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .page-route-login .login-hero h1 {
+    margin: 18px 0 8px;
+    font-size: 30px;
+  }
+  .page-route-login .login-hero p { font-size: 16px; }
+  .page-route-login .login-note { max-width: none; font-size: 12px; }
+  .page-route-login .login-panel {
+    min-width: 0;
+    padding: 28px 24px 36px;
+  }
+  .page-route-login .login-panel .el-input,
+  .page-route-login .login-panel .el-button { width: 100%; min-width: 0; }
+}

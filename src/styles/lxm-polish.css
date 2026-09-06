@@ -324,3 +324,193 @@
 .el-message-box__headerbtn:hover .el-message-box__close {
   color: var(--lxm-brand);
 }
+
+/* ---------- 会话验证态 ---------- */
+.auth-loading {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--lxm-ink-2);
+  background: var(--lxm-cream);
+  text-align: center;
+}
+.auth-loading-mark {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--lxm-r-lg);
+  color: #fff;
+  background: var(--lxm-brand-grad);
+  box-shadow: var(--lxm-shadow-md);
+  font-size: 24px;
+  font-weight: 800;
+}
+.auth-loading strong { font-size: 16px; color: var(--lxm-ink); }
+.auth-loading span { color: var(--lxm-muted); font-size: 13px; }
+
+.conn-status.conn-offline {
+  color: var(--lxm-warning);
+  background: var(--lxm-warning-soft);
+  border-color: var(--lxm-line-strong);
+}
+
+/* ---------- 内容页冷灰残留收口（动态页面样式之后仍以令牌为准） ---------- */
+.page-route-spot,
+.page-route-album,
+.page-route-package,
+.page-route-shelf-products,
+.page-route-contentTags,
+.page-route-productAudit,
+.page-route-peripherals,
+.page-route-addonServices,
+.page-route-videoSingle {
+  --content-ink: var(--lxm-ink-2) !important;
+  --content-muted: var(--lxm-muted) !important;
+  --content-line: var(--lxm-line) !important;
+  --content-panel: var(--lxm-surface) !important;
+  --content-soft: var(--lxm-bg) !important;
+  --content-shadow: var(--lxm-shadow-sm) !important;
+}
+.page-route-spot h3,
+.page-route-spot h4,
+.page-route-album h3,
+.page-route-album h4,
+.page-route-package h3,
+.page-route-package h4,
+.page-route-shelf-products h3,
+.page-route-contentTags h3,
+.page-route-productAudit h3,
+.page-route-peripherals h3,
+.page-route-addonServices h3,
+.page-route-videoSingle h3,
+.page-route-album .album-toolbar h3,
+.page-route-package .pkg-toolbar h3,
+.page-route-peripherals .ppl-toolbar h3,
+.page-route-videoSingle .vse-toolbar h3 {
+  color: var(--lxm-ink) !important;
+}
+.page-route-spot p,
+.page-route-album p,
+.page-route-package p,
+.page-route-shelf-products p,
+.page-route-contentTags p,
+.page-route-productAudit p,
+.page-route-peripherals p,
+.page-route-addonServices p,
+.page-route-videoSingle p,
+.page-route-album .muted,
+.page-route-package .muted,
+.page-route-peripherals .muted,
+.page-route-videoSingle .muted {
+  color: var(--lxm-muted) !important;
+}
+.page-route-spot .spot-toolbar,
+.page-route-album .album-toolbar,
+.page-route-package .pkg-toolbar,
+.page-route-shelf-products .shelf-toolbar,
+.page-route-contentTags .tag-toolbar,
+.page-route-productAudit .audit-toolbar,
+.page-route-peripherals .ppl-toolbar,
+.page-route-addonServices .addon-toolbar,
+.page-route-videoSingle .vse-toolbar,
+.page-route-spot .spot-tree-card,
+.page-route-spot .spot-detail-card,
+.page-route-spot .spot-relation-panel,
+.page-route-album .album-list,
+.page-route-album .album-form,
+.page-route-package .pkg-list,
+.page-route-package .pkg-form,
+.page-route-peripherals .ppl-list,
+.page-route-peripherals .ppl-form,
+.page-route-videoSingle .vse-list,
+.page-route-videoSingle .vse-form {
+  border-color: var(--lxm-line) !important;
+  background: var(--lxm-surface) !important;
+  box-shadow: var(--lxm-shadow-sm) !important;
+}
+
+/* ---------- 移动端后台导航与编辑器 ---------- */
+.mobile-menu-toggle {
+  display: none;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--lxm-line-strong);
+  border-radius: var(--lxm-r-sm);
+  color: var(--lxm-ink-2);
+  background: var(--lxm-surface);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.mobile-nav-backdrop { display: none; }
+
+@media (max-width: 760px) {
+  .admin-shell { display: block !important; min-width: 0 !important; }
+  .lxm-sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
+    width: 264px !important;
+    flex: 0 0 264px !important;
+    transform: translateX(-105%);
+    transition: transform var(--lxm-t-normal);
+    z-index: 1000 !important;
+  }
+  .lxm-sidebar.mobile-open { transform: translateX(0); }
+  .mobile-nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    border: 0;
+    background: rgba(42, 33, 27, .42);
+    cursor: pointer;
+  }
+  .lxm-main { width: 100%; min-width: 0; }
+  .lxm-topbar {
+    min-height: 0 !important;
+    padding: 10px 12px !important;
+    align-items: flex-start !important;
+  }
+  .lxm-topbar > div:first-child {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    width: 100%;
+  }
+  .mobile-menu-toggle { display: inline-flex; grid-row: span 2; }
+  .lxm-topbar h1 { font-size: 17px !important; }
+  .top-actions {
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+  }
+  .top-actions > .el-date-editor,
+  .top-actions > .el-select { width: min(100%, 220px) !important; max-width: 100% !important; }
+  .lxm-content { padding: 12px !important; }
+  .order-summary,
+  .kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .table-card,
+  .panel,
+  .lxm-table-card { overflow-x: auto; }
+  .album-editor,
+  .pkg-editor,
+  .ppl-editor,
+  .vse-editor,
+  .decor-workbench,
+  .lxm-layout--3,
+  .lxm-layout--2,
+  .lxm-layout--side { grid-template-columns: 1fr !important; }
+  .album-preview,
+  .pkg-preview,
+  .ppl-preview,
+  .vse-preview { position: static !important; }
+  .el-dialog { width: calc(100vw - 24px) !important; max-width: calc(100vw - 24px) !important; }
+}
