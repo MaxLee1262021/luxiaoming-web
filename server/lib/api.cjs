@@ -83,6 +83,7 @@ const ORDER_FINANCE_FIELDS = new Set([
 ]);
 const ORDER_PHOTO_FIELDS = new Set(["status", "customerStatus", "statusLogs", "followRecords", "completedAt"]);
 const ORDER_MERCHANT_FIELDS = new Set(["customerRemark"]);
+const IMMUTABLE_ORDER_FIELDS = new Set(["id", "_id", "openid", "_openid", "createTime"]);
 
 function hashPassword(plain) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -213,6 +214,13 @@ function redactRow(key, row, session) {
       delete out.phone; delete out.contactPhone; delete out.wechat; delete out.contactWechat;
       delete out.openid; delete out._openid; delete out.internalNote; delete out.paymentRecords;
     }
+  }
+  if (key === "afterSales" && !["super", "finance"].includes(role)) {
+    out = { ...out };
+    delete out.openid;
+    delete out._openid;
+    if (out.phone) out.phone = maskPhone(out.phone);
+    if (out.contactPhone) out.contactPhone = maskPhone(out.contactPhone);
   }
   return out;
 }
@@ -374,23 +382,24 @@ module.exports = function createApi(source, mode, options = {}) {
       const role = merchant ? "merchant" : normalizeRole(staff.role || "");
       if (!ROLE_ACTIONS[role]) return json(res, 403, { ok: false, error: "账号角色未配置" });
       const subjectId = String(candidate.id || candidate._id || "");
-      const session = await auth.createSession({
+      const sessionPayload = {
         kind: "admin", subjectType: merchant ? "merchant" : "staff", subjectId, account, role,
         permissions: Array.isArray(candidate.permissions) ? candidate.permissions : (Array.isArray(candidate.permissionKeys) ? candidate.permissionKeys : []),
         shopId: merchant ? String(merchant.id || merchant._id || merchant.shopId || "") : String(candidate.shopId || ""),
         shopCode: merchant ? String(merchant.shopId || "") : "", distributorId: String(candidate.distributorId || ""), agentId: String(candidate.agentId || "")
-      });
+      };
+      const session = await auth.createSession(sessionPayload);
       return json(res, 200, {
         ok: true,
         role,
         account,
         name: candidate.name || account,
         staffId: subjectId,
-        shopId: session.shopId || "",
-        distributorId: session.distributorId || "",
-        agentId: session.agentId || "",
-        permissions: Array.isArray(session.permissions) ? session.permissions : [],
-        actions: [...roleActions(session)],
+        shopId: sessionPayload.shopId || "",
+        distributorId: sessionPayload.distributorId || "",
+        agentId: sessionPayload.agentId || "",
+        permissions: Array.isArray(sessionPayload.permissions) ? sessionPayload.permissions : [],
+        actions: [...roleActions(sessionPayload)],
         token: session.token,
         expiresAt: session.expiresAt,
         expiresIn: Math.floor(session.ttlMs / 1000),
@@ -430,6 +439,7 @@ module.exports = function createApi(source, mode, options = {}) {
     const current = await source.get(key, id);
     if (!current) return true;
     const role = normalizeRole(session.role);
+    if (Object.keys(body || {}).some((field) => IMMUTABLE_ORDER_FIELDS.has(field))) return false;
     if (role === "super") return true;
     if (role === "finance") {
       const allowedFinance = key === "orders" ? ORDER_FINANCE_FIELDS : new Set(["status", "customerVisibleStatus", "financeStatus", "refundAmount", "approvedBy", "approvedAt", "logs", "updatedAt"]);
@@ -469,6 +479,15 @@ module.exports = function createApi(source, mode, options = {}) {
       sanitizePasswordBody(key, body);
     }
     if (key === "logs") { body.user = session.account; body.operator = session.account; body.time = body.time || new Date().toISOString(); delete body.password; delete body.token; }
+    if (key === "orders" && method === "POST") {
+      // The customer identity is assigned by the public booking RPC. Admin
+      // manual orders are intentionally unowned and cannot impersonate a user.
+      delete body.openid;
+      delete body._openid;
+      body.createdBy = session.account;
+      body.createdById = session.subjectId;
+      body.createTime = body.createTime || new Date().toISOString();
+    }
     if (method === "PUT") {
       if (!id) return json(res, 400, { error: "缺少记录 id" });
       if (!(await enforceOrderPatch(session, key, id, body))) return forbidden(res, session, pathname, "当前角色不能修改该记录或字段");

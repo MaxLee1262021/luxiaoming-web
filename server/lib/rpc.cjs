@@ -441,7 +441,7 @@ async function rpcLogin(source, data = {}, ctx = {}) {
   return { success: true, openid: devOpenid, dev: true, message: "开发模式：未配置微信 AppID/Secret，使用本地匿名 openid" };
 }
 
-async function rpcBindPhone(source, data = {}) {
+async function rpcBindPhone(source, data = {}, ctx = {}) {
   const openid = data.openid || "";
   if (!openid) return { success: false, message: "缺少 openid" };
   const appid = process.env.WX_APP_ID || "";
@@ -456,7 +456,7 @@ async function rpcBindPhone(source, data = {}) {
       }
     } catch (e) { /* 落到兜底 */ }
   }
-  if (!phone && data.phone) phone = String(data.phone).trim();
+  if (!phone && ctx.allowDevOpenid && data.phone) phone = String(data.phone).trim();
   if (!phone) return { success: false, message: "手机号获取失败（开发期可传 data.phone）" };
   await source.upsert("userProfiles", openid, { openid, phone, updateTime: new Date().toISOString() });
   return { success: true, data: { openid, phone } };
@@ -1132,5 +1132,11 @@ async function rpcResolveMerchantCode(source, data = {}) {
   const codes = await source.list("merchantCodes");
   const code = codes.find(x => x._id === codeId || x.scene === ("c=" + codeId) || x.codeId === codeId);
   if (!code) return { success: false, message: "二维码无效或已失效" };
-  return { success: true, shopId: code.shopId, shopName: code.shopName, placementType: code.placementType, placementLabel: code.placementLabel, codeId: code._id, scene: code.scene };
+  try {
+    const id = getItemId(code);
+    if (id && typeof source.update === "function") {
+      await source.update("merchantCodes", id, { scanCount: (Number(code.scanCount) || 0) + 1, lastScanTime: new Date().toISOString() });
+    }
+  } catch (_) { /* scan metrics must not block a valid landing */ }
+  return { success: true, shopId: code.shopId, shopName: code.shopName, placementType: code.placementType, placementLabel: code.placementLabel, codeId: getItemId(code), scene: code.scene };
 }
