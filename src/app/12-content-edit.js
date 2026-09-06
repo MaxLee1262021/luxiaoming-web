@@ -413,8 +413,12 @@ async function pushContentToCloud(key, payload) {
     const doc = { ...payload, isDeleted: false };
     let res;
     if (payload.id) {
-      res = await window.LXM_CLOUD.update(key, payload.id, doc);
-      if (!res || res.error) res = await window.LXM_CLOUD.create(key, doc);
+      try {
+        res = await window.LXM_CLOUD.update(key, payload.id, doc);
+      } catch (error) {
+        if (!error || error.status !== 404) throw error;
+        res = await window.LXM_CLOUD.create(key, doc);
+      }
     } else {
       res = await window.LXM_CLOUD.create(key, doc);
     }

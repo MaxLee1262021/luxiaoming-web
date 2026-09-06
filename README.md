@@ -41,7 +41,7 @@ luxiaoming-admin/
 
 直接双击 `index.html` 可以预览。
 
-也可以启动本地服务：
+也可以启动本地服务（同时提供前端和受保护的 `/api`）：
 
 ```powershell
 npm run dev
@@ -61,9 +61,9 @@ node scripts/serve.cjs
 
 ## 当前边界
 
-- 当前是演示版后台，数据来自 `src/mock/business-data.js`。
-- 页面内容管理、商品资料、上下架、首页装修预览已经具备演示链路。
-- 真实上线时需要把 mock 数据替换为后端接口或云开发数据库。
+- 默认 `DATA_MODE=json`，数据持久化在 `server/data/db.json`；`mock` 仅用于显式演示。
+- 管理 API 需要服务端 Bearer 会话，角色和数据范围由服务端校验；前端未认证不会加载管理数据。
+- 订单履约、售后、配置和内容写入会经过 API 持久化；生产建议使用 MySQL + Redis 会话存储。
 - 支付、提现、佣金结算等资金动作不在本演示版直接执行。
 
 ## 后续重点
