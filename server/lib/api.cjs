@@ -455,6 +455,25 @@ module.exports = function createApi(source, mode, options = {}) {
     const allowed = role === "service" ? (key === "orders" ? ORDER_SERVICE_FIELDS : new Set(["status", "customerVisibleStatus", "assigneeId", "logs", "updatedAt", "financeStatus", "refundAmount"])) : role === "photo" ? ORDER_PHOTO_FIELDS : role === "merchant" ? ORDER_MERCHANT_FIELDS : new Set();
     return Object.keys(body || {}).every((field) => allowed.has(field));
   }
+  async function readConfigDocument(key, id) {
+    let value = await source.get(key, id);
+    if (value || key !== "siteConfig" || id !== "global") return value;
+    // Legacy seeds stored each siteConfig section as its own document. Assemble
+    // those fragments for reads; the next save writes the canonical singleton.
+    const rows = await source.list("siteConfig");
+    if (!Array.isArray(rows) || !rows.length) return null;
+    const assembled = {};
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      const fragmentId = String(row.id || row._id || "");
+      if (!fragmentId || fragmentId === "global") continue;
+      const fragment = { ...row };
+      delete fragment.id;
+      delete fragment._id;
+      assembled[fragmentId] = fragment;
+    }
+    return Object.keys(assembled).length ? { ...assembled, id: "global", _id: "global" } : null;
+  }
   async function collectionRoute(req, res, parts, session, pathname) {
     const key = decodePart(parts[1]); const id = parts[2] ? decodePart(parts[2]) : "";
     if (!KEY_SET.has(key)) { const e = new Error("不支持的数据集合"); e.code = "DATA_KEY_INVALID"; throw e; }
@@ -462,7 +481,11 @@ module.exports = function createApi(source, mode, options = {}) {
     if (method === "GET") {
       if (!canReadKey(session, key)) return forbidden(res, session, pathname);
       if (id) {
-        const value = await source.get(key, id); const rows = await filterRows(source, session, key, value ? [value] : []);
+        let value = await readConfigDocument(key, id);
+        // Older JSON installs stored the singleton under homeStats. Keep read
+        // compatibility while the next editor save writes siteConfig/global.
+        if (!value && key === "siteConfig" && id === "global") value = await source.get(key, "homeStats");
+        const rows = await filterRows(source, session, key, value ? [value] : []);
         if (!rows.length) return json(res, 404, { error: "未找到记录" });
         return json(res, 200, redactRow(key, rows[0], session));
       }
@@ -507,7 +530,12 @@ module.exports = function createApi(source, mode, options = {}) {
   async function docRoute(req, res, parts, session, pathname) {
     const key = decodePart(parts[1]); const id = decodePart(parts[2]);
     if (!KEY_SET.has(key) || !id) { const e = new Error("文档参数无效"); e.code = "DATA_KEY_INVALID"; throw e; }
-    if (req.method === "GET") { if (!canReadKey(session, key)) return forbidden(res, session, pathname); return json(res, 200, redactRow(key, await source.get(key, id), session)); }
+    if (req.method === "GET") {
+      if (!canReadKey(session, key)) return forbidden(res, session, pathname);
+      let value = await readConfigDocument(key, id);
+      if (!value && key === "siteConfig" && id === "global") value = await source.get(key, "homeStats");
+      return json(res, 200, redactRow(key, value, session));
+    }
     if (req.method !== "PUT") return json(res, 405, { error: "方法不支持" });
     if (!canWriteKey(session, key)) return forbidden(res, session, pathname);
     const body = await readBody(req); if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "请求体无效" });

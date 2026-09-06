@@ -204,10 +204,25 @@ const SITE_DEFAULTS = {
 // 读 siteConfig('global')：集合 / 文档不存在或异常时返回 {}，由各 RPC 用默认值兜底
 async function getSiteGlobal(source) {
   try {
-    return (await source.get("siteConfig", "global"))
+    const canonical = (await source.get("siteConfig", "global"))
       || (await source.get("siteConfig", "homeStats"))
       || (await source.get("config", "global"))
-      || {};
+    if (canonical) return canonical;
+    const rows = await source.list("siteConfig");
+    if (Array.isArray(rows) && rows.length) {
+      const assembled = {};
+      for (const row of rows) {
+        if (!row || typeof row !== "object") continue;
+        const id = String(row.id || row._id || "");
+        if (!id || id === "global") continue;
+        const fragment = { ...row };
+        delete fragment.id;
+        delete fragment._id;
+        assembled[id] = fragment;
+      }
+      if (Object.keys(assembled).length) return assembled;
+    }
+    return {};
   } catch (e) { return {}; }
 }
 

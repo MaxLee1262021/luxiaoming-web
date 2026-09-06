@@ -179,6 +179,8 @@ function makeFixture() {
     status: "active", scanCount: 0,
   };
   collections.financeSettings["smoke-finance"] = { id: "smoke-finance", currency: "CNY" };
+  collections.siteConfig["customPrice"] = { id: "customPrice", baseHours: 1, singlePersonPrice: 200, perExtraPerson: 100 };
+  collections.siteConfig["bookingNotice"] = { id: "bookingNotice", 0: "Synthetic notice" };
   collections.albums["smoke-album"] = { id: "smoke-album", name: "Smoke Album", status: "已上架" };
   collections.packages["smoke-package"] = { id: "smoke-package", name: "Smoke Package", status: "已上架", price: 100 };
   collections.spots["smoke-spot"] = { id: "smoke-spot", name: "Smoke Spot", status: "启用" };
@@ -589,6 +591,15 @@ async function runSmoke(options = {}) {
         const result = await requestJson(server.baseUrl, "/api/collection/shops", { headers: authHeaders(superToken) });
         assert.equal(result.status, 200);
         assertNoPasswordFields(result.body, "shop collection");
+      });
+      await check(report, "legacy site config fragments read as canonical document", async () => {
+        const result = await requestJson(server.baseUrl, "/api/collection/siteConfig/global", { headers: authHeaders(superToken) });
+        assert.equal(result.status, 200);
+        assert.equal(result.body && result.body.id, "global");
+        assert.equal(result.body && result.body.customPrice && result.body.customPrice.singlePersonPrice, 200);
+        const doc = await requestJson(server.baseUrl, "/api/doc/siteConfig/global", { headers: authHeaders(superToken) });
+        assert.equal(doc.status, 200);
+        assert.equal(doc.body && doc.body.customPrice && doc.body.customPrice.singlePersonPrice, 200);
       });
 
       await check(report, "order action persists timeline", async () => {
