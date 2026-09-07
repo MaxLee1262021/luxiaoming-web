@@ -1,0 +1,99 @@
+.page-route-permissions {
+  color: var(--lxm-ink, #2a211b);
+}
+
+.page-route-permissions .permissions-page {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.page-route-permissions .permissions-header,
+.page-route-permissions .permissions-stat-grid > div,
+.page-route-permissions .permissions-table-panel,
+.page-route-permissions .role-list-panel,
+.page-route-permissions .role-editor-panel {
+  border: 1px solid var(--lxm-line, #efe6dd);
+  border-radius: 8px;
+  background: var(--lxm-surface, #fff);
+  box-shadow: var(--lxm-shadow-sm, 0 2px 8px rgba(42, 33, 27, .06));
+}
+
+.page-route-permissions .permissions-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px 20px;
+  border-left: 4px solid var(--lxm-brand-strong, #ee2c2c);
+}
+
+.page-route-permissions .permissions-eyebrow {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: var(--lxm-brand, #d9531e);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.page-route-permissions h2,
+.page-route-permissions p { margin: 0; }
+.page-route-permissions h2 { font-size: 22px; line-height: 1.3; }
+.page-route-permissions .permissions-header p { margin-top: 6px; color: var(--lxm-muted, #7c6a5e); font-size: 13px; line-height: 1.6; }
+.page-route-permissions .permissions-header-actions { display: flex; align-items: center; gap: 10px; }
+
+.page-route-permissions .permissions-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.page-route-permissions .permissions-stat-grid > div { padding: 14px 16px; }
+.page-route-permissions .permissions-stat-grid span,
+.page-route-permissions .permissions-stat-grid em { display: block; color: var(--lxm-muted, #7c6a5e); font-size: 12px; font-style: normal; }
+.page-route-permissions .permissions-stat-grid strong { display: block; margin: 6px 0 3px; color: var(--lxm-ink, #2a211b); font-size: 23px; }
+.page-route-permissions .permissions-stat-note { background: var(--lxm-brand-soft, #fbe6d8) !important; }
+
+.page-route-permissions .permissions-tabs { min-width: 0; }
+.page-route-permissions .permissions-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+.page-route-permissions .permissions-toolbar .el-input { max-width: 360px; }
+.page-route-permissions .permissions-toolbar .el-button { margin-left: auto; }
+.page-route-permissions .user-toolbar .el-select { width: 160px; }
+.page-route-permissions .user-toolbar .el-button { margin-left: 0; }
+.page-route-permissions .permissions-table-panel { padding: 14px; }
+.page-route-permissions .permissions-section-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.page-route-permissions .permissions-section-title strong { display: block; margin-bottom: 4px; font-size: 15px; }
+.page-route-permissions .permissions-section-title p { color: var(--lxm-muted, #7c6a5e); font-size: 12px; line-height: 1.5; }
+.page-route-permissions .muted { color: var(--lxm-muted, #7c6a5e); font-size: 12px; }
+
+.page-route-permissions .role-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 12px; min-height: 510px; }
+.page-route-permissions .role-list-panel,
+.page-route-permissions .role-editor-panel { padding: 14px; min-width: 0; }
+.page-route-permissions .role-list-item { display: flex; flex-direction: column; width: 100%; gap: 4px; padding: 11px 12px; border: 0; border-left: 3px solid transparent; background: transparent; color: var(--lxm-ink, #2a211b); text-align: left; cursor: pointer; }
+.page-route-permissions .role-list-item:hover { background: var(--lxm-cream, #fff7ef); }
+.page-route-permissions .role-list-item.active { border-left-color: var(--lxm-brand-strong, #ee2c2c); background: var(--lxm-brand-soft, #fbe6d8); }
+.page-route-permissions .role-list-item span { font-size: 14px; font-weight: 700; }
+.page-route-permissions .role-list-item small { color: var(--lxm-muted, #7c6a5e); font-size: 11px; }
+.page-route-permissions .role-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0 20px; }
+.page-route-permissions .role-summary > div { padding: 13px; border: 1px solid var(--lxm-line, #efe6dd); border-radius: 6px; background: var(--lxm-bg, #faf7f3); }
+.page-route-permissions .role-summary span { display: block; color: var(--lxm-muted, #7c6a5e); font-size: 12px; }
+.page-route-permissions .role-summary strong { display: block; margin-top: 5px; font-size: 17px; }
+.page-route-permissions .role-permission-block { padding: 14px 0; border-top: 1px solid var(--lxm-line, #efe6dd); }
+.page-route-permissions .role-permission-block h4 { margin: 0 0 10px; font-size: 14px; }
+.page-route-permissions .permission-chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.page-route-permissions .permission-check-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; width: 100%; }
+.page-route-permissions .permission-check-grid .el-checkbox { margin-right: 0; }
+
+@media (max-width: 900px) {
+  .page-route-permissions .permissions-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .page-route-permissions .role-layout { grid-template-columns: 1fr; }
+  .page-route-permissions .role-list-panel { max-height: 230px; overflow: auto; }
+}
+
+@media (max-width: 620px) {
+  .page-route-permissions .permissions-header,
+  .page-route-permissions .permissions-toolbar { display: grid; grid-template-columns: 1fr; }
+  .page-route-permissions .permissions-header-actions { justify-content: space-between; }
+  .page-route-permissions .permissions-toolbar .el-input,
+  .page-route-permissions .user-toolbar .el-select { width: 100%; max-width: none; }
+  .page-route-permissions .permissions-toolbar .el-button,
+  .page-route-permissions .user-toolbar .el-button { margin-left: 0; width: 100%; }
+  .page-route-permissions .permissions-stat-grid { grid-template-columns: 1fr; }
+  .page-route-permissions .role-summary,
+  .page-route-permissions .permission-check-grid { grid-template-columns: 1fr; }
+}
