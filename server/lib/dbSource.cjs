@@ -41,14 +41,17 @@ function makeJson(cfg) {
   let loadError = "";
   function load() {
     if (mem) return mem;
+    let candidate;
     try {
-      mem = JSON.parse(fs.readFileSync(dataFile, "utf8"));
-      loadState = "ready";
+      candidate = JSON.parse(fs.readFileSync(dataFile, "utf8"));
     } catch (e) {
       if (e && e.code === "ENOENT") {
         mem = { collections: {} };
         loadState = "empty";
+        loadError = "";
+        return mem;
       } else {
+        mem = null;
         loadState = "invalid";
         loadError = "json_invalid";
         const err = new Error("JSON 数据文件无效");
@@ -56,12 +59,31 @@ function makeJson(cfg) {
         throw err;
       }
     }
-    if (!mem || typeof mem !== "object") {
+
+    // Keep malformed input out of the live cache. A failed health check must
+    // remain failed until the file is repaired, rather than becoming writable
+    // on the next request because an invalid object was cached first.
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate) || !candidate.collections || typeof candidate.collections !== "object" || Array.isArray(candidate.collections)) {
+      mem = null;
+      loadState = "invalid";
+      loadError = "json_invalid";
       const err = new Error("JSON 数据文件格式无效");
       err.code = "DATA_SOURCE_INVALID";
       throw err;
     }
-    if (!mem.collections) mem.collections = {};
+    for (const [key, value] of Object.entries(candidate.collections)) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        mem = null;
+        loadState = "invalid";
+        loadError = "json_invalid";
+        const err = new Error(`JSON 集合 ${key} 格式无效`);
+        err.code = "DATA_SOURCE_INVALID";
+        throw err;
+      }
+    }
+    mem = candidate;
+    loadState = "ready";
+    loadError = "";
     return mem;
   }
   function persist() {
@@ -146,10 +168,12 @@ function makeMysql(cfg) {
     throw err;
   }
   const pool = mysql.createPool({
-    host: cfg.dbHost, user: cfg.dbUser, password: cfg.dbPassword,
+    host: cfg.dbHost, port: cfg.dbPort || 3306, user: cfg.dbUser, password: cfg.dbPassword,
     database: cfg.dbName, waitForConnections: true, connectionLimit: 10,
-    multipleStatements: false, enableKeepAlive: true, connectTimeout: cfg.connectTimeout || 3000
+    multipleStatements: false, enableKeepAlive: true, connectTimeout: cfg.connectTimeout || 3000,
+    ...(cfg.dbSsl ? { ssl: { rejectUnauthorized: true } } : {})
   });
+  const autoMigrate = cfg.autoMigrate !== undefined ? !!cfg.autoMigrate : String(process.env.DB_AUTO_MIGRATE || "false").toLowerCase() === "true";
   const table = (key) => "lxm_" + assertKey(key);
   async function q(sql, p = []) { const [rows] = await pool.query(sql, p); return rows; }
   async function run(sql, p = []) { const [r] = await pool.query(sql, p); return r; }
@@ -158,6 +182,7 @@ function makeMysql(cfg) {
   async function ensure() {
     if (ensured) return;
     if (ensurePromise) return ensurePromise;
+    if (!autoMigrate) { ensured = true; return; }
     ensurePromise = (async () => {
       for (const key of ALL_KEYS) {
         await run(`CREATE TABLE IF NOT EXISTS \`${table(key)}\` (id VARCHAR(64) PRIMARY KEY, doc MEDIUMTEXT NOT NULL)`);
@@ -208,8 +233,13 @@ function makeMysql(cfg) {
     async object() { return null; },
     async health() {
       try {
-        await ensure();
         await q("SELECT 1 AS ok");
+        if (autoMigrate) await ensure();
+        else {
+          const names = ALL_KEYS.map((key) => `lxm_${key}`);
+          const rows = await q(`SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN (${names.map(() => "?").join(",")})`, names);
+          if (Number(rows[0] && rows[0].count || 0) < ALL_KEYS.length) return { backend: "mysql", configured: true, ready: false, persistent: true, error: "schema_missing" };
+        }
         return { backend: "mysql", configured: true, ready: true, persistent: true };
       } catch (e) {
         return { backend: "mysql", configured: true, ready: false, persistent: true, error: e && e.code === "DATA_SOURCE_INVALID" ? "invalid" : "unavailable" };
@@ -280,14 +310,18 @@ function computeOrderStats(db) {
 }
 
 async function listMerchantCodes(base, shopId) {
-  const list = (await base.list("merchantCodes")).filter((c) => !c.isDeleted);
-  const filtered = shopId ? list.filter((c) => c.shopId === shopId) : list;
+  const list = (await base.list("merchantCodes")).filter(isActiveMerchantCode);
+  const filtered = shopId ? list.filter((c) => String(c.shopId || "") === String(shopId)) : list;
   const orders = await base.list("orders");
   return filtered.map((c) => {
     const os = orders.filter((o) => !o.deleted && (o.sourceCodeId === c._id || (o.source && o.source.codeId === c._id)));
     const deals = os.filter((o) => ["completed", "final_pending", "delivered"].includes(o.status) || o.customerStatus === "已完成");
     return { ...c, orderCount: os.length, dealCount: deals.length };
   });
+}
+function isActiveMerchantCode(code) {
+  return !!code && code.isDeleted !== true && code.deleted !== true
+    && !["disabled", "inactive", "expired", "停用", "失效", "已失效", "下架", "已下架"].includes(String(code.status || "").trim().toLowerCase());
 }
 async function generateMerchantCode(base, body = {}) {
   const shopId = body.shopId || "";
@@ -296,12 +330,12 @@ async function generateMerchantCode(base, body = {}) {
   if (!shopId) return { success: false, error: "缺少 shopId" };
   if (!placementLabel) return { success: false, error: "缺少位置名称" };
   const codes = await base.list("merchantCodes");
-  const exist = codes.find((c) => c.shopId === shopId && (c.placementLabel || "").trim() === placementLabel && !c.isDeleted);
+  const exist = codes.find((c) => String(c.shopId || "") === String(shopId) && (c.placementLabel || "").trim() === placementLabel && isActiveMerchantCode(c));
   if (exist) return { success: true, existed: true, codeId: exist._id, scene: exist.scene, placementType: exist.placementType, placementLabel: exist.placementLabel, shopId, shopName: exist.shopName, qrImage: exist.qrImage || "" };
   const codeId = "Q" + Date.now().toString(36) + crypto.randomBytes(3).toString("hex");
   const scene = "c=" + codeId;
   const shops = await base.list("shops");
-  const shop = shops.find((s) => s.shopId === shopId || s.id === shopId);
+  const shop = shops.find((s) => String(s.shopId || "") === String(shopId) || String(s.id || s._id || "") === String(shopId));
   const shopName = (shop && shop.name) || "";
   const qrImage = buildDemoQr(shopName, placementLabel, codeId);
   const doc = { _id: codeId, shopId, shopName, placementType, placementLabel, scene, scanCount: 0, orderCount: 0, dealCount: 0, qrImage, status: "active", createTime: new Date().toISOString() };

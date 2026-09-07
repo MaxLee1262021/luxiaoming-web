@@ -16,6 +16,7 @@ module.exports = function (root) {
     ".ico": "image/x-icon"
   };
   const publicDirs = new Set(["public", "src"]);
+  const blockedSubdirs = new Set(["src/mock"]);
   const publicRootFiles = new Set(["index.html", "favicon.ico"]);
   const publicExtensions = new Set(Object.keys(types));
 
@@ -23,6 +24,7 @@ module.exports = function (root) {
     let clean = "";
     try { clean = decodeURIComponent(urlPath.split("?")[0]).replace(/^\/+/, ""); }
     catch (_) { return { blocked: true }; }
+    if (clean.includes("\0")) return { blocked: true };
     if (!clean) return { file: path.join(root, "index.html") };
     let candidate = path.resolve(root, clean);
     const relative = path.relative(root, candidate);
@@ -30,6 +32,8 @@ module.exports = function (root) {
     const parts = relative.split(path.sep);
     if (parts.some((part) => !part || part === "." || part === ".." || part.startsWith("."))) return { blocked: true };
     const first = String(parts[0] || "").toLowerCase();
+    const subdir = parts.slice(0, 2).map((part) => String(part).toLowerCase()).join("/");
+    if (blockedSubdirs.has(subdir)) return { blocked: true };
     const rootFile = parts.length === 1 && publicRootFiles.has(first);
     const directoryFile = publicDirs.has(first) && publicExtensions.has(path.extname(relative).toLowerCase());
     if (!rootFile && !directoryFile) return { blocked: true };
@@ -38,6 +42,11 @@ module.exports = function (root) {
   }
 
   return function (req, res, urlPath) {
+    if (req && !["GET", "HEAD"].includes(req.method)) {
+      res.statusCode = 405;
+      res.setHeader("Allow", "GET, HEAD");
+      return res.end("Method not allowed");
+    }
     const resolved = resolvePublicFile(urlPath || "");
     if (resolved.blocked || resolved.missing) {
       res.statusCode = 404;
@@ -50,6 +59,7 @@ module.exports = function (root) {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Type", types[ext] || "application/octet-stream");
     res.setHeader("Cache-Control", "no-store");
+    if (req && req.method === "HEAD") return res.end();
     fs.createReadStream(candidate)
       .on("error", () => {
         res.statusCode = 500;

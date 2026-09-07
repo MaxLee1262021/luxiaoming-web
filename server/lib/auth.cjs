@@ -303,9 +303,20 @@ function redisUrlFromConfig(options = {}) {
   return `${scheme}://${auth}${host}:${safePort}/${safeDb}`;
 }
 
+function hasInvalidRedisNumericConfig(options = {}) {
+  const portRaw = options.redisPort !== undefined ? options.redisPort : process.env.REDIS_PORT;
+  const dbRaw = options.redisDb !== undefined ? options.redisDb : process.env.REDIS_DB;
+  if (portRaw !== undefined && String(portRaw).trim() && (!/^\d+$/.test(String(portRaw).trim()) || Number(portRaw) < 1 || Number(portRaw) > 65535)) return true;
+  if (dbRaw !== undefined && String(dbRaw).trim() && (!/^\d+$/.test(String(dbRaw).trim()) || Number(dbRaw) < 0)) return true;
+  return false;
+}
+
 function createAuthStore(options = {}) {
+  if (hasInvalidRedisNumericConfig(options)) return new UnavailableAuthStore("redis_config_invalid");
   const redisUrl = redisUrlFromConfig(options);
   const requestedStore = String(options.sessionStore !== undefined ? options.sessionStore : process.env.SESSION_STORE || "").trim().toLowerCase();
+  const nodeEnv = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  const productionLike = ["production", "prod", "staging"].includes(nodeEnv);
   const ttlMs = options.ttlMs !== undefined ? options.ttlMs : Number(process.env.SESSION_TTL_SECONDS || 0) * 1000 || DEFAULT_TTL_MS;
   const common = {
     ttlMs,
@@ -315,6 +326,9 @@ function createAuthStore(options = {}) {
   };
   if (requestedStore === "redis" && !(redisUrl && String(redisUrl).trim())) {
     return new UnavailableAuthStore("redis_config_missing");
+  }
+  if (productionLike && requestedStore !== "redis" && !(redisUrl && String(redisUrl).trim())) {
+    return new UnavailableAuthStore("redis_required_in_production");
   }
   if (redisUrl && String(redisUrl).trim()) {
     return new RedisAuthStore({ ...common, url: String(redisUrl).trim(), prefix: options.redisPrefix || process.env.REDIS_KEY_PREFIX || "lxm:admin" });

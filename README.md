@@ -64,6 +64,8 @@ node scripts/serve.cjs
 - 默认 `DATA_MODE=json`，数据持久化在 `server/data/db.json`；`mock` 仅用于显式演示。
 - 管理 API 需要服务端 Bearer 会话，角色和数据范围由服务端校验；前端未认证不会加载管理数据。
 - 订单履约、售后、配置和内容写入会经过 API 持久化；生产建议使用 MySQL + Redis 会话存储。
+- 静态 HTTP 服务只发布前端资源，原始 demo fixture、`server/data`、`.env` 和项目元数据不会被直接读取；直接打开 `index.html` 才会加载本地 demo fixture。
+- JSON 账号明文迁移可运行 `npm run migrate:passwords`（自动生成 600 权限备份）；财务参数使用 `financeSettings/global` 单文档。
 - 支付、提现、佣金结算等资金动作不在本演示版直接执行。
 
 ## 后续重点

@@ -23,6 +23,7 @@
     isOrderAfterSaleLocked,
     log,
     money,
+    normalizeReviewStatus,
     orderSourceName,
     orderSourceType,
     orderSourceTypeText,
@@ -258,7 +259,7 @@ function finalPaymentDisabledReason(order = state.currentOrder) {
   if (!canEditCurrentOrder()) return "当前订单不可登记尾款";
   if (expectedFinalAmount(order) <= 0) return "当前没有需要登记的应收尾款";
   if (!isDepositRegistrationConfirmed(order)) return "定金必须财务审核通过后才能确认尾";
-  if (["待审", "已审"].includes(order.finalFinanceStatus)) return "尾款已提交或已通过财务审核";
+  if (["待审", "已审"].includes(normalizeReviewStatus(order.finalFinanceStatus))) return "尾款已提交或已通过财务审核";
   return "";
 }
 function completeDisabledReason(order = state.currentOrder) {
@@ -345,6 +346,7 @@ async function saveOrder() {
   if (!canEditOrder()) return ElMessage.error("当前角色无权保存客服处理信息");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能保存客服处理信息");
   if (!String(state.currentOrder?.customer || "").trim() || !String(state.currentOrder?.phone || "").trim()) return ElMessage.warning("请先填写客户姓名和手机号");
+  const original = JSON.parse(JSON.stringify(state.currentOrder));
   if (state.role === "service" && !state.currentOrder.assigneeId) state.currentOrder.assigneeId = roleProfile.value.staffId || state.currentStaffId || "";
   state.saving = true;
   try {
@@ -368,6 +370,8 @@ async function saveOrder() {
     ElMessage.success("客户信息已保存，操作日志已记");
   } catch (_) {
     // persistOrderAction has already shown the server failure; do not report success.
+    Object.keys(state.currentOrder).forEach((key) => { if (!(key in original)) delete state.currentOrder[key]; });
+    Object.assign(state.currentOrder, original);
   } finally {
     state.saving = false;
   }
@@ -410,7 +414,7 @@ async function confirmMoneyEdit(field) {
     if (next > maxCoupon) return ElMessage.warning(`优惠券金额不能超过当前可优惠金额 ${money(maxCoupon)}`);
     state.currentOrder.finalDiscountAmount = next;
     state.currentOrder.finalDiscountReason = state.currentOrder.priceAdjustReason;
-    if (!["待审", "已审"].includes(state.currentOrder.finalFinanceStatus)) {
+    if (!["待审", "已审"].includes(normalizeReviewStatus(state.currentOrder.finalFinanceStatus))) {
       state.currentOrder.finalPaid = 0;
     }
   }
@@ -448,8 +452,8 @@ async function confirmPaymentRegistration(field) {
   }
   const statusField = field === "depositPaid" ? "depositFinanceStatus" : "finalFinanceStatus";
   const timeField = field === "depositPaid" ? "depositPaidAt" : "finalPaidAt";
-  if (order[statusField] === "待审") return ElMessage.warning(`${moneyFieldMeta(field).label}已提交财务审核，请等待财务确认`);
-  if (order[statusField] === "已审") return ElMessage.warning(`${moneyFieldMeta(field).label}已通过财务审核，如需修改请点击改价并填写原因`);
+  if (normalizeReviewStatus(order[statusField]) === "待审") return ElMessage.warning(`${moneyFieldMeta(field).label}已提交财务审核，请等待财务确认`);
+  if (normalizeReviewStatus(order[statusField]) === "已审") return ElMessage.warning(`${moneyFieldMeta(field).label}已通过财务审核，如需修改请点击改价并填写原因`);
   const beforeRegistration = { [field]: order[field], [statusField]: order[statusField], [timeField]: order[timeField] };
   if (field === "finalPaid") {
     order.finalPaid = expectedFinalAmount(order);

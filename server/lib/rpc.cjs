@@ -6,6 +6,23 @@
 const crypto = require("crypto");
 const https = require("https");
 
+function isDataSourceFailure(error) {
+  return !!(error && (["DATA_SOURCE_UNAVAILABLE", "DATA_SOURCE_CONFIG_INVALID", "DATA_SOURCE_INVALID"].includes(error.code)
+    || /^(?:ER_|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNRESET|EACCES|EROFS|ENOSPC)/i.test(String(error.code || ""))));
+}
+function publicRpcError(error, fallback = "请求失败") {
+  if (isDataSourceFailure(error)) return "数据服务暂不可用，请稍后重试";
+  const message = String(error && error.message || "").trim();
+  // Do not expose SQL statements, filesystem paths, SDK request ids, or
+  // connection details through an anonymous RPC response.
+  if (!message || /(?:select\s|insert\s|update\s|delete\s|table\s|column\s|[A-Za-z]:\\|\/var\/|\/srv\/|redis|mysql|socket|request[_ -]?id)/i.test(message)) return fallback;
+  return message.slice(0, 160);
+}
+const AFTER_SALE_TERMINAL_STATUSES = new Set(["completed", "closed", "done", "已完", "已完成", "已结案", "已结束"]);
+function isAfterSaleTerminalStatus(value) {
+  return AFTER_SALE_TERMINAL_STATUSES.has(String(value || "").trim().toLowerCase());
+}
+
 module.exports = async function rpc(source, name, body = {}, ctx = {}) {
   const data = body.data || body; // 兼容 {data:{...}} 与直接传 {...}
   const identity = ctx.identity || null;
@@ -76,8 +93,8 @@ function normalizeStatus(value) { return String(value || "").trim().toLowerCase(
 
 // 与云函数 getHomeData 一致的可见性判断（含审核态 + 增值服务排除）
 function isPublicVisible(item) {
-  if (!item || item.isDeleted === true || item.deleted === true || item.isShow === false || item.visible === false) return false;
-  const hiddenStatuses = ["draft", "pending", "reviewing", "rejected", "offline", "disabled", "down", "草稿", "待审", "待审核", "驳回", "下架", "停用", "禁用", "已下架"];
+  if (!item || item.isDeleted === true || item.deleted === true || item.isShow === false || item.visible === false || item.enabled === false) return false;
+  const hiddenStatuses = ["draft", "pending", "reviewing", "rejected", "offline", "disabled", "down", "草稿", "待审", "待审核", "驳回", "下架", "停用", "禁用", "已下架", "已下架商品"];
   const passAuditStatuses = ["approved", "pass", "passed", "published", "online", "已上", "已上架", "审核通过", "通过"];
   const status = normalizeStatus(item.status || item.saleStatus || item.shelfStatus);
   const statusRaw = String(item.status || item.saleStatus || item.shelfStatus || "").trim();
@@ -91,8 +108,8 @@ function isPublicVisible(item) {
 
 // 列表型函数用的简化可见性判断（无增值服务排除，与 getSpots 等一致）
 function isVisibleSimple(item) {
-  if (!item || item.isDeleted === true || item.isShow === false) return false;
-  const badStatuses = ["draft", "pending", "reviewing", "rejected", "offline", "disabled", "down", "草稿", "待审", "待审核", "驳回", "下架", "停用", "禁用", "已下"];
+  if (!item || item.isDeleted === true || item.deleted === true || item.isShow === false || item.visible === false || item.enabled === false) return false;
+  const badStatuses = ["draft", "pending", "reviewing", "rejected", "offline", "disabled", "down", "草稿", "待审", "待审核", "驳回", "下架", "停用", "禁用", "已下", "已下架", "已下架商品"];
   const passAuditStatuses = ["approved", "pass", "passed", "published", "online", "已上", "已上架", "审核通过", "通过"];
   const status = String(item.status || item.saleStatus || "").toLowerCase();
   const auditStatus = String(item.auditStatus || item.reviewStatus || "").toLowerCase();
@@ -140,6 +157,32 @@ function normalizeConfigBanners(config = {}) {
 }
 
 function normalizeImage(item) { return item.cover || item.coverUrl || item.image || item.url || "/images/placeholder.png"; }
+
+const PUBLIC_HIDDEN_FIELD = /^(?:password|passwordHash|secret|secretId|secretKey|token|internalNote|internalCost|costPrice|operatorId|auditStatus|reviewer|approvedBy|privateUrl|auditNote|internalSecret|source|sourceCodeId|sourceScene|paymentRecords|packageSnapshot|customer|contact|openid|unionid|userId|phone|mobile|telephone|wechat|email|idCard|bankAccount|extraPhones|extraWechats)$/i;
+function isPublicHiddenField(key) {
+  const normalized = String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return PUBLIC_HIDDEN_FIELD.test(key) || normalized.startsWith("password") || normalized.startsWith("secret")
+    || normalized.endsWith("token") || /^(?:internal|private|audit)/.test(normalized)
+    || normalized.includes("credential") || normalized.includes("authorization")
+    || normalized.includes("openid") || normalized.includes("unionid") || normalized.includes("wechat")
+    || normalized === "userid" || normalized.endsWith("userid")
+    || normalized === "phone" || normalized.endsWith("phone") || normalized === "mobile" || normalized.endsWith("mobile")
+    || normalized === "telephone" || normalized.endsWith("telephone") || normalized === "email" || normalized.endsWith("email")
+    || ["internalnote", "internalcost", "costprice", "operatorid", "auditstatus", "reviewer", "approvedby", "privateurl", "auditnote", "sourcecodeid", "sourcescene", "paymentrecords", "packagesnapshot", "customer", "contact", "idcard", "bankaccount"].includes(normalized);
+}
+function publicContentRow(value, seen = new WeakSet()) {
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => publicContentRow(item, seen)).filter((item) => item !== undefined);
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isPublicHiddenField(key)) continue;
+    const next = publicContentRow(child, seen);
+    if (next !== undefined) out[key] = next;
+  }
+  return out;
+}
 
 function normalizeTags(item) {
   if (Array.isArray(item.serviceTags)) return item.serviceTags;
@@ -223,7 +266,10 @@ async function getSiteGlobal(source) {
       if (Object.keys(assembled).length) return assembled;
     }
     return {};
-  } catch (e) { return {}; }
+  } catch (e) {
+    if (isDataSourceFailure(e)) throw e;
+    return {};
+  }
 }
 
 function normalizeSiteConfigFragment(id, fragment) {
@@ -265,8 +311,8 @@ function normalizeVideoSinglePackage(p = {}) {
 /* 城市：探索页城市列表。enabled=false 时小程序端显示“（敬请期待）”，不剔除 */
 async function rpcGetCities(source) {
   try {
-    const cities = (await source.list("cities")).filter(c => c && c.isDeleted !== true);
-    const shops = (await source.list("shops")).filter(s => s && s.isDeleted !== true);
+    const cities = (await source.list("cities")).filter(c => c && c.isDeleted !== true && c.deleted !== true && c.visible !== false);
+    const shops = (await source.list("shops")).filter(s => s && s.isDeleted !== true && s.deleted !== true && s.visible !== false);
     const list = cities.map(c => {
       const statusText = String(c.status || "").trim();
       const enabled = c.enabled === true || (c.enabled !== false && (!statusText || statusText === "运营中" || statusText === "营业中"));
@@ -275,9 +321,9 @@ async function rpcGetCities(source) {
       const shopsCount = shops.filter(s => s.cityId === cityId || s.city === name || s.cityName === name).length;
       return { _id: cityId, name, code: c.code || c.cityCode || "", enabled, shopsCount };
     });
-    return { success: true, data: list };
+    return { success: true, data: list.map((item) => publicContentRow(item)) };
   } catch (err) {
-    return { success: false, error: err.message, data: [] };
+    return { success: false, error: publicRpcError(err), data: [] };
   }
 }
 
@@ -292,10 +338,11 @@ async function rpcGetPrivacyPolicy(source) {
       content,
       updateTime: String(pp.updateTime || site.updateTime || "")
     };
-    if (Array.isArray(pp.sections) && pp.sections.length) data.sections = pp.sections;
+    if (Array.isArray(pp.sections) && pp.sections.length) data.sections = publicContentRow(pp.sections);
     return { success: true, data };
   } catch (err) {
-    return { success: false, error: err.message };
+    if (isDataSourceFailure(err)) throw err;
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -312,7 +359,8 @@ async function rpcGetSearchConfig(source) {
     const hotWords = merged.filter(w => { if (seen.has(w)) return false; seen.add(w); return true; });
     return { success: true, data: { hotWords } };
   } catch (err) {
-    return { success: false, error: err.message };
+    if (isDataSourceFailure(err)) throw err;
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -331,7 +379,8 @@ async function rpcGetBookingConfig(source) {
       }
     };
   } catch (err) {
-    return { success: false, error: err.message };
+    if (isDataSourceFailure(err)) throw err;
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -359,7 +408,8 @@ async function rpcGetFootprintConfig(source) {
       }
     };
   } catch (err) {
-    return { success: false, error: err.message };
+    if (isDataSourceFailure(err)) throw err;
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -377,7 +427,8 @@ async function rpcGetCorpConfig(source) {
       }
     };
   } catch (err) {
-    return { success: false, error: err.message };
+    if (isDataSourceFailure(err)) throw err;
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -390,9 +441,9 @@ async function rpcGetVideoSingles(source, data = {}) {
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0) || String(b.createTime || "").localeCompare(String(a.createTime || "")));
     if (data.spotId) list = list.filter(p => p.spotId === data.spotId || (Array.isArray(p.spotIds) && p.spotIds.includes(data.spotId)));
     if (data.seriesId) list = list.filter(p => p.seriesId === data.seriesId || (Array.isArray(p.seriesIds) && p.seriesIds.includes(data.seriesId)));
-    return { success: true, data: list.slice(0, limit).map(normalizeVideoSinglePackage) };
+    return { success: true, data: list.slice(0, limit).map(normalizeVideoSinglePackage).map((item) => publicContentRow(item)) };
   } catch (err) {
-    return { success: false, error: err.message, data: [] };
+    return { success: false, error: publicRpcError(err), data: [] };
   }
 }
 
@@ -443,16 +494,17 @@ async function rpcLogin(source, data = {}, ctx = {}) {
   const code = data.code || "";
   const appid = process.env.WX_APP_ID || "";
   const secret = process.env.WX_APP_SECRET || "";
-  if (appid && secret && code) {
+  if (appid || secret) {
+    if (!appid || !secret || !code) return { success: false, message: "微信登录参数不完整" };
     try {
       const r = await wxGetJson(`/sns/jscode2session?appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`);
       if (r.openid) {
         await source.upsert("userProfiles", r.openid, { openid: r.openid, updateTime: new Date().toISOString() });
         return { success: true, openid: r.openid };
       }
-      return { success: false, message: "微信登录失败: " + (r.errmsg || r.errcode || "未知错误") };
+      return { success: false, message: "微信登录失败，请稍后重试" };
     } catch (e) {
-      return { success: false, message: "微信登录请求失败: " + e.message };
+      return { success: false, message: "微信登录服务暂不可用，请稍后重试" };
     }
   }
   // Development fallback is explicit and uses one fixed synthetic identity. A
@@ -509,7 +561,7 @@ async function rpcGetHomeData(source, data = {}) {
     let banners = [];
     if (Array.isArray(config.carouselIds) && config.carouselIds.length) {
       const sampleMap = {};
-      (await source.list("samples")).forEach(s => { if (s) sampleMap[getItemId(s)] = s; });
+      (await source.list("samples")).filter(isVisibleSimple).forEach(s => { if (s) sampleMap[getItemId(s)] = s; });
       banners = config.carouselIds
         .map(id => sampleMap[String(id)] || sampleMap[id])
         .filter(Boolean)
@@ -521,7 +573,7 @@ async function rpcGetHomeData(source, data = {}) {
     }
     if (!banners.length) banners = normalizeConfigBanners(config);
     if (!banners.length) {
-      const showcase = (await source.list("samples")).filter(s => s.isShowcase && !s.isDeleted).slice(0, 6);
+      const showcase = (await source.list("samples")).filter(s => s.isShowcase && isVisibleSimple(s)).slice(0, 6);
       banners = showcase.map(item => ({
         _id: item._id, url: item.url, type: item.type || "image", mediaType: item.type || "image",
         cover: item.cover || item.poster || item.url || "", description: item.description || "",
@@ -572,9 +624,24 @@ async function rpcGetHomeData(source, data = {}) {
     }
     if (!shopInfo.name) shopInfo = { name: "鹿小鸣旅拍", logo: "", description: "长沙专业旅拍" };
 
-    return { success: true, data: { shopInfo, activityText, banners, exploreBanners, spots, series, albums: configuredAlbums, packages, videoSingles, guides, peripherals, modules, quickNav: config.quickNav || [], pageConfig: { homeModules: modules, recommendations, pageModules } } };
+    return { success: true, data: {
+      shopInfo,
+      activityText,
+      banners: publicContentRow(banners),
+      exploreBanners: publicContentRow(exploreBanners),
+      spots: publicContentRow(spots),
+      series: publicContentRow(series),
+      albums: publicContentRow(configuredAlbums),
+      packages: publicContentRow(packages),
+      videoSingles: publicContentRow(videoSingles),
+      guides: publicContentRow(guides),
+      peripherals: publicContentRow(peripherals),
+      modules: publicContentRow(modules),
+      quickNav: publicContentRow(config.quickNav || []),
+      pageConfig: { homeModules: publicContentRow(modules), recommendations: publicContentRow(recommendations), pageModules: publicContentRow(pageModules) }
+    } };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -599,7 +666,7 @@ async function rpcGetSpots(source, data = {}) {
       }));
     return { success: true, data: list };
   } catch (err) {
-    return { success: false, error: err.message || "获取打卡点失败", data: [] };
+    return { success: false, error: publicRpcError(err, "获取打卡点失败"), data: [] };
   }
 }
 
@@ -610,7 +677,7 @@ async function rpcGetBookingData(source) {
     const rawSeries = (await source.list("series")).filter(isVisibleSimple);
     const allPackages = (await source.list("packages")).filter(isVisibleSimple);
     const albums = (await source.list("albums")).filter(isVisibleSimple);
-    const photos = (await source.list("samples"));
+    const photos = (await source.list("samples")).filter(isVisibleSimple);
     const albumCountMap = {};
     albums.forEach(a => { if (a.seriesId) albumCountMap[a.seriesId] = (albumCountMap[a.seriesId] || 0) + 1; });
     const photoCountMap = {};
@@ -622,9 +689,9 @@ async function rpcGetBookingData(source) {
       firstSpotName: (() => { if (s.spotIds && s.spotIds.length) { const sp = spots.find(x => x._id === s.spotIds[0]); return sp ? sp.name : ""; } return ""; })()
     }));
     const hotPackages = allPackages.filter(p => p.isHot || p.isMainPush || p.mainPush);
-    return { success: true, data: { spots, allSeries, albums, hotPackages, allPackages } };
+    return { success: true, data: { spots: publicContentRow(spots), allSeries: publicContentRow(allSeries), albums: publicContentRow(albums), hotPackages: publicContentRow(hotPackages), allPackages: publicContentRow(allPackages) } };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -641,9 +708,9 @@ async function rpcGetSeriesList(source, data = {}) {
     const paged = list.slice(start, start + Number(pageSize)).map(s => ({
       ...s, spotCount: Array.isArray(s.spotIds) ? s.spotIds.length : 0, packageCount: Array.isArray(s.packageIds) ? s.packageIds.length : 0
     }));
-    return { success: true, data: paged, total, page: Number(page), pageSize: Number(pageSize) };
+    return { success: true, data: paged.map((item) => publicContentRow(item)), total, page: Number(page), pageSize: Number(pageSize) };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -677,16 +744,16 @@ async function rpcGetSeriesDetail(source, data = {}) {
     let spots = [];
     if (seriesSpotIds.length) {
       const allSpots = await source.list("spots");
-      spots = seriesSpotIds.map(id => allSpots.find(s => s._id === id || s.id === id)).filter(Boolean).map(s => ({
-        _id: s._id, name: s.name || "", cover: normalizeImage(s), address: s.address || "", description: s.description || s.desc || ""
+      spots = seriesSpotIds.map(id => allSpots.find(s => isVisibleSimple(s) && String(getItemId(s)) === String(id))).filter(Boolean).map(s => ({
+        _id: getItemId(s), name: s.name || "", cover: normalizeImage(s), address: s.address || "", description: s.description || s.desc || ""
       }));
     }
 
-    const allSamples = (await source.list("samples")).filter(s => s.seriesId === seriesId && !s.isDeleted);
+    const allSamples = (await source.list("samples")).filter(s => s.seriesId === seriesId && isVisibleSimple(s));
     const samples = allSamples.filter(s => s.isShowcase).slice(0, 8);
     const photos = allSamples.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || ""))).slice(0, 30);
 
-    const albums = (await source.list("albums")).filter(a => a.seriesId === seriesId && a.isShow !== false && !a.isDeleted)
+    const albums = (await source.list("albums")).filter(a => a.seriesId === seriesId && isVisibleSimple(a))
       .sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || ""))).slice(0, 30)
       .map(a => ({ ...a, cover: normalizeImage(a), sampleUrls: a.sampleUrls || a.photos || [], photoCount: a.photoCount || (a.sampleUrls ? a.sampleUrls.length : 0) }));
 
@@ -699,7 +766,7 @@ async function rpcGetSeriesDetail(source, data = {}) {
       const belongs = p.spotId === currentSpotId || (Array.isArray(p.spotIds) && p.spotIds.includes(currentSpotId));
       return belongs && !mainPushIds.includes(p._id);
     }).map(p => ({ ...p, serviceTags: normalizeTags(p), cover: normalizeImage(p) }));
-    const seriesPackages = allPackages.filter(p => p.seriesId === seriesId || (Array.isArray(series.packageIds) && series.packageIds.includes(p._id)))
+    const seriesPackages = allPackages.filter(p => String(p.seriesId || "") === String(seriesId) || (Array.isArray(series.packageIds) && series.packageIds.map(String).includes(String(getItemId(p)))))
       .map(p => ({ ...p, serviceTags: normalizeTags(p), cover: normalizeImage(p) }));
     if (currentPackage && !seriesPackages.some(p => p._id === currentPackage._id)) {
       seriesPackages.unshift({ ...currentPackage, serviceTags: normalizeTags(currentPackage), cover: normalizeImage(currentPackage) });
@@ -712,39 +779,40 @@ async function rpcGetSeriesDetail(source, data = {}) {
     return {
       success: true,
       data: {
-        series: { ...series, cover: normalizeImage(series), styles: seriesStyles, minPrice: prices.length ? Math.min(...prices) : (series.minPrice || 0), maxPrice: prices.length ? Math.max(...prices) : (series.maxPrice || 0) },
-        currentPackage: currentPackage ? { ...currentPackage, serviceTags: normalizeTags(currentPackage), cover: normalizeImage(currentPackage) } : null,
+        series: publicContentRow({ ...series, cover: normalizeImage(series), styles: seriesStyles, minPrice: prices.length ? Math.min(...prices) : (series.minPrice || 0), maxPrice: prices.length ? Math.max(...prices) : (series.maxPrice || 0) }),
+        currentPackage: currentPackage ? publicContentRow({ ...currentPackage, serviceTags: normalizeTags(currentPackage), cover: normalizeImage(currentPackage) }) : null,
         currentSpotId,
-        spots,
-        samples: filterMediaByPackage(samples, currentPackage),
-        photos: filterMediaByPackage(photos, currentPackage),
-        recommendedVideos,
-        albums,
-        packages: seriesPackages,
-        mainPushPackages,
-        spotPackages
+        spots: publicContentRow(spots),
+        samples: publicContentRow(filterMediaByPackage(samples, currentPackage)),
+        photos: publicContentRow(filterMediaByPackage(photos, currentPackage)),
+        recommendedVideos: publicContentRow(recommendedVideos),
+        albums: publicContentRow(albums),
+        packages: publicContentRow(seriesPackages),
+        mainPushPackages: publicContentRow(mainPushPackages),
+        spotPackages: publicContentRow(spotPackages)
       }
     };
   } catch (err) {
-    return { success: false, error: err.message || "获取系列详情失败" };
+    return { success: false, error: publicRpcError(err, "获取系列详情失败") };
   }
 }
 
 function buildPackageOnlyResponse(currentPackage, spotId = "") {
   const normalizedPackage = { ...currentPackage, serviceTags: normalizeTags(currentPackage), cover: normalizeImage(currentPackage) };
+  const safePackage = publicContentRow(normalizedPackage);
   const price = Number(currentPackage.price || 0);
   return {
     success: true,
     data: {
       series: { _id: "", name: currentPackage.name || "套餐详情", cover: normalizeImage(currentPackage), styles: normalizeTags(currentPackage), intro: currentPackage.description || currentPackage.intro || "", minPrice: price, maxPrice: price, soldCount: currentPackage.soldCount || 0 },
-      currentPackage: normalizedPackage,
+      currentPackage: safePackage,
       currentSpotId: spotId || currentPackage.spotId || "",
       spots: [],
       samples: [{ _id: "package-cover", url: normalizeImage(currentPackage), type: "image" }],
       photos: [],
       albums: [],
-      packages: [normalizedPackage],
-      mainPushPackages: [normalizedPackage],
+      packages: [safePackage],
+      mainPushPackages: [safePackage],
       spotPackages: []
     }
   };
@@ -756,10 +824,10 @@ async function getRecommendedVideos(source, { currentPackage = {}, series = {}, 
     ...(series.recommendedVideoIds || []), ...(series.recommendVideoIds || [])
   ].filter(Boolean);
   let found = [];
-  if (configuredIds.length) found = (await source.list("samples")).filter(s => configuredIds.includes(s._id) && (s.type || s.mediaType) === "video");
+  if (configuredIds.length) found = (await source.list("samples")).filter(s => configuredIds.map(String).includes(String(getItemId(s))) && isVisibleSimple(s) && (s.type || s.mediaType) === "video");
   if (!found.length) {
     const seriesId = series._id || "";
-    found = (await source.list("samples")).filter(s => (s.type || s.mediaType) === "video" && (s.seriesId === seriesId || s.spotId === currentSpotId || s.isRecommend === true || s.isFeatured === true));
+    found = (await source.list("samples")).filter(s => isVisibleSimple(s) && (s.type || s.mediaType) === "video" && (s.seriesId === seriesId || s.spotId === currentSpotId || s.isRecommend === true || s.isFeatured === true));
   }
   return found.map(normalizeVideoSample);
 }
@@ -775,25 +843,25 @@ async function rpcGetPhotoCollection(source, data = {}) {
     let spots = [];
     if (series.spotIds && series.spotIds.length) {
       const allSpots = await source.list("spots");
-      spots = series.spotIds.map(id => allSpots.find(s => s._id === id || s.id === id)).filter(Boolean).map(s => ({ _id: s._id, name: s.name }));
+      spots = series.spotIds.map(id => allSpots.find(s => isVisibleSimple(s) && String(getItemId(s)) === String(id))).filter(Boolean).map(s => ({ _id: getItemId(s), name: s.name }));
     }
     series.spots = spots;
 
-    const samplesAll = (await source.list("samples")).filter(s => s.seriesId === seriesId && !s.isDeleted);
+    const samplesAll = (await source.list("samples")).filter(s => s.seriesId === seriesId && isVisibleSimple(s));
     series.samples = samplesAll.filter(s => s.isShowcase).slice(0, 5);
     const photos = samplesAll.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || "")));
 
     let packages = [];
     if (series.packageIds && series.packageIds.length) {
       const byIds = await source.list("packages");
-      packages = byIds.filter(p => series.packageIds.includes(p._id) && isVisibleSimple(p));
+      packages = byIds.filter(p => series.packageIds.map(String).includes(String(getItemId(p))) && isVisibleSimple(p));
     }
     let featuredPackages = (await source.list("packages")).filter(p => p.isFeatured === true && isVisibleSimple(p))
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     let spotPackages = [];
     if (series.spotIds && series.spotIds.length) {
       const targetSpotId = spotId || series.spotIds[0];
-      spotPackages = (await source.list("packages")).filter(p => p.spotId === targetSpotId && isVisibleSimple(p))
+      spotPackages = (await source.list("packages")).filter(p => String(p.spotId || "") === String(targetSpotId) && isVisibleSimple(p))
         .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     }
     const albums = await source.list("albums");
@@ -808,9 +876,16 @@ async function rpcGetPhotoCollection(source, data = {}) {
       sampleUrls: photos.map(p => p.url), photoCount: photos.length, price: albumPrice
     };
 
-    return { success: true, data: { series, photos, packages, featuredPackages, spotPackages, collections: [collection] } };
+    return { success: true, data: {
+      series: publicContentRow(series),
+      photos: publicContentRow(photos),
+      packages: publicContentRow(packages),
+      featuredPackages: publicContentRow(featuredPackages),
+      spotPackages: publicContentRow(spotPackages),
+      collections: publicContentRow([collection])
+    } };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -821,21 +896,21 @@ async function rpcGetPeripherals(source, data = {}) {
     let list = (await source.list("peripherals")).filter(isVisibleSimple);
     if (cate) list = list.filter(p => p.category === cate || p.cate === cate);
     list.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || "")));
-    return { success: true, data: list };
+    return { success: true, data: list.map((item) => publicContentRow(item)) };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
 async function rpcGetGuides(source, data = {}) {
   try {
     const { spotId } = data;
-    let list = (await source.list("guides")).filter(g => g.isDeleted !== true && g.isShow !== false);
+    let list = (await source.list("guides")).filter(isVisibleSimple);
     if (spotId) list = list.filter(g => g.spotId === spotId);
     list.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || "")));
-    return { success: true, data: list };
+    return { success: true, data: list.map((item) => publicContentRow(item)) };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -844,10 +919,10 @@ async function rpcGetGuide(source, data = {}) {
   if (!id) return { success: false, error: "缺少攻略 ID" };
   try {
     const guide = await source.get("guides", id);
-    if (!guide || guide.isDeleted === true || guide.isShow === false) return { success: false, error: "攻略不存在" };
-    return { success: true, data: guide };
+    if (!guide || !isVisibleSimple(guide)) return { success: false, error: "攻略不存在" };
+    return { success: true, data: publicContentRow(guide) };
   } catch (error) {
-    return { success: false, error: error.message || "攻略读取失败" };
+    return { success: false, error: publicRpcError(error, "攻略读取失败") };
   }
 }
 
@@ -862,6 +937,18 @@ const PUBLIC_ORDER_ITEM_FIELDS = [
   "packageId", "packageName", "albumId", "albumName", "seriesId", "seriesName",
   "spotId", "spotName", "type", "duration", "cover", "coverUrl", "image"
 ];
+function projectPublicDeliveryFiles(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (typeof item === "string") return item;
+    if (!item || typeof item !== "object") return null;
+    const out = {};
+    ["id", "_id", "name", "title", "url", "downloadUrl", "cover", "type", "mediaType", "size", "duration"].forEach((field) => {
+      if (item[field] !== undefined) out[field] = item[field];
+    });
+    return out;
+  }).filter(Boolean);
+}
 function projectPublicOrder(order = {}) {
   const id = getItemId(order);
   const rawItems = Array.isArray(order.productItems) ? order.productItems : (Array.isArray(order.items) ? order.items : []);
@@ -894,7 +981,7 @@ function projectPublicOrder(order = {}) {
     message: order.message || order.customerRemark || order.remark || "",
     afterSaleStatus: order.afterSaleStatus || "",
     bookingMode: order.bookingMode || "consult",
-    deliverFiles: Array.isArray(order.deliverFiles) ? order.deliverFiles : (Array.isArray(order.photos) ? order.photos : []),
+    deliverFiles: projectPublicDeliveryFiles(Array.isArray(order.deliverFiles) ? order.deliverFiles : (Array.isArray(order.photos) ? order.photos : [])),
     createTime: order.createTime || "",
     createdAt: order.createdAt || order.createTime || "",
   };
@@ -903,7 +990,9 @@ function projectPublicOrder(order = {}) {
 async function rpcGetMyOrders(source, openid, data = {}) {
   try {
     if (!openid) return { success: false, error: "请先完成微信登录" };
-    const { status, page = 1, pageSize = 10 } = data;
+    const { status } = data;
+    const page = Math.max(1, Math.floor(Number(data.page) || 1));
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(data.pageSize) || 10)));
     let list = await source.list("orders");
     list = list.filter(o => !o.isDeleted && !o.deleted && (!openid || getOrderOpenid(o) === openid));
     if (status && STATUS_GROUPS[status]) {
@@ -912,15 +1001,15 @@ async function rpcGetMyOrders(source, openid, data = {}) {
     }
     list.sort((a, b) => String(b.createTime || b.appointmentAt || "").localeCompare(String(a.createTime || a.appointmentAt || "")));
     const total = list.length;
-    const start = (Number(page) - 1) * Number(pageSize);
-    const paged = list.slice(start, start + Number(pageSize)).map(o => {
+    const start = (page - 1) * pageSize;
+    const paged = list.slice(start, start + pageSize).map(o => {
       const computed = customerStatusText(o.status);
       const customerStatus = shouldUseComputedStatus(o.status) ? computed : (o.customerStatus || computed);
       return { ...projectPublicOrder(o), customerStatus, statusText: customerStatus };
     });
-    return { success: true, data: paged, total, page: Number(page), pageSize: Number(pageSize) };
+    return { success: true, data: paged, total, page, pageSize };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -948,7 +1037,7 @@ async function rpcGetOrderDetail(source, openid, data = {}) {
       data: { ...d, statusText: d.customerStatus, paidAmount: d.paidAmount, dueAmount: d.dueAmount }
     };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -963,7 +1052,7 @@ async function rpcOrderStatusCount(source, openid) {
     }
     return { success: true, data: result };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -993,6 +1082,69 @@ function buildSource({ shopId, scene, codeId, placementType, placementLabel }) {
     sourceType,
     channel: sourceType,
   };
+}
+function isActiveMerchantCode(row) {
+  if (!row || row.isDeleted === true || row.deleted === true) return false;
+  return !["disabled", "inactive", "expired", "停用", "失效", "已失效", "下架", "已下架"].includes(String(row.status || "").trim().toLowerCase());
+}
+function isActiveShop(row) {
+  if (!row || row.isDeleted === true || row.deleted === true) return false;
+  return !["disabled", "inactive", "terminated", "停用", "已停用", "终止合作", "已终止", "暂停合作"].includes(String(row.status || "").trim().toLowerCase());
+}
+function matchesShopId(shop, value) {
+  const target = String(value || "");
+  return !!target && [shop && shop.id, shop && shop._id, shop && shop.shopId].filter(Boolean).map(String).includes(target);
+}
+async function validateBookingSource(source, input = {}) {
+  const requested = buildSource(input);
+  const requestedCodeId = String(requested.sourceCodeId || "").trim();
+  let shops = [];
+  let codes = [];
+  try {
+    shops = await source.list("shops");
+    codes = await source.list("merchantCodes");
+  } catch (_) {
+    return { error: "来源信息暂不可用，请稍后重试" };
+  }
+  const activeShops = (Array.isArray(shops) ? shops : []).filter(isActiveShop);
+  if (requestedCodeId) {
+    const code = (Array.isArray(codes) ? codes : []).find((row) => isActiveMerchantCode(row)
+      && (getItemId(row) === requestedCodeId || String(row.codeId || "") === requestedCodeId || String(row.scene || "") === `c=${requestedCodeId}`));
+    if (!code) return { error: "二维码无效或已失效" };
+    const codeShopId = String(code.shopId || code.shopCode || "");
+    const shop = activeShops.find((row) => matchesShopId(row, codeShopId));
+    if (!shop) return { error: "二维码对应商家不存在或已停用" };
+    const distributorId = String(code.distributorId || (Array.isArray(code.distributorIds) ? code.distributorIds[0] : "")
+      || shop.distributorId || (Array.isArray(shop.distributorIds) ? shop.distributorIds[0] : "") || "");
+    const authoritativeSource = buildSource({
+        shopId: codeShopId,
+        scene: String(code.scene || input.scene || `c=${requestedCodeId}`),
+        codeId: getItemId(code),
+        placementType: code.placementType,
+        placementLabel: code.placementLabel,
+      });
+    authoritativeSource.sourceType = "merchant_qrcode";
+    authoritativeSource.channel = "merchant_qrcode";
+    return {
+      source: authoritativeSource,
+      shop,
+      code,
+      distributorId,
+    };
+  }
+  if (requested.shopId) {
+    const shop = activeShops.find((row) => matchesShopId(row, requested.shopId));
+    if (!shop) return { error: "商家不存在或已停用" };
+    const canonical = String(shop.shopId || shop.id || shop._id || requested.shopId);
+    return {
+      source: buildSource({ ...input, shopId: canonical, scene: "", codeId: "" }),
+      shop,
+      distributorId: String(shop.distributorId || (Array.isArray(shop.distributorIds) ? shop.distributorIds[0] : "") || ""),
+    };
+  }
+  // Direct bookings cannot claim a distributor or merchant code supplied by a
+  // client. Keep only the neutral direct source marker.
+  return { source: buildSource({ ...input, shopId: "", scene: "", codeId: "" }), distributorId: "" };
 }
 function orderHasPackage(order, packageId) {
   if (order.packageId === packageId) return true;
@@ -1072,7 +1224,9 @@ async function rpcCreateBooking(source, data = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim()) || Number.isNaN(new Date(`${date}T00:00:00+08:00`).getTime())) return { success: false, error: "预约日期格式不正确" };
   const hasBookingItem = !!packageId || !!data.albumId || !!seriesId || normalizedItems.some(item => item && (item.custom === true || item.packageId || item.albumId || item.seriesId));
   if (!hasBookingItem) return { success: false, error: "请选择预约拍摄项目" };
-  const src = buildSource({ shopId, scene, codeId, placementType, placementLabel });
+  const sourceResult = await validateBookingSource(source, { shopId, scene, codeId, placementType, placementLabel });
+  if (sourceResult.error) return { success: false, error: sourceResult.error };
+  const src = { ...sourceResult.source, distributorId: sourceResult.distributorId || sourceResult.source.distributorId || "" };
   const normalizedContactPhones = [phone, ...(contactPhones || [])].map(String).map(s => s.trim()).filter((s, i, l) => s && l.indexOf(s) === i);
 
   const now = new Date();
@@ -1107,7 +1261,7 @@ async function rpcCreateBooking(source, data = {}) {
     const doc = {
       openid,
       shopId: src.shopId || "",
-      scene: scene || "",
+      scene: src.scene || "",
       source: src,
       sourceCodeId: src.sourceCodeId || "",
       sourceType: src.sourceType,
@@ -1164,7 +1318,7 @@ async function rpcCreateBooking(source, data = {}) {
     if (!created) return { success: false, error: "订单号生成冲突，请稍后重试" };
     return { success: true, orderId: getItemId(created), orderNo };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 
@@ -1180,25 +1334,44 @@ async function rpcUpdateOrderStatus(source, openid, data = {}) {
     const owner = getOrderOpenid(order);
 
     if (newStatus === "canceled" && GUEST_CANCELABLE.includes(order.status) && owner === openid) {
+      let tickets = [];
+      try { tickets = await source.list("afterSales"); }
+      catch (_) { return { success: false, error: "售后数据暂不可用，请稍后重试" }; }
+      if ((Array.isArray(tickets) ? tickets : []).some((ticket) => ticket && String(ticket.orderId || "") === String(orderId) && !isAfterSaleTerminalStatus(ticket.status))) {
+        return { success: false, error: "订单存在处理中售后，暂不能取消" };
+      }
       return await applyStatusChange(source, { orderId, beforeStatus: order.status, newStatus, operatorName: "客人自助", openid, note });
     }
     if (newStatus === "deleted" && ["canceled", "cancelled"].includes(order.status) && owner === openid) {
-      await source.update("orders", orderId, { isDeleted: true, status: "deleted", customerStatus: "已删除", updateTime: new Date().toISOString() });
-      return { success: true };
+      const original = JSON.parse(JSON.stringify(order));
+      const updated = await source.update("orders", orderId, { isDeleted: true, status: "deleted", customerStatus: "已删除", updateTime: new Date().toISOString() });
+      try {
+        await source.create("logs", { action: "deleteOrder", operator: openid, targetType: "order", targetId: orderId, detail: "客户移除已取消订单", createTime: new Date().toISOString() });
+      } catch (error) {
+        try { await source.update("orders", orderId, original); } catch (_) {}
+        return { success: false, error: "订单未删除，审计日志暂不可用" };
+      }
+      return updated ? { success: true } : { success: false, error: "订单不存在" };
     }
     return { success: false, error: "该状态变更需由客服在后台操作" };
   } catch (err) {
-    return { success: false, error: err.message };
+    return { success: false, error: publicRpcError(err) };
   }
 }
 async function applyStatusChange(source, { orderId, beforeStatus, newStatus, operatorName, openid, note = "" }) {
   const order = await source.get("orders", orderId);
+  const original = order && JSON.parse(JSON.stringify(order));
   const follow = { type: "状态变更", operator: operatorName, operatorId: openid, note: note || `${beforeStatus || "空"} -> ${newStatus}`, from: beforeStatus || "", to: newStatus, createTime: new Date().toISOString() };
   const updated = await source.update("orders", orderId, {
     status: newStatus, customerStatus: customerStatusText(newStatus), updateTime: new Date().toISOString(),
     followRecords: [...(order.followRecords || []), follow]
   });
-  await source.create("logs", { action: "updateOrderStatus", operator: openid, operatorName: operatorName || "", targetType: "order", targetId: orderId, detail: `状态由${beforeStatus || "空"}更新为${newStatus}`, createTime: new Date().toISOString() });
+  try {
+    await source.create("logs", { action: "updateOrderStatus", operator: openid, operatorName: operatorName || "", targetType: "order", targetId: orderId, detail: `状态由${beforeStatus || "空"}更新为${newStatus}`, createTime: new Date().toISOString() });
+  } catch (_) {
+    if (original) { try { await source.update("orders", orderId, original); } catch (__) {} }
+    return { success: false, error: "状态未更新，审计日志暂不可用" };
+  }
   return { success: true, customerStatus: customerStatusText(newStatus) };
 }
 
@@ -1217,11 +1390,11 @@ async function rpcSubmitAfterSale(source, openid, data = {}) {
     // A customer can submit only one active ticket per order. This keeps retries
     // idempotent when the mobile network repeats the request.
     let tickets = [];
-    try { tickets = await source.list("afterSales"); } catch (_) { tickets = []; }
+    try { tickets = await source.list("afterSales"); } catch (_) { return { success: false, error: "售后数据暂不可用，请稍后重试" }; }
     const duplicate = (Array.isArray(tickets) ? tickets : []).find((ticket) =>
       ticket && String(ticket.orderId || "") === String(orderKey) &&
       String(ticket.openid || ticket.operatorId || "") === String(openid) &&
-      !["completed", "closed", "已完", "已结案"].includes(String(ticket.status || ""))
+      !isAfterSaleTerminalStatus(ticket.status)
     );
     if (duplicate) return { success: true, data: { status: duplicate.status || "pending", ticketId: getItemId(duplicate), existed: true } };
     const now = new Date().toISOString();
@@ -1242,16 +1415,26 @@ async function rpcSubmitAfterSale(source, openid, data = {}) {
       createdAt: now,
       updatedAt: now,
     };
-    await source.create("afterSales", ticket);
-    const updated = await source.update("orders", orderKey, {
-      afterSaleStatus: "pending", afterSaleReason: normalizedReason, afterSaleCreateTime: now,
-      afterSaleId: ticketId,
-      followRecords: [...(order.followRecords || []), { type: "afterSale", status: "pending", reason: normalizedReason, packageName: packageName || order.packageName || "", operator: "customer", operatorId: openid, createTime: now }]
-    });
-    await source.create("logs", { action: "submitAfterSale", operator: openid, targetType: "order", targetId: orderKey, detail: normalizedReason, createTime: now });
+    let createdTicket = false;
+    let updated = null;
+    try {
+      await source.create("afterSales", ticket);
+      createdTicket = true;
+      updated = await source.update("orders", orderKey, {
+        afterSaleStatus: "pending", afterSaleReason: normalizedReason, afterSaleCreateTime: now,
+        afterSaleId: ticketId,
+        followRecords: [...(order.followRecords || []), { type: "afterSale", status: "pending", reason: normalizedReason, packageName: packageName || order.packageName || "", operator: "customer", operatorId: openid, createTime: now }]
+      });
+      if (!updated) throw new Error("关联订单保存失败");
+      await source.create("logs", { action: "submitAfterSale", operator: openid, targetType: "order", targetId: orderKey, detail: normalizedReason, createTime: now });
+    } catch (error) {
+      if (createdTicket) { try { await source.remove("afterSales", ticketId); } catch (_) {} }
+      if (updated) { try { await source.update("orders", orderKey, order); } catch (_) {} }
+      return { success: false, error: publicRpcError(error, "提交失败") };
+    }
     return { success: true, data: { status: updated.afterSaleStatus, ticketId } };
   } catch (err) {
-    return { success: false, error: err.message || "提交失败" };
+    return { success: false, error: publicRpcError(err, "提交失败") };
   }
 }
 
@@ -1260,8 +1443,17 @@ async function rpcResolveMerchantCode(source, data = {}) {
   const c = data.c || "";
   const codeId = c.startsWith("c=") ? c.slice(2) : c;
   const codes = await source.list("merchantCodes");
-  const code = codes.find(x => x._id === codeId || x.scene === ("c=" + codeId) || x.codeId === codeId);
+  const code = codes.find(x => isActiveMerchantCode(x) && (getItemId(x) === codeId || x.scene === ("c=" + codeId) || x.codeId === codeId));
   if (!code) return { success: false, message: "二维码无效或已失效" };
+  try {
+    const shops = await source.list("shops");
+    const shopId = String(code.shopId || code.shopCode || "");
+    if (shopId && !(Array.isArray(shops) ? shops : []).some((shop) => isActiveShop(shop) && matchesShopId(shop, shopId))) {
+      return { success: false, message: "二维码对应商家不存在或已停用" };
+    }
+  } catch (_) {
+    return { success: false, message: "商家数据暂不可用，请稍后重试" };
+  }
   try {
     const id = getItemId(code);
     if (id && typeof source.update === "function") {

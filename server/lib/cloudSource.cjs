@@ -4,6 +4,8 @@
 // 部署到轻量服务器时：npm i @cloudbase/node-sdk，并设置下方三个环境变量。
 const map = require("./map.cjs");
 
+function safeCloudError() { return "云数据服务暂不可用，请稍后重试"; }
+
 module.exports = function (cfg) {
   let app = null;
   function getApp() {
@@ -50,8 +52,12 @@ module.exports = function (cfg) {
     },
     async update(key, id, patch) {
       const c = await coll(key);
-      await c.doc(id).update(patch);
-      return { ...patch, _id: id };
+      const safePatch = { ...(patch || {}) };
+      delete safePatch._id;
+      delete safePatch.id;
+      await c.doc(id).update(safePatch);
+      const latest = await c.doc(id).get();
+      return { ...((latest.data && latest.data[0]) || {}), ...safePatch, _id: id };
     },
     async remove(key, id) {
       const c = await coll(key);
@@ -61,8 +67,16 @@ module.exports = function (cfg) {
     // 有则更新、无则创建（.set 覆盖写，可重复执行）。用于 config/homeStats 这类"按固定 id 存的配置文档"。
     async upsert(key, id, patch) {
       const c = await coll(key);
-      await c.doc(id).set(patch || {});
-      return { ...(patch || {}), _id: id };
+      let previous = { data: [] };
+      try { previous = await c.doc(id).get(); }
+      catch (error) {
+        const message = String(error && (error.message || error.errMsg) || "");
+        if (!/not.?found|不存在|404/i.test(message)) throw error;
+      }
+      const merged = { ...((previous.data && previous.data[0]) || {}), ...(patch || {}) };
+      delete merged._id;
+      await c.doc(id).set(merged);
+      return { ...merged, _id: id };
     },
     async dashboard() {
       try {
@@ -70,7 +84,7 @@ module.exports = function (cfg) {
         const r = await tcb.callFunction({ name: "getDashboard" });
         return r.result;
       } catch (e) {
-        return { error: String(e && e.message ? e.message : e) };
+        return { error: safeCloudError() };
       }
     },
     async orderStats() {
@@ -79,7 +93,7 @@ module.exports = function (cfg) {
         const r = await tcb.callFunction({ name: "getOrderStatusCount" });
         return r.result;
       } catch (e) {
-        return { error: String(e && e.message ? e.message : e) };
+        return { error: safeCloudError() };
       }
     },
     async homeData() {
@@ -88,7 +102,7 @@ module.exports = function (cfg) {
         const r = await tcb.callFunction({ name: "getHomeData" });
         return r.result;
       } catch (e) {
-        return { error: String(e && e.message ? e.message : e) };
+        return { error: safeCloudError() };
       }
     },
     // 商家二维码：调用小程序云函数生成小程序码并落库
@@ -98,13 +112,13 @@ module.exports = function (cfg) {
         const r = await tcb.callFunction({ name: "generateMerchantQR", data: body });
         return r.result;
       } catch (e) {
-        return { success: false, error: String(e && e.message ? e.message : e) };
+        return { success: false, error: safeCloudError() };
       }
     },
     async listMerchantCodes(shopId = "") {
       try {
         const c = await coll("merchantCodes");
-        const cond = shopId ? { shopId, isDeleted: cmd().neq(true) } : { isDeleted: cmd().neq(true) };
+        const cond = shopId ? { shopId, isDeleted: cmd().neq(true), deleted: cmd().neq(true) } : { isDeleted: cmd().neq(true), deleted: cmd().neq(true) };
         const r = await c.where(cond).limit(1000).get();
         return r.data || [];
       } catch (e) {
@@ -114,7 +128,7 @@ module.exports = function (cfg) {
     async merchantCodeStats(shopId = "") {
       try {
         const c = await coll("merchantCodes");
-        const cond = shopId ? { shopId, isDeleted: cmd().neq(true) } : { isDeleted: cmd().neq(true) };
+        const cond = shopId ? { shopId, isDeleted: cmd().neq(true), deleted: cmd().neq(true) } : { isDeleted: cmd().neq(true), deleted: cmd().neq(true) };
         const codes = (await c.where(cond).limit(1000).get()).data || [];
         const scans = codes.reduce((s, x) => s + (Number(x.scanCount) || 0), 0);
         const orders = codes.reduce((s, x) => s + (Number(x.orderCount) || 0), 0);

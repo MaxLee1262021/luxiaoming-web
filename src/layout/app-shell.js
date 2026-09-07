@@ -692,7 +692,7 @@ window.LXM_VIEWS = {
           <div><span>本批应计</span><strong>{{ money(state.settlementTarget.commission || state.settlementTarget.settlementAmount || 0) }}</strong></div>
         </div>
         <div class="settlement-confirm-form">
-          <label><span>本次实结分成金额</span><el-input-number v-model="state.settlementForm.amount" :min="0" :controls="false" /></label>
+          <label><span>本次实结分成金额</span><el-input-number v-model="state.settlementForm.amount" :min="0" :step="0.01" :precision="2" :controls="false" /></label>
           <label><span>付款方式（选填）</span><el-input v-model="state.settlementForm.method" placeholder="如：微信转账 / 银行转账" /></label>
           <label><span>凭证号（选填）</span><el-input v-model="state.settlementForm.voucherNo" placeholder="填写转账单号或凭证编号" /></label>
           <label><span>备注（选填）</span><el-input v-model="state.settlementForm.note" placeholder="如：本周结算，已线下转账" /></label>

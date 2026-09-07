@@ -70,7 +70,11 @@ function applyRoleDefaultPermissions() {
 function openStaff(row = null) {
   // 编辑时密码栏置空（留空=不改）；新增时不再预置弱口令 "123456"，必须手动设置强密码。
   const base = row ? { ...row, password: "" } : { id: "", name: "", account: "", password: "", phone: "", role: "service", status: "启用", cityId: "city1", city: "长沙", agentId: "", distributorId: "", shopId: "", permissions: [] };
-  base.permissionKeys = base.permissionKeys || defaultPermissionKeys(base.role);
+  base.permissionKeys = Array.isArray(base.permissionKeys)
+    ? base.permissionKeys.slice()
+    : Array.isArray(base.permissions) && base.permissions.length
+      ? base.permissions.slice()
+      : defaultPermissionKeys(base.role);
   if (base.role === "photo") {
     base.commissionRate = Number(base.commissionRate || 20);
     base.settlementCycle = base.settlementCycle || "月结";
@@ -244,8 +248,7 @@ function openQr(row) {
 async function loadMerchantCodes() {
   if (!state.currentShop) return;
   try {
-    const r = await fetch(`/api/merchant-codes?shopId=${encodeURIComponent(state.currentShop.shopId)}`);
-    if (r.ok) state.merchantCodes = await r.json();
+    if (window.LXM_CLOUD?.merchantCodes) state.merchantCodes = await window.LXM_CLOUD.merchantCodes(state.currentShop.shopId);
     else state.merchantCodes = [];
   } catch (e) {
     state.merchantCodes = [];
@@ -254,8 +257,7 @@ async function loadMerchantCodes() {
 async function fetchMerchantCodeStats() {
   if (!state.currentShop) return;
   try {
-    const r = await fetch(`/api/merchant-codes/stats?shopId=${encodeURIComponent(state.currentShop.shopId)}`);
-    if (r.ok) state.merchantCodeStats = await r.json();
+    if (window.LXM_CLOUD?.merchantCodeStats) state.merchantCodeStats = await window.LXM_CLOUD.merchantCodeStats(state.currentShop.shopId);
   } catch (e) {}
 }
 async function generateMerchantQr() {
@@ -272,12 +274,8 @@ async function generateMerchantQr() {
   }
   state.qrGenerating = true;
   try {
-    const r = await fetch("/api/merchant-code/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shopId: state.currentShop.shopId, placementType, placementLabel })
-    });
-    const res = await r.json();
+    if (!window.LXM_CLOUD?.generateMerchantCode) throw new Error("商家码接口不可用");
+    const res = await window.LXM_CLOUD.generateMerchantCode({ shopId: state.currentShop.shopId, placementType, placementLabel });
     if (res && res.success) {
       state.qrPreview = { codeId: res.codeId, qrImage: res.qrImage, placementType: res.placementType, placementLabel: res.placementLabel, existed: res.existed };
       ElMessage.success(res.existed ? "该位置码已存在，已展示已有码" : "二维码生成成功");

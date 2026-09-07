@@ -34,6 +34,7 @@
     money,
     netOrderAmount,
     normalizeDateText,
+    normalizeReviewStatus,
     openOrderById,
     orderDistributorIds,
     orderShop,
@@ -51,6 +52,32 @@
     state,
     statusMeta
   } = ctx;
+
+function remoteReconciliationEnabled() {
+  const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+  return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD && window.LXM_CLOUD.create && window.LXM_CLOUD.update
+    && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+}
+async function saveReconciliationRecord(key, row, mode = "create") {
+  if (!remoteReconciliationEnabled()) return row;
+  const id = row && (row.id || row._id);
+  let payload = row;
+  if (mode === "update") {
+    const fields = key === "reconciliationTransfers"
+      ? state.role === "finance"
+        ? (row && row.status === "已封" ? ["status", "sealNote"] : ["payStatus", "voucherNo", "note"])
+        : ["status", "payStatus", "paidBy", "paidAt", "sealedBy", "sealedAt", "sealNote", "unsealedBy", "unsealedAt", "unsealNote", "voucherNo", "note"]
+      : key === "adjustmentRecords"
+        ? ["approvalStatus", "approvedBy", "approvedAt", "note"]
+        : ["status", "operator", "time", "note", "unlockedBy", "unlockedAt"];
+    payload = Object.fromEntries(fields.filter((field) => row && row[field] !== undefined).map((field) => [field, row[field]]));
+  }
+  const saved = mode === "update"
+    ? await window.LXM_CLOUD.update(key, id, payload)
+    : await window.LXM_CLOUD.create(key, row);
+  if (!saved || saved.error) throw new Error((saved && saved.error) || "财务记录保存失败");
+  return saved;
+}
 
 function reconciliation(type) {
   let rows = [];
@@ -123,8 +150,11 @@ function closeReconciliationMonth() {
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "先不封存",
-  }).then(() => {
-    data.monthlyClosings.unshift({ month, status: "已关", operator: currentOperatorName(), time: LXMFormat.nowText(), note: "月度对账已完成并锁定" });
+  }).then(async () => {
+    const record = { id: `closing-${month}`, month, status: "已关", operator: currentOperatorName(), time: LXMFormat.nowText(), note: "月度对账已完成并锁定" };
+    try { Object.assign(record, await saveReconciliationRecord("monthlyClosings", record, "create") || {}); }
+    catch (error) { return ElMessage.error((error && error.message) || "月度关账保存失败，请稍后重试"); }
+    data.monthlyClosings.unshift(record);
     log("月度关账", month, "锁定当月分账与结算操", currentOperatorName(), { module: "财务审计", level: "", objectType: "对账", objectName: month });
     ElMessage.success("月度对账单已封存，关键财务操作已锁定");
   }).catch(() => {});
@@ -137,10 +167,13 @@ function unlockReconciliationMonth() {
     type: "warning",
     confirmButtonText: "确认解锁",
     cancelButtonText: "取消",
-  }).then(() => {
+  }).then(async () => {
+    const original = JSON.parse(JSON.stringify(record));
     record.status = "未关";
     record.unlockedBy = currentOperatorName();
     record.unlockedAt = LXMFormat.nowText();
+    try { Object.assign(record, await saveReconciliationRecord("monthlyClosings", record, "update") || {}); }
+    catch (error) { Object.assign(record, original); return ElMessage.error((error && error.message) || "月度解锁保存失败，请稍后重试"); }
     log("月度解锁", record.month, "超管解锁月度对账", currentOperatorName(), { module: "财务审计", level: "", objectType: "对账", objectName: record.month });
     ElMessage.success("月份已解锁");
   }).catch(() => {});
@@ -164,17 +197,17 @@ function settlementCycleFor(row) {
 }
 function settlementPeriodFor(cycle) {
   const monthStart = parseMonthStart(reconciliationTransferMonth());
-  if (String(cycle || "").includes("")) {
+  if (String(cycle || "").includes("周")) {
     const base = state.filters.reconcileMonth ? monthStart : new Date();
     const day = base.getDay() || 7;
     const start = new Date(base);
     start.setDate(base.getDate() - day + 1);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
-    return `${formatDateObject(start)} "${formatDateObject(end)}`;
+    return `${formatDateObject(start)} 至 ${formatDateObject(end)}`;
   }
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
-  return `${formatDateObject(monthStart)} "${formatDateObject(monthEnd)}`;
+  return `${formatDateObject(monthStart)} 至 ${formatDateObject(monthEnd)}`;
 }
 function settlementBatchKey(row) {
   const cycle = row.settlementCycle || settlementCycleFor(row);
@@ -303,9 +336,9 @@ const reconciliationSummary = computed(() => {
     confirmedSettlementAmount,
     confirmedSettlementOrders: confirmedSettlementOrderIds.size,
     confirmedSettlementBatches: confirmedSettlementRows.length,
-    reviewedRefundAmount: scopedRefundRows.filter((row) => row.financeStatus === "已审").reduce((sum, row) => sum + Number(row.refundAmount || row.amount || 0), 0),
-    pendingRefundAmount: scopedRefundRows.filter((row) => row.financeStatus !== "已审").reduce((sum, row) => sum + Number(row.refundAmount || row.amount || 0), 0),
-    pendingRefundOrders: scopedRefundRows.filter((row) => row.financeStatus !== "已审").length,
+    reviewedRefundAmount: scopedRefundRows.filter((row) => normalizeReviewStatus(row.financeStatus) === "已审").reduce((sum, row) => sum + Number(row.refundAmount || row.amount || 0), 0),
+    pendingRefundAmount: scopedRefundRows.filter((row) => normalizeReviewStatus(row.financeStatus) !== "已审").reduce((sum, row) => sum + Number(row.refundAmount || row.amount || 0), 0),
+    pendingRefundOrders: scopedRefundRows.filter((row) => normalizeReviewStatus(row.financeStatus) !== "已审").length,
   };
 });
 const reconciliationDifferenceRows = computed(() => {
@@ -379,12 +412,12 @@ function openAdjustmentDialog(row = null) {
   };
   state.adjustmentDialog = true;
 }
-function submitAdjustmentRecord() {
+async function submitAdjustmentRecord() {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("当前角色无权发起冲正调账");
   const form = state.adjustmentForm;
   if (!form.orderNo || !Number(form.amount || 0) || !form.targetName || !form.note) return ElMessage.warning("请填写订单号、冲正金额、扣减主体和备注");
   const order = data.orders.find((item) => item.orderNo === form.orderNo || item.id === form.orderNo);
-  data.adjustmentRecords.unshift({
+  const record = {
     id: `adj-${Date.now()}`,
     orderNo: order?.orderNo || form.orderNo,
     orderId: order?.id || "",
@@ -398,7 +431,10 @@ function submitAdjustmentRecord() {
     offsetStatus: "优先抵扣下一期待结算",
     note: form.note,
     attachment: form.attachment || "线下凭证待补",
-  });
+  };
+  try { Object.assign(record, await saveReconciliationRecord("adjustmentRecords", record, "create") || {}); }
+  catch (error) { return ElMessage.error((error && error.message) || "冲正记录保存失败，请稍后重试"); }
+  data.adjustmentRecords.unshift(record);
     log("发起冲正调账", form.orderNo, `${form.targetType} ${form.targetName} / ${money(form.amount)}`, currentOperatorName(), { module: "财务审计", level: "", amount: Number(form.amount || 0), objectType: form.targetType, objectName: form.targetName });
   state.adjustmentDialog = false;
   ElMessage.success(state.role === "super" ? "冲正记录已审批入" : "冲正记录已提交，等待超管审批");
@@ -427,10 +463,13 @@ function approveAdjustmentRecord(row) {
     type: "warning",
     confirmButtonText: "确认审批",
     cancelButtonText: "取消",
-  }).then(() => {
+  }).then(async () => {
+    const original = JSON.parse(JSON.stringify(row));
     row.approvalStatus = "已审";
     row.approvedBy = currentOperatorName();
     row.approvedAt = LXMFormat.nowText();
+    try { Object.assign(row, await saveReconciliationRecord("adjustmentRecords", row, "update") || {}); }
+    catch (error) { Object.assign(row, original); return ElMessage.error((error && error.message) || "冲正审批保存失败，请稍后重试"); }
     log("审批冲正调账", row.orderNo, `${row.targetType} ${row.targetName} / ${money(Math.abs(Number(row.amount || 0)))}`, currentOperatorName(), { module: "财务审计", level: "", amount: Math.abs(Number(row.amount || 0)), objectType: row.targetType, objectName: row.targetName });
     ElMessage.success("冲正调账已审");
   }).catch(() => {});
@@ -511,10 +550,13 @@ function markSettlementPaid(row) {
     type: "warning",
     confirmButtonText: "确认已打",
     cancelButtonText: "取消",
-  }).then(() => {
+  }).then(async () => {
+    const original = JSON.parse(JSON.stringify(row));
     row.payStatus = "已打";
     row.paidBy = currentOperatorName();
     row.paidAt = LXMFormat.nowText();
+    try { Object.assign(row, await saveReconciliationRecord("reconciliationTransfers", row, "update") || {}); }
+    catch (error) { Object.assign(row, original); return ElMessage.error((error && error.message) || "打款记录保存失败，请稍后重试"); }
     log("确认结算打款", row.objectName, `${row.objectType} / ${row.period} / ${money(row.amount)}`, currentOperatorName(), { module: "财务审计", level: "", amount: Number(row.amount || 0), objectType: row.objectType, objectName: row.objectName, snapshot: (row.orderNos || []).join("") });
     ElMessage.success("已记录打款，当前进入待复核封存阶");
   }).catch(() => {});
@@ -527,11 +569,14 @@ function sealSettlementRecord(row) {
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "取消",
-  }).then(() => {
+  }).then(async () => {
+    const original = JSON.parse(JSON.stringify(row));
     row.status = "已封";
     row.sealedBy = currentOperatorName();
     row.sealedAt = LXMFormat.nowText();
     row.sealNote = row.sealNote || "结算记录复核封存";
+    try { Object.assign(row, await saveReconciliationRecord("reconciliationTransfers", row, "update") || {}); }
+    catch (error) { Object.assign(row, original); return ElMessage.error((error && error.message) || "封存记录保存失败，请稍后重试"); }
     log("封存结算记录", row.objectName, `${row.objectType} / ${row.period} / ${money(row.amount)}`, currentOperatorName(), { module: "财务审计", level: "", amount: Number(row.amount || 0), objectType: row.objectType, objectName: row.objectName, snapshot: (row.orderNos || []).join("") });
     ElMessage.success("结算记录已复核封");
   }).catch(() => {});
@@ -656,7 +701,7 @@ function settlementOrderAmount(order, target = state.settlementTarget) {
 }
 function refreshSettlementFormAmount() {
   const amount = selectedSettlementDialogOrders.value.reduce((sum, order) => sum + settlementOrderAmount(order), 0);
-  state.settlementForm.amount = Math.round(amount);
+  state.settlementForm.amount = Math.round(amount * 100) / 100;
 }
 function confirmSettlementBatch(row) {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以确认结");
@@ -677,7 +722,7 @@ function confirmSettlementBatch(row) {
 function onReconciliationSelectionChange(rows) {
   state.selectedReconciliationKeys = (rows || []).map((row) => row.transferKey);
 }
-function createSettlementRecordFromRow(row, extra = {}) {
+async function createSettlementRecordFromRow(row, extra = {}) {
   const selectedOrders = scopedOrders.value.filter((order) => (row.orderIds || []).includes(order.id));
   const amount = Number(row.amount || row.commission || row.settlementAmount || 0);
   const record = {
@@ -699,13 +744,20 @@ function createSettlementRecordFromRow(row, extra = {}) {
     voucherNo: extra.voucherNo || "",
     note: `${row.rateText || "按比例"} · ${row.settlementCycle}；批量结算 ${selectedOrders.length} 单${extra.note ? `；备注：${extra.note}` : ""}`,
   };
-  data.reconciliationTransfers.unshift(record);
-  return record;
+  try {
+    const saved = await saveReconciliationRecord("reconciliationTransfers", record, "create");
+    Object.assign(record, saved || {});
+    data.reconciliationTransfers.unshift(record);
+    return record;
+  } catch (error) {
+    ElMessage.error((error && error.message) || "结算记录保存失败，请稍后重试");
+    return null;
+  }
 }
 function batchConfirmSettlement() {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以批量确认结算");
   if (isReconciliationClosed.value) return ElMessage.warning("当前月份已封存，不能批量确认结算");
-  const rows = selectedReconciliationRows.value.filter((row) => row.transferStatus === "待结算" && Number(row.commission || 0) > 0);
+  const rows = selectedReconciliationRows.value.filter((row) => ["待结", "待结算"].includes(row.transferStatus) && Number(row.commission || 0) > 0);
   if (!rows.length) return ElMessage.warning("请先勾选待结算对象");
   const largeRows = rows.filter((row) => Number(row.commission || 0) >= largeSettlementThreshold() && largeSettlementThreshold() > 0);
   if (largeRows.length) return ElMessage.warning(`已选对象包含 ${largeRows.length} 个大额结算，请逐个打开确认结算并填写凭证与备注`);
@@ -713,8 +765,13 @@ function batchConfirmSettlement() {
     type: "warning",
     confirmButtonText: "确认批量结算",
     cancelButtonText: "取消",
-  }).then(() => {
-    rows.forEach((row) => createSettlementRecordFromRow(row, { method: "批量确认" }));
+  }).then(async () => {
+    const created = [];
+    for (const row of rows) {
+      const record = await createSettlementRecordFromRow(row, { method: "批量确认" });
+      if (record) created.push(record);
+    }
+    if (created.length !== rows.length) return;
     state.selectedReconciliationKeys = [];
     log("批量确认结算", "月度对账", `${rows.length} 个结算对象生成记录`, currentOperatorName(), { module: "财务审计", level: "高", amount: rows.reduce((sum, row) => sum + Number(row.commission || 0), 0), objectType: "批量结算", objectName: "月度对账" });
     ElMessage.success(`已生成 ${rows.length} 条结算记录`);
@@ -729,19 +786,26 @@ function batchSealSettlement() {
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "取消",
-  }).then(() => {
+  }).then(async () => {
+    const originals = rows.map((row) => [row.transferRecord, JSON.parse(JSON.stringify(row.transferRecord))]);
     rows.forEach((row) => {
       row.transferRecord.status = "已封";
       row.transferRecord.sealedBy = currentOperatorName();
       row.transferRecord.sealedAt = LXMFormat.nowText();
       row.transferRecord.sealNote = "批量封存账单";
     });
+    try {
+      for (const [record] of originals) await saveReconciliationRecord("reconciliationTransfers", record, "update");
+    } catch (error) {
+      originals.forEach(([record, original]) => Object.assign(record, original));
+      return ElMessage.error((error && error.message) || "批量封存保存失败，请稍后重试");
+    }
     state.selectedReconciliationKeys = [];
     log("批量封存账单", "月度对账", `${rows.length} 个结算对象账单已封存`, currentOperatorName(), { module: "财务审计", level: "", amount: rows.reduce((sum, row) => sum + Number(row.commission || 0), 0), objectType: "批量封存", objectName: "月度对账" });
     ElMessage.success(`已批量封"${rows.length} 个账单`);
   }).catch(() => {});
 }
-function submitSettlementBatch() {
+async function submitSettlementBatch() {
   const row = state.settlementTarget;
   if (!row) return;
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以确认结");
@@ -771,8 +835,14 @@ function submitSettlementBatch() {
     orderNos: selectedOrders.map((order) => order.orderNo),
     method: state.settlementForm.method || "未填",
     voucherNo: state.settlementForm.voucherNo || "",
-    note: `${row.rateText || "按比例"} · ${row.settlementCycle}；批量结算 ${selectedOrders.length} 单${extra.note ? `；备注：${extra.note}` : ""}`,
+    note: `${row.rateText || "按比例"} · ${row.settlementCycle}；批量结算 ${selectedOrders.length} 单${state.settlementForm.note ? `；备注：${state.settlementForm.note}` : ""}`,
   };
+  try {
+    const saved = await saveReconciliationRecord("reconciliationTransfers", record, "create");
+    Object.assign(record, saved || {});
+  } catch (error) {
+    return ElMessage.error((error && error.message) || "结算批次保存失败，请稍后重试");
+  }
   data.reconciliationTransfers.unshift(record);
   log("确认结算批次", row.name, `${record.objectType} ${money(amount)} / ${record.period} / ${record.orderNos.length} 单`, currentOperatorName(), { module: "财务审计", level: "", amount, objectType: record.objectType, objectName: record.objectName, snapshot: record.orderNos.join("") });
   state.settlementDialog = false;
@@ -789,11 +859,14 @@ function closeSettlementBatch(row) {
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "暂不封存",
-  }).then(() => {
+  }).then(async () => {
+    const original = JSON.parse(JSON.stringify(record));
     record.status = "已封";
     record.sealedBy = currentOperatorName();
     record.sealedAt = LXMFormat.nowText();
     record.sealNote = "按结算对象与结算周期封存账单";
+    try { Object.assign(record, await saveReconciliationRecord("reconciliationTransfers", record, "update") || {}); }
+    catch (error) { Object.assign(record, original); return ElMessage.error((error && error.message) || "封存结算保存失败，请稍后重试"); }
     log("封存结算账单", row.name, `${row.typeName} / ${record.period} / ${money(record.amount)}`, currentOperatorName(), { module: "财务审计", level: "", amount: Number(record.amount || 0), objectType: row.typeName, objectName: row.name, snapshot: (record.orderNos || []).join("") });
     ElMessage.success("该结算对象本周期账单已封存，可在结算确认记录中查");
   }).catch(() => {});
@@ -809,11 +882,14 @@ function unlockSettlementBatch(row) {
     confirmButtonText: "确认解封",
     cancelButtonText: "取消",
     inputValidator: (value) => !!String(value || "").trim() || "请填写解封审批说",
-  }).then(({ value }) => {
+  }).then(async ({ value }) => {
+    const original = JSON.parse(JSON.stringify(record));
     record.status = "已确";
     record.unsealedBy = currentOperatorName();
     record.unsealedAt = LXMFormat.nowText();
     record.unsealNote = value;
+    try { Object.assign(record, await saveReconciliationRecord("reconciliationTransfers", record, "update") || {}); }
+    catch (error) { Object.assign(record, original); return ElMessage.error((error && error.message) || "解封结算保存失败，请稍后重试"); }
     log("解封结算账单", row.name, `${row.typeName} / ${record.period} / ${value}`, currentOperatorName(), { module: "财务审计", level: "", amount: Number(record.amount || 0), objectType: row.typeName, objectName: row.name, snapshot: value });
     ElMessage.success("账单已解封，请完成调整后重新封存");
   }).catch(() => {});

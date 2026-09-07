@@ -96,14 +96,17 @@
     const target = LXM_CONFIG.roles && LXM_CONFIG.roles[key];
     if (!target) return false;
     restoreRoleDefaults(key);
-    const permissions = payload.permissions && typeof payload.permissions === "object" ? payload.permissions : {};
+    const permissions = payload.permissions && typeof payload.permissions === "object" && !Array.isArray(payload.permissions) ? payload.permissions : {};
+    const permissionList = Array.isArray(payload.permissionKeys) ? payload.permissionKeys : (Array.isArray(payload.permissions) ? payload.permissions : []);
     const menus = Array.isArray(payload.menus) ? payload.menus : (Array.isArray(permissions.menus) ? permissions.menus : permissions.menuKeys);
-    const actions = Array.isArray(payload.actions) ? payload.actions : (Array.isArray(permissions.actions) ? permissions.actions : permissions.actionKeys);
+    const actions = Array.isArray(payload.actions) ? payload.actions : (Array.isArray(permissions.actions) ? permissions.actions : (permissions.actionKeys || permissionList));
     if (Array.isArray(menus)) target.menus = [...new Set(menus.filter((item) => knownMenuKeys.has(item)))];
     if (Array.isArray(actions)) target.actions = [...new Set(actions.map(String))];
     if (payload.scope || permissions.scope) target.scope = payload.scope || permissions.scope;
     if (payload.shopId || permissions.shopId) target.shopId = payload.shopId || permissions.shopId;
     if (payload.staffId || permissions.staffId) target.staffId = payload.staffId || permissions.staffId;
+    if (payload.distributorId || permissions.distributorId) target.distributorId = payload.distributorId || permissions.distributorId;
+    if (payload.agentId || permissions.agentId) target.agentId = payload.agentId || permissions.agentId;
     if (payload.home && knownMenuKeys.has(payload.home)) target.home = payload.home;
     return true;
   }
@@ -113,7 +116,9 @@
     const source = envelope.session && typeof envelope.session === "object"
       ? envelope.session
       : envelope.user && typeof envelope.user === "object" ? envelope.user : envelope;
-    const permissions = source.permissions && typeof source.permissions === "object" ? source.permissions : (envelope.permissions || {});
+    const rawPermissions = source.permissions !== undefined ? source.permissions : envelope.permissions;
+    const permissionList = Array.isArray(rawPermissions) ? rawPermissions : [];
+    const permissions = rawPermissions && typeof rawPermissions === "object" && !Array.isArray(rawPermissions) ? rawPermissions : {};
     return {
       ok: envelope.ok !== false,
       token: source.token || envelope.token || fallback.token || "",
@@ -122,17 +127,20 @@
       name: source.name || envelope.name || fallback.name || "",
       staffId: source.staffId || envelope.staffId || fallback.staffId || "",
       menus: Array.isArray(source.menus) ? source.menus : (Array.isArray(envelope.menus) ? envelope.menus : permissions.menus),
-      actions: Array.isArray(source.actions) ? source.actions : (Array.isArray(envelope.actions) ? envelope.actions : permissions.actions),
+      actions: Array.isArray(source.actions) ? source.actions : (Array.isArray(envelope.actions) ? envelope.actions : (permissions.actions || permissionList)),
       scope: source.scope || envelope.scope || permissions.scope || fallback.scope || "",
       shopId: source.shopId || envelope.shopId || permissions.shopId || fallback.shopId || "",
-      permissions
+      distributorId: source.distributorId || envelope.distributorId || permissions.distributorId || fallback.distributorId || "",
+      agentId: source.agentId || envelope.agentId || permissions.agentId || fallback.agentId || "",
+      permissions,
+      permissionKeys: permissionList,
+      permissionsConfigured: source.permissionsConfigured === true || envelope.permissionsConfigured === true || rawPermissions !== undefined,
     };
   }
 
 function isExplicitDemoMode() {
   const protocol = window.location && window.location.protocol;
-  const query = window.location && window.location.search;
-  return protocol === "file:" || window.LXM_DEMO_MODE === true || /(?:^|[?&])demo=1(?:&|$)/.test(query || "");
+  return protocol === "file:" || window.LXM_DEMO_MODE === true;
 }
 
 function serverErrorMessage(error) {
@@ -186,11 +194,20 @@ async function login() {
 }
 
 function loginDemo(account, password) {
-  const sourceStaff = ((window.LXM_DATA && window.LXM_DATA.staff) || []).find((u) => u && u.account === account && u.password === password);
-  const sourceMerchant = ((window.LXM_DATA && window.LXM_DATA.shops) || []).find((s) => s && s.account === account && s.password === password);
-  if (sourceStaff && sourceStaff.status === "停用") return ElMessage.error("该账号已被停用，请联系管理员启用后再登录");
+  const demoRows = (key) => {
+    const value = window.LXM_DATA && window.LXM_DATA[key];
+    return Array.isArray(value) ? value : Object.values(value || {});
+  };
+  const sourceStaff = demoRows("staff").find((u) => u && u.account === account && u.password === password);
+  const sourceMerchant = demoRows("shops").find((s) => s && s.account === account && s.password === password);
+  const sourceDistributor = demoRows("distributors").find((s) => s && s.account === account && s.password === password);
+  const sourceAgent = demoRows("agents").find((s) => s && s.account === account && s.password === password);
+  const matched = [sourceStaff, sourceMerchant, sourceDistributor, sourceAgent].filter(Boolean);
+  if (matched.length > 1) return ElMessage.error("账号配置冲突，请联系管理员");
+  const source = matched[0];
+  if (source && ["停用", "已停用", "禁用", "暂停合作", "已终止"].includes(source.status || "")) return ElMessage.error("该账号已被停用，请联系管理员启用后再登录");
   if (sourceMerchant && ["暂停合作", "已终止", "停用"].includes(sourceMerchant.status || "")) return ElMessage.error("该商家合作已暂停或终止，账号暂无法登录");
-  if (!sourceStaff && !sourceMerchant) {
+  if (!source) {
     log("登录失败", "后台", "本地演示账号校验失败", account, { level: "高" });
     return ElMessage.error("账号或密码错误");
   }
@@ -198,10 +215,13 @@ function loginDemo(account, password) {
   restoreDemoData();
   hydrateFromStorage();
   applyLogin({
-    role: sourceMerchant ? "merchant" : (sourceStaff.role || "super"),
+    role: sourceMerchant ? "merchant" : (sourceAgent ? "agent" : sourceDistributor ? "distributor" : (sourceStaff.role || "super")),
     account,
-    name: (sourceStaff && sourceStaff.name) || (sourceMerchant && sourceMerchant.name) || account,
-    staffId: (sourceStaff && sourceStaff.id) || (sourceMerchant && sourceMerchant.id) || "st1"
+    name: source.name || account,
+    staffId: source.id || "st1",
+    shopId: sourceMerchant ? (sourceMerchant.id || sourceMerchant.shopId || "") : "",
+    distributorId: sourceDistributor ? (sourceDistributor.id || sourceDistributor.distributorId || "") : (source.distributorId || ""),
+    agentId: sourceAgent ? (sourceAgent.id || sourceAgent.agentId || "") : (source.agentId || "")
   }, { source: "demo" });
   state.authNotice = "当前为本地演示模式，改动不会写入数据库";
   ElMessage.warning(state.authNotice);

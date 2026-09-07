@@ -81,15 +81,23 @@ window.LXM_CONFIG = {
       scope: "distributor",
       distributorId: "dist2",
       staffId: "st8",
-      menus: ["dashboard", "orders", "afterSales", "reconciliation", "shops"],
-      actions: ["view", "export"]
+      menus: ["dashboard", "orders", "shops"],
+      actions: ["view", "dashboard", "export"]
+    },
+    agent: {
+      name: "渠道代理",
+      home: "dashboard",
+      scope: "agent",
+      agentId: "agent1",
+      menus: ["dashboard", "orders", "shops"],
+      actions: ["view", "dashboard", "export"]
     },
     service: {
       name: "客服",
       home: "orders",
       scope: "orders",
       staffId: "st2",
-      menus: ["dashboard", "orders", "afterSales", "addonServices", "reconciliation"],
+      menus: ["dashboard", "orders", "afterSales", "addonServices"],
       actions: ["view", "orderEdit", "assign", "transfer", "cancelOrder", "export"]
     },
     finance: {
@@ -105,7 +113,7 @@ window.LXM_CONFIG = {
       home: "tasks",
       scope: "selfTask",
       staffId: "st4",
-      menus: ["tasks", "reconciliation"],
+      menus: ["tasks"],
       actions: ["view", "shootUpdate"]
     },
     merchant: {
@@ -113,8 +121,8 @@ window.LXM_CONFIG = {
       home: "dashboard",
       scope: "shop",
       shopId: "shop1",
-      menus: ["dashboard", "orders", "reconciliation"],
-      actions: ["view", "export"]
+      menus: ["dashboard", "orders"],
+      actions: ["view", "dashboard", "export"]
     },
     content: {
       name: "内容运营",
@@ -145,7 +153,7 @@ window.LXM_CONFIG = {
   settlementCycles: ["周结", "月结", "季度结"],
   permissionMatrix: [
     { key: "dashboardAll", name: "查看总部数据看板", super: true },
-    { key: "dashboardShop", name: "查看商家数据看板", super: true, distributor: true, merchant: true },
+    { key: "dashboardShop", name: "查看商家数据看板", super: true, distributor: true, merchant: true, agent: true },
     { key: "orderAll", name: "查看全部订单", super: true, service: true, finance: true },
     { key: "orderSelf", name: "查看自己订单", super: true, distributor: true, photo: true, merchant: true },
     { key: "orderStatus", name: "更改订单状态", super: true, service: true, photo: true },

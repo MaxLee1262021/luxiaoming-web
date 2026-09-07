@@ -5,7 +5,8 @@
 module.exports = {
   samples: "travel_photos",
   orders: "bookings",
-  afterSales: "bookings", // 售后更新的是 bookings 里的售后字段
+  // 售后工单必须使用独立集合，不能把整张 bookings 订单集合当作工单读取。
+  afterSales: "afterSales",
   staff: "users",
   scans: "scanRecords",
   homeConfig: "config", // 存于 config 文档(homeStats)中

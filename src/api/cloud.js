@@ -82,8 +82,9 @@
     const raw = typeof input === "string" ? input : (input && input.url) || "";
     try {
       const parsed = new URL(raw, window.location.href);
-      const apiPath = base.startsWith("/") ? base : `/${base}`;
-      return parsed.origin === window.location.origin && (parsed.pathname === apiPath || parsed.pathname.startsWith(`${apiPath}/`));
+      const configured = new URL(base, window.location.href);
+      const apiPath = configured.pathname.replace(/\/$/, "") || "/api";
+      return parsed.origin === configured.origin && (parsed.pathname === apiPath || parsed.pathname.startsWith(`${apiPath}/`));
     } catch (e) {
       return false;
     }
@@ -116,7 +117,7 @@
     }
     if (apiRequest && !headers.has("Accept")) headers.set("Accept", "application/json");
     requestInit.headers = headers;
-    if (!requestInit.credentials) requestInit.credentials = "same-origin";
+    if (!requestInit.credentials) requestInit.credentials = url && url.origin === window.location.origin ? "same-origin" : "omit";
 
     return nativeFetch(input, requestInit).then((response) => {
       if (response.status === 401 && apiRequest && !isLoginRequest && !options.suppressAuthEvent) {
@@ -246,6 +247,39 @@
     return result && result.data ? result.data : result;
   }
 
+  async function afterSaleAction(id, action, payload = {}) {
+    if (!hasSession()) throw authError("需要登录后处理售后", 401);
+    const response = await request(`${base}/after-sales/${encodeURIComponent(id)}/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...(payload || {}) })
+    });
+    const result = await jsonResponse(response);
+    return result && result.data ? result.data : result;
+  }
+
+  async function merchantCodes(shopId) {
+    if (!hasSession()) throw authError("需要登录后读取商家码", 401);
+    const response = await request(`${base}/merchant-codes?shopId=${encodeURIComponent(shopId || "")}`);
+    return jsonResponse(response);
+  }
+
+  async function merchantCodeStats(shopId) {
+    if (!hasSession()) throw authError("需要登录后读取商家码统计", 401);
+    const response = await request(`${base}/merchant-codes/stats?shopId=${encodeURIComponent(shopId || "")}`);
+    return jsonResponse(response);
+  }
+
+  async function generateMerchantCode(payload = {}) {
+    if (!hasSession()) throw authError("需要登录后生成商家码", 401);
+    const response = await request(`${base}/merchant-code/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    return jsonResponse(response);
+  }
+
   function normalizeIds(value) {
     if (Array.isArray(value)) value.forEach((item) => { if (item && item._id && !item.id) item.id = item._id; });
     return value;
@@ -267,6 +301,26 @@
           if (key === "siteConfig") {
             const doc = await getDoc("siteConfig", "global");
             if (doc && state && state.siteConfig !== undefined) state.siteConfig = doc;
+            continue;
+          }
+          if (key === "financeSettings") {
+            const doc = await getDoc("financeSettings", "global");
+            if (doc && data && data.financeSettings !== undefined) data.financeSettings = { ...(data.financeSettings || {}), ...doc };
+            else if (data && data.financeSettings !== undefined) {
+              try {
+                const legacy = normalizeIds(await getColl(key));
+                const rows = Array.isArray(legacy) ? legacy : [];
+                const merged = rows.reduce((memo, row) => {
+                  if (!row || typeof row !== "object") return memo;
+                  const id = String(row.id || row._id || "");
+                  const valueKeys = Object.keys(row).filter((key) => !["id", "_id"].includes(key));
+                  if (valueKeys.length === 1 && valueKeys[0] === "value") memo[id] = row.value;
+                  else Object.assign(memo, row);
+                  return memo;
+                }, {});
+                data.financeSettings = { ...(data.financeSettings || {}), ...merged };
+              } catch (_) { /* retain initialized defaults */ }
+            }
             continue;
           }
           const value = normalizeIds(await getColl(key));
@@ -295,5 +349,5 @@
     return loadPromise;
   }
 
-  window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, orderAction, loadAdminData, mode: () => window.LXM_CLOUD_MODE };
+  window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, orderAction, afterSaleAction, merchantCodes, merchantCodeStats, generateMerchantCode, loadAdminData, mode: () => window.LXM_CLOUD_MODE };
 })();

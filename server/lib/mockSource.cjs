@@ -13,6 +13,9 @@ module.exports = function (root) {
   vm.runInContext(code, sandbox);
   const LXM = sandbox.window.LXM_DATA || {};
   const db = JSON.parse(JSON.stringify(LXM)); // 深拷贝，避免改到源文件
+  Object.keys(db).forEach((key) => {
+    if (Array.isArray(db[key])) db[key] = db[key].map((row) => row && typeof row === "object" ? { ...row, id: row.id || row._id, _id: row._id || row.id } : row);
+  });
 
   function clone(v) {
     return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
@@ -28,7 +31,7 @@ module.exports = function (root) {
     },
     async get(key, id) {
       const coll = db[key];
-      if (Array.isArray(coll)) return coll.find((x) => x && x.id === id) || null;
+      if (Array.isArray(coll)) return clone(coll.find((x) => x && String(x.id || x._id) === String(id)) || null);
       if (coll && typeof coll === "object") return clone(coll[id] || null);
       return null;
     },
@@ -47,7 +50,7 @@ module.exports = function (root) {
     async update(key, id, patch) {
       const arr = db[key];
       if (Array.isArray(arr)) {
-        const i = arr.findIndex((x) => x && x.id === id);
+        const i = arr.findIndex((x) => x && String(x.id || x._id) === String(id));
         if (i >= 0) {
           arr[i] = { ...arr[i], ...patch, id };
           return clone(arr[i]);
@@ -58,7 +61,7 @@ module.exports = function (root) {
     async remove(key, id) {
       const arr = db[key];
       if (Array.isArray(arr)) {
-        db[key] = arr.filter((x) => !(x && x.id === id));
+        db[key] = arr.filter((x) => !(x && String(x.id || x._id) === String(id)));
         return true;
       }
       return false;
@@ -74,7 +77,7 @@ module.exports = function (root) {
       if (!shopId) return { success: false, error: "缺少 shopId" };
       if (!placementLabel) return { success: false, error: "缺少位置名称" };
       if (!Array.isArray(db.merchantCodes)) db.merchantCodes = [];
-      const exist = db.merchantCodes.find((c) => c.shopId === shopId && (c.placementLabel || "").trim() === placementLabel && !c.isDeleted);
+      const exist = db.merchantCodes.find((c) => String(c.shopId || "") === String(shopId) && (c.placementLabel || "").trim() === placementLabel && isActiveMerchantCode(c));
       if (exist) {
         return { success: true, existed: true, codeId: exist._id, scene: exist.scene, placementType: exist.placementType, placementLabel: exist.placementLabel, shopId, shopName: exist.shopName, qrImage: exist.qrImage || "" };
       }
@@ -88,8 +91,8 @@ module.exports = function (root) {
       return { success: true, existed: false, codeId, scene, placementType, placementLabel, shopId, shopName, qrImage };
     },
     async listMerchantCodes(shopId = "") {
-      const list = Array.isArray(db.merchantCodes) ? db.merchantCodes.filter((c) => !c.isDeleted) : [];
-      const filtered = shopId ? list.filter((c) => c.shopId === shopId) : list;
+      const list = Array.isArray(db.merchantCodes) ? db.merchantCodes.filter((c) => isActiveMerchantCode(c)) : [];
+      const filtered = shopId ? list.filter((c) => String(c.shopId || "") === String(shopId)) : list;
       // 实时统计：订单关联交易码则计入 orderCount / dealCount
       return filtered.map((c) => {
         const orders = (db.orders || []).filter((o) => !o.deleted && (o.sourceCodeId === c._id || (o.source && o.source.codeId === c._id)));
@@ -147,6 +150,11 @@ function computeOrderStats(db) {
     byStatus[s] = (byStatus[s] || 0) + 1;
   });
   return byStatus;
+}
+
+function isActiveMerchantCode(code) {
+  return !!code && code.isDeleted !== true && code.deleted !== true
+    && !["disabled", "inactive", "expired", "停用", "失效", "已失效", "下架", "已下架"].includes(String(code.status || "").trim().toLowerCase());
 }
 
 // 演示模式：生成一张「仿真小程序码」占位图（SVG data URI）。

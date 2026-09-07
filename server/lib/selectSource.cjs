@@ -1,6 +1,7 @@
 // Select a data source. Misconfiguration is represented as an unavailable
 // source; it must never silently downgrade a production request to JSON/mock.
 const path = require("path");
+const fs = require("fs");
 const root = path.resolve(__dirname, "..", "..");
 
 function unavailableSource(mode, reason) {
@@ -40,11 +41,26 @@ function safeJsonPath(raw) {
   const candidate = path.resolve(root, raw);
   const rootPrefix = root.endsWith(path.sep) ? root : root + path.sep;
   if (candidate !== root && !candidate.startsWith(rootPrefix)) return null;
+  // Resolve an existing target before opening it so a DB_FILE symlink cannot
+  // escape the repository boundary. Non-existent files remain valid targets;
+  // the JSON adapter creates their parent directory on first write.
+  try {
+    if (fs.existsSync(candidate)) {
+      const real = fs.realpathSync(candidate);
+      if (real !== root && !real.startsWith(rootPrefix)) return null;
+    }
+  } catch (_) { return null; }
   return candidate;
 }
 
 module.exports = function selectSource() {
   const dataMode = String(process.env.DATA_MODE || "json").trim().toLowerCase();
+  const nodeEnv = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  const productionLike = ["production", "prod", "staging"].includes(nodeEnv);
+  if (productionLike && (!process.env.DATA_MODE || ["json", "mock"].includes(dataMode))) {
+    const source = unavailableSource(dataMode, "production_data_mode_required");
+    return { source, mode: dataMode, status: { configured: false, ready: false, persistent: dataMode !== "mock", error: "production_data_mode_required" } };
+  }
 
   if (dataMode === "mock") {
     try {
@@ -71,12 +87,20 @@ module.exports = function selectSource() {
   }
 
   if (dataMode === "mysql") {
+    const dbPortRaw = String(process.env.DB_PORT || "").trim();
+    if (dbPortRaw && (!/^\d+$/.test(dbPortRaw) || Number(dbPortRaw) < 1 || Number(dbPortRaw) > 65535)) {
+      const source = unavailableSource("mysql", "mysql_config_invalid");
+      return { source, mode: "mysql", status: { configured: false, ready: false, persistent: true, error: "mysql_config_invalid" } };
+    }
     const cfg = {
       backend: "mysql",
       dbHost: String(process.env.DB_HOST || "").trim(),
+      dbPort: Math.min(Math.max(Number(process.env.DB_PORT || 3306), 1), 65535),
       dbUser: String(process.env.DB_USER || "").trim(),
       dbPassword: process.env.DB_PASSWORD || "",
       dbName: String(process.env.DB_NAME || "").trim(),
+      autoMigrate: String(process.env.DB_AUTO_MIGRATE || "false").toLowerCase() === "true",
+      dbSsl: String(process.env.DB_SSL || "false").toLowerCase() === "true",
       connectTimeout: Math.min(Math.max(Number(process.env.DB_CONNECT_TIMEOUT_MS || 3000), 500), 10000)
     };
     if (!cfg.dbHost || !cfg.dbUser || !cfg.dbName) {

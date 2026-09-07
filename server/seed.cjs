@@ -69,8 +69,9 @@ async function seedKey(key) {
   const collName = realName(key);
   const raw = DATA[key];
   if (raw === undefined || raw === null) return;
-  const isStableObject = key === "siteConfig" || key === "homeConfig" || key === "config";
-  const items = isStableObject ? [{ id: key === "siteConfig" ? "global" : "homeStats", ...raw }] : (Array.isArray(raw) ? raw : [raw]);
+  const isStableObject = key === "siteConfig" || key === "homeConfig" || key === "config" || key === "financeSettings";
+  const stableId = key === "siteConfig" || key === "financeSettings" ? "global" : "homeStats";
+  const items = isStableObject ? [{ id: stableId, ...raw }] : (Array.isArray(raw) ? raw : [raw]);
   if (items.length === 0) return;
   await ensureCollection(collName);
   const coll = db.collection(collName);

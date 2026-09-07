@@ -51,6 +51,9 @@ module.exports = function (source) {
           if (key === "homeConfig" || key === "config") {
             await source.upsert(key, "homeStats", val);
             count++;
+          } else if (key === "financeSettings") {
+            await source.upsert(key, "global", val);
+            count++;
           } else if (key === "siteConfig") {
             // The mobile client and admin editor share this stable document id.
             await source.upsert(key, "global", val);

@@ -22,6 +22,7 @@
     log,
     manualOrderProducts,
     money,
+    normalizeReviewStatus,
     onMounted,
     orderFinanceReviews,
     persistOrderAction,
@@ -291,11 +292,10 @@ async function submitAfterSale() {
     if (connected && window.LXM_CLOUD?.create) {
       const saved = await window.LXM_CLOUD.create("afterSales", item);
       if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "售后工单保存失败");
-      Object.assign(item, saved, { id: saved.id || saved._id || item.id, _id: saved._id || saved.id || item.id });
-      await persistOrderAction(order, "update", {
-        fields: { afterSaleStatus: "pending", afterSaleReason: item.reason, afterSaleCreateTime: new Date().toISOString(), afterSaleId: item.id },
-        reason: `提交售后：${item.type}`
-      });
+      const savedTicket = { ...saved };
+      delete savedTicket.order;
+      Object.assign(item, savedTicket, { id: saved.id || saved._id || item.id, _id: saved._id || saved.id || item.id });
+      if (saved.order) Object.assign(order, saved.order);
     }
     data.afterSales.unshift(item);
     addOrderTimeline(order, `提交售后：${item.type} ${item.reason}`);
@@ -313,7 +313,7 @@ function openAfterSaleProcess(row) {
     action: "售后跟进",
     note: "",
     refundAmount: Number(row.refundAmount || row.amount || 0),
-    refundConfirmed: !!row.refundConfirmed || ["待财务审", "已完"].includes(row.status) || ["待审", "已审"].includes(row.financeStatus),
+    refundConfirmed: !!row.refundConfirmed || ["待财务审", "已完"].includes(row.status) || ["待审", "已审"].includes(normalizeReviewStatus(row.financeStatus)),
   };
 }
 function completeAfterSale(row) {
@@ -323,13 +323,13 @@ function completeAfterSale(row) {
     action: "处理完成",
     note: "售后问题已处理完",
     refundAmount: Number(row.refundAmount || row.amount || 0),
-    refundConfirmed: !!row.refundConfirmed || ["待财务审", "已完"].includes(row.status) || ["待审", "已审"].includes(row.financeStatus),
+    refundConfirmed: !!row.refundConfirmed || ["待财务审", "已完"].includes(row.status) || ["待审", "已审"].includes(normalizeReviewStatus(row.financeStatus)),
   };
   saveAfterSaleProcess(true);
 }
 function isAfterSaleProcessReadonly(row = state.currentAfterSale) {
   if (!row) return false;
-  return row.status === "已完" || row.status === "待财务审" || ["待审", "已审"].includes(row.financeStatus);
+  return row.status === "已完" || row.status === "待财务审" || ["待审", "已审"].includes(normalizeReviewStatus(row.financeStatus));
 }
 function confirmAfterSaleRefundAmount() {
   const row = state.currentAfterSale;
@@ -356,6 +356,8 @@ async function saveAfterSaleProcess(complete = false, confirmed = false) {
   const source = data.afterSales.find((item) => item.id === row.id);
   const order = data.orders.find((item) => item.id === row.orderId);
   if (!source || !order) return;
+  const beforeSource = JSON.parse(JSON.stringify(source));
+  const beforeOrder = JSON.parse(JSON.stringify(order));
   if (isAfterSaleProcessReadonly(source)) return ElMessage.warning("该售后已处理完成，不能再修改处理说明或退款金");
   const form = state.afterSaleProcessForm;
   if (!form.note.trim()) return ElMessage.warning("请填写售后跟进说");
@@ -402,23 +404,20 @@ async function saveAfterSaleProcess(complete = false, confirmed = false) {
   source.logs.unshift(`${currentOperatorName()} ${complete ? "处理完成" : "保存跟进记录"}：${form.note.trim()}`);
   log("售后处理", order.orderNo, `${source.type} / ${source.status} / ${form.note.trim()}`);
   const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
-  if (connected && window.LXM_CLOUD?.update) {
+  if (connected && window.LXM_CLOUD?.afterSaleAction) {
     try {
-      const saved = await window.LXM_CLOUD.update("afterSales", source.id || source._id, {
-        status: source.status,
-        customerVisibleStatus: source.customerVisibleStatus,
-        refundAmount: Number(source.refundAmount || 0),
-        refundConfirmed: !!source.refundConfirmed,
-        financeStatus: source.financeStatus || "",
-        logs: source.logs,
-        updatedAt: source.updatedAt,
+      const saved = await window.LXM_CLOUD.afterSaleAction(source.id || source._id, complete ? "complete" : "follow", {
+        refundAmount,
+        refundConfirmed: !!form.refundConfirmed,
+        reason: form.note.trim(),
       });
-      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "售后工单保存失败");
-      await persistOrderAction(order, "update", {
-        fields: { afterSaleStatus: source.status, afterSaleId: source.id || source._id },
-        reason: `售后${complete ? "处理完成" : "跟进"}：${form.note.trim()}`
-      });
+      const serverTicket = saved && (saved.ticket || saved);
+      if (!serverTicket || serverTicket.error) throw new Error(serverTicket && serverTicket.error ? serverTicket.error : "售后工单保存失败");
+      Object.assign(source, serverTicket);
+      if (saved && saved.order) Object.assign(order, saved.order);
     } catch (error) {
+      Object.assign(source, beforeSource);
+      Object.assign(order, beforeOrder);
       return ElMessage.error((error && error.message) || "售后未保存，请稍后重试");
     }
   }
@@ -429,7 +428,7 @@ async function saveAfterSaleProcess(complete = false, confirmed = false) {
   }
   ElMessage.success(complete ? "售后处理完成状态已更新" : "售后跟进记录已保存");
 }
-const financeRefundReviewRows = computed(() => afterSaleRows.value.filter((row) => Number(row.refundAmount || row.amount || 0) > 0 && row.financeStatus !== "已审"));
+const financeRefundReviewRows = computed(() => afterSaleRows.value.filter((row) => Number(row.refundAmount || row.amount || 0) > 0 && normalizeReviewStatus(row.financeStatus) !== "已审"));
 const financeReviewRows = computed(() => {
   const orderRows = scopedOrders.value.flatMap(orderFinanceReviews).filter((row) => row.status !== "未提");
   const refundRows = financeRefundReviewRows.value.map((row) => ({
@@ -471,7 +470,7 @@ const financeReviewOrderRows = computed(() => {
     ...row,
     amount: row.items.reduce((sum, item) => sum + Number(item.amount || 0), 0),
     pendingCount: row.items.filter((item) => item.status === "待审").length,
-    approvedCount: row.items.filter((item) => item.status === "已审").length,
+    approvedCount: row.items.filter((item) => normalizeReviewStatus(item.status) === "已审").length,
     rejectedCount: row.items.filter((item) => item.status === "已驳").length,
     typesText: [...new Set(row.items.map((item) => item.type))].join(""),
     itemSummary: row.items.map((item) => `${item.type} ${money(item.amount)} · ${item.status}`).join(""),
@@ -481,13 +480,13 @@ const financeReviewOrderRows = computed(() => {
 const financeReviewRecordRows = computed(() => financeReviewRows.value.filter((row) => row.status !== "待审"));
 const financeReviewSummary = computed(() => ({
   pending: financeReviewRows.value.filter((row) => row.status === "待审").length,
-  approved: financeReviewRows.value.filter((row) => row.status === "已审").length,
+  approved: financeReviewRows.value.filter((row) => normalizeReviewStatus(row.status) === "已审").length,
   rejected: financeReviewRows.value.filter((row) => row.status === "已驳").length,
   amount: financeReviewRows.value.reduce((sum, row) => sum + Number(row.amount || 0), 0),
 }));
 function reviewFinanceItem(row, approved = true) {
   if (!can("financeReview")) return ElMessage.error("当前角色无权进行财务审核");
-  if (approved && row.status === "已审") return ElMessage.warning("该记录已审核通过，不能重复通过");
+  if (approved && normalizeReviewStatus(row.status) === "已审") return ElMessage.warning("该记录已审核通过，不能重复通过");
   if (!approved && row.status === "已驳") return ElMessage.warning("该记录已驳回，不能重复驳");
   const actionText = approved ? "审核通过" : "审核驳回";
   ElMessageBox.confirm(`确认 ${row.orderNo} 的「${row.type}${actionText}」？金额：${money(row.amount)}。`, `确认${approved ? "通过" : "驳回"}财务审核`, {
@@ -499,6 +498,7 @@ function reviewFinanceItem(row, approved = true) {
 async function applyFinanceReview(row, approved = true) {
   const order = data.orders.find((item) => item.id === row.orderId);
   if (!order) return;
+  const original = JSON.parse(JSON.stringify(order));
   const status = approved ? "已审" : "已驳";
   if (row.source === "afterSale") {
     applyRefundReview(row, approved);
@@ -521,12 +521,12 @@ async function applyFinanceReview(row, approved = true) {
       await persistOrderAction(order, "update", {
         fields: {
           [row.field]: status,
-          status: order.status,
-          customerStatus: order.customerStatus,
         },
         reason: `财务审核${approved ? "通过" : "驳回"}${typeText}`,
       });
     } catch (error) {
+      Object.keys(order).forEach((key) => { if (!(key in original)) delete order[key]; });
+      Object.assign(order, original);
       return ElMessage.error((error && error.message) || "财务审核未保存，请稍后重试");
     }
   }
@@ -540,7 +540,7 @@ function openFinanceReview(row) {
 }
 function reviewRefund(row, approved = true) {
   if (!can("financeReview")) return ElMessage.error("当前角色无权审核退款");
-  if (approved && row.status === "已审") return ElMessage.warning("该记录已审核通过，不能重复通过");
+  if (approved && normalizeReviewStatus(row.status) === "已审") return ElMessage.warning("该记录已审核通过，不能重复通过");
   if (!approved && row.status === "已驳") return ElMessage.warning("该记录已驳回，不能重复驳");
   const actionText = approved ? "审核通过" : "审核驳回";
   ElMessageBox.confirm(`确认 ${row.orderNo} 的「退款审核${actionText}」？金额：${money(row.amount || row.refundAmount || 0)}。`, `确认${approved ? "通过" : "驳回"}退款审核`, {
@@ -553,6 +553,8 @@ async function applyRefundReview(row, approved = true) {
   const source = data.afterSales.find((item) => item.id === (row.afterSaleId || row.id));
   const order = data.orders.find((item) => item.id === row.orderId);
   if (!source || !order) return;
+  const beforeSource = JSON.parse(JSON.stringify(source));
+  const beforeOrder = JSON.parse(JSON.stringify(order));
   source.financeStatus = approved ? "已审" : "已驳";
   row.status = source.financeStatus;
   if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = source.financeStatus;
@@ -566,19 +568,19 @@ async function applyRefundReview(row, approved = true) {
   addOrderTimeline(order, `${approved ? "财务审核通过退" : "财务驳回退"} ${money(source.refundAmount || 0)}`);
   log("退款财务审", order.orderNo, `${approved ? "通过" : "驳回"} / ${money(source.refundAmount || 0)}`);
   const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
-  if (connected && window.LXM_CLOUD?.update) {
+  if (connected && window.LXM_CLOUD?.afterSaleAction) {
     try {
-      const saved = await window.LXM_CLOUD.update("afterSales", source.id || source._id, {
-        status: source.status,
-        financeStatus: source.financeStatus,
-        customerVisibleStatus: source.customerVisibleStatus,
-        refundAmount: Number(source.refundAmount || 0),
-        logs: source.logs,
-        updatedAt: source.updatedAt,
+      const saved = await window.LXM_CLOUD.afterSaleAction(source.id || source._id, "review", {
+        approved,
+        reason: approved ? "退款审核通过" : "退款审核驳回",
       });
-      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "退款审核保存失败");
-      await persistOrderAction(order, "update", { fields: { afterSaleStatus: source.status, afterSaleId: source.id || source._id }, reason: "退款审核状态更新" });
+      const serverTicket = saved && (saved.ticket || saved);
+      if (!serverTicket || serverTicket.error) throw new Error(serverTicket && serverTicket.error ? serverTicket.error : "退款审核保存失败");
+      Object.assign(source, serverTicket);
+      if (saved && saved.order) Object.assign(order, saved.order);
     } catch (error) {
+      Object.assign(source, beforeSource);
+      Object.assign(order, beforeOrder);
       return ElMessage.error((error && error.message) || "退款审核未保存，请稍后重试");
     }
   }

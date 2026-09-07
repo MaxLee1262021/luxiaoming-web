@@ -54,7 +54,7 @@ function openVideoSingle(row = null) {
     : { __key: "packages", id: `pkg_vs_${Date.now()}`, title: "", name: "", seriesId: (data.series[0] && data.series[0].id) || "", spotId: (data.spots[0] && data.spots[0].id) || "", cover: LXM_SVG("短视频", "封面"), videoUrl: "", previewVideoUrl: "", type: "video", productKind: "video_single", isVideoSingle: true, durationText: "", price: 0, status: "上架", isShow: true, isMainPush: false, tags: [], intro: "" };
   state.videoSingleDialog = true;
 }
-function saveVideoSingle() {
+async function saveVideoSingle() {
   const form = state.videoSingleForm;
   if (!form) return;
   if (!form.title && !form.name) return ElMessage.warning("请填写短视频名称");
@@ -64,34 +64,41 @@ function saveVideoSingle() {
   form.isVideoSingle = true;
   form.productKind = "video_single";
   const source = data.packages.find((item) => item.id === form.id);
+  const previous = source ? { ...source } : null;
+  const target = source || { ...form };
   if (source) {
     Object.assign(source, form);
-    log("编辑短视频", "短视频", form.title);
-    ElMessage.success("已保存短视频");
   } else {
-    data.packages.unshift({ ...form });
-    log("新增短视频", "短视频", form.title);
-    ElMessage.success("已新增短视频");
+    data.packages.unshift(target);
   }
+  if (isServerConnected() && !(await persistContentMutation("packages", target, previous))) {
+    if (!source) data.packages = data.packages.filter((item) => item !== target);
+    return;
+  }
+  log(source ? "编辑短视频" : "新增短视频", "短视频", form.title);
   state.videoSingleDialog = false;
-  if (isServerConnected()) pushContentToCloud("packages", source || form);
+  ElMessage.success(source ? "已保存短视频" : "已新增短视频");
 }
-function deleteVideoSingle(row) {
+async function deleteVideoSingle(row) {
   const source = data.packages.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   source.deleted = true;
+  source.isDeleted = true;
+  source.isShow = false;
   source.status = "下架";
+  if (!(await persistContentMutation("packages", source, previous))) return;
   state.trash.unshift({ id: `trash-vs-${source.id}-${Date.now()}`, type: "短视频", name: source.title || source.name, reason: "删除短视频", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
   log("删除短视频进入回收站", "短视频", source.title || source.name);
-  syncDeleteToServer("packages", source.id);
   ElMessage.success("短视频已进入回收站，可由超管恢复");
 }
-function toggleVideoSingleShelf(row) {
+async function toggleVideoSingleShelf(row) {
   const source = data.packages.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   const next = videoSingleStatus(source) === "下架";
   source.isShow = next;
   source.status = next ? "上架" : "下架";
+  if (isServerConnected() && !(await persistContentMutation("packages", source, previous))) return;
   log(next ? "短视频上架" : "短视频下架", "短视频", source.title || source.name);
-  if (isServerConnected()) pushContentToCloud("packages", source);
   ElMessage.success(`${source.title || source.name} 已${next ? "上架" : "下架"}`);
 }
 // ===== 拍摄风格：降级为分类词表管理（保留 seriesId 外键，去除内容实体属性）=====
@@ -101,22 +108,26 @@ function openSeries(row = null) {
     : { id: `ser${Date.now()}`, name: "", style: "", intro: "", cover: LXM_SVG("拍摄风格", "分类封面"), spotId: (data.spots[0] && data.spots[0].id) || "", spotIds: [(data.spots[0] && data.spots[0].id) || ""], productType: "photo", isHot: false, status: "启用" };
   state.seriesDialog = true;
 }
-function saveSeries() {
+async function saveSeries() {
   const form = state.seriesForm;
   if (!form || !form.name) return ElMessage.warning("请填写拍摄风格名称");
   const source = data.series.find((item) => item.id === form.id);
+  const previous = source ? { ...source } : null;
+  const target = source || { ...form };
   if (source) {
     Object.assign(source, form);
-    log("编辑拍摄风格", "拍摄风格", form.name);
-    ElMessage.success("已保存拍摄风格");
   } else {
-    data.series.unshift({ ...form });
-    log("新增拍摄风格", "拍摄风格", form.name);
-    ElMessage.success("已新增拍摄风格");
+    data.series.unshift(target);
   }
+  if (isServerConnected() && !(await persistContentMutation("series", target, previous))) {
+    if (!source) data.series = data.series.filter((item) => item !== target);
+    return;
+  }
+  log(source ? "编辑拍摄风格" : "新增拍摄风格", "拍摄风格", form.name);
   state.seriesDialog = false;
+  ElMessage.success(source ? "已保存拍摄风格" : "已新增拍摄风格");
 }
-function requestDeleteSeries(row) {
+async function requestDeleteSeries(row) {
   const refAlbums = data.albums.filter((a) => a.seriesId === row.id).length;
   const refPackages = data.packages.filter((p) => p.seriesId === row.id).length;
   const refVideos = (data.packages || []).filter((v) => v.isVideoSingle && v.seriesId === row.id).length;
@@ -124,21 +135,33 @@ function requestDeleteSeries(row) {
     return ElMessage.warning(`该拍摄风格仍被引用：照片单品 ${refAlbums}、套餐 ${refPackages}、短视频 ${refVideos}，不能直接删除`);
   }
   const source = data.series.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   source.deleted = true;
+  source.isDeleted = true;
   state.trash.unshift({ id: `trash-ser-${source.id}-${Date.now()}`, type: "拍摄风格", name: source.name, reason: "删除拍摄风格", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
+  if (!(await persistContentMutation("series", source, previous))) {
+    Object.assign(source, previous);
+    state.trash.shift();
+    return;
+  }
   log("删除拍摄风格进入回收站", "拍摄风格", source.name);
-  syncDeleteToServer("series", source.id);
   ElMessage.success("拍摄风格已进入回收站，可由超管恢复");
 }
 
-function requestDeleteCity(row) {
+async function requestDeleteCity(row) {
   const refShops = data.shops.filter((s) => s.cityId === row.id).length;
   const source = data.cities.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   source.deleted = true;
+  source.isDeleted = true;
   source.status = "筹备中";
   state.trash.unshift({ id: `trash-city-${source.id}-${Date.now()}`, type: "城市", name: source.name, reason: "删除城市", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
+  if (!(await persistContentMutation("cities", source, previous))) {
+    Object.assign(source, previous);
+    state.trash.shift();
+    return;
+  }
   log("删除城市进入回收站", "城市管理", source.name);
-  syncDeleteToServer("cities", source.id);
   ElMessage.success(refShops > 0 ? `城市已进入回收站（仍有 ${refShops} 个商家引用，恢复后自动归位）` : "城市已进入回收站，可由超管恢复");
 }
 
@@ -434,6 +457,31 @@ function isServerConnected() {
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   return !!(window.LXM_CLOUD && window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
 }
+async function persistContentMutation(key, source, previous = null) {
+  if (!source || !(source.id || source._id) || !isServerConnected()) return true;
+  const id = source.id || source._id;
+  const payload = { ...source, id, _id: id };
+  delete payload.__key;
+  delete payload.__source;
+  delete payload.id;
+  delete payload._id;
+  try {
+    let saved;
+    try {
+      saved = await window.LXM_CLOUD.update(key, id, payload);
+    } catch (error) {
+      if (!error || error.status !== 404) throw error;
+      saved = await window.LXM_CLOUD.create(key, payload);
+    }
+    if (!saved || saved.error) throw new Error((saved && saved.error) || "内容保存失败");
+    Object.assign(source, saved);
+    return true;
+  } catch (error) {
+    if (previous) Object.assign(source, previous);
+    ElMessage.error((error && error.message) || "内容保存失败，请稍后重试");
+    return false;
+  }
+}
 // 删除：软删除同步到服务端（小程序按 isDeleted 过滤，删除项不再展示）。失败仅告警，不影响本地回收站。
 async function syncDeleteToServer(key, id) {
   if (!isServerConnected() || !id) return;
@@ -447,11 +495,13 @@ function shelfTypeText(key, row = null) {
   if (key === "packages" && row?.type === "video") return "短视频产";
   return { albums: "照片单品", packages: "照片套餐", peripherals: "摄影周边" }[key] || "商品";
 }
-function syncShelfPrice(row) {
+async function syncShelfPrice(row) {
   if (!row?.__source) return;
+  const previous = { ...row.__source };
   row.__source.price = Number(row.shelfPrice || 0);
   if (row.__key === "packages") row.__source.specialPrice = Number(row.shelfPrice || 0);
   markProductAudit(row.__source, "调整货架价格");
+  if (!(await persistContentMutation(row.__key, row.__source, previous))) return;
   log("调整商品价格", row.name, `${shelfTypeText(row.__key, row)} ${money(row.__source.price)}`);
   ElMessage.success("商品价格已更新到货架演示数据");
 }
@@ -479,17 +529,21 @@ function applyCoverUrl(event) {
   state.editContent.cover = value;
   if (state.editContent.__key === "samples") state.editContent.url = value;
 }
-function toggleShelf(row) {
+async function toggleShelf(row) {
   if (!row?.__source) return;
+  const previous = { ...row.__source };
   row.__source.status = row.__source.isShow === false ? "下架" : "上架";
   if (row.__key === "peripherals") row.__source.enabled = row.__source.isShow !== false;
   markProductAudit(row.__source, row.__source.status === "上架" ? "商品上架" : "商品下架");
+  if (!(await persistContentMutation(row.__key, row.__source, previous))) return;
   log(row.__source.isShow === false ? "商品下架" : "商品上架", row.name, shelfTypeText(row.__key, row));
   ElMessage.success(`${row.name} ${row.__source.isShow === false ? "下架" : "上架"}`);
 }
-function saveShelfInline(row, field) {
+async function saveShelfInline(row, field) {
   if (!row?.__source) return;
+  const previous = { ...row.__source };
   markProductAudit(row.__source, `调整货架${field}`);
+  if (!(await persistContentMutation(row.__key, row.__source, previous))) return;
   log("调整商品货架", row.name, `${field}：${row.__source.tag || "-"}`);
   ElMessage.success("商品货架信息已更");
 }
@@ -520,10 +574,11 @@ function selectedShelfSources() {
   const keys = new Set(state.selectedShelfKeys || []);
   return shelfRows().filter((row) => keys.has(shelfRowKey(row)) && row.__source);
 }
-function applyShelfBatchAction(action) {
+async function applyShelfBatchAction(action) {
   const rows = selectedShelfSources();
   if (!rows.length) return ElMessage.warning("请先勾选需要批量处理的商品");
   const actionText = { on: "批量上架", off: "批量下架", main: "批量设主", tag: "批量打标", schedule: "批量配置定时" }[action] || "批量操作";
+  const originals = rows.map((row) => [row.__source, { ...row.__source }]);
   rows.forEach((row) => {
     if (action === "on") {
       row.__source.isShow = true;
@@ -538,6 +593,13 @@ function applyShelfBatchAction(action) {
     if (action === "schedule") row.__source.scheduledOnAt = row.__source.scheduledOnAt || "下个运营档期";
     markProductAudit(row.__source, actionText || "批量货架操作");
   });
+  for (const [source, previous] of originals) {
+    const row = rows.find((item) => item.__source === source);
+    if (!(await persistContentMutation(row.__key, source, previous))) {
+      originals.forEach(([target, original]) => Object.assign(target, original));
+      return;
+    }
+  }
   log(actionText, "商品货架", `${rows.length} 个商品`);
   ElMessage.success(`${actionText}已应用到 ${rows.length} 个商品`);
 }
@@ -549,10 +611,15 @@ function clearContentFilters() {
   Object.assign(state.filters, { keyword: "", contentStatus: "", contentSpotId: "", contentSeriesId: "", shelfType: "" });
   state.contentScope = { type: "", id: "" };
 }
-function uploadHomeMaterial() {
+async function uploadHomeMaterial() {
   const sample = { id: `sample${Date.now()}`, name: "首页新轮播素", type: "photo", albumId: "alb1", seriesId: "ser1", spotId: "spot1", isShowcase: true, url: LXM_SVG("首页新素", "即时预览") };
   data.samples.unshift(sample);
+  if (!(await persistContentMutation("samples", sample))) {
+    data.samples = data.samples.filter((item) => item !== sample);
+    return;
+  }
   state.homeConfig.carouselIds = [sample.id, ...(state.homeConfig.carouselIds || [])].slice(0, 6);
+  if (isServerConnected()) await saveHomeConfig();
   log("上传首页素材", "首页配置", sample.name);
   ElMessage.success("演示版已添加一张首页轮播素材");
 }
@@ -729,6 +796,7 @@ async function saveSiteConfig() {
     saveContent,
     pushContentToCloud,
     isServerConnected,
+    persistContentMutation,
     syncDeleteToServer,
     shelfTypeText,
     syncShelfPrice,

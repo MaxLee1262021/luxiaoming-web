@@ -27,6 +27,11 @@
     state
   } = ctx;
 
+async function persistMutation(key, row, previous = null) {
+  if (typeof ctx.persistContentMutation !== "function") return true;
+  return ctx.persistContentMutation(key, row, previous);
+}
+
 function contentList(key = state.active) {
   return { cities: data.cities, spots: data.spots, series: data.series, albums: data.albums, samples: data.samples, packages: data.packages, addonServices: data.addonServices, peripherals: data.peripherals, guides: data.guides, stories: data.stories }[key] || [];
 }
@@ -175,18 +180,24 @@ function markProductAudit(row, type = "商品配置变更") {
   row.auditReason = type;
   log("提交商品审核", row.name || row.title || "未命名商", type);
 }
-function submitProductAudit(row, type = "商品配置变更") {
+async function submitProductAudit(row, type = "商品配置变更") {
   const source = row?.__source || row;
+  const previous = source ? { ...source } : null;
   markProductAudit(source, type);
+  const key = row?.__key || source?.__key || (data.packages.includes(source) ? "packages" : data.albums.includes(source) ? "albums" : "peripherals");
+  if (source && !(await persistMutation(key, source, previous))) return;
   ElMessage.success("已提交商品审核，审核通过前不会作为最新正式配置发");
 }
-function reviewProductAudit(row, approved) {
+async function reviewProductAudit(row, approved) {
   const source = row?.__source || row;
   if (!source) return;
+  const previous = { ...source };
   source.auditStatus = approved ? (productStatus(source) === "上架" ? "已上" : "已下") : "驳回";
   source.auditReviewer = currentOperatorName();
   source.auditReviewedAt = LXMFormat.dateTime(new Date());
   if (!approved) source.auditRejectReason = state.auditRejectReason || "配置不符合商品运营规";
+  const key = row?.__key || source?.__key || (data.packages.includes(source) ? "packages" : data.albums.includes(source) ? "albums" : "peripherals");
+  if (!(await persistMutation(key, source, previous))) return;
   log(approved ? "商品审核通过" : "商品审核驳回", source.name || "未命名商", `${source.auditType || "商品配置变更"} / ${approved ? "通过" : source.auditRejectReason}`);
   state.auditRejectReason = "";
   ElMessage.success(approved ? "商品审核已通过" : "商品审核已驳");
@@ -253,24 +264,35 @@ function openTag(row = null) {
   state.editTag = row ? { ...row } : { id: "", name: "", category: "风格", status: "启用", sort: 100, scope: "照片单品/套餐/货架", color: "#E0662A" };
   state.tagDialog = true;
 }
-function saveTag() {
+async function saveTag() {
   const row = state.editTag;
   if (!row?.name) return ElMessage.warning("请填写标签名");
   if (!row.category) return ElMessage.warning("请选择标签分类");
   const payload = { ...row, sort: Number(row.sort || 0) };
+  let target;
+  let previous = null;
   if (payload.id) {
     const index = data.tagLibrary.findIndex((item) => item.id === payload.id);
-    if (index >= 0) Object.assign(data.tagLibrary[index], payload);
+    if (index >= 0) { target = data.tagLibrary[index]; previous = { ...target }; Object.assign(target, payload); }
+    else { target = payload; data.tagLibrary.unshift(target); }
   } else {
     payload.id = `tag${Date.now()}`;
-    data.tagLibrary.unshift(payload);
+    target = payload;
+    data.tagLibrary.unshift(target);
+  }
+  if (target && !(await persistMutation("tagLibrary", target, previous))) {
+    if (previous) Object.assign(target, previous);
+    else data.tagLibrary = data.tagLibrary.filter((item) => item !== target);
+    return;
   }
   state.tagDialog = false;
   log("保存标签", "标签管理", `${payload.category} / ${payload.name}`);
   ElMessage.success("标签已保存，套餐、照片单品、周边可统一复用");
 }
-function toggleTagStatus(row) {
+async function toggleTagStatus(row) {
+  const previous = { ...row };
   row.status = row.status === "停用" ? "启用" : "停用";
+  if (!(await persistMutation("tagLibrary", row, previous))) return;
   log(row.status === "停用" ? "停用标签" : "启用标签", "标签管理", row.name);
   ElMessage.success(`${row.name} ${row.status}`);
 }
@@ -278,29 +300,33 @@ function replaceTagUsage(row) {
   ElMessage.info(`已进入批量替换流程占位：${row.name} 当前引用 ${tagUsageCount(row.name)} 次`);
   log("批量替换标签", "标签管理", `${row.name} / ${tagUsageCount(row.name)} 次引用`);
 }
-function toggleAlbumSellable(album) {
+async function toggleAlbumSellable(album) {
   if (!album) return;
   const source = data.albums.find((item) => item.id === album.id) || album;
+  const previous = { ...source };
   const next = album.isSellable !== false;
   const linked = packagesByAlbum(album.id);
   source.isSellable = next;
   source.isShow = next;
   source.status = next ? "上架" : "下架";
   markProductAudit(source, next ? "照片单品上架售卖" : "照片单品下架售卖");
+  if (!(await persistMutation("albums", source, previous))) return;
   if (!next && linked.length) ElMessage.warning(`照片单品已下架，但仍有 ${linked.length} 个套餐引用其素材，请检查前端展示风险`);
   else ElMessage.success(`${album.name} ${next ? "开启售卖" : "下架售卖"}`);
   log(next ? "开启照片单品售卖" : "下架照片单品售卖", "照片单品", `${album.name} / 关联套餐 ${linked.length}`);
 }
-function toggleAlbumMaterialUse(album) {
+async function toggleAlbumMaterialUse(album) {
   if (!album) return;
   const source = data.albums.find((item) => item.id === album.id) || album;
+  const previous = { ...source };
   const next = album.allowMaterialUse !== false;
   source.allowMaterialUse = next;
   markProductAudit(source, next ? "开启素材展" : "关闭素材展示");
+  if (!(await persistMutation("albums", source, previous))) return;
   log(next ? "允许照片单品素材展示" : "关闭照片单品素材展示", "照片单品", album.name);
   ElMessage.success(`${album.name} ${next ? "允许套餐引用素材" : "禁止套餐引用素材"}`);
 }
-function uploadAlbumSample(album, type = "photo") {
+async function uploadAlbumSample(album, type = "photo") {
   if (!album) return;
   const sample = {
     id: `sample${Date.now()}`,
@@ -314,6 +340,10 @@ function uploadAlbumSample(album, type = "photo") {
     url: LXM_SVG(type === "video" ? "视频样片" : "图片样片", "后台上传预览"),
   };
   data.samples.unshift(sample);
+  if (!(await persistMutation("samples", sample))) {
+    data.samples = data.samples.filter((item) => item !== sample);
+    return;
+  }
   log(type === "video" ? "上传视频样片" : "上传图片样片", album.name, sample.name);
   ElMessage.success(`${sample.name} 已加"${album.name}`);
 }
@@ -324,18 +354,21 @@ async function requestDeleteAlbum(album) {
     await ElMessageBox.confirm(`删除后「${album.name}」将进入回收站，30 天内可在回收站恢复。确认删除吗？`, "删除照片单品", { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "再想想", confirmButtonClass: "el-button--danger" });
   } catch (e) { return; }
   const source = data.albums.find((item) => item.id === album.id) || album;
+  const previous = { ...source };
   source.deleted = true;
+  source.isDeleted = true;
+  source.isShow = false;
   source.status = "下架";
+  if (!(await persistMutation("albums", source, previous))) return;
   state.trash.unshift({ id: `trash${Date.now()}`, type: "照片单品", name: album.name, reason: "删除照片单品", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
   log("删除照片单品进入回收", "照片单品", album.name);
-  ctx.syncDeleteToServer("albums", album.id);
   ElMessage.success("照片单品已进入回收站，可在 30 天内恢复");
 }
 function openAlbumReplace(album = null) {
   state.albumReplaceForm = { fromAlbumId: album?.id || "", toAlbumId: "" };
   state.albumReplaceDialog = true;
 }
-function submitAlbumReplace() {
+async function submitAlbumReplace() {
   const form = state.albumReplaceForm;
   if (!form.fromAlbumId || !form.toAlbumId) return ElMessage.warning("请选择原照片单品和替换照片单品");
   if (form.fromAlbumId === form.toAlbumId) return ElMessage.warning("替换照片单品不能和原照片单品相同");
@@ -343,29 +376,39 @@ function submitAlbumReplace() {
   const toAlbum = data.albums.find((item) => item.id === form.toAlbumId);
   if (!fromAlbum || !toAlbum) return ElMessage.warning("照片单品数据不存在，请刷新后重试");
   const rows = packagesByAlbum(form.fromAlbumId);
+  const originals = rows.map((pkg) => [pkg, { ...pkg }]);
   rows.forEach((pkg) => {
     if (pkg.albumId === form.fromAlbumId) pkg.albumId = form.toAlbumId;
     if (Array.isArray(pkg.albumIds)) pkg.albumIds = pkg.albumIds.map((id) => id === form.fromAlbumId ? form.toAlbumId : id);
     pkg.spotId = pkg.spotId || toAlbum.spotId;
     pkg.seriesId = pkg.seriesId || toAlbum.seriesId;
   });
+  for (const [pkg, previous] of originals) {
+    if (!(await persistMutation("packages", pkg, previous))) {
+      originals.forEach(([target, original]) => Object.assign(target, original));
+      return;
+    }
+  }
   state.albumReplaceDialog = false;
   log("批量替换套餐绑定照片单品", "照片单品", `${fromAlbum.name} -> ${toAlbum.name} / ${rows.length} 个套餐`);
   ElMessage.success(`已替"${rows.length} 个套餐的绑定照片单品`);
 }
-function togglePeripheralShelf(row) {
+async function togglePeripheralShelf(row) {
   const source = data.peripherals.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   const next = productStatus(source) === "下架";
   source.isShow = next;
   source.enabled = source.isShow !== false;
   source.status = source.isShow === false ? "下架" : "上架";
   source.auditStatus = source.status === "上架" ? "已上" : "已下";
   markProductAudit(source, source.status === "上架" ? "周边上架" : "周边下架");
+  if (!(await persistMutation("peripherals", source, previous))) return;
   log(source.status === "上架" ? "周边上架" : "周边下架", "摄影周边", source.name);
   ElMessage.success(`${source.name} ${source.status}`);
 }
-function setPeripheralMode(row, mode) {
+async function setPeripheralMode(row, mode) {
   const source = data.peripherals.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   source.mode = mode;
   if (mode === "全城通用") {
     source.spotId = "";
@@ -373,29 +416,37 @@ function setPeripheralMode(row, mode) {
   } else if (!source.spotId) {
     source.spotId = data.spots[0]?.id || "";
   }
+  if (!(await persistMutation("peripherals", source, previous))) return;
   markProductAudit(source, "调整周边关联模式");
   log("调整周边关联模式", "摄影周边", `${source.name} / ${mode}`);
   ElMessage.success(`${source.name} 已设置为${mode}`);
 }
-function requestDeletePeripheral(row) {
+async function requestDeletePeripheral(row) {
   const summary = peripheralDependencySummary(row);
   if (!summary.canDelete) return ElMessage.warning(`该周边已"${summary.orders} 个关联订单，不能直接删除`);
   const source = data.peripherals.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   source.deleted = true;
+  source.isDeleted = true;
+  source.isShow = false;
   source.status = "下架";
+  if (!(await persistMutation("peripherals", source, previous))) return;
   state.trash.unshift({ id: `trash${Date.now()}`, type: "摄影周边", name: row.name, reason: "删除周边商品", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
   log("删除周边进入回收", "摄影周边", row.name);
   ctx.syncDeleteToServer("peripherals", row.id);
   ElMessage.success("周边商品已进入回收站");
 }
-function requestDeletePackage(row) {
+async function requestDeletePackage(row) {
   const source = data.packages.find((item) => item.id === row.id) || row;
   const orders = data.orders.filter((order) => !order.deleted && (order.products || []).some((product) => product.id === source.id));
   if (orders.length) return ElMessage.warning(`该套餐已"${orders.length} 个关联订单，不能直接删除，请先下架并保留历史订单追溯`);
+  const previous = { ...source };
   source.deleted = true;
+  source.isDeleted = true;
   source.isShow = false;
   source.status = "下架";
   source.auditStatus = "已下";
+  if (!(await persistMutation("packages", source, previous))) return;
   state.trash.unshift({
     id: `trash-package-${source.id}-${Date.now()}`,
     type: source.type === "video" ? "短视频套" : "照片套餐",
@@ -409,13 +460,15 @@ function requestDeletePackage(row) {
     source: { ...source },
   });
   log("删除套餐进入回收", "套餐设置", source.name, currentOperatorName(), { module: "内容商品", level: "", objectType: source.type === "video" ? "短视频套" : "照片套餐", objectName: source.name });
-  ctx.syncDeleteToServer("packages", source.id);
   ElMessage.success("套餐已进入回收站，可由超管恢");
 }
-function requestDeleteAddon(row) {
+async function requestDeleteAddon(row) {
   const source = data.addonServices.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   source.deleted = true;
+  source.isDeleted = true;
   source.enabled = false;
+  if (!(await persistMutation("addonServices", source, previous))) return;
   state.trash.unshift({
     id: `trash-addon-${source.id}-${Date.now()}`,
     type: "增值服",
@@ -429,13 +482,14 @@ function requestDeleteAddon(row) {
     source: { ...source },
   });
   log("删除增值服务进入回收站", "增值服", source.name, currentOperatorName(), { module: "内容商品", level: "", objectType: "增值服", objectName: source.name });
-  ctx.syncDeleteToServer("addonServices", source.id);
   ElMessage.success("增值服务已进入回收站，可由超管恢复");
 }
-function toggleAddonEnabled(row) {
+async function toggleAddonEnabled(row) {
   const source = data.addonServices.find((item) => item.id === row.id) || row;
+  const previous = { ...source };
   source.enabled = source.enabled === false;
   if (row.enabled !== undefined && row.enabled !== source.enabled) source.enabled = row.enabled;
+  if (!(await persistMutation("addonServices", source, previous))) return;
   log(source.enabled ? "启用增值服" : "停用增值服", "增值服", source.name);
   ElMessage.success(`${source.name} ${source.enabled ? "启用" : "停用"}`);
 }
@@ -528,33 +582,47 @@ function selectSpot(id) {
   state.contentScope = { type: "spot", id };
   state.filters.contentSpotId = id;
 }
-function toggleSpotVisible(spot) {
-  spot.isShow = spot.isShow === false;
-  spot.status = spot.isShow === false ? "停用" : "启用";
-  log(spot.isShow === false ? "关闭打卡点展" : "开启打卡点展示", "打卡点设", spot.name);
-  ElMessage.success(`${spot.name} ${spot.isShow === false ? "关闭展示" : "开启展示"}`);
+async function toggleSpotVisible(spot) {
+  const source = data.spots.find((item) => item.id === spot.id) || spot;
+  const previous = { ...source };
+  source.isShow = source.isShow === false;
+  source.status = source.isShow === false ? "停用" : "启用";
+  if (!(await persistMutation("spots", source, previous))) return;
+  log(source.isShow === false ? "关闭打卡点展" : "开启打卡点展示", "打卡点设", source.name);
+  ElMessage.success(`${source.name} ${source.isShow === false ? "关闭展示" : "开启展示"}`);
 }
-function batchSetSpotVisible(visible) {
+async function batchSetSpotVisible(visible) {
+  const changed = [];
   spotRows.value.forEach((spotRow) => {
     const source = data.spots.find((spot) => spot.id === spotRow.id);
     if (source) {
+      changed.push([source, { ...source }]);
       source.isShow = visible;
       source.status = visible ? "启用" : "停用";
     }
   });
+  for (const [source, previous] of changed) {
+    if (!(await persistMutation("spots", source, previous))) {
+      Object.assign(source, previous);
+      return;
+    }
+  }
   log(visible ? "批量开启打卡点展示" : "批量关闭打卡点展示", "打卡点设置", `${spotRows.value.length} 个点位`);
   ElMessage.success(`已${visible ? "开启" : "关闭"}当前筛选点位展示`);
 }
-function requestDeleteSpot(spot) {
+async function requestDeleteSpot(spot) {
   const summary = spotDependencySummary(spot);
   if (!summary.canDelete) {
     return ElMessage.warning(`该点位仍有关联数据：拍摄风格 ${summary.series}、照片单品 ${summary.albums}、商品 ${summary.products}、订单 ${summary.orders}，不能直接删除`);
   }
+  const previous = { ...spot };
   spot.deleted = true;
+  spot.isDeleted = true;
   spot.status = "停用";
+  const synced = await persistMutation("spots", spot, previous);
+  if (!synced) return;
   state.trash.unshift({ id: `trash${Date.now()}`, type: "打卡", name: spot.name, reason: "删除打卡", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...spot } });
   log("删除打卡点进入回收站", "打卡点设", spot.name);
-  ctx.syncDeleteToServer("spots", spot.id);
   ElMessage.success("打卡点已进入回收站，可在 30 天内恢复");
 }
 // ===== 短视频（独立内容类型，自包含，不进入 spots 层级 contentRows 体系）=====

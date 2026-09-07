@@ -1,6 +1,6 @@
 # Project Hub v1 API smoke（#10522）
 
-本检查是本地、可重复的后台 API 合同 smoke，不连接生产数据库、Redis、云环境或客户数据。运行器每次在项目 `server/data/`（已被 `.gitignore` 忽略）下创建临时 synthetic JSON fixture，账号密码在进程内随机生成，文件中只保存带随机盐的测试哈希；进程结束后删除临时目录。
+本检查是本地、可重复的后台 API 合同 smoke，不连接生产数据库、Redis、云环境或客户数据。运行器每次在项目 `server/data/`（已被 `.gitignore` 忽略）下创建临时 synthetic JSON fixture，账号密码在进程内随机生成，文件中只保存带随机盐的测试哈希；为验证脱敏会短暂写入明确标记的合成联系方式/身份字段，进程结束后删除整个临时目录，不包含真实客户数据。
 
 ## 运行前提
 
@@ -54,9 +54,13 @@ node scripts/api-smoke.cjs --root D:\idea\travel-photo\.worktrees\hub-v1-10520
 | 未认证负向 | 管理看板、集合读取在没有 Bearer 时返回 401 |
 | 公共 RPC | 浏览和小程序登录 RPC 不被后台 Bearer 拦截 |
 | 订单 RPC 负向 | 缺少已验证主体时不能成功读取/创建订单 |
-| 登录矩阵 | `super/service/finance/photo/merchant/distributor/content` 均能登录并返回 token、角色、账号、主体 ID |
+| 登录矩阵 | `super/service/finance/photo/merchant/distributor/agent/content` 均能登录并返回 token、角色、账号、主体 ID |
 | 权限矩阵 | 每个角色至少有一个允许路由（200）和一个拒绝路由（403）；商家、分销员、摄影师订单按自身范围过滤 |
 | 密码脱敏 | staff/shops 集合及登录、身份响应不含 `password` 字段 |
+| 联系方式与公开投影 | 渠道/摄影师订单及小程序订单列表/详情不返回联系方式别名、来源归因或内部支付字段 |
+| 工作流边界 | 通用订单/售后 PUT/DELETE、敏感状态跳转、完成/售后锁定字段、伪造来源码和下架内容均被拒绝 |
+| 财务对账边界 | 结算主体、订单归属、订单号、审核收款、退款/风控/静置期和服务端分成金额均复核，重复批次幂等拒绝 |
+| 静态资源边界 | `server/data`、`package.json`、原始 `src/mock/business-data.js` 不可通过 HTTP 读取 |
 | JSON 持久化 | 超管写入 synthetic 标记，重启服务后重新登录仍可读到该标记 |
 | Redis fail-closed | `SESSION_STORE=redis` 在缺配置、无效 URL、`REDIS_HOST/PORT/DB` 不可连接时不回落 memory |
 | MySQL fail-closed | `DATA_MODE=mysql` 缺少连接配置时不伪装成健康或降级为 JSON |

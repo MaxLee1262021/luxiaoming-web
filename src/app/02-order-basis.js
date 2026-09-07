@@ -48,8 +48,8 @@ function paid(order) {
   return Number(order?.depositPaid || 0) + Number(order?.finalPaid || 0);
 }
 function financePaid(order) {
-  const deposit = order?.depositFinanceStatus === "已审" ? Number(order.depositPaid || 0) : 0;
-  const final = order?.finalFinanceStatus === "已审" ? Number(order.finalPaid || 0) : 0;
+  const deposit = normalizeReviewStatus(order?.depositFinanceStatus) === "已审" ? Number(order.depositPaid || 0) : 0;
+  const final = normalizeReviewStatus(order?.finalFinanceStatus) === "已审" ? Number(order.finalPaid || 0) : 0;
   return deposit + final;
 }
 function orderDiscount(order) {
@@ -62,8 +62,8 @@ function finalGap(order) {
   return Math.max(expectedFinalAmount(order) - Number(order?.finalPaid || 0), 0);
 }
 function financePendingAmount(order) {
-  const deposit = order?.depositFinanceStatus === "已审" ? 0 : Number(order?.depositPaid || 0);
-  const final = order?.finalFinanceStatus === "已审" ? 0 : Number(order?.finalPaid || 0);
+  const deposit = normalizeReviewStatus(order?.depositFinanceStatus) === "已审" ? 0 : Number(order?.depositPaid || 0);
+  const final = normalizeReviewStatus(order?.finalFinanceStatus) === "已审" ? 0 : Number(order?.finalPaid || 0);
   return deposit + final;
 }
 function due(order) {
@@ -74,7 +74,7 @@ function financeDue(order) {
 }
 function confirmedRefund(order) {
   return data.afterSales
-    .filter((item) => item.orderId === order?.id && item.status === "已完" && item.financeStatus === "已审" && Number(item.refundAmount || item.amount || 0) > 0)
+    .filter((item) => item.orderId === order?.id && normalizeAfterSaleStatus(item.status) === "已完成" && normalizeReviewStatus(item.financeStatus) === "已审" && Number(item.refundAmount || item.amount || 0) > 0)
     .reduce((sum, item) => sum + Number(item.refundAmount || item.amount || 0), Number(order?.refundAmount || 0));
 }
 function retainedCancelledAmount(order) {
@@ -615,7 +615,7 @@ function orderAfterSales(order) {
   return data.afterSales.filter((item) => item.orderId === order.id);
 }
 function activeAfterSales(order) {
-  return orderAfterSales(order).filter((item) => item.status !== "已完");
+  return orderAfterSales(order).filter((item) => normalizeAfterSaleStatus(item.status) !== "已完成");
 }
 function isOrderAfterSaleLocked(order = state.currentOrder) {
   return !!order && activeAfterSales(order).length > 0;
@@ -632,17 +632,17 @@ function afterSaleBadge(order) {
 function orderFinanceStatus(order) {
   const rows = orderFinanceReviews(order);
   if (!rows.length) return "未提";
-  if (rows.some((row) => row.status === "已驳")) return "已驳";
-  if (rows.some((row) => row.status === "待审")) return "待审";
-  if (rows.every((row) => row.status === "已审")) return "已审";
+  if (rows.some((row) => normalizeReviewStatus(row.status) === "已驳")) return "已驳";
+  if (rows.some((row) => normalizeReviewStatus(row.status) === "待审")) return "待审";
+  if (rows.every((row) => normalizeReviewStatus(row.status) === "已审")) return "已审";
   return "未提";
 }
 function orderRefundStatus(order) {
   const rows = orderAfterSales(order).filter((row) => Number(row.refundAmount || row.amount || 0) > 0);
   if (!rows.length) return "无退";
-  if (rows.some((row) => row.financeStatus === "待审" || row.status === "待财务审")) return "待审";
-  if (rows.some((row) => row.financeStatus === "已驳")) return "已驳";
-  if (rows.every((row) => row.financeStatus === "已审")) return "已审";
+  if (rows.some((row) => normalizeReviewStatus(row.financeStatus) === "待审" || normalizeReviewStatus(row.status) === "待审")) return "待审";
+  if (rows.some((row) => normalizeReviewStatus(row.financeStatus) === "已驳")) return "已驳";
+  if (rows.every((row) => normalizeReviewStatus(row.financeStatus) === "已审")) return "已审";
   return "待审";
 }
 function hasTransferRecord(order) {
@@ -783,8 +783,8 @@ function orderFinanceReviews(order) {
 }
 function hasBlockingAfterSale(order) {
   return orderAfterSales(order).some((item) => {
-    if (Number(item.refundAmount || item.amount || 0) > 0) return item.financeStatus !== "已审";
-    return item.status !== "已完";
+    if (Number(item.refundAmount || item.amount || 0) > 0) return normalizeReviewStatus(item.financeStatus) !== "已审";
+    return normalizeAfterSaleStatus(item.status) !== "已完成";
   });
 }
 function hasRiskBlock(order) {
@@ -798,9 +798,23 @@ function largeSettlementThreshold() {
   const amount = Number(data.financeSettings?.largeSettlementThreshold || 5000);
   return Math.max(amount, 0);
 }
-function normalizeFinanceSettings() {
+async function normalizeFinanceSettings() {
   data.financeSettings.settlementObservationDays = settlementObservationDays();
   data.financeSettings.largeSettlementThreshold = largeSettlementThreshold();
+  const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+  const remote = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.upsertDoc
+    && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+  if (remote) {
+    try {
+      const saved = await window.LXM_CLOUD.upsertDoc("financeSettings", "global", {
+        settlementObservationDays: data.financeSettings.settlementObservationDays,
+        largeSettlementThreshold: data.financeSettings.largeSettlementThreshold,
+      });
+      if (saved && typeof saved === "object") Object.assign(data.financeSettings, saved);
+    } catch (error) {
+      return ElMessage.error((error && error.message) || "财务参数保存失败，请稍后重试");
+    }
+  }
   ElMessage.success("财务参数已更新，后续分账校验将按新参数计");
 }
 function parseBusinessTime(value) {
@@ -842,8 +856,8 @@ function canReleaseSettlementObservation(order) {
 function reconciliationBlockReasons(order, options = {}) {
   const afterSales = orderAfterSales(order);
   const observationHold = order.status === "completed" && isSettlementObservationPending(order);
-  const refundPending = afterSales.some((item) => Number(item.refundAmount || item.amount || 0) > 0 && item.financeStatus !== "已审");
-  const afterSalePending = afterSales.some((item) => item.status !== "已完成");
+  const refundPending = afterSales.some((item) => Number(item.refundAmount || item.amount || 0) > 0 && normalizeReviewStatus(item.financeStatus) !== "已审");
+  const afterSalePending = afterSales.some((item) => normalizeAfterSaleStatus(item.status) !== "已完成");
   const reasons = [];
   if (order.status !== "completed" && !isRetainedCancelledOrder(order)) reasons.push(`订单未完成：${statusMeta(order.status).label}`);
   if (auditedReceiptBase(order) < 0) reasons.push("订单实收为负");
@@ -862,10 +876,25 @@ function releaseSettlementObservation(order) {
     type: "warning",
     confirmButtonText: "确认结束静置",
     cancelButtonText: "暂不处理",
-  }).then(() => {
+  }).then(async () => {
+    const original = JSON.parse(JSON.stringify(order));
     order.settlementObservationReleased = true;
     order.settlementObservationReleasedAt = LXMFormat.nowText();
     order.settlementObservationReleasedBy = currentOperatorName();
+    try {
+      await persistOrderAction(order, "update", {
+        fields: {
+          settlementObservationReleased: true,
+          settlementObservationReleasedAt: order.settlementObservationReleasedAt,
+          settlementObservationReleasedBy: order.settlementObservationReleasedBy,
+        },
+        reason: "超管提前结束订单静置期",
+      });
+    } catch (_) {
+      Object.keys(order).forEach((key) => { if (!(key in original)) delete order[key]; });
+      Object.assign(order, original);
+      return;
+    }
     addOrderTimeline(order, `超管提前结束订单静置期，订单可按财务审核状态进入月度对账`, currentOperatorName());
     log("提前结束订单静置", order.orderNo, `${order.customer} / ${money(order.totalAmount)}`);
     if (state.reconciliationDetail.type === "observation") {
@@ -897,20 +926,20 @@ function isEstimatedReconciliationOrder(order) {
 }
 function isDepositRegistrationConfirmed(order) {
   if (!order) return false;
-  return Number(order.depositPaid || 0) > 0 && order.depositFinanceStatus === "已审";
+  return Number(order.depositPaid || 0) > 0 && normalizeReviewStatus(order.depositFinanceStatus) === "已审";
 }
 function canConfirmFinalPayment(order) {
   if (!order) return false;
   return canEditCurrentOrder()
     && expectedFinalAmount(order) > 0
     && isDepositRegistrationConfirmed(order)
-    && !["待审", "已审"].includes(order.finalFinanceStatus);
+    && !["待审", "已审"].includes(normalizeReviewStatus(order.finalFinanceStatus));
 }
 function canCompleteOrderPayment(order) {
   if (!order) return false;
   return isDepositRegistrationConfirmed(order)
     && Number(order.finalPaid || 0) > 0
-    && order.finalFinanceStatus === "已审";
+    && normalizeReviewStatus(order.finalFinanceStatus) === "已审";
 }
 
 // 登录：优先走后端 /api/auth/login（scrypt 校验，前端不持有明文密码）。
