@@ -5,7 +5,7 @@ const test = require("node:test");
 const path = require("node:path");
 const { runSmoke } = require("./api-smoke.cjs");
 
-test("Project Hub v1 API smoke contract", async () => {
+test("后台 API smoke contract", async () => {
   const root = process.env.LXM_SMOKE_ROOT ? path.resolve(process.env.LXM_SMOKE_ROOT) : undefined;
   const report = await runSmoke({ root });
   assert.equal(

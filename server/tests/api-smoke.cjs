@@ -1,6 +1,6 @@
 "use strict";
 
-// Project Hub v1 API contract smoke.  The harness owns its temporary fixture and
+// Backend API contract smoke.  The harness owns its temporary fixture and
 // never reads the repository's demo/customer data.  It intentionally uses only
 // Node built-ins so it can run on a clean deployment host.
 
@@ -276,7 +276,7 @@ function createTempFixture(root) {
   // temporary directory under ignored server/data/ and remove it in finally.
   const fixtureRoot = root ? path.join(root, "server", "data") : os.tmpdir();
   fs.mkdirSync(fixtureRoot, { recursive: true });
-  const dir = fs.mkdtempSync(path.join(fixtureRoot, ".project-hub-10522-"));
+  const dir = fs.mkdtempSync(path.join(fixtureRoot, ".api-smoke-"));
   const file = path.join(dir, "db.json");
   const envFile = path.join(dir, ".env");
   const staticSentinel = path.join(dir, "static-sentinel.txt");

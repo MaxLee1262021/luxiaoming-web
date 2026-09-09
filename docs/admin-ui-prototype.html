@@ -1093,7 +1093,7 @@ function guideEditorHTML(){
   <div class="note">📖 <span><b>攻略 = 旅拍灵感内容</b>（非商品）：发布到小程序「旅拍灵感」板块，可按分类管理、置顶、设状态。左侧选攻略、中间改字段、<b>右侧手机实时预览</b>客人看到的样子。</span></div>
   <div class="album-editor"><div class="ae-list"><div class="head"><span style="font-weight:700;font-size:13px">攻略管理（${GUIDES.length}）</span><button class="btn btn-sm btn-primary" onclick="openCreate('guide')">＋ 新建</button></div>${list}</div>
     <div class="ae-form">${guideFormHTML(p)}</div>
-    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="gdPreviewInner">${renderGuidePreview()}</div></div></div></div>`;
+    <div class="ae-preview"><div class="sectitle" style="text-align:center">📱 小程序预览（实时）</div><div class="phone"><div class="phone-screen" id="guidePreviewInner">${renderGuidePreview()}</div></div></div></div>`;
 }
 function guideFormHTML(p){
   const catOpts=['机位路线','拍摄技巧','风格灵感','穿搭','避坑'];
@@ -1122,7 +1122,7 @@ function renderGuidePreview(){
     <div class="pd-notes"><b>摘要：</b>${esc(p.description||'—')}</div>`;
 }
 function selectGuide(id){ GD_SEL=id; gotoView('guides'); }
-function updateGuide(prop,val){ const p=GUIDES.find(x=>x.id===GD_SEL); if(!p) return; p[prop]=(prop==='readCount')?(Number(val)||0):val; const el=document.getElementById('gdPreviewInner'); if(el) el.innerHTML=renderGuidePreview(); if(REMOTE) remoteWrite('guides', p.id, {[prop]:p[prop]}); }
+function updateGuide(prop,val){ const p=GUIDES.find(x=>x.id===GD_SEL); if(!p) return; p[prop]=(prop==='readCount')?(Number(val)||0):val; const el=document.getElementById('guidePreviewInner'); if(el) el.innerHTML=renderGuidePreview(); if(REMOTE) remoteWrite('guides', p.id, {[prop]:p[prop]}); }
 function toggleGuide(prop){ const p=GUIDES.find(x=>x.id===GD_SEL); if(p){ p[prop]=!p[prop]; if(REMOTE) remoteWrite('guides', p.id, {[prop]:p[prop]}); } selectGuide(GD_SEL); }
 
 /* ===================== 打卡点编辑器（无价格 / 无上架） ===================== */

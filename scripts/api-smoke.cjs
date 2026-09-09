@@ -17,7 +17,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   process.stdout.write([
-    "Project Hub v1 API smoke",
+    "后台 API smoke",
     "",
     "Usage:",
     "  node scripts/api-smoke.cjs [--root <project-root>] [--json]",
