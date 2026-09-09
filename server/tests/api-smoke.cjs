@@ -398,7 +398,9 @@ async function waitForHealth(baseUrl, child, timeoutMs = DEFAULT_START_TIMEOUT_M
       return { ready: false, exited: true, exitCode: child.exitCode, diagnostic: sanitizeDiagnostic(lastError) };
     }
     try {
-      const result = await requestJson(baseUrl, "/api/health", { timeoutMs: 350 });
+      // Redis fail-closed health may spend up to the configured connect timeout
+      // before returning 503; keep the probe from racing that response.
+      const result = await requestJson(baseUrl, "/api/health", { timeoutMs: 1200 });
       if (result.status) return { ready: true, health: result };
     } catch (error) {
       lastError = error && error.message;
