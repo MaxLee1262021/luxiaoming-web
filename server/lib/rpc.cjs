@@ -207,7 +207,174 @@ function normalizeTags(item) {
   return [];
 }
 
-function isVideoProduct(item) { return item && (item.serviceType === "video" || item.type === "video" || item.productType === "video"); }
+function isVideoProduct(item) {
+  if (!item || typeof item !== "object") return false;
+  const values = [item.serviceType, item.type, item.productType, item.productKind, item.category]
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => String(value).trim().toLowerCase());
+  return values.some((value) => /video|短视频|视频/.test(value));
+}
+
+function boolValue(value) {
+  return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true";
+}
+
+function packageIsMainPush(item = {}) {
+  return boolValue(item.isMainPush) || boolValue(item.mainPush) || boolValue(item.isFeatured);
+}
+
+function packageIsHot(item = {}) {
+  return boolValue(item.isHot) || boolValue(item.isHotSale) || boolValue(item.hot);
+}
+
+function firstNonEmpty(...values) {
+  return values.find((value) => value !== undefined && value !== null && String(value).trim() !== "");
+}
+
+function packageSpotIds(item = {}) {
+  const values = [];
+  if (Array.isArray(item.spotIds)) values.push(...item.spotIds);
+  if (item.spotId !== undefined && item.spotId !== null && item.spotId !== "") values.push(item.spotId);
+  return [...new Set(values.filter((value) => value !== undefined && value !== null && String(value) !== "").map(String))];
+}
+
+function packageItemType(item = {}) {
+  const target = item.target && typeof item.target === "object" ? item.target : {};
+  const raw = String(item.type || item.productType || item.category || target.page || "").trim().toLowerCase();
+  if (/video|视频/.test(raw)) return "video";
+  if (/peripheral|accessor|周边|相册|实物/.test(raw) && !/photo|照片/.test(raw)) return "peripheral";
+  if (/album|photo|照片|写真|拍照|collection/.test(raw)) return "album";
+  if (target.page === "videoProductDetail") return "video";
+  if (target.page === "peripheral") return "peripheral";
+  if (target.page === "photoCollection") return "album";
+  return item.type || item.productType || "service";
+}
+
+function normalizePackageIncludedItems(item = {}, context = {}) {
+  const declared = [];
+  const primary = Array.isArray(item.includedItems) ? item.includedItems : [];
+  const alias = Array.isArray(item.items) ? item.items : [];
+  const length = Math.max(primary.length, alias.length);
+  for (let index = 0; index < length; index += 1) {
+    const merged = { ...(alias[index] && typeof alias[index] === "object" ? alias[index] : {}), ...(primary[index] && typeof primary[index] === "object" ? primary[index] : {}) };
+    if (!Object.keys(merged).length) {
+      const value = primary[index] !== undefined ? primary[index] : alias[index];
+      if (value !== undefined && value !== null) merged.name = String(value);
+    }
+    declared.push(merged);
+  }
+
+  const albums = Array.isArray(context.albums) ? context.albums : [];
+  const videos = Array.isArray(context.videos) ? context.videos : [];
+  const peripherals = Array.isArray(context.peripherals) ? context.peripherals : [];
+  const findById = (rows, id) => rows.find((row) => row && String(getItemId(row)) === String(id || ""));
+  const normalized = declared.map((raw) => {
+    const type = packageItemType(raw);
+    const target = raw.target && typeof raw.target === "object" && !Array.isArray(raw.target) ? { ...raw.target } : {};
+    const directId = raw.productId || raw.albumId || raw.peripheralId || raw.videoId || target.productId || target.albumId || target.peripheralId || "";
+    const related = type === "album" ? findById(albums, raw.albumId || target.albumId || directId)
+      : type === "video" ? findById(videos, raw.productId || raw.videoId || target.productId || directId)
+        : type === "peripheral" ? findById(peripherals, raw.peripheralId || target.peripheralId || target.id || directId) : null;
+    const id = directId || (related && getItemId(related)) || "";
+    const result = {
+      ...raw,
+      type,
+      name: String(firstNonEmpty(raw.name, raw.title, related && (related.name || related.title)) || "未命名产品"),
+      price: raw.price !== undefined && raw.price !== null && raw.price !== ""
+        ? Number(raw.price)
+        : (related && Number(related.specialPrice || related.price || 0)) || 0,
+      cover: firstNonEmpty(raw.cover, raw.image, related && normalizeImage(related)) || "/images/placeholder.png",
+      target
+    };
+    if (type === "album") {
+      if (id && !result.albumId) result.albumId = id;
+      if (id && !target.albumId) target.albumId = id;
+      if (!target.seriesId) target.seriesId = raw.seriesId || (related && related.seriesId) || item.seriesId || "";
+      if (!target.spotId) target.spotId = raw.spotId || (related && related.spotId) || item.spotId || "";
+      target.page = target.page || "photoCollection";
+    } else if (type === "video") {
+      if (id && !result.productId) result.productId = id;
+      if (id && !target.productId) target.productId = id;
+      if (!target.seriesId) target.seriesId = raw.seriesId || (related && related.seriesId) || item.seriesId || "";
+      if (!target.spotId) target.spotId = raw.spotId || (related && related.spotId) || item.spotId || "";
+      target.page = target.page || "videoProductDetail";
+    } else if (type === "peripheral") {
+      if (id && !result.peripheralId) result.peripheralId = id;
+      if (id && !target.peripheralId) target.peripheralId = id;
+      // The mini-program's peripheral route historically reads target.id;
+      // keep it as an alias alongside the canonical peripheralId.
+      if (id && !target.id) target.id = id;
+      target.page = target.page || "peripheral";
+    }
+    return result;
+  });
+
+  // Older seeded packages only carry albumId. Materialize one navigable item
+  // so the public detail page still has useful package content before an
+  // operator opens the advanced editor and adds explicit includedItems.
+  if (!normalized.length && item.albumId) {
+    const album = findById(albums, item.albumId);
+    const albumId = String(item.albumId);
+    normalized.push({
+      type: "album",
+      name: String(firstNonEmpty(album && album.name, "照片留影")),
+      price: Number(album && (album.specialPrice || album.price) || 0),
+      cover: firstNonEmpty(album && normalizeImage(album), "/images/placeholder.png"),
+      albumId,
+      target: {
+        page: "photoCollection",
+        albumId,
+        seriesId: String(firstNonEmpty(item.seriesId, album && album.seriesId) || ""),
+        spotId: String(firstNonEmpty(item.spotId, album && album.spotId) || "")
+      }
+    });
+  }
+  return normalized;
+}
+
+function normalizePublicPackage(item = {}, context = {}) {
+  const source = item && typeof item === "object" ? item : {};
+  const id = getItemId(source);
+  const video = isVideoProduct(source);
+  const tags = [...new Set(normalizeTags(source).map((tag) => String(tag).trim()).filter(Boolean))];
+  const spotIds = packageSpotIds(source);
+  const description = String(firstNonEmpty(source.description, source.intro, source.desc) || "");
+  const includedItems = normalizePackageIncludedItems(source, context);
+  const serviceText = tags.join(" ");
+  const durationMatch = serviceText.match(/(?:拍摄|时长)\s*(\d+)\s*分钟/);
+  const retouchMatch = serviceText.match(/精修\s*(\d+)\s*张/);
+  const videoDurationMatch = serviceText.match(/(?:视频|成片)\s*(\d+)\s*(?:秒|s)/i);
+  const videoCountMatch = serviceText.match(/(\d+)\s*条/);
+  const mainPush = packageIsMainPush(source);
+  const hot = packageIsHot(source);
+  const normalized = {
+    ...source,
+    id,
+    _id: id,
+    type: source.type || (video ? "video" : "photo"),
+    serviceType: source.serviceType || (video ? "video" : "photo"),
+    productType: source.productType || (video ? "video" : "photo"),
+    spotId: String(firstNonEmpty(source.spotId, spotIds[0]) || ""),
+    spotIds,
+    intro: description,
+    description,
+    tags: tags.slice(),
+    serviceTags: tags.slice(),
+    includedItems: includedItems.map((value) => ({ ...value, target: value.target ? { ...value.target } : value.target })),
+    items: includedItems.map((value) => ({ ...value, target: value.target ? { ...value.target } : value.target })),
+    isMainPush: mainPush,
+    mainPush,
+    isFeatured: source.isFeatured === undefined ? mainPush : boolValue(source.isFeatured),
+    isHot: hot,
+    isHotSale: source.isHotSale === undefined ? hot : boolValue(source.isHotSale),
+    cover: normalizeImage(source)
+  };
+  if (normalized.duration === undefined && durationMatch) normalized.duration = Number(durationMatch[1]);
+  if (normalized.retouchCount === undefined && retouchMatch) normalized.retouchCount = Number(retouchMatch[1]);
+  if (video && normalized.videoDuration === undefined && videoDurationMatch) normalized.videoDuration = Number(videoDurationMatch[1]);
+  if (video && normalized.finishedVideoCount === undefined && videoCountMatch) normalized.finishedVideoCount = Number(videoCountMatch[1]);
+  return normalized;
+}
 
 function filterMediaByPackage(mediaList, currentPackage) {
   if (!currentPackage) return mediaList;
@@ -626,7 +793,9 @@ async function rpcGetHomeData(source, data = {}) {
     const rawPackages = (await source.list("packages")).filter(isVisibleSimple)
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 100);
     const albums = (await source.list("albums")).filter(isVisibleSimple);
+    const allPeripherals = (await source.list("peripherals")).filter(isVisibleSimple);
     const configuredAlbums = pickConfiguredList(albums, recommendations.featuredAlbumIds || recommendations.albumIds, 20);
+    const packageContext = { albums, videos: rawPackages, peripherals: allPeripherals };
 
     const albumCountMap = {};
     configuredAlbums.forEach(a => { if (a.seriesId) albumCountMap[a.seriesId] = (albumCountMap[a.seriesId] || 0) + 1; });
@@ -637,16 +806,26 @@ async function rpcGetHomeData(source, data = {}) {
       return { ...item, albumCount: albumCountMap[item._id] || 0, firstSpotName: firstSpot ? firstSpot.name : "", spotCount: spotIds.length, packageCount };
     });
 
-    const packages = pickConfiguredList(rawPackages, recommendations.hotPackageIds || recommendations.packageIds, 20);
+    const packageRows = pickConfiguredList(rawPackages, recommendations.hotPackageIds || recommendations.packageIds, 20)
+      .map((item) => normalizePublicPackage(item, packageContext));
+    const configuredHotIds = Array.isArray(recommendations.hotPackageIds) ? recommendations.hotPackageIds : [];
+    const hotSource = configuredHotIds.length
+      ? pickConfiguredList(rawPackages, configuredHotIds, 20)
+      : (rawPackages.filter((item) => packageIsHot(item) || packageIsMainPush(item)).length
+        ? rawPackages.filter((item) => packageIsHot(item) || packageIsMainPush(item))
+        : rawPackages);
+    const hotPackages = hotSource.filter((item) => !isVideoProduct(item)).slice(0, 20)
+      .map((item) => normalizePublicPackage(item, packageContext));
     // 短视频单品（独立商品种类）随首页一并下发，小程序端与 getVideoSingles 同源合并
-    const videoSingles = rawPackages.filter(isVideoSingleProduct).slice(0, 50).map(normalizeVideoSinglePackage);
+    const videoSingles = rawPackages.filter(isVideoSingleProduct).slice(0, 50)
+      .map((item) => normalizeVideoSinglePackage(normalizePublicPackage(item, packageContext)));
 
     const guides = pickConfiguredList(
       (await source.list("guides")).filter(isVisibleSimple).sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || ""))).slice(0, 20),
       recommendations.guideIds, 8
     );
     const peripherals = pickConfiguredList(
-      (await source.list("peripherals")).filter(isVisibleSimple).slice(0, 20),
+      allPeripherals.slice(0, 20),
       recommendations.peripheralIds, 8
     );
 
@@ -666,7 +845,8 @@ async function rpcGetHomeData(source, data = {}) {
       spots: publicContentRow(spots),
       series: publicContentRow(series),
       albums: publicContentRow(configuredAlbums),
-      packages: publicContentRow(packages),
+      packages: publicContentRow(packageRows),
+      hotPackages: publicContentRow(hotPackages),
       videoSingles: publicContentRow(videoSingles),
       guides: publicContentRow(guides),
       peripherals: publicContentRow(peripherals),
@@ -712,6 +892,8 @@ async function rpcGetBookingData(source) {
     const allPackages = (await source.list("packages")).filter(isVisibleSimple);
     const albums = (await source.list("albums")).filter(isVisibleSimple);
     const photos = (await source.list("samples")).filter(isVisibleSimple);
+    const peripherals = (await source.list("peripherals")).filter(isVisibleSimple);
+    const packageContext = { albums, videos: allPackages, peripherals };
     const albumCountMap = {};
     albums.forEach(a => { if (a.seriesId) albumCountMap[a.seriesId] = (albumCountMap[a.seriesId] || 0) + 1; });
     const photoCountMap = {};
@@ -722,8 +904,19 @@ async function rpcGetBookingData(source) {
       packageCount: allPackages.filter((p) => String(p.seriesId || "") === String(getItemId(s)) || (Array.isArray(s.packageIds) && s.packageIds.map(String).includes(String(getItemId(p))))).length,
       firstSpotName: (() => { if (s.spotIds && s.spotIds.length) { const sp = spots.find(x => x._id === s.spotIds[0]); return sp ? sp.name : ""; } return ""; })()
     }));
-    const hotPackages = allPackages.filter(p => p.isHot || p.isMainPush || p.mainPush);
-    return { success: true, data: { spots: publicContentRow(spots), allSeries: publicContentRow(allSeries), albums: publicContentRow(albums), hotPackages: publicContentRow(hotPackages), allPackages: publicContentRow(allPackages) } };
+    const packageRows = allPackages.map((item) => normalizePublicPackage(item, packageContext));
+    const hotPackages = allPackages.filter((item) => packageIsHot(item) || packageIsMainPush(item))
+      .map((item) => normalizePublicPackage(item, packageContext));
+    return { success: true, data: {
+      spots: publicContentRow(spots),
+      allSeries: publicContentRow(allSeries),
+      albums: publicContentRow(albums),
+      hotPackages: publicContentRow(hotPackages),
+      allPackages: publicContentRow(packageRows),
+      packages: publicContentRow(packageRows),
+      allPeripherals: publicContentRow(peripherals),
+      peripherals: publicContentRow(peripherals)
+    } };
   } catch (err) {
     return { success: false, error: publicRpcError(err) };
   }
@@ -773,7 +966,7 @@ async function rpcGetSeriesDetail(source, data = {}) {
     const series = await source.get("series", seriesId);
     if (!series || !isVisibleSimple(series)) return { success: false, error: "系列不存在" };
 
-    const seriesSpotIds = Array.isArray(series.spotIds) ? series.spotIds : (series.spotId ? [series.spotId] : []);
+    const seriesSpotIds = packageSpotIds(series);
     const currentSpotId = spotId || seriesSpotIds[0] || "";
 
     let spots = [];
@@ -794,17 +987,23 @@ async function rpcGetSeriesDetail(source, data = {}) {
 
     const allPackages = (await source.list("packages")).filter(isVisibleSimple)
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0));
-    const mainPushPackages = allPackages.filter(p => p.isMainPush === true || p.isFeatured === true)
-      .map(p => ({ ...p, serviceTags: normalizeTags(p), cover: normalizeImage(p) }));
-    const mainPushIds = mainPushPackages.map(p => p._id);
-    const spotPackages = allPackages.filter(p => {
-      const belongs = p.spotId === currentSpotId || (Array.isArray(p.spotIds) && p.spotIds.includes(currentSpotId));
-      return belongs && !mainPushIds.includes(p._id);
-    }).map(p => ({ ...p, serviceTags: normalizeTags(p), cover: normalizeImage(p) }));
-    const seriesPackages = allPackages.filter(p => String(p.seriesId || "") === String(seriesId) || (Array.isArray(series.packageIds) && series.packageIds.map(String).includes(String(getItemId(p)))))
-      .map(p => ({ ...p, serviceTags: normalizeTags(p), cover: normalizeImage(p) }));
-    if (currentPackage && !seriesPackages.some(p => p._id === currentPackage._id)) {
-      seriesPackages.unshift({ ...currentPackage, serviceTags: normalizeTags(currentPackage), cover: normalizeImage(currentPackage) });
+    const [allVisibleAlbums, allPeripherals] = await Promise.all([
+      source.list("albums").then((rows) => rows.filter(isVisibleSimple)),
+      source.list("peripherals").then((rows) => rows.filter(isVisibleSimple))
+    ]);
+    const packageContext = { albums: allVisibleAlbums, videos: allPackages, peripherals: allPeripherals };
+    const packageRows = allPackages.map((item) => normalizePublicPackage(item, packageContext));
+    const currentPackageRow = currentPackage ? normalizePublicPackage(currentPackage, packageContext) : null;
+    const mainPushIds = new Set(packageRows.filter(packageIsMainPush).map((item) => getItemId(item)));
+    const mainPushPackages = packageRows.filter(packageIsMainPush);
+    const spotPackages = packageRows.filter((item) => {
+      const belongs = currentSpotId && packageSpotIds(item).includes(String(currentSpotId));
+      return belongs && !mainPushIds.has(getItemId(item));
+    });
+    const configuredSeriesPackageIds = new Set((Array.isArray(series.packageIds) ? series.packageIds : []).map(String));
+    const seriesPackages = packageRows.filter((item) => String(item.seriesId || "") === String(seriesId) || configuredSeriesPackageIds.has(String(getItemId(item))));
+    if (currentPackageRow && !seriesPackages.some((item) => getItemId(item) === getItemId(currentPackageRow))) {
+      seriesPackages.unshift(currentPackageRow);
     }
 
     const prices = [...albums.map(a => Number(a.price || 0)), ...mainPushPackages.map(p => Number(p.price || 0)), ...spotPackages.map(p => Number(p.price || 0))].filter(p => p > 0);
@@ -815,7 +1014,7 @@ async function rpcGetSeriesDetail(source, data = {}) {
       success: true,
       data: {
         series: publicContentRow({ ...series, cover: normalizeImage(series), styles: seriesStyles, minPrice: prices.length ? Math.min(...prices) : (series.minPrice || 0), maxPrice: prices.length ? Math.max(...prices) : (series.maxPrice || 0) }),
-        currentPackage: currentPackage ? publicContentRow({ ...currentPackage, serviceTags: normalizeTags(currentPackage), cover: normalizeImage(currentPackage) }) : null,
+        currentPackage: currentPackageRow ? publicContentRow(currentPackageRow) : null,
         currentSpotId,
         spots: publicContentRow(spots),
         samples: publicContentRow(filterMediaByPackage(samples, currentPackage)),
@@ -833,7 +1032,7 @@ async function rpcGetSeriesDetail(source, data = {}) {
 }
 
 function buildPackageOnlyResponse(currentPackage, spotId = "") {
-  const normalizedPackage = { ...currentPackage, serviceTags: normalizeTags(currentPackage), cover: normalizeImage(currentPackage) };
+  const normalizedPackage = normalizePublicPackage(currentPackage);
   const safePackage = publicContentRow(normalizedPackage);
   const price = Number(currentPackage.price || 0);
   return {
@@ -875,10 +1074,11 @@ async function rpcGetPhotoCollection(source, data = {}) {
     const series = await source.get("series", seriesId);
     if (!series || !isVisibleSimple(series)) return { success: false, error: "系列不存在" };
 
+    const seriesSpotIds = packageSpotIds(series);
     let spots = [];
-    if (series.spotIds && series.spotIds.length) {
+    if (seriesSpotIds.length) {
       const allSpots = await source.list("spots");
-      spots = series.spotIds.map(id => allSpots.find(s => isVisibleSimple(s) && String(getItemId(s)) === String(id))).filter(Boolean).map(s => ({ _id: getItemId(s), name: s.name }));
+      spots = seriesSpotIds.map(id => allSpots.find(s => isVisibleSimple(s) && String(getItemId(s)) === String(id))).filter(Boolean).map(s => ({ _id: getItemId(s), name: s.name }));
     }
     series.spots = spots;
 
@@ -886,25 +1086,28 @@ async function rpcGetPhotoCollection(source, data = {}) {
     series.samples = samplesAll.filter(s => s.isShowcase).slice(0, 5);
     const photos = samplesAll.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || "")));
 
-    const packagesAll = await source.list("packages");
+    const packagesAll = (await source.list("packages")).filter(isVisibleSimple);
+    const albums = (await source.list("albums")).filter(isVisibleSimple);
+    const peripherals = (await source.list("peripherals")).filter(isVisibleSimple);
+    const packageContext = { albums, videos: packagesAll, peripherals };
+    const publicPackages = packagesAll.map((item) => normalizePublicPackage(item, packageContext));
     const configuredPackageIds = new Set((Array.isArray(series.packageIds) ? series.packageIds : []).map(String));
-    const packages = packagesAll.filter((p) => isVisibleSimple(p) && (String(p.seriesId || "") === String(seriesId) || configuredPackageIds.has(String(getItemId(p)))));
-    let featuredPackages = packagesAll.filter(p => p.isFeatured === true && isVisibleSimple(p))
+    const packages = publicPackages.filter((p) => String(p.seriesId || "") === String(seriesId) || configuredPackageIds.has(String(getItemId(p))));
+    const featuredPackages = publicPackages.filter((p) => packageIsMainPush(p) || packageIsHot(p))
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     let spotPackages = [];
-    if (series.spotIds && series.spotIds.length) {
-      const targetSpotId = spotId || series.spotIds[0];
-      spotPackages = packagesAll.filter(p => String(p.spotId || "") === String(targetSpotId) && isVisibleSimple(p))
+    if (seriesSpotIds.length) {
+      const targetSpotId = spotId || seriesSpotIds[0];
+      spotPackages = publicPackages.filter((p) => packageSpotIds(p).includes(String(targetSpotId)))
         .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     }
-    const albums = await source.list("albums");
     const firstAlbum = albums.find(a => a.seriesId === seriesId && isVisibleSimple(a));
     const albumPrice = firstAlbum ? (firstAlbum.price || 0) : 0;
 
     const collection = {
       seriesId: series._id, seriesName: series.name || "", intro: series.intro || "",
       spotName: photos.length ? (photos[0].spotName || "") : (spots.length ? spots[0].name : ""),
-      spotId: series.spotIds ? series.spotIds[0] : "",
+      spotId: seriesSpotIds[0] || "",
       albumId: "", coverImage: photos.length ? photos[0].url : (series.cover || "/images/placeholder.png"),
       sampleUrls: photos.map(p => p.url), photoCount: photos.length, price: albumPrice
     };

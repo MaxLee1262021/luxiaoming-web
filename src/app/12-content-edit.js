@@ -343,9 +343,16 @@ async function saveContent() {
     payload.specialPrice = Number(payload.specialPrice || payload.price || 0);
     payload.serviceType = payload.type || "photo";
     payload.productType = payload.type || "photo";
-    // 详情说明：小程序读 description（与周边保持一致），intro 仅为占位兼容旧数据
-    payload.description = payload.description ?? payload.intro ?? "";
-    delete payload.intro;
+    // Keep both field names in sync. Older JSON data and the compact package
+    // editor still use intro, while the mini-program detail reads description.
+    payload.description = String(payload.description || payload.intro || "").trim();
+    payload.intro = payload.description;
+    const packageSpotIds = [
+      ...(Array.isArray(payload.spotIds) ? payload.spotIds : []),
+      payload.spotId
+    ].filter(Boolean).map(String);
+    payload.spotIds = [...new Set(packageSpotIds)];
+    payload.spotId = String(payload.spotId || payload.spotIds[0] || "");
     if (payload.type !== "video" || payload.productKind !== "video_single") {
       delete payload.videoUrl;
       delete payload.previewVideoUrl;
@@ -367,7 +374,9 @@ async function saveContent() {
           item.target = { page: "videoProductDetail", productId: v ? v.id : currentTarget.productId || item.productId || "", seriesId: v ? v.seriesId : currentTarget.seriesId || item.seriesId || "", spotId: v ? (v.spotId || (v.spotIds || [])[0]) : currentTarget.spotId || item.spotId || "" };
         } else if (item.type === "peripheral") {
           const p = (data.peripherals || []).find((x) => x.id === (currentTarget.peripheralId || item.peripheralId || currentTarget.productId || item.productId) || x.name === item.name);
-          item.target = { page: "peripheral", peripheralId: p ? p.id : currentTarget.peripheralId || item.peripheralId || currentTarget.productId || item.productId || "" };
+          const peripheralId = p ? p.id : currentTarget.peripheralId || item.peripheralId || currentTarget.productId || item.productId || "";
+          item.target = { page: "peripheral", id: peripheralId, peripheralId };
+          item.peripheralId = peripheralId;
         }
         return item;
       });
@@ -410,24 +419,39 @@ async function saveContent() {
     payload.originalPrice = undefined;
     payload.specialPrice = undefined;
   }
-  if (payload.id) {
-    const index = target.findIndex((item) => item.id === payload.id);
-    if (index >= 0) Object.assign(target[index], payload);
-    if (["packages", "albums", "peripherals"].includes(key)) markProductAudit(target[index], "商品资料编辑");
-  } else {
+  const isNew = !payload.id;
+  if (isNew) {
     payload.id = `${key}${Date.now()}`;
+    payload._id = payload.id;
     if (["packages", "albums", "peripherals"].includes(key)) {
       payload.auditStatus = "待审";
       payload.auditType = "新增商品";
       payload.auditSubmitAt = LXMFormat.dateTime(new Date());
       payload.auditSubmitter = currentOperatorName();
     }
+  } else if (["packages", "albums", "peripherals"].includes(key)) {
+    payload.auditStatus = "待审";
+    payload.auditType = "商品资料编辑";
+    payload.auditSubmitAt = LXMFormat.dateTime(new Date());
+    payload.auditSubmitter = currentOperatorName();
+    payload.auditReason = "商品资料编辑";
+  }
+  let persisted = payload;
+  if (isServerConnected()) {
+    persisted = await pushContentToCloud(key, payload);
+    if (!persisted) return;
+    Object.assign(payload, persisted);
+  }
+  if (!isNew) {
+    const index = target.findIndex((item) => item.id === payload.id);
+    if (index >= 0) Object.assign(target[index], payload);
+  } else {
     target.unshift(payload);
   }
   state.contentDialog = false;
   log("保存内容", activeMenu.value.label, payload.name || payload.title);
   if (isServerConnected()) {
-    await pushContentToCloud(key, payload);
+    ElMessage.success("内容已同步到服务端，小程序将读取最新内容");
   } else {
     ElMessage.success("内容已保存到本地（未连接服务端，启动后台后将自动同步）");
   }
@@ -449,10 +473,11 @@ async function pushContentToCloud(key, payload) {
       res = await window.LXM_CLOUD.create(key, doc);
     }
     if (res && res.error) throw new Error(res.error);
-    if (res && res._id) payload.id = res._id;
-    ElMessage.success("内容已同步到服务端（小程序将读取最新内容）");
+    const id = String((res && (res.id || res._id)) || payload.id || "");
+    return { ...payload, ...(res && typeof res === "object" ? res : {}), id, _id: id };
   } catch (e) {
-    ElMessage.warning("已本地保存，但同步服务端失败：" + (e && e.message ? e.message : e));
+    ElMessage.error("服务端保存失败，未修改本地内容：" + (e && e.message ? e.message : e));
+    return null;
   }
 }
 // 是否已连接自托管/云服务端（/api/health 返回的 mode 不是 mock 即视为已连接）。

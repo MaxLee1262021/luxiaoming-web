@@ -28,10 +28,29 @@ window.LXM_PAGES.register({
     const remoteLoading = Vue.ref(false);
     const serverConnected = () => !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && (!window.LXM_API_STATE || window.LXM_API_STATE.reachable !== false));
 
+    function normalizePackageForEditor(pkg) {
+      if (!pkg || typeof pkg !== "object") return pkg;
+      const description = String(pkg.description || pkg.intro || "").trim();
+      pkg.description = description;
+      pkg.intro = description;
+      const spotIds = [
+        ...(Array.isArray(pkg.spotIds) ? pkg.spotIds : []),
+        pkg.spotId
+      ].filter(Boolean).map(String);
+      pkg.spotIds = [...new Set(spotIds)];
+      pkg.spotId = String(pkg.spotId || pkg.spotIds[0] || "");
+      pkg.serviceTags = Array.isArray(pkg.serviceTags) ? pkg.serviceTags.filter(Boolean) : (Array.isArray(pkg.tags) ? pkg.tags.filter(Boolean) : []);
+      pkg.tags = Array.isArray(pkg.tags) && pkg.tags.length ? pkg.tags.filter(Boolean) : pkg.serviceTags.slice();
+      pkg.includedItems = Array.isArray(pkg.includedItems) ? pkg.includedItems : (Array.isArray(pkg.items) ? pkg.items : []);
+      pkg.items = Array.isArray(pkg.items) ? pkg.items : pkg.includedItems.slice();
+      if (pkg.isMainPush === true) pkg.mainPush = true;
+      return pkg;
+    }
+
     const listSource = Vue.computed(() => {
-      if (remoteOn.value && remotePackages.value) return remotePackages.value;
+      if (remoteOn.value && remotePackages.value) return remotePackages.value.map(normalizePackageForEditor);
       // 旅拍套餐：取 type=photo 且未删除的；视频单品另由 videoSingle 维护
-      return (data.packages || []).filter((r) => r && !r.deleted && r.type !== "video");
+      return (data.packages || []).filter((r) => r && !r.deleted && r.type !== "video").map(normalizePackageForEditor);
     });
 
     const selectedPackage = Vue.computed(() => {
@@ -57,7 +76,7 @@ window.LXM_PAGES.register({
       remoteLoading.value = true;
       LXM_API.loadCollection("packages")
         .then((list) => {
-          remotePackages.value = (list || []).filter((r) => r && r.type !== "video");
+          remotePackages.value = (list || []).filter((r) => r && r.type !== "video").map(normalizePackageForEditor);
           remoteOn.value = true;
           LXM_API.setRemote(true);
           remoteLoading.value = false;
@@ -77,8 +96,10 @@ window.LXM_PAGES.register({
       const p = selectedPackage.value;
       if (!p) return;
       if (!p.name) { tip("请填写套餐名称"); return; }
+      const previous = { ...p, spotIds: Array.isArray(p.spotIds) ? p.spotIds.slice() : [], tags: Array.isArray(p.tags) ? p.tags.slice() : [], serviceTags: Array.isArray(p.serviceTags) ? p.serviceTags.slice() : [], includedItems: Array.isArray(p.includedItems) ? p.includedItems.slice() : [], items: Array.isArray(p.items) ? p.items.slice() : [] };
+      normalizePackageForEditor(p);
       if (serverConnected() && typeof ctx.persistContentMutation === "function") {
-        const ok = await ctx.persistContentMutation("packages", p, { ...p });
+        const ok = await ctx.persistContentMutation("packages", p, previous);
         if (ok) tip("已写入真实后端");
         return;
       }

@@ -884,6 +884,42 @@ async function runSmoke(options = {}) {
     })();
     if (superToken) {
       let activeSuperToken = superToken;
+      await check(report, "package content write persists to public catalog", async () => {
+        const packageId = "smoke-package-content";
+        const payload = {
+          name: "Smoke Package Updated", type: "photo", price: 199, originalPrice: 299,
+          status: "上架", isShow: true, isMainPush: true, spotId: "smoke-spot", spotIds: ["smoke-spot"],
+          intro: "Synthetic package description", description: "Synthetic package description",
+          serviceTags: ["拍摄60分钟", "精修12张"],
+          includedItems: [{ type: "album", name: "Smoke Album", albumId: "smoke-album", target: { page: "photoCollection", albumId: "smoke-album", spotId: "smoke-spot" } }]
+        };
+        const saved = await requestJson(server.baseUrl, "/api/collection/packages", {
+          method: "POST", headers: authHeaders(activeSuperToken), body: { ...payload, id: packageId, _id: packageId },
+        });
+        assert.equal(saved.status, 201, "authorized package creation must succeed");
+        assert.equal(saved.body && saved.body.description, payload.description);
+        const reloaded = await requestJson(server.baseUrl, `/api/collection/packages/${packageId}`, { headers: authHeaders(activeSuperToken) });
+        assert.equal(reloaded.status, 200);
+        assert.equal(reloaded.body && reloaded.body.includedItems && reloaded.body.includedItems[0].target.albumId, "smoke-album");
+        const home = await requestJson(server.baseUrl, "/api/rpc/getHomeData", { method: "POST", body: { data: {} } });
+        assert.equal(home.status, 200);
+        const homeRows = home.body && home.body.data && home.body.data.packages || [];
+        const publicPackage = homeRows.find((item) => item && (item.id === packageId || item._id === packageId));
+        assert.ok(publicPackage, "updated package must appear in public home data");
+        assert.equal(publicPackage.description, payload.description);
+        assert.equal(publicPackage.duration, 60);
+        assert.equal(publicPackage.retouchCount, 12);
+        assert.ok((home.body.data.hotPackages || []).some((item) => item && (item.id === packageId || item._id === packageId)), "main-push package must appear in public recommendations");
+        const detail = await requestJson(server.baseUrl, "/api/rpc/getSeriesDetail", {
+          method: "POST", body: { data: { packageId } },
+        });
+        assert.equal(detail.status, 200);
+        assert.equal(detail.body && detail.body.data && detail.body.data.currentPackage && detail.body.data.currentPackage.description, payload.description);
+        const removed = await requestJson(server.baseUrl, `/api/collection/packages/${packageId}`, {
+          method: "DELETE", headers: authHeaders(activeSuperToken),
+        });
+        assert.equal(removed.status, 200);
+      });
       await check(report, "stale admin sessions stop after account disable", async () => {
         const serviceToken = await login(server.baseUrl, fixture.accounts.service);
         const disabled = await requestJson(server.baseUrl, "/api/collection/staff/smoke-service", {
