@@ -6,6 +6,8 @@ const path = require("path");
 const crypto = require("crypto");
 
 const AUTHZ_KEYS = ["menus", "roles", "roleMenus", "rolePermissions", "users"];
+const LEGACY_ROLE_ALIASES = { admin: "super", administrator: "super", photographer: "photo" };
+const AUTHORITY_PERMISSION_KEYS = new Set(["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"]);
 const BUSINESS_KEYS = [
   "cities", "agents", "distributors", "shops", "staff", "spots", "series", "albums", "samples",
   "packages", "addonServices", "peripherals", "tagLibrary", "guides", "stories", "scans", "orders",
@@ -58,6 +60,10 @@ function normalizeUser(input = {}) {
   out.status = out.status || "active";
   out.updatedAt = now();
   return out;
+}
+function normalizeAuthzRole(value) {
+  const key = String(value || "").trim().toLowerCase();
+  return LEGACY_ROLE_ALIASES[key] || key;
 }
 
 function createJson(options) {
@@ -169,7 +175,10 @@ function createPermissionStore(options = {}) {
     const menuKeys = (grants.menuKeys || []).map(String).filter((key) => !menuRows.length || activeMenus.has(key));
     const extra = user && user.extra && typeof user.extra === "object" ? user.extra : {};
     const direct = Array.isArray(user && user.permissionKeys) ? user.permissionKeys : (Array.isArray(extra.permissionKeys) ? extra.permissionKeys : []);
-    return { user: safeUser(user), role: role || null, menuKeys: [...new Set(menuKeys)], permissionKeys: [...new Set([...(grants.permissionKeys || []), ...direct].map(String))] };
+    const roleKey = String(role && (role.roleKey || role.code || role.key) || "").trim().toLowerCase();
+    const permissionKeys = [...new Set([...(grants.permissionKeys || []), ...direct].map(String))]
+      .filter((key) => roleKey === "super" || (key !== "*" && !AUTHORITY_PERMISSION_KEYS.has(key)));
+    return { user: safeUser(user), role: role || null, menuKeys: [...new Set(menuKeys)], permissionKeys };
   };
   store.getRoleGrants = async (roleId) => {
     const menus = await store.getRoleMenus(roleId);
@@ -186,7 +195,7 @@ function createPermissionStore(options = {}) {
   store.syncLegacyAccount = async (key, doc = {}) => {
     if (!doc || !doc.account) return null;
     const legacyId = String(doc.id || doc._id || `${key}_${doc.account}`);
-    const role = doc.role || (key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "service");
+    const role = normalizeAuthzRole(doc.role || (key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "service"));
     const existing = await store.getUser(legacyId);
     const previousExtra = existing && existing.extra && typeof existing.extra === "object" ? existing.extra : {};
     const permissionKeys = Array.isArray(doc.permissionKeys) ? doc.permissionKeys : (Array.isArray(doc.permissions) ? doc.permissions : previousExtra.permissionKeys || []);

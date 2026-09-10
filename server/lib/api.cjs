@@ -70,12 +70,15 @@ const DYNAMIC_PERMISSION_ALIASES = {
   transfer: ["transfer", "dispatch", "order.transfer"],
   cancelOrder: ["cancelOrder", "orderStatus", "order.cancel"],
   financeReview: ["financeReview", "finance.review", "finance.audit"],
+  staff: ["staff", "staff.manage"],
   shopEdit: ["shopEdit", "shop", "shop.edit"],
   contentEdit: ["contentEdit", "content", "content.edit"],
   shootUpdate: ["shootUpdate", "order.shoot", "orderStatus"],
   export: ["export", "report.export"],
   permissionManage: ["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"],
 };
+const RESERVED_DYNAMIC_ROLE_KEYS = new Set(Object.keys(ROLE_ALIASES));
+const AUTHORITY_PERMISSION_KEYS = new Set(DYNAMIC_PERMISSION_ALIASES.permissionManage);
 // A permission menu can use its own identifier, but it must target a page the
 // bundled admin client can render. This supports real menu CRUD without
 // creating navigation entries that lead nowhere.
@@ -207,6 +210,16 @@ function normalizeRole(role) {
   const key = String(role || "").trim().toLowerCase();
   return ROLE_ALIASES[key] || key;
 }
+function dynamicRoleKey(role) {
+  const raw = String(role || "").trim();
+  const key = raw.toLowerCase();
+  return raw === key && key && !RESERVED_DYNAMIC_ROLE_KEYS.has(key) ? key : "";
+}
+function effectiveDynamicPermissionKeys(role, source) {
+  const keys = [...new Set((Array.isArray(source) ? source : []).map(String).filter(Boolean))];
+  if (String(role || "").trim().toLowerCase() === "super") return keys;
+  return keys.filter((key) => key !== "*" && !AUTHORITY_PERMISSION_KEYS.has(key));
+}
 
 function roleActions(session) { return ROLE_ACTIONS[normalizeRole(session && session.role)] || new Set(); }
 function hasAction(session, action) {
@@ -272,7 +285,8 @@ function canWriteKey(session, key) {
   const role = normalizeRole(session.role);
   const action = FINANCE_KEYS.has(key) || (role === "finance" && ORDER_KEYS.has(key)) ? "financeReview"
     : role === "photo" && key === "orders" ? "shootUpdate"
-      : key === "staff" || key === "shops" || key === "merchantCodes" ? "shopEdit"
+      : key === "staff" ? "staff"
+        : key === "shops" || key === "merchantCodes" ? "shopEdit"
         : key === "orders" || key === "afterSales" ? "orderEdit"
           : key === "logs" ? "view" : "contentEdit";
   return hasAction(session, action) && (!!(ROLE_WRITE_KEYS[role] || new Set()).has(key) || dynamicRole(session));
@@ -289,6 +303,7 @@ function customReadAllowed(session, key) {
   if (["orders", "afterSales"].includes(key)) return hasAction(session, "orderAll") || hasAction(session, "orderSelf");
   if (FINANCE_KEYS.has(key)) return hasAction(session, "financeReview");
   if (CONTENT_KEYS.has(key)) return hasAction(session, "contentEdit") || hasAction(session, "content");
+  if (key === "staff") return hasAction(session, "staff");
   if (["shops", "merchantCodes", "scans"].includes(key)) return hasAction(session, "shopEdit");
   return false;
 }
@@ -610,7 +625,7 @@ module.exports = function createApi(source, mode, options = {}) {
       if (session.authzUpdatedAt && session.authzUpdatedAt !== userVersion) return null;
       const policy = await permissionStore.getPolicyForUser(user);
       if (!policy || !policy.role || isDisabledStatus(policy.role.status)) return null;
-      const role = normalizeRole(policy.role.roleKey || policy.role.code);
+      const role = dynamicRoleKey(policy.role.roleKey || policy.role.code);
       if (!role) return null;
       const extra = user.extra && typeof user.extra === "object" ? user.extra : {};
       const subjectType = extra.subjectType || (extra.legacyKey === "shops" ? "merchant" : extra.legacyKey === "distributors" ? "distributor" : extra.legacyKey === "agents" ? "agent" : "staff");
@@ -628,8 +643,8 @@ module.exports = function createApi(source, mode, options = {}) {
           routeKey: String((menu.meta && (menu.meta.routeKey || menu.meta.targetKey)) || menu.routeKey || menu.targetKey || menu.menuKey || menu.key || menu.id || ""),
           sort: Number(menu.sortNo ?? menu.sort ?? 0), status: permissionStatus(menu.status)
         })).filter((menu) => menu.key),
-        permissionKeys: Array.isArray(policy.permissionKeys) ? policy.permissionKeys.map(String) : [],
-        permissions: Array.isArray(policy.permissionKeys) ? policy.permissionKeys.map(String) : [],
+        permissionKeys: effectiveDynamicPermissionKeys(role, policy.permissionKeys),
+        permissions: effectiveDynamicPermissionKeys(role, policy.permissionKeys),
         permissionsConfigured: true,
         permissionSource: permissionStore.backend === "mysql" ? "mysql" : "json-authz",
         authzUpdatedAt: userVersion,
@@ -796,19 +811,17 @@ module.exports = function createApi(source, mode, options = {}) {
     const keys = new Set((Array.isArray(permissionKeys) ? permissionKeys : []).map(String));
     if (keys.has("*")) return ["*"];
     const output = new Set(keys);
-    const aliases = {
-      view: ["view", "read", "*.view", "system.view"], dashboard: ["dashboard", "dashboard.view"],
-      orderEdit: ["orderEdit", "order.edit", "order.write", "orderStatus"], assign: ["assign", "dispatch", "order.assign"],
-      transfer: ["transfer", "order.transfer"], cancelOrder: ["cancelOrder", "order.cancel"], financeReview: ["financeReview", "finance.review", "finance.audit"],
-      shopEdit: ["shopEdit", "shop", "shop.edit"], contentEdit: ["contentEdit", "content", "content.edit"], shootUpdate: ["shootUpdate", "order.shoot", "orderStatus"],
-      export: ["export", "report.export"], permissionManage: ["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"]
-    };
-    Object.entries(aliases).forEach(([action, candidates]) => { if (candidates.some((candidate) => keys.has(candidate))) output.add(action); });
+    // Keep the client-visible action list in lockstep with server enforcement.
+    // A grant such as `dispatch` therefore exposes both `assign` and
+    // `transfer`, which are authorized by the same server-side alias set.
+    Object.entries(DYNAMIC_PERMISSION_ALIASES).forEach(([action, candidates]) => {
+      if (candidates.some((candidate) => keys.has(candidate))) output.add(action);
+    });
     return [...output];
   }
   function authzSubject(user, policy) {
     const extra = user && user.extra && typeof user.extra === "object" ? user.extra : {};
-    const roleKey = normalizeRole(policy && policy.role && (policy.role.roleKey || policy.role.code));
+    const roleKey = dynamicRoleKey(policy && policy.role && (policy.role.roleKey || policy.role.code));
     const legacyKey = extra.legacyKey || (extra.subjectType === "merchant" ? "shops" : extra.subjectType === "distributor" ? "distributors" : extra.subjectType === "agent" ? "agents" : "staff");
     const subjectType = extra.subjectType || (legacyKey === "shops" ? "merchant" : legacyKey === "distributors" ? "distributor" : legacyKey === "agents" ? "agent" : "staff");
     const subjectId = String(extra.subjectId || extra.legacyId || user.id || "");
@@ -833,7 +846,7 @@ module.exports = function createApi(source, mode, options = {}) {
     const policy = await permissionStore.getPolicyForUser(user);
     const subject = authzSubject(user, policy);
     if (!policy || !policy.role || !subject.roleKey || isDisabledStatus(policy.role.status)) return json(res, 403, { ok: false, error: "该账号绑定的角色不存在或已停用" });
-    const permissionKeys = Array.isArray(policy.permissionKeys) ? [...new Set(policy.permissionKeys.map(String))] : [];
+    const permissionKeys = effectiveDynamicPermissionKeys(subject.roleKey, policy.permissionKeys);
     const menuKeys = Array.isArray(policy.menuKeys) ? [...new Set(policy.menuKeys.map(String))] : [];
     const menuDefinitions = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
     const sessionPayload = {
@@ -858,6 +871,7 @@ module.exports = function createApi(source, mode, options = {}) {
       ok: true, role: sessionPayload.role, roleName: sessionPayload.roleName, roleId: sessionPayload.roleId || "", account: user.account, name: user.name || account,
       staffId: sessionPayload.subjectId, shopId: sessionPayload.shopId, distributorId: sessionPayload.distributorId, agentId: sessionPayload.agentId,
       menus: menuKeys, menuKeys, menuDefinitions: sessionPayload.menuDefinitions, permissions: permissionKeys, permissionKeys, actions: dynamicActionKeys(permissionKeys),
+      permissionsConfigured: true, permissionSource: sessionPayload.permissionSource,
       token: session.token, expiresAt: session.expiresAt, expiresIn: Math.floor(session.ttlMs / 1000)
     });
   }
@@ -1270,13 +1284,23 @@ module.exports = function createApi(source, mode, options = {}) {
     });
   }
   async function validateRoleGrants(roleKey, sourceMenus, sourcePermissions) {
+    const canonicalRoleKey = dynamicRoleKey(roleKey);
     const menuKeys = [...new Set((Array.isArray(sourceMenus) ? sourceMenus : []).map(String).filter(Boolean))];
     const permissionKeys = [...new Set((Array.isArray(sourcePermissions) ? sourcePermissions : []).map(String).filter(Boolean))];
-    if (roleKey === "super" && !permissionKeys.includes("*")) return { ok: false, status: 409, error: "超级管理员必须保留全部权限" };
-    if (roleKey !== "super" && permissionKeys.some((key) => key === "*" || ["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"].includes(key))) return { ok: false, status: 403, error: "只有超级管理员可以授予权限管理能力" };
+    if (!canonicalRoleKey) return { ok: false, status: 400, error: "角色标识必须为小写且不能使用系统保留别名" };
+    if (canonicalRoleKey === "super" && !permissionKeys.includes("*")) return { ok: false, status: 409, error: "超级管理员必须保留全部权限" };
+    if (canonicalRoleKey !== "super" && permissionKeys.some((key) => key === "*" || AUTHORITY_PERMISSION_KEYS.has(key))) return { ok: false, status: 403, error: "只有超级管理员可以授予权限管理能力" };
     const validMenus = new Set((await permissionMenus()).filter((menu) => menu.enabled !== false).map((menu) => String(menu.key)));
     if (menuKeys.some((key) => !validMenus.has(key))) return { ok: false, status: 400, error: "授权菜单不存在或已停用" };
     return { ok: true, menuKeys, permissionKeys };
+  }
+  function validateDirectPermissionGrants(roleKey, sourcePermissions) {
+    const permissionKeys = [...new Set((Array.isArray(sourcePermissions) ? sourcePermissions : []).map(String).filter(Boolean))];
+    if (String(roleKey || "").trim().toLowerCase() !== "super"
+      && permissionKeys.some((key) => key === "*" || AUTHORITY_PERMISSION_KEYS.has(key))) {
+      return { ok: false, status: 403, error: "非超级管理员不能获得全部权限或权限管理能力" };
+    }
+    return { ok: true, permissionKeys };
   }
   async function permissionUserContext(userId) {
     const user = await permissionStore.getUser(userId);
@@ -1339,7 +1363,7 @@ module.exports = function createApi(source, mode, options = {}) {
     return { ok: true, id: userId };
   }
   async function permissionRoute(req, res, parts, session, pathname) {
-    if (!permissionStore) return json(res, 503, { error: "权限数据服务未初始化" });
+    if (!permissionStore || permissionStore.backend !== "mysql") return json(res, 503, { error: "权限数据必须由 MySQL 服务提供" });
     if (!permissionAdminAllowed(session)) return forbidden(res, session, pathname, "只有权限管理员可以配置菜单、角色和人员");
     try { await initPermissions(); } catch (_) { return json(res, 503, { error: "权限数据服务暂不可用" }); }
     const resource = String(parts[1] || "").toLowerCase();
@@ -1389,11 +1413,12 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       if (resource === "roles") {
         const roles = await permissionRoles(); const current = roles.find((item) => item.id === idPart || item.roleKey === idPart);
-        if (current && ["super", "admin"].includes(String(current.roleKey))) return json(res, 409, { error: "系统角色不可删除" });
+        if (current && String(current.roleKey) === "super") return json(res, 409, { error: "系统角色不可删除" });
+        const roleId = current && current.id ? current.id : idPart;
         const users = await permissionStore.listUsers();
-        if ((Array.isArray(users) ? users : []).some((user) => String(user.roleId || user.role || "") === String(idPart) || String(user.roleId || "") === String(current && current.roleKey || ""))) return json(res, 409, { error: "角色仍绑定人员，不能删除" });
-        const ok = await permissionStore.deleteRole(idPart);
-        if (ok) await auditMutation(session, "删除权限角色", "authz_roles", idPart, "权限中心删除角色");
+        if ((Array.isArray(users) ? users : []).some((user) => String(user.roleId || user.role || "") === String(roleId) || String(user.roleId || user.role || "") === String(current && current.roleKey || ""))) return json(res, 409, { error: "角色仍绑定人员，不能删除" });
+        const ok = await permissionStore.deleteRole(roleId);
+        if (ok) await auditMutation(session, "删除权限角色", "authz_roles", roleId, "权限中心删除角色");
         return json(res, ok ? 200 : 404, { ok });
       }
       return json(res, 404, { error: "权限资源不存在" });
@@ -1443,6 +1468,7 @@ module.exports = function createApi(source, mode, options = {}) {
       const key = String(body.key || body.roleKey || body.code || (currentRole && (currentRole.roleKey || currentRole.key)) || "").trim();
       const name = String(body.name || (currentRole && currentRole.name) || "").trim();
       if (!/^[A-Za-z][A-Za-z0-9_.-]{1,63}$/.test(key) || !name) return json(res, 400, { error: "角色标识或名称无效" });
+      if (!dynamicRoleKey(key)) return json(res, 400, { error: "角色标识必须为小写且不能使用系统保留别名" });
       const payload = { id: idPart || body.id || `role_${key}`, roleKey: key, key, name: name.slice(0, 128), description: String(body.description ?? (currentRole && currentRole.description) ?? "").slice(0, 500), status: body.status === undefined ? permissionStatus(currentRole && currentRole.status) : permissionStatus(body.status) };
       if (currentRole && currentRole.roleKey === "super" && key !== "super") return json(res, 409, { error: "系统超级管理员角色不允许修改标识" });
       if (currentRole && currentRole.roleKey === "super" && payload.status === "disabled") {
@@ -1452,7 +1478,8 @@ module.exports = function createApi(source, mode, options = {}) {
       const grantsProvided = Array.isArray(body.menuKeys) || Array.isArray(body.menus) || Array.isArray(body.permissionKeys) || Array.isArray(body.actions);
       const grants = grantsProvided ? await validateRoleGrants(key, body.menuKeys || body.menus, body.permissionKeys || body.actions) : null;
       if (grants && !grants.ok) return json(res, grants.status, { error: grants.error });
-      const saved = idPart ? await permissionStore.updateRole(idPart, payload) : await permissionStore.createRole(payload);
+      const resolvedRoleId = currentRole && currentRole.id ? currentRole.id : idPart;
+      const saved = idPart ? await permissionStore.updateRole(resolvedRoleId, payload) : await permissionStore.createRole(payload);
       if (!saved) return json(res, 404, { error: "角色不存在" });
       if (grants) {
         try { await permissionStore.setRoleGrants(saved.id, grants); }
@@ -1479,16 +1506,19 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!/^[A-Za-z0-9_.@-]{2,128}$/.test(account) || !name || !roleKey) return json(res, 400, { error: "人员账号、姓名或角色无效" });
       const role = roles.find((item) => item.roleKey === roleKey || item.id === roleKey);
       if (!role || role.status === "停用") return json(res, 400, { error: "绑定角色不存在或已停用" });
+      if (!dynamicRoleKey(role.roleKey)) return json(res, 409, { error: "绑定角色无效，请先修正角色配置" });
       if (role.roleKey === "super" && normalizeRole(session.role) !== "super") return json(res, 403, { error: "只有超级管理员可以绑定超级管理员角色" });
       const password = body.password === undefined ? "" : String(body.password);
       if (!idPart && !password) return json(res, 400, { error: "新增人员必须设置密码" });
       if (password && (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password))) return json(res, 400, { error: "密码至少 8 位且同时包含字母和数字" });
       const userId = idPart || String(body.id || `staff_${crypto.randomBytes(8).toString("hex")}`);
       const requestedPermissions = Array.isArray(body.permissionKeys) ? body.permissionKeys : Array.isArray(body.permissions) ? body.permissions : (Array.isArray(existingUser && existingUser.permissionKeys) ? existingUser.permissionKeys : (Array.isArray(existingExtra.permissionKeys) ? existingExtra.permissionKeys : []));
+      const directGrants = validateDirectPermissionGrants(role.roleKey, requestedPermissions);
+      if (!directGrants.ok) return json(res, directGrants.status, { error: directGrants.error });
       const inferredSubjectType = existingExtra.subjectType || (existingExtra.legacyKey === "shops" ? "merchant" : existingExtra.legacyKey === "distributors" ? "distributor" : existingExtra.legacyKey === "agents" ? "agent" : "staff");
       const inferredLegacyKey = existingExtra.legacyKey || (inferredSubjectType === "merchant" ? "shops" : inferredSubjectType === "distributor" ? "distributors" : inferredSubjectType === "agent" ? "agents" : "staff");
-      const extra = { ...existingExtra, ...(body.extra && typeof body.extra === "object" ? body.extra : {}), permissionKeys: [...new Set(requestedPermissions.map(String).filter(Boolean))], subjectType: String(body.subjectType || inferredSubjectType), subjectId: String(body.subjectId || existingExtra.subjectId || userId), legacyKey: inferredLegacyKey, legacyId: String(existingExtra.legacyId || userId), distributorId: String(body.distributorId ?? existingExtra.distributorId ?? ""), agentId: String(body.agentId ?? existingExtra.agentId ?? ""), shopId: String(body.shopId ?? existingExtra.shopId ?? "") };
-      const payload = { id: userId, account, name, displayName: name, roleId: role.id, role: role.roleKey, status: body.status === undefined ? permissionStatus(existingUser && existingUser.status) : permissionStatus(body.status), phone: String(body.phone ?? (existingUser && existingUser.phone) ?? "").slice(0, 64), email: String(body.email ?? (existingUser && existingUser.email) ?? "").slice(0, 255), extra, permissionKeys: requestedPermissions };
+      const extra = { ...existingExtra, ...(body.extra && typeof body.extra === "object" ? body.extra : {}), permissionKeys: directGrants.permissionKeys, subjectType: String(body.subjectType || inferredSubjectType), subjectId: String(body.subjectId || existingExtra.subjectId || userId), legacyKey: inferredLegacyKey, legacyId: String(existingExtra.legacyId || userId), distributorId: String(body.distributorId ?? existingExtra.distributorId ?? ""), agentId: String(body.agentId ?? existingExtra.agentId ?? ""), shopId: String(body.shopId ?? existingExtra.shopId ?? "") };
+      const payload = { id: userId, account, name, displayName: name, roleId: role.id, role: role.roleKey, status: body.status === undefined ? permissionStatus(existingUser && existingUser.status) : permissionStatus(body.status), phone: String(body.phone ?? (existingUser && existingUser.phone) ?? "").slice(0, 64), email: String(body.email ?? (existingUser && existingUser.email) ?? "").slice(0, 255), extra, permissionKeys: directGrants.permissionKeys };
       const superRole = roles.find((item) => item.roleKey === "super");
       const existingIsSuper = !!(existingUser && ((superRole && String(existingUser.roleId || "") === String(superRole.id)) || String(existingUser.role || "") === "super"));
       if (existingIsSuper && (role.roleKey !== "super" || payload.status === "disabled")) {

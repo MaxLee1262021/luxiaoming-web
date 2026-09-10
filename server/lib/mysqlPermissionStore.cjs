@@ -18,6 +18,7 @@ const TABLES = Object.freeze({
 });
 const DISABLED = new Set(["disabled", "停用", "禁用", "inactive"]);
 const SENSITIVE = /password|token|secret|private.?key|authorization/i;
+const UNSAFE_ATTRIBUTE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function id(prefix) { return `${prefix}_${crypto.randomBytes(8).toString("hex")}`; }
 function now() { return new Date(); }
@@ -75,15 +76,23 @@ function valueType(value) {
   if (typeof value === "number") return "number";
   return "string";
 }
+function attributePathTokens(path) {
+  const tokens = [];
+  String(path || "").replace(/([^.[\]]+)|\[(\d+)\]/g, (_, key, index) => tokens.push(index === undefined ? key : Number(index)));
+  return tokens;
+}
+function isSafeAttributePath(path) {
+  return attributePathTokens(path).every((token) => typeof token !== "string" || !UNSAFE_ATTRIBUTE_KEYS.has(token));
+}
 function flatten(value, path, output) {
-  if (value === undefined || SENSITIVE.test(String(path).split(/[.\[]/).pop() || "")) return;
+  if (value === undefined || !isSafeAttributePath(path) || SENSITIVE.test(String(path).split(/[.\[]/).pop() || "")) return;
   if (Array.isArray(value)) {
     if (!value.length) output.push({ path, ordinal: 0, value_type: "array", value_text: null, value_number: null, value_bool: null });
     value.forEach((item, index) => flatten(item, `${path}[${index}]`, output));
     return;
   }
   if (value && typeof value === "object") {
-    const entries = Object.entries(value).filter(([key]) => !SENSITIVE.test(key));
+    const entries = Object.entries(value).filter(([key]) => !SENSITIVE.test(key) && !UNSAFE_ATTRIBUTE_KEYS.has(key));
     if (!entries.length) output.push({ path, ordinal: 0, value_type: "object", value_text: null, value_number: null, value_bool: null });
     entries.forEach(([key, child]) => flatten(child, path ? `${path}.${key}` : key, output));
     return;
@@ -107,9 +116,8 @@ function parseAttribute(row) {
   return row.value_text == null ? "" : String(row.value_text);
 }
 function setPath(target, path, value) {
-  const tokens = [];
-  String(path || "").replace(/([^.[\]]+)|\[(\d+)\]/g, (_, key, index) => tokens.push(index === undefined ? key : Number(index)));
-  if (!tokens.length) return;
+  const tokens = attributePathTokens(path);
+  if (!tokens.length || !isSafeAttributePath(path)) return;
   let cursor = target;
   for (let i = 0; i < tokens.length - 1; i += 1) {
     const next = tokens[i + 1];
@@ -273,19 +281,38 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   }
   async function listMenus() { const rows = await menuRows(); const output = []; for (const row of rows) output.push(await menuDocument(row)); return output; }
   async function getMenu(entityId) { const rows = await query(pool, `SELECT id,menu_key,parent_key,name,path,icon,sort_no,status,meta_group,meta_type,meta_label,created_at,updated_at FROM ${TABLES.menus} WHERE id=?`, [entityId]); return menuDocument(rows[0]); }
-  async function upsertMenu(input, entityId) {
+  async function writeMenu(input = {}, entityId) {
     const current = entityId ? await getMenu(entityId) : null;
+    if (entityId && !current) return null;
     const data = { ...(current || {}), ...(input || {}) }; const idv = String(entityId || data.id || data._id || id("menu")); const meta = data.meta && typeof data.meta === "object" ? data.meta : {};
     const values = [idv, String(data.menuKey || data.key || data.path || idv), data.parentKey || data.parentId || null, String(data.name || data.label || ""), String(data.path || ""), data.icon || null, Number(data.sortNo ?? data.sort ?? 0) || 0, data.status || "active", meta.group || null, meta.type || null, meta.label || null];
     const extra = Object.fromEntries(Object.entries(meta).filter(([key]) => !["group", "type", "label"].includes(key)));
     const attributes = [];
     flatten(extra, "meta", attributes);
     await withTransaction(async (conn) => {
-      await execute(conn, `INSERT INTO ${TABLES.menus} (id,menu_key,parent_key,name,path,icon,sort_no,status,meta_group,meta_type,meta_label) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE menu_key=VALUES(menu_key),parent_key=VALUES(parent_key),name=VALUES(name),path=VALUES(path),icon=VALUES(icon),sort_no=VALUES(sort_no),status=VALUES(status),meta_group=VALUES(meta_group),meta_type=VALUES(meta_type),meta_label=VALUES(meta_label),updated_at=CURRENT_TIMESTAMP(3)`, values);
+      if (current) {
+        await execute(conn, `UPDATE ${TABLES.menus} SET menu_key=?,parent_key=?,name=?,path=?,icon=?,sort_no=?,status=?,meta_group=?,meta_type=?,meta_label=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?`, [...values.slice(1), idv]);
+      } else {
+        await execute(conn, `INSERT INTO ${TABLES.menus} (id,menu_key,parent_key,name,path,icon,sort_no,status,meta_group,meta_type,meta_label) VALUES (?,?,?,?,?,?,?,?,?,?,?)`, values);
+      }
       await execute(conn, `DELETE FROM ${TABLES.menuAttributes} WHERE menu_id=?`, [idv]);
       for (const row of attributes) await execute(conn, `INSERT INTO ${TABLES.menuAttributes} (menu_id,attribute_key,ordinal,value_type,value_text,value_number,value_bool) VALUES (?,?,?,?,?,?,?)`, [idv, row.path, row.ordinal, row.value_type, row.value_text, row.value_number, row.value_bool]);
     });
     return getMenu(idv);
+  }
+  async function createMenu(input) {
+    try { return await writeMenu(input); }
+    catch (error) {
+      if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("菜单标识已存在"), { code: "DUPLICATE_RECORD" });
+      throw error;
+    }
+  }
+  async function updateMenu(entityId, input) {
+    try { return await writeMenu(input, entityId); }
+    catch (error) {
+      if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("菜单标识已存在"), { code: "DUPLICATE_RECORD" });
+      throw error;
+    }
   }
   async function listRoles() { return query(pool, `SELECT id,role_key roleKey,name,status,description,created_at createdAt,updated_at updatedAt FROM ${TABLES.roles} ORDER BY name,id`); }
   async function getRole(entityId) { const rows = await query(pool, `SELECT id,role_key roleKey,name,status,description,created_at createdAt,updated_at updatedAt FROM ${TABLES.roles} WHERE id=?`, [entityId]); return rows[0] || null; }
@@ -315,9 +342,15 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   async function listUsers() { const rows = await query(pool, `SELECT * FROM ${TABLES.users} ORDER BY display_name,id`); const out = []; for (const row of rows) out.push(await userDocument(row)); return out; }
   async function getUser(entityId) { return userDocument(await rawUser(entityId)); }
   async function getUserState(entityId) { return userDocument(await rawUser(entityId), true); }
-  async function upsertUser(input = {}, entityId) {
+  async function writeUser(input = {}, entityId) {
     const existing = entityId ? await rawUser(entityId) : null;
-    const current = existing ? { account: existing.account, name: existing.display_name, roleId: existing.role_id, status: existing.status, phone: existing.phone, email: existing.email, extra: hydrateAttributes(await userAttributes(existing.id)), permissionKeys: (await userPermissions(existing.id)).map((item) => item.permission_key) } : {};
+    if (entityId && !existing) return null;
+    const currentDocument = existing ? await userDocument(existing) : null;
+    const current = currentDocument ? {
+      account: currentDocument.account, name: currentDocument.name, roleId: currentDocument.roleId,
+      status: currentDocument.status, phone: currentDocument.phone, email: currentDocument.email,
+      extra: currentDocument.extra, permissionKeys: currentDocument.permissionKeys
+    } : {};
     const data = normalizeUser({ ...current, ...input });
     const idv = String(entityId || data.id || data._id || id("usr"));
     const extra = data.extra && typeof data.extra === "object" ? data.extra : {};
@@ -330,7 +363,11 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     const attrs = [];
     for (const [key, value] of Object.entries(extra)) if (!known.has(key)) flatten(value, key, attrs);
     await withTransaction(async (conn) => {
-      await execute(conn, `INSERT INTO ${TABLES.users} (id,account,display_name,password_hash,role_id,status,phone,email,legacy_key,legacy_id,subject_type,subject_id,shop_id,distributor_id,agent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE account=VALUES(account),display_name=VALUES(display_name),password_hash=VALUES(password_hash),role_id=VALUES(role_id),status=VALUES(status),phone=VALUES(phone),email=VALUES(email),legacy_key=VALUES(legacy_key),legacy_id=VALUES(legacy_id),subject_type=VALUES(subject_type),subject_id=VALUES(subject_id),shop_id=VALUES(shop_id),distributor_id=VALUES(distributor_id),agent_id=VALUES(agent_id),updated_at=CURRENT_TIMESTAMP(3)`, values);
+      if (existing) {
+        await execute(conn, `UPDATE ${TABLES.users} SET account=?,display_name=?,password_hash=?,role_id=?,status=?,phone=?,email=?,legacy_key=?,legacy_id=?,subject_type=?,subject_id=?,shop_id=?,distributor_id=?,agent_id=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?`, [...values.slice(1), idv]);
+      } else {
+        await execute(conn, `INSERT INTO ${TABLES.users} (id,account,display_name,password_hash,role_id,status,phone,email,legacy_key,legacy_id,subject_type,subject_id,shop_id,distributor_id,agent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, values);
+      }
       await execute(conn, `DELETE FROM ${TABLES.userPermissions} WHERE user_id=?`, [idv]);
       for (const key of permissionKeys) await execute(conn, `INSERT INTO ${TABLES.userPermissions} (user_id,permission_key) VALUES (?,?)`, [idv, key]);
       await execute(conn, `DELETE FROM ${TABLES.userAttributes} WHERE user_id=?`, [idv]);
@@ -338,8 +375,8 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     });
     return getUser(idv);
   }
-  async function createUser(input) { try { return await upsertUser(input); } catch (error) { if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("账号已存在"), { code: "DUPLICATE_RECORD" }); throw error; } }
-  async function updateUser(entityId, input) { if (!(await rawUser(entityId))) return null; return upsertUser(input, entityId); }
+  async function createUser(input) { try { return await writeUser(input); } catch (error) { if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("账号已存在"), { code: "DUPLICATE_RECORD" }); throw error; } }
+  async function updateUser(entityId, input) { try { return await writeUser(input, entityId); } catch (error) { if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("账号已存在"), { code: "DUPLICATE_RECORD" }); throw error; } }
   async function deleteUser(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.userPermissions} WHERE user_id=?`, [entityId]); await execute(conn, `DELETE FROM ${TABLES.userAttributes} WHERE user_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.users} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
   async function authenticate(account, password, options = {}) { const rows = await query(pool, `SELECT * FROM ${TABLES.users} WHERE account=? LIMIT 1`, [String(account).trim()]); const row = rows[0]; const verifier = typeof options.verifyPassword === "function" ? options.verifyPassword : verifyPassword; if (!row || DISABLED.has(String(row.status).toLowerCase()) || !verifier(row.password_hash, password)) return null; return userDocument(row); }
   async function setRoleMenus(roleId, menuIds) { return withTransaction(async (conn) => { const keys = [...new Set((menuIds || []).map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [roleId]); for (const key of keys) await execute(conn, `INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`, [roleId, key]); return { roleId, menuKeys: keys }; }); }
@@ -365,15 +402,22 @@ module.exports = function createMysqlPermissionStore(options = {}) {
       }
       const subjectIndexes = await query(pool, "SELECT column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=?", [TABLES.users]);
       if (!subjectIndexes.some((row) => ["subject_type", "subject_id"].includes(String(row.column_name).toLowerCase()))) missing.push(`${TABLES.users}.idx_auth_user_subject`);
+      const identityIndexes = await query(pool, "SELECT table_name,index_name,non_unique,column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name IN (?,?,?)", [TABLES.menus, TABLES.roles, TABLES.users]);
+      const hasUniqueIdentity = (table, column) => identityIndexes.some((row) => String(row.table_name) === table
+        && Number(row.non_unique) === 0 && String(row.column_name).toLowerCase() === column);
+      if (!hasUniqueIdentity(TABLES.menus, "menu_key")) missing.push(`${TABLES.menus}.uq_auth_menu_key`);
+      if (!hasUniqueIdentity(TABLES.roles, "role_key")) missing.push(`${TABLES.roles}.uq_auth_role_key`);
+      if (!hasUniqueIdentity(TABLES.users, "account")) missing.push(`${TABLES.users}.uq_auth_user_account`);
       const ready = count === Object.values(TABLES).length && missing.length === 0;
       return { backend: "mysql", configured: true, ready, persistent: true, tables: count, normalized: missing.length === 0, ...(missing.length ? { error: "schema_incomplete", missing } : {}) };
     } catch (error) { return { backend: "mysql", configured: true, ready: false, persistent: true, error: error.code || "unavailable" }; }
   }
   async function snapshot() { return { menus: await listMenus(), roles: await listRoles(), roleMenus: await query(pool, `SELECT role_id roleId,menu_key menuKey FROM ${TABLES.roleMenus}`), rolePermissions: await query(pool, `SELECT role_id roleId,permission_key permissionKey FROM ${TABLES.rolePermissions}`), users: await listUsers() }; }
 
-  return { mode: "mysql", backend: "mysql", required: true, tables: TABLES, ensureSchema, listMenus, getMenu, createMenu: (input) => upsertMenu(input), updateMenu: (entityId, input) => upsertMenu(input, entityId), deleteMenu: async (entityId) => { const result = await execute(pool, `DELETE FROM ${TABLES.menus} WHERE id=?`, [entityId]); await execute(pool, `DELETE FROM ${TABLES.menuAttributes} WHERE menu_id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }, listRoles, getRole, createRole, updateRole, deleteRole, listUsers, getUser, getUserState, createUser, updateUser, deleteUser, setRoleMenus, getRoleMenus, setRolePermissions, getRolePermissions, setRoleGrantsAtomic, authenticate, health, snapshot, async close() { closed = true; if (typeof pool.end === "function") await pool.end(); } };
+  return { mode: "mysql", backend: "mysql", required: true, tables: TABLES, ensureSchema, listMenus, getMenu, createMenu, updateMenu, deleteMenu: async (entityId) => { const result = await execute(pool, `DELETE FROM ${TABLES.menus} WHERE id=?`, [entityId]); await execute(pool, `DELETE FROM ${TABLES.menuAttributes} WHERE menu_id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }, listRoles, getRole, createRole, updateRole, deleteRole, listUsers, getUser, getUserState, createUser, updateUser, deleteUser, setRoleMenus, getRoleMenus, setRolePermissions, getRolePermissions, setRoleGrantsAtomic, authenticate, health, snapshot, async close() { closed = true; if (typeof pool.end === "function") await pool.end(); } };
 };
 module.exports.hashPassword = hashPassword;
 module.exports.verifyPassword = verifyPassword;
 module.exports.safeUser = safeUser;
 module.exports.TABLES = TABLES;
+module.exports.__test = Object.freeze({ flatten, hydrateAttributes });

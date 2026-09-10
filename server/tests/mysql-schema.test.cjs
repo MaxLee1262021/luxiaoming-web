@@ -132,6 +132,22 @@ test("MySQL permission projections preserve user timestamps", () => {
   assert.equal(Object.prototype.hasOwnProperty.call(user, "passwordHash"), false);
 });
 
+test("MySQL permission attributes reject prototype-polluting paths", () => {
+  const leaves = [];
+  const input = { safe: "kept", nested: Object.create(null) };
+  input.nested["__proto__"] = { polluted: "no" };
+  mysqlPermission.__test.flatten(input, "extra", leaves);
+  assert.ok(leaves.some((row) => row.path === "extra.safe"));
+  assert.equal(leaves.some((row) => /(?:^|\.)__(?:proto)__(?:\.|$)|(?:^|\.)(?:constructor|prototype)(?:\.|$)/.test(row.path)), false);
+
+  const restored = mysqlPermission.__test.hydrateAttributes([
+    { path: "__proto__.polluted", value_type: "string", value_text: "no" },
+    { path: "safe.value", value_type: "string", value_text: "kept" }
+  ]);
+  assert.equal(({}).polluted, undefined);
+  assert.equal(restored.safe.value, "kept");
+});
+
 test("finance settings stay a closed scalar singleton", () => {
   const split = schema.splitDocument("financeSettings", {
     id: "global",

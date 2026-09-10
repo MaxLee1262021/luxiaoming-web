@@ -27,10 +27,10 @@
     { key: "content", label: "内容数据管理" },
     { key: "contentEdit", label: "编辑内容" },
     { key: "shootUpdate", label: "更新拍摄任务" },
-    { key: "system", label: "系统配置" },
     { key: "export", label: "导出" },
     { key: "permissionManage", label: "权限管理" }
   ];
+  const USER_ACTIONS = ACTIONS.filter((item) => item.key !== "permissionManage");
 
   const text = (value, fallback = "") => value === undefined || value === null ? fallback : String(value);
   const unique = (items) => [...new Set((Array.isArray(items) ? items : []).map(text).filter(Boolean))];
@@ -371,7 +371,7 @@
     return {
       activeTab, loading, saving, readOnly, canWrite, menuRows, roleRows, userRows,
       menuFilter, userFilter, filteredMenus, filteredUsers, selectedRole,
-      menuOptions, routeOptions, activeMenuCount, activeRoleCount, ACTIONS, menuForm, roleForm, userForm,
+      menuOptions, routeOptions, activeMenuCount, activeRoleCount, ACTIONS, USER_ACTIONS, menuForm, roleForm, userForm,
       menuDialog, roleDialog, userDialog, selectedRoleId,
       openMenu, saveMenu, toggleMenu, deleteMenu, selectRole, openRole, editSelectedRole, saveRole, toggleRole, deleteRole,
       openUser, saveUser, toggleUser, deleteUser, userRoleName, menuLabel, roleLabel, loadAll

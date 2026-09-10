@@ -687,6 +687,10 @@ async function ensureAuthTimestampDefaults(conn) {
 
 function roleId(profileKey) { return `role_${String(profileKey).replace(/[^A-Za-z0-9_.-]/g, "_")}`; }
 function menuId(menuKey) { return `menu_${String(menuKey).replace(/[^A-Za-z0-9_.-]/g, "_")}`; }
+function normalizeAuthzRoleKey(value) {
+  const key = String(value || "").trim().toLowerCase();
+  return ({ admin: "super", administrator: "super", photographer: "photo" })[key] || key;
+}
 function actionKeys(profileKey, profile, configData) {
   const output = new Set(Array.isArray(profile && profile.actions) ? profile.actions.map(String) : []);
   for (const item of Array.isArray(configData.permissionMatrix) ? configData.permissionMatrix : []) if (item && item[profileKey]) output.add(String(item.key));
@@ -714,12 +718,21 @@ async function seedAuthorization(conn, configData, data) {
   let users = 0;
   for (const key of accountKeys) for (const row of sourceRows(data, key, true)) {
     if (!row.doc.account) continue;
-    const role = key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : String(row.doc.role || "service").toLowerCase();
-    const existing = (await query(conn, "SELECT password_hash FROM lxm_auth_users WHERE id=?", [row.id]))[0];
+    const role = normalizeAuthzRoleKey(key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : row.doc.role || "service");
+    const existingRows = await query(conn, "SELECT id,account,password_hash FROM lxm_auth_users WHERE id=? OR account=?", [row.id, String(row.doc.account).slice(0, 128)]);
+    const existing = existingRows.find((item) => String(item.id) === String(row.id)) || null;
+    if (existingRows.some((item) => String(item.id) !== String(row.id))) {
+      throw Object.assign(new Error(`权限账号冲突: ${String(row.doc.account).slice(0, 128)}`), { code: "MIGRATION_VERIFY_FAILED" });
+    }
     const supplied = String(row.doc.passwordHash || row.doc.password || "");
     const passwordHash = existing && existing.password_hash ? existing.password_hash : supplied.startsWith("lxm1$") ? supplied : hashPassword(supplied || crypto.randomBytes(18).toString("hex"));
     const disabled = ["停用", "禁用", "disabled", "inactive"].includes(String(row.doc.status || "").toLowerCase());
-    await execute(conn, "INSERT INTO lxm_auth_users (id,account,display_name,password_hash,role_id,status,phone,email,legacy_key,legacy_id,subject_type,subject_id,shop_id,distributor_id,agent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE account=VALUES(account),display_name=VALUES(display_name),role_id=VALUES(role_id),status=VALUES(status),phone=VALUES(phone),email=VALUES(email),legacy_key=VALUES(legacy_key),legacy_id=VALUES(legacy_id),subject_type=VALUES(subject_type),subject_id=VALUES(subject_id),shop_id=VALUES(shop_id),distributor_id=VALUES(distributor_id),agent_id=VALUES(agent_id),updated_at=CURRENT_TIMESTAMP(3)", [row.id, String(row.doc.account).slice(0, 128), String(row.doc.name || row.doc.title || row.doc.account).slice(0, 128), passwordHash, roleId(role), disabled ? "disabled" : "active", String(row.doc.phone || row.doc.contactPhone || "").slice(0, 64) || null, String(row.doc.email || "").slice(0, 255) || null, key, row.id, key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "staff", row.id, row.doc.shopId || null, row.doc.distributorId || null, row.doc.agentId || null]);
+    const userValues = [row.id, String(row.doc.account).slice(0, 128), String(row.doc.name || row.doc.title || row.doc.account).slice(0, 128), passwordHash, roleId(role), disabled ? "disabled" : "active", String(row.doc.phone || row.doc.contactPhone || "").slice(0, 64) || null, String(row.doc.email || "").slice(0, 255) || null, key, row.id, key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "staff", row.id, row.doc.shopId || null, row.doc.distributorId || null, row.doc.agentId || null];
+    if (existing) {
+      await execute(conn, "UPDATE lxm_auth_users SET account=?,display_name=?,role_id=?,status=?,phone=?,email=?,legacy_key=?,legacy_id=?,subject_type=?,subject_id=?,shop_id=?,distributor_id=?,agent_id=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?", [...userValues.slice(1, 3), ...userValues.slice(4), row.id]);
+    } else {
+      await execute(conn, "INSERT INTO lxm_auth_users (id,account,display_name,password_hash,role_id,status,phone,email,legacy_key,legacy_id,subject_type,subject_id,shop_id,distributor_id,agent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", userValues);
+    }
     await execute(conn, "DELETE FROM lxm_auth_user_permissions WHERE user_id=?", [row.id]);
     const permissions = Array.isArray(row.doc.permissionKeys) ? row.doc.permissionKeys : Array.isArray(row.doc.permissions) ? row.doc.permissions : [];
     for (const permission of new Set(permissions.map(String))) await execute(conn, "INSERT INTO lxm_auth_user_permissions (user_id,permission_key) VALUES (?,?) ON DUPLICATE KEY UPDATE permission_key=VALUES(permission_key)", [row.id, permission]);

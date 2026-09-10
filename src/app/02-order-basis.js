@@ -19,6 +19,10 @@
 function can(action) {
   if (roleProfile.value.actions.includes("*")) return true;
   if (!roleProfile.value.actions.includes(action)) return false;
+  // Normalized permission sessions already contain the effective union of
+  // role grants and per-user additions. Do not reinterpret a user's optional
+  // additions as a restrictive allowlist in the browser.
+  if (window.LXM_AUTH?.getSession?.()?.permissionSource) return true;
   const staff = currentStaff.value;
   if (!staff || staff.role !== state.role) return true;
   const custom = staff.permissionKeys || staff.permissions || [];
