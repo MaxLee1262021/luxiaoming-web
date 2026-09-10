@@ -123,18 +123,24 @@
       ok: envelope.ok !== false,
       token: source.token || envelope.token || fallback.token || "",
       role: source.role || envelope.role || fallback.role || "",
+      roleId: source.roleId || envelope.roleId || fallback.roleId || "",
+      roleName: source.roleName || envelope.roleName || fallback.roleName || "",
       account: source.account || envelope.account || fallback.account || "",
       name: source.name || envelope.name || fallback.name || "",
       staffId: source.staffId || envelope.staffId || fallback.staffId || "",
       menus: Array.isArray(source.menus) ? source.menus : (Array.isArray(envelope.menus) ? envelope.menus : permissions.menus),
+      menuKeys: Array.isArray(source.menuKeys) ? source.menuKeys : (Array.isArray(envelope.menuKeys) ? envelope.menuKeys : (Array.isArray(source.menus) ? source.menus : [])),
+      menuDefinitions: Array.isArray(source.menuDefinitions) ? source.menuDefinitions : (Array.isArray(envelope.menuDefinitions) ? envelope.menuDefinitions : []),
       actions: Array.isArray(source.actions) ? source.actions : (Array.isArray(envelope.actions) ? envelope.actions : (permissions.actions || permissionList)),
       scope: source.scope || envelope.scope || permissions.scope || fallback.scope || "",
       shopId: source.shopId || envelope.shopId || permissions.shopId || fallback.shopId || "",
       distributorId: source.distributorId || envelope.distributorId || permissions.distributorId || fallback.distributorId || "",
       agentId: source.agentId || envelope.agentId || permissions.agentId || fallback.agentId || "",
-      permissions,
-      permissionKeys: permissionList,
+      permissions: Array.isArray(rawPermissions) ? permissionList : permissions,
+      permissionKeys: Array.isArray(source.permissionKeys) ? source.permissionKeys : (Array.isArray(envelope.permissionKeys) ? envelope.permissionKeys : permissionList),
       permissionsConfigured: source.permissionsConfigured === true || envelope.permissionsConfigured === true || rawPermissions !== undefined,
+      permissionSource: source.permissionSource || envelope.permissionSource || fallback.permissionSource || "",
+      expiresAt: source.expiresAt || envelope.expiresAt || fallback.expiresAt || 0,
     };
   }
 
@@ -176,6 +182,7 @@ async function login() {
       return loginDemo(account, password);
     }
     const session = normalizeSession(j);
+    if (session.role) ensureServerRole(session);
     if (!session.ok || !session.role || !session.token || !LXM_CONFIG.roles[session.role]) {
       log("登录失败", "后台", "服务端未返回有效会话或角色", account, { level: "高" });
       return ElMessage.error("登录服务返回无效会话，请联系管理员");
@@ -191,6 +198,42 @@ async function login() {
   } finally {
     state.loading = false;
   }
+}
+
+function mergeServerDefinitions(session) {
+  const definitions = Array.isArray(session && session.menuDefinitions) ? session.menuDefinitions : [];
+  definitions.forEach((item) => {
+    const key = String(item && item.key || "").trim();
+    if (!key) return;
+    knownMenuKeys.add(key);
+    const existing = (LXM_CONFIG.menus || []).find((menu) => menu.key === key);
+    const next = { key, routeKey: String(item.routeKey || item.targetKey || key), label: String(item.label || item.name || key), group: String(item.group || "系统安全"), path: String(item.path || `/${key}`), icon: String(item.icon || "") };
+    if (existing) Object.assign(existing, next);
+    else LXM_CONFIG.menus.push(next);
+    const sections = Array.isArray(LXM_CONFIG.navSections) ? LXM_CONFIG.navSections : [];
+    let section = sections.find((candidate) => candidate.label === next.group) || sections.find((candidate) => candidate.key === "system");
+    if (!section) {
+      section = { key: `dynamic-${next.group || "system"}`, label: next.group || "系统安全", desc: "系统权限菜单", items: [] };
+      sections.push(section);
+      LXM_CONFIG.navSections = sections;
+    }
+    const items = Array.isArray(section.items) ? section.items : (section.items = []);
+    if (!items.some((candidate) => (candidate && (candidate.key || candidate)) === key)) items.push(key);
+  });
+}
+
+function ensureServerRole(session) {
+  const role = String(session && session.role || "").trim().toLowerCase();
+  if (!role) return false;
+  mergeServerDefinitions(session);
+  if (!LXM_CONFIG.roles[role]) {
+    const menus = Array.isArray(session.menus) ? session.menus.map(String).filter((key) => knownMenuKeys.has(key)) : [];
+    const actions = Array.isArray(session.actions) ? session.actions.map(String) : (Array.isArray(session.permissionKeys) ? session.permissionKeys.map(String) : ["view"]);
+    const profile = { name: session.roleName || role, home: menus[0] || "dashboard", scope: "all", menus, actions };
+    LXM_CONFIG.roles[role] = profile;
+    roleDefaults[role] = { ...profile, menus: menus.slice(), actions: actions.slice() };
+  }
+  return true;
 }
 
 function loginDemo(account, password) {
@@ -230,6 +273,7 @@ function loginDemo(account, password) {
 function applyLogin(raw, options = {}) {
   const session = normalizeSession(raw);
   const role = session.role || "super";
+  if (options.source === "server") ensureServerRole(session);
   if (!LXM_CONFIG.roles[role]) throw new Error("服务端返回了未知角色");
   if (options.source === "server") {
     window.LXM_AUTH.setSession(session);
@@ -277,6 +321,7 @@ async function restoreSession() {
   try {
     const raw = await window.LXM_AUTH.me();
     const session = normalizeSession(raw, stored);
+    if (session.role) ensureServerRole(session);
     if (!session.ok || !session.role || !LXM_CONFIG.roles[session.role]) throw new Error("会话信息无效");
     applyLogin(session, { source: "server", restored: true });
     await loadAuthenticatedData();
@@ -461,14 +506,16 @@ function switchMenu(key, options = {}) {
     ElMessage.warning("当前角色无权访问该页");
     return;
   }
+  const menu = (LXM_CONFIG.menus || []).find((item) => item && item.key === key);
+  const routeKey = (menu && (menu.routeKey || menu.targetKey)) || key;
   if (!options.preserveFilters) {
     state.selectedOrderIds = [];
-    if (key === "logs") Object.assign(state.filters, { logUser: "", logModule: "", logLevel: "", logAction: "", keyword: "" });
-    if (key !== "orders") Object.assign(state.filters, { status: "", financeStatus: "", afterSaleStatus: "", refundStatus: "", transferStatus: "", rescheduleStatus: "", assigneeId: "", photographerId: "", productType: "" });
-    if (!contentKeys.includes(key)) Object.assign(state.filters, { contentStatus: "", contentSpotId: "", contentSeriesId: "" });
+    if (routeKey === "logs") Object.assign(state.filters, { logUser: "", logModule: "", logLevel: "", logAction: "", keyword: "" });
+    if (routeKey !== "orders") Object.assign(state.filters, { status: "", financeStatus: "", afterSaleStatus: "", refundStatus: "", transferStatus: "", rescheduleStatus: "", assigneeId: "", photographerId: "", productType: "" });
+    if (!contentKeys.includes(routeKey)) Object.assign(state.filters, { contentStatus: "", contentSpotId: "", contentSeriesId: "" });
   }
-  if (key === "videoSingles" && !options.preserveFilters) state.filters.shelfType = "video";
-  if (key === "reconciliation" && ["super", "finance"].includes(state.role) && !options.preserveFilters) {
+  if (routeKey === "videoSingles" && !options.preserveFilters) state.filters.shelfType = "video";
+  if (routeKey === "reconciliation" && ["super", "finance"].includes(state.role) && !options.preserveFilters) {
     Object.assign(state.filters, { cityId: "", agentId: "", distributorId: "", shopId: "" });
   }
   state.active = key;

@@ -9,6 +9,7 @@
     addonRows,
     agentName,
     cityName,
+    cityById,
     commission,
     computed,
     data,
@@ -16,6 +17,8 @@
     financeDue,
     inRoleScope,
     isHeadquarterSource,
+    isOrderCancelledStatus,
+    isOrderCompletedStatus,
     isOrderAfterSaleLocked,
     normalizeDateText,
     normalizeReviewStatus,
@@ -28,6 +31,8 @@
     productStatus,
     reminderBaseOrders,
     roleProfile,
+    sameCity,
+    sameShop,
     scanInRoleScope,
     scopedOrders,
     scopedScans,
@@ -89,8 +94,8 @@ const dashboardDelta = computed(() => {
     if (pct === 0) return { text: "持平", trend: "flat" };
     return pct > 0 ? { text: `↑ ${Math.abs(pct)}%`, trend: "up" } : { text: `↓ ${Math.abs(pct)}%`, trend: "down" };
   };
-  const prevScans = data.scans.filter((s) => scanInRoleScope(s) && inPrev(s.date) && (!state.filters.shopId || s.shopId === state.filters.shopId));
-  const prevOrders = data.orders.filter((o) => !o.deleted && inRoleScope(o) && inPrev(o.appointmentAt) && (!state.filters.shopId || o.shopId === state.filters.shopId));
+  const prevScans = data.scans.filter((s) => scanInRoleScope(s) && inPrev(s.date) && (!state.filters.shopId || sameShop(s, state.filters.shopId)));
+  const prevOrders = data.orders.filter((o) => !o.deleted && inRoleScope(o) && inPrev(o.appointmentAt) && (!state.filters.shopId || sameShop(o, state.filters.shopId)));
   const prevConverted = prevOrders.filter((o) => prevScans.some((s) => s.orderId === o.id));
   return {
     label: `对比 ${prevRange[0]} ~ ${prevRange[1]}`,
@@ -107,9 +112,9 @@ const reminders = computed(() => statusDict.map((s) => ({
 })));
 const activeAdvFilterCount = computed(() => ["financeStatus", "afterSaleStatus", "refundStatus", "transferStatus", "rescheduleStatus", "sourceType", "distributorId", "shopId", "assigneeId", "photographerId", "productType"].filter((key) => state.filters[key]).length);
 const messageRows = computed(() => {
-  const pending = scopedOrders.value.filter((o) => o.status === "pending");
-  const dueList = scopedOrders.value.filter((o) => financeDue(o) > 0 && o.status !== "pending");
-  const unassigned = scopedOrders.value.filter((o) => ["confirmed", "shooting"].includes(o.status) && !o.photographerId);
+  const pending = scopedOrders.value.filter((o) => ["pending", "new"].includes(o.status));
+  const dueList = scopedOrders.value.filter((o) => financeDue(o) > 0 && !["pending", "new"].includes(o.status));
+  const unassigned = scopedOrders.value.filter((o) => ["confirmed", "deposit_paid", "assigned", "shooting"].includes(o.status) && !o.photographerId);
   const todayScans = scopedScans.value.filter((s) => s.date === "2026-06-29");
   return [
     { type: "新预约", count: pending.length, text: "待客服联系确认细节", action: "pending" },
@@ -124,31 +129,30 @@ const selectedOrderBatchSummary = computed(() => {
   return {
     total: rows.length,
     accept: rows.filter(ctx.canBatchAcceptOrder).length,
-    note: rows.filter((order) => !isOrderAfterSaleLocked(order) && !["completed", "cancelled"].includes(order.status)).length,
+      note: rows.filter((order) => !isOrderAfterSaleLocked(order) && !isOrderCompletedStatus(order) && !isOrderCancelledStatus(order)).length,
     locked: rows.filter((order) => isOrderAfterSaleLocked(order)).length,
-    completed: rows.filter((order) => ["completed", "cancelled"].includes(order.status)).length,
+      completed: rows.filter((order) => isOrderCompletedStatus(order) || isOrderCancelledStatus(order)).length,
   };
 });
 const dashboardScopeShops = computed(() => scopedShops.value.filter((shop) => {
-  if (state.dashboardCityId && shop.cityId !== state.dashboardCityId) return false;
-  if (state.dashboardShopId && shop.id !== state.dashboardShopId) return false;
+  if (state.dashboardCityId && !sameCity(shop, state.dashboardCityId)) return false;
+  if (state.dashboardShopId && !sameShop(shop, state.dashboardShopId)) return false;
   return true;
 }));
 const dashboardScopeScans = computed(() => scopedScans.value.filter((scan) => {
   const shop = orderShop({ shopId: scan.shopId });
-  if (state.dashboardCityId && shop.cityId !== state.dashboardCityId) return false;
-  if (state.dashboardShopId && scan.shopId !== state.dashboardShopId) return false;
+  if (state.dashboardCityId && !sameCity(shop, state.dashboardCityId)) return false;
+  if (state.dashboardShopId && !sameShop(scan, state.dashboardShopId)) return false;
   return true;
 }));
-const shopRank = computed(() => scopedShops.value.filter((shop) => !state.dashboardCityId || shop.cityId === state.dashboardCityId).map((shop) => {
-  const orders = data.orders.filter((o) => o.shopId === shop.id && !o.deleted);
-  const scans = data.scans.filter((s) => s.shopId === shop.id);
+const shopRank = computed(() => scopedShops.value.filter((shop) => !state.dashboardCityId || sameCity(shop, state.dashboardCityId)).map((shop) => {
+  const orders = data.orders.filter((o) => sameShop(o, shop) && !o.deleted);
+  const scans = data.scans.filter((s) => sameShop(s, shop));
   return { ...shop, orderCount: orders.length, scanCount: scans.length, amount: orders.reduce((n, o) => n + Number(o.totalAmount || 0), 0) };
 }).sort((a, b) => b.amount - a.amount));
 const cityRank = computed(() => visibleCities.value.map((city) => {
-  const shops = scopedShops.value.filter((s) => s.cityId === city.id);
-  const shopIds = new Set(shops.map((s) => s.id));
-  const orders = data.orders.filter((o) => shopIds.has(o.shopId) && !o.deleted);
+  const shops = scopedShops.value.filter((s) => sameCity(s, city));
+  const orders = data.orders.filter((o) => shops.some((shop) => sameShop(o, shop)) && !o.deleted);
   return { ...city, shops: shops.length, orders: orders.length, amount: orders.reduce((s, o) => s + o.totalAmount, 0) };
 }).sort((a, b) => b.amount - a.amount));
 const scanHeat = computed(() => Array.from({ length: 24 }, (_, hour) => ({ hour, count: dashboardScopeScans.value.filter((s) => s.hour === hour).length })));
@@ -179,7 +183,7 @@ const drillRows = computed(() => {
       return {
         ...s,
         date: s.date,
-        cityId: shop.cityId,
+        cityId: cityById(shop).id || shop.cityId || shop.city || "",
         agentId: shop.agentId,
         distributorId: s.distributorId || order?.distributorId || "",
         distributorIds: orderDistributorIds(order || { shopId: s.shopId }),
@@ -193,8 +197,8 @@ const drillRows = computed(() => {
     });
     rows = rows.filter((row) => {
       const shop = orderShop({ shopId: row.shopId });
-      if (metricFilters.cityId && shop.cityId !== metricFilters.cityId) return false;
-      if (metricFilters.shopId && row.shopId !== metricFilters.shopId) return false;
+      if (metricFilters.cityId && !sameCity(shop, metricFilters.cityId)) return false;
+      if (metricFilters.shopId && !sameShop(row, metricFilters.shopId)) return false;
       if (metricFilters.scene && row.scene !== metricFilters.scene) return false;
       if (metricFilters.status && row.status !== metricFilters.status) return false;
       if (metricFilters.keyword && !JSON.stringify({ ...row, shop: shopName(row.shopId), source: orderSourceName(row), city: cityName(shop.cityId) }).includes(metricFilters.keyword)) return false;
@@ -209,8 +213,8 @@ const drillRows = computed(() => {
   if (state.dashboardDrill === "due") rows = rows.filter((o) => financeDue(o) > 0);
   return rows.map((o) => ({ ...o, date: o.appointmentAt.slice(0, 10), scene: isHeadquarterSource(o) ? (o.sourceScene || "总部二维") : orderShop(o).qrPosition, sourceName: orderSourceName(o), status: statusMeta(o.status).label })).filter((row) => {
     const shop = orderShop(row);
-    if (metricFilters.cityId && shop.cityId !== metricFilters.cityId) return false;
-    if (metricFilters.shopId && row.shopId !== metricFilters.shopId) return false;
+    if (metricFilters.cityId && !sameCity(shop, metricFilters.cityId)) return false;
+    if (metricFilters.shopId && !sameShop(row, metricFilters.shopId)) return false;
     if (metricFilters.scene && row.scene !== metricFilters.scene) return false;
     if (metricFilters.status && row.status !== metricFilters.status) return false;
     if (metricFilters.keyword && !JSON.stringify({ ...row, shop: shopName(row.shopId), source: orderSourceName(row), city: cityName(shop.cityId), products: (row.products || []).map(productName) }).includes(metricFilters.keyword)) return false;
@@ -451,16 +455,16 @@ function clearDashboardScope(type = "all") {
 function rankOrders(type, id) {
   return scopedOrders.value.filter((order) => {
     const shop = orderShop(order);
-    if (type === "shop") return order.shopId === id;
-    if (type === "city") return shop.cityId === id;
+    if (type === "shop") return sameShop(order, id);
+    if (type === "city") return sameCity(shop, id);
     return false;
   });
 }
 function openRankPreview(type, row) {
   const orders = rankOrders(type, row.id);
   const scans = type === "shop"
-    ? scopedScans.value.filter((scan) => scan.shopId === row.id)
-    : scopedScans.value.filter((scan) => orderShop({ shopId: scan.shopId }).cityId === row.id);
+    ? scopedScans.value.filter((scan) => sameShop(scan, row))
+    : scopedScans.value.filter((scan) => sameCity(orderShop({ shopId: scan.shopId }), row));
   state.rankPreview = {
     type,
     id: row.id,

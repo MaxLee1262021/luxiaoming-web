@@ -26,6 +26,8 @@
     inDateRange,
     inRoleScope,
     isEstimatedReconciliationOrder,
+    isOrderCancelledStatus,
+    isOrderCompletedStatus,
     isReconciliationEligible,
     isRetainedCancelledOrder,
     isSettlementObservationPending,
@@ -43,6 +45,7 @@
     photographers,
     retainedCancelledAmount,
     roleProfile,
+    sameShop,
     scopedOrders,
     scopedShops,
     selectedOrders,
@@ -89,7 +92,7 @@ function reconciliation(type) {
   return rows.map((row) => {
     const allMatchedOrders = scopedOrders.value.filter((o) => {
       const shop = orderShop(o);
-      if (type === "shop") return o.shopId === row.id;
+      if (type === "shop") return sameShop(o, row);
       if (type === "agent") return shop.agentId === row.id;
       if (type === "distributor") return o.distributorId === row.id || orderDistributorIds(o).includes(row.id);
       if (type === "service") return o.assigneeId === row.id;
@@ -97,9 +100,9 @@ function reconciliation(type) {
       return false;
     });
     const orders = allMatchedOrders.filter(isReconciliationEligible);
-    const pendingOrders = allMatchedOrders.filter((order) => order.status !== "completed" && !isReconciliationEligible(order) && !isRetainedCancelledOrder(order));
-    const observationOrders = allMatchedOrders.filter((order) => order.status === "completed" && isSettlementObservationPending(order));
-    const blockedOrders = allMatchedOrders.filter((order) => order.status === "completed" && !isSettlementObservationPending(order) && hasBlockingAfterSale(order));
+      const pendingOrders = allMatchedOrders.filter((order) => !isOrderCompletedStatus(order) && !isReconciliationEligible(order) && !isRetainedCancelledOrder(order));
+      const observationOrders = allMatchedOrders.filter((order) => isOrderCompletedStatus(order) && isSettlementObservationPending(order));
+      const blockedOrders = allMatchedOrders.filter((order) => isOrderCompletedStatus(order) && !isSettlementObservationPending(order) && hasBlockingAfterSale(order));
     return {
       id: row.id,
       type,
@@ -243,7 +246,7 @@ const reconciliationSettlementRows = computed(() => [
 const visibleReconciliationSettlementRows = computed(() => {
   let rows = [];
   if (["super", "finance"].includes(state.role)) rows = reconciliationSettlementRows.value;
-  else if (state.role === "merchant") rows = reconciliationSettlementRows.value.filter((row) => row.type === "shop" && row.id === roleProfile.value.shopId);
+  else if (state.role === "merchant") rows = reconciliationSettlementRows.value.filter((row) => row.type === "shop" && sameShop(row, roleProfile.value.shopId));
   else if (state.role === "distributor") rows = reconciliationSettlementRows.value.filter((row) => row.type === "distributor" && row.id === roleProfile.value.distributorId);
   else if (state.role === "photo") rows = reconciliationSettlementRows.value.filter((row) => row.type === "photo" && row.id === roleProfile.value.staffId);
   if (state.filters.settlementStatus) rows = rows.filter((row) => row.transferStatus === state.filters.settlementStatus);
@@ -274,12 +277,12 @@ const photographerSettlementRows = computed(() => reconciliation("photo")
 const reconciliationSummary = computed(() => {
   const baseOrders = scopedOrders.value;
   const eligibleOrders = baseOrders.filter(isReconciliationEligible);
-  const pendingOrders = baseOrders.filter((order) => order.status !== "completed" && !isEstimatedReconciliationOrder(order) && !isRetainedCancelledOrder(order));
+  const pendingOrders = baseOrders.filter((order) => !isOrderCompletedStatus(order) && !isEstimatedReconciliationOrder(order) && !isRetainedCancelledOrder(order));
   const retainedCancelledOrders = eligibleOrders.filter(isRetainedCancelledOrder);
-  const observationOrders = baseOrders.filter((order) => order.status === "completed" && isSettlementObservationPending(order));
+  const observationOrders = baseOrders.filter((order) => isOrderCompletedStatus(order) && isSettlementObservationPending(order));
   const estimatedOrders = baseOrders.filter(isEstimatedReconciliationOrder);
   const estimatedExtraOrders = estimatedOrders.filter((order) => !isReconciliationEligible(order));
-  const blockedOrders = baseOrders.filter((order) => order.status === "completed" && !isSettlementObservationPending(order) && hasBlockingAfterSale(order));
+  const blockedOrders = baseOrders.filter((order) => isOrderCompletedStatus(order) && !isSettlementObservationPending(order) && hasBlockingAfterSale(order));
   const rows = reconciliation("shop");
   const distributorRows = reconciliation("distributor");
   const photoRows = reconciliation("photo");
@@ -295,7 +298,7 @@ const reconciliationSummary = computed(() => {
   const pendingTransferAmount = visibleReconciliationSettlementBatchRows.value.reduce((sum, row) => sum + Number(row.pendingTransferAmount || 0), 0);
   const scopedRefundRows = data.afterSales.filter((row) => {
     const order = data.orders.find((item) => item.id === row.orderId);
-    return Number(row.refundAmount || row.amount || 0) > 0 && order && inRoleScope(order) && inDateRange(order.appointmentAt) && (!state.filters.shopId || order.shopId === state.filters.shopId);
+    return Number(row.refundAmount || row.amount || 0) > 0 && order && inRoleScope(order) && inDateRange(order.appointmentAt) && (!state.filters.shopId || sameShop(order, state.filters.shopId));
   });
   const observationAmount = observationSplits.reduce((sum, split) => sum + split.netAmount, 0);
   const estimatedAmount = estimatedSplits.reduce((sum, split) => sum + split.netAmount, 0);
@@ -500,7 +503,7 @@ const visibleReconciliationSettlementBatchRows = computed(() => visibleReconcili
   })));
 function canSeeSettlementRecord(row) {
   if (["super", "finance"].includes(state.role)) return true;
-  if (state.role === "merchant") return row.objectType === "商家" && row.objectId === roleProfile.value.shopId;
+  if (state.role === "merchant") return row.objectType === "商家" && sameShop({ id: row.objectId, shopId: row.objectId }, roleProfile.value.shopId);
   if (state.role === "distributor") return row.objectType === "分销" && row.objectId === roleProfile.value.distributorId;
   if (state.role === "photo") return row.objectType === "摄影" && row.objectId === roleProfile.value.staffId;
   return false;

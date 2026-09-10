@@ -17,7 +17,10 @@
     log,
     money,
     packagesByAlbum,
+    packagesByPeripheral,
+    packagesReferencingPackage,
     peripheralDependencySummary,
+    persistTrashRecord,
     productStatus,
     seriesBySpot,
     seriesName,
@@ -30,6 +33,12 @@
 async function persistMutation(key, row, previous = null) {
   if (typeof ctx.persistContentMutation !== "function") return true;
   return ctx.persistContentMutation(key, row, previous);
+}
+async function addTrash(key, source, previous, row) {
+  if (await persistTrashRecord(row)) return true;
+  Object.assign(source, previous);
+  await persistMutation(key, source, null);
+  return false;
 }
 
 function contentList(key = state.active) {
@@ -360,7 +369,7 @@ async function requestDeleteAlbum(album) {
   source.isShow = false;
   source.status = "下架";
   if (!(await persistMutation("albums", source, previous))) return;
-  state.trash.unshift({ id: `trash${Date.now()}`, type: "照片单品", name: album.name, reason: "删除照片单品", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
+  if (!(await addTrash("albums", source, previous, { id: `trash${Date.now()}`, type: "照片单品", sourceKey: "albums", name: album.name, reason: "删除照片单品", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
   log("删除照片单品进入回收", "照片单品", album.name);
   ElMessage.success("照片单品已进入回收站，可在 30 天内恢复");
 }
@@ -380,6 +389,15 @@ async function submitAlbumReplace() {
   rows.forEach((pkg) => {
     if (pkg.albumId === form.fromAlbumId) pkg.albumId = form.toAlbumId;
     if (Array.isArray(pkg.albumIds)) pkg.albumIds = pkg.albumIds.map((id) => id === form.fromAlbumId ? form.toAlbumId : id);
+    if (Array.isArray(pkg.includedItems)) pkg.includedItems = pkg.includedItems.map((item) => {
+      if (!item || item.type !== "album") return item;
+      const next = { ...item, target: { ...(item.target || {}) } };
+      if (next.albumId === form.fromAlbumId) next.albumId = form.toAlbumId;
+      if (next.productId === form.fromAlbumId) next.productId = form.toAlbumId;
+      if (next.target.albumId === form.fromAlbumId) next.target.albumId = form.toAlbumId;
+      if (next.target.productId === form.fromAlbumId) next.target.productId = form.toAlbumId;
+      return next;
+    });
     pkg.spotId = pkg.spotId || toAlbum.spotId;
     pkg.seriesId = pkg.seriesId || toAlbum.seriesId;
   });
@@ -416,14 +434,15 @@ async function setPeripheralMode(row, mode) {
   } else if (!source.spotId) {
     source.spotId = data.spots[0]?.id || "";
   }
-  if (!(await persistMutation("peripherals", source, previous))) return;
   markProductAudit(source, "调整周边关联模式");
+  if (!(await persistMutation("peripherals", source, previous))) return;
   log("调整周边关联模式", "摄影周边", `${source.name} / ${mode}`);
   ElMessage.success(`${source.name} 已设置为${mode}`);
 }
 async function requestDeletePeripheral(row) {
   const summary = peripheralDependencySummary(row);
-  if (!summary.canDelete) return ElMessage.warning(`该周边已"${summary.orders} 个关联订单，不能直接删除`);
+  const packageRefs = packagesByPeripheral(row.id).length;
+  if (!summary.canDelete || packageRefs) return ElMessage.warning(`该周边仍有 ${summary.orders} 个关联订单或 ${packageRefs} 个套餐引用，不能直接删除`);
   const source = data.peripherals.find((item) => item.id === row.id) || row;
   const previous = { ...source };
   source.deleted = true;
@@ -431,7 +450,7 @@ async function requestDeletePeripheral(row) {
   source.isShow = false;
   source.status = "下架";
   if (!(await persistMutation("peripherals", source, previous))) return;
-  state.trash.unshift({ id: `trash${Date.now()}`, type: "摄影周边", name: row.name, reason: "删除周边商品", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
+  if (!(await addTrash("peripherals", source, previous, { id: `trash${Date.now()}`, type: "摄影周边", sourceKey: "peripherals", name: row.name, reason: "删除周边商品", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
   log("删除周边进入回收", "摄影周边", row.name);
   ctx.syncDeleteToServer("peripherals", row.id);
   ElMessage.success("周边商品已进入回收站");
@@ -439,7 +458,8 @@ async function requestDeletePeripheral(row) {
 async function requestDeletePackage(row) {
   const source = data.packages.find((item) => item.id === row.id) || row;
   const orders = data.orders.filter((order) => !order.deleted && (order.products || []).some((product) => product.id === source.id));
-  if (orders.length) return ElMessage.warning(`该套餐已"${orders.length} 个关联订单，不能直接删除，请先下架并保留历史订单追溯`);
+  const packageRefs = packagesReferencingPackage(source.id).filter((item) => item.id !== source.id).length;
+  if (orders.length || packageRefs) return ElMessage.warning(`该套餐已"${orders.length} 个关联订单或 ${packageRefs} 个套餐引用，不能直接删除，请先下架并保留历史订单追溯`);
   const previous = { ...source };
   source.deleted = true;
   source.isDeleted = true;
@@ -447,7 +467,7 @@ async function requestDeletePackage(row) {
   source.status = "下架";
   source.auditStatus = "已下";
   if (!(await persistMutation("packages", source, previous))) return;
-  state.trash.unshift({
+  if (!(await addTrash("packages", source, previous, {
     id: `trash-package-${source.id}-${Date.now()}`,
     type: source.type === "video" ? "短视频套" : "照片套餐",
     sourceKey: "packages",
@@ -458,7 +478,7 @@ async function requestDeletePackage(row) {
     operator: currentOperatorName(),
     restorable: true,
     source: { ...source },
-  });
+  }))) return;
   log("删除套餐进入回收", "套餐设置", source.name, currentOperatorName(), { module: "内容商品", level: "", objectType: source.type === "video" ? "短视频套" : "照片套餐", objectName: source.name });
   ElMessage.success("套餐已进入回收站，可由超管恢");
 }
@@ -469,7 +489,7 @@ async function requestDeleteAddon(row) {
   source.isDeleted = true;
   source.enabled = false;
   if (!(await persistMutation("addonServices", source, previous))) return;
-  state.trash.unshift({
+  if (!(await addTrash("addonServices", source, previous, {
     id: `trash-addon-${source.id}-${Date.now()}`,
     type: "增值服",
     sourceKey: "addonServices",
@@ -480,7 +500,7 @@ async function requestDeleteAddon(row) {
     operator: currentOperatorName(),
     restorable: true,
     source: { ...source },
-  });
+  }))) return;
   log("删除增值服务进入回收站", "增值服", source.name, currentOperatorName(), { module: "内容商品", level: "", objectType: "增值服", objectName: source.name });
   ElMessage.success("增值服务已进入回收站，可由超管恢复");
 }
@@ -621,7 +641,7 @@ async function requestDeleteSpot(spot) {
   spot.status = "停用";
   const synced = await persistMutation("spots", spot, previous);
   if (!synced) return;
-  state.trash.unshift({ id: `trash${Date.now()}`, type: "打卡", name: spot.name, reason: "删除打卡", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...spot } });
+  if (!(await addTrash("spots", spot, previous, { id: `trash${Date.now()}`, type: "打卡", sourceKey: "spots", name: spot.name, reason: "删除打卡", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...spot } }))) return;
   log("删除打卡点进入回收站", "打卡点设", spot.name);
   ElMessage.success("打卡点已进入回收站，可在 30 天内恢复");
 }

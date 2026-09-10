@@ -13,7 +13,9 @@
     isOrderAfterSaleLocked,
     productName,
     productPrice,
+    persistOrderAction,
     resolveProduct,
+    samplesByAlbum,
     seriesName,
     spotName,
     state
@@ -21,7 +23,7 @@
 
 function addonProducts() {
   const packages = data.packages.filter((p) => p.status !== "下架" && p.isShow !== false).map((p) => ({ ...p, type: p.type === "video" ? "video" : "package", key: `${p.type === "video" ? "video" : "package"}-${p.id}`, price: p.specialPrice || p.price, images: [p.cover] }));
-  const albums = data.albums.map((a) => ({ ...a, type: "album", key: `album-${a.id}`, images: data.samples.filter((s) => s.albumId === a.id).map((s) => s.url), price: a.price }));
+  const albums = data.albums.map((a) => ({ ...a, type: "album", key: `album-${a.id}`, images: samplesByAlbum(a.id).map((s) => s.url), price: a.price }));
   const servicesList = data.addonServices.filter((s) => s.enabled).map((s) => ({ ...s, type: "service", key: `service-${s.id}`, cover: LXM_SVG(s.name, "通用加购服务") }));
   const peripherals = data.peripherals.filter((p) => p.enabled).map((p) => ({ ...p, type: "peripheral", key: `peripheral-${p.id}`, images: [p.cover] }));
   return [...packages, ...albums, ...servicesList, ...peripherals];
@@ -80,26 +82,44 @@ function toggleAddon(item) {
   if (idx >= 0) state.selectedAddonKeys.splice(idx, 1);
   else state.selectedAddonKeys.push(item.key);
 }
-function confirmAddon() {
+async function confirmAddon() {
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能调整加购商品");
+  const order = state.currentOrder;
+  const original = JSON.parse(JSON.stringify(order));
   const selected = addonProducts().filter((i) => state.selectedAddonKeys.includes(i.key));
-  const base = state.currentOrder.products.filter((p) => !p.key);
+  const base = (order.products || []).filter((p) => !p.key);
   const addons = selected.map((i) => ({ id: i.id, key: i.key, type: i.type, name: i.name, price: i.price || 0, spotId: i.spotId, seriesId: i.seriesId, albumId: i.albumId }));
-  state.currentOrder.addons = addons;
-  state.currentOrder.products = [...base, ...addons];
-  state.currentOrder.totalAmount = state.currentOrder.products.reduce((sum, p) => sum + productPrice(p), 0);
+  order.addons = addons;
+  order.products = [...base, ...addons];
+  order.totalAmount = order.products.reduce((sum, p) => sum + productPrice(p), 0);
+  try {
+    await persistOrderAction(order, "update", { fields: { addons: order.addons, products: order.products, totalAmount: order.totalAmount }, reason: `调整加购商品：${addons.map((i) => i.name).join("、") || "清空加购"}` });
+  } catch (_) {
+    Object.keys(order).forEach((key) => { if (!(key in original)) delete order[key]; });
+    Object.assign(order, original);
+    return;
+  }
   state.addonDialog = false;
-  addOrderTimeline(state.currentOrder, `调整加购商品：${addons.map((i) => i.name).join("、") || "清空加购"}`);
+  addOrderTimeline(order, `调整加购商品：${addons.map((i) => i.name).join("、") || "清空加购"}`);
   ElMessage.success("加购商品已同步到订单");
 }
-function removeAddon(item) {
+async function removeAddon(item) {
   if (!state.currentOrder || !item?.key) return;
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能取消加购商品");
+  const order = state.currentOrder;
+  const original = JSON.parse(JSON.stringify(order));
   const removedName = productName(item);
-  state.currentOrder.addons = (state.currentOrder.addons || []).filter((p) => (p.key || `${p.type}-${p.id}`) !== item.key);
-  state.currentOrder.products = state.currentOrder.products.filter((p) => (p.key || `${p.type}-${p.id}`) !== item.key);
-  state.currentOrder.totalAmount = state.currentOrder.products.reduce((sum, p) => sum + productPrice(p), 0);
-  addOrderTimeline(state.currentOrder, `取消加购商品：${removedName}`);
+  order.addons = (order.addons || []).filter((p) => (p.key || `${p.type}-${p.id}`) !== item.key);
+  order.products = (order.products || []).filter((p) => (p.key || `${p.type}-${p.id}`) !== item.key);
+  order.totalAmount = order.products.reduce((sum, p) => sum + productPrice(p), 0);
+  try {
+    await persistOrderAction(order, "update", { fields: { addons: order.addons, products: order.products, totalAmount: order.totalAmount }, reason: `取消加购商品：${removedName}` });
+  } catch (_) {
+    Object.keys(order).forEach((key) => { if (!(key in original)) delete order[key]; });
+    Object.assign(order, original);
+    return;
+  }
+  addOrderTimeline(order, `取消加购商品：${removedName}`);
   ElMessage.success("已取消该加购商品，并同步重算订单总价");
 }
 function productTypeText(type) {
@@ -108,7 +128,7 @@ function productTypeText(type) {
 function openProduct(p) {
   const item = resolveProduct(p);
   const type = p.type === "video" ? "video" : p.type || item.type;
-  const images = item.images || (item.id && data.samples.filter((s) => s.albumId === item.id).map((s) => s.url)) || [item.cover].filter(Boolean);
+  const images = item.images || (item.id && samplesByAlbum(item.id).map((s) => s.url)) || [item.cover].filter(Boolean);
   state.currentProduct = { ...item, ...p, type, name: p.name || item.name, price: productPrice(p), images: images.length ? images : [item.cover].filter(Boolean) };
   state.productDialog = true;
 }

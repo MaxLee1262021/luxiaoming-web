@@ -19,6 +19,8 @@
     data,
     due,
     isOrderAfterSaleLocked,
+    isOrderCancelledStatus,
+    isOrderCompletedStatus,
     log,
     manualOrderProducts,
     money,
@@ -29,6 +31,7 @@
     roleProfile,
     scopedOrders,
     selectedOrders,
+    sameShop,
     shopName,
     state,
     switchMenu
@@ -63,13 +66,13 @@ function batchCancelOrders() {
   if (!can("cancelOrder")) return ElMessage.error("当前角色无权取消订单");
   if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订");
   if (selectedOrders.value.some((order) => isOrderAfterSaleLocked(order))) return ElMessage.warning("选中的订单包含售后处理中订单，请先完成售后处");
-  if (selectedOrders.value.some((order) => order.status === "completed")) return ElMessage.warning("选中的订单包含已完成订单，已完成订单不能取消");
+   if (selectedOrders.value.some((order) => isOrderCompletedStatus(order))) return ElMessage.warning("选中的订单包含已完成订单，已完成订单不能取消");
   ElMessageBox.confirm(`确认取消已"${selectedOrders.value.length} 个订单？取消后进入回收站。`, "批量取消订单", { type: "warning", confirmButtonText: "确认取消", cancelButtonText: "暂不取消" }).then(async () => {
     let changed = 0;
     for (const order of selectedOrders.value) {
       try {
         await persistOrderAction(order, "cancel", { reason: "批量取消订单" });
-        state.trash.unshift({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "批量取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
+        ctx.addTrashLocal?.({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "批量取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
         changed += 1;
       } catch (_) {}
     }
@@ -81,7 +84,7 @@ function batchCancelOrders() {
   }).catch(() => {});
 }
 function canBatchAcceptOrder(order) {
-  return !!order && canEditOrder() && !state.orderReadonly && !isOrderAfterSaleLocked(order) && order.status === "pending";
+  return !!order && canEditOrder() && !state.orderReadonly && !isOrderAfterSaleLocked(order) && ["pending", "new"].includes(order.status);
 }
 function batchAcceptOrders() {
   const rows = selectedOrders.value.filter(canBatchAcceptOrder);
@@ -112,7 +115,7 @@ function openBatchNoteDialog() {
 async function confirmBatchNote() {
   const text = String(state.batchNoteText || "").trim();
   if (!text) return ElMessage.warning("请填写批量备注内");
-  const rows = selectedOrders.value.filter((order) => !isOrderAfterSaleLocked(order) && !["completed", "cancelled"].includes(order.status));
+  const rows = selectedOrders.value.filter((order) => !isOrderAfterSaleLocked(order) && !isOrderCompletedStatus(order) && !isOrderCancelledStatus(order));
   if (!rows.length) return ElMessage.warning("已选订单均已锁定，不能批量备注");
   let changed = 0;
   for (const order of rows) {
@@ -444,7 +447,7 @@ const financeReviewRows = computed(() => {
   let rows = [...refundRows, ...orderRows];
   if (state.filters.status) rows = rows.filter((row) => row.status === state.filters.status);
   if (state.filters.productType) rows = rows.filter((row) => row.type === state.filters.productType);
-  if (state.filters.shopId) rows = rows.filter((row) => row.shopId === state.filters.shopId);
+  if (state.filters.shopId) rows = rows.filter((row) => sameShop(row, state.filters.shopId));
   if (state.filters.keyword) rows = rows.filter((row) => JSON.stringify(row).includes(state.filters.keyword));
   return rows.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
 });
@@ -606,12 +609,23 @@ onMounted(() => {
     }
   });
 });
-function addFollowLog(text) {
+async function addFollowLog(text) {
   if (!state.currentOrder) return;
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，客服处理信息暂时锁定，请先完成售后处理");
   const detail = (text || state.followText || "").trim();
   if (!detail) return ElMessage.warning("请先填写跟进内容");
-  addOrderTimeline(state.currentOrder, detail);
+  const order = state.currentOrder;
+  const original = JSON.parse(JSON.stringify(order));
+  const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
+  const connected = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+  try {
+    await persistOrderAction(order, "note", { reason: detail });
+    if (!connected) addOrderTimeline(order, detail);
+  } catch (_) {
+    Object.keys(order).forEach((field) => { if (!(field in original)) delete order[field]; });
+    Object.assign(order, original);
+    return;
+  }
   state.followText = "";
   ElMessage.success("客服跟进记录已添");
 }

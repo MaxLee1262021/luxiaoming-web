@@ -1,5 +1,8 @@
 window.LXM_CONFIG = {
   groups: ["经营中心", "订单履约", "财务管理", "渠道增长", "内容管理", "内容运营", "系统安全"],
+  // Menu records may use a custom key, but the target page must be one of
+  // these registered route keys. Keep this catalog aligned with the API.
+  routeMenuKeys: ["dashboard", "orders", "afterSales", "tasks", "addonServices", "financeReview", "reconciliation", "staff", "distributors", "shops", "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags", "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "miniDecor", "miniConfig", "guides", "permissions", "logs", "trash"],
   navSections: [
     { key: "biz", label: "经营中心", desc: "数据、业绩、经营追踪", items: ["dashboard"] },
     { key: "fulfill", label: "订单履约", desc: "客服接单、拍摄任务、售后处理、增值服务", items: ["orders", "afterSales", "tasks", "addonServices"] },
@@ -35,7 +38,7 @@ window.LXM_CONFIG = {
         { key: "productAudit", label: "商品审核", level: 1 }
       ]
     },
-    { key: "system", label: "系统安全", desc: "日志、回收站", items: ["logs", "trash"] }
+    { key: "system", label: "系统安全", desc: "权限、日志与回收站", items: ["permissions", "logs", "trash"] }
   ],
   menus: [
     { key: "dashboard", label: "经营看板", group: "经营中心" },
@@ -63,6 +66,7 @@ window.LXM_CONFIG = {
     { key: "miniDecor", label: "小程序首页", group: "内容管理" },
     { key: "miniConfig", label: "小程序全局配置", group: "内容管理" },
     { key: "guides", label: "旅拍灵感", group: "内容管理" },
+    { key: "permissions", label: "权限管理", group: "系统安全" },
     { key: "logs", label: "操作日志", group: "系统安全" },
     { key: "trash", label: "回收站", group: "系统安全" }
   ],
@@ -72,7 +76,7 @@ window.LXM_CONFIG = {
       home: "dashboard",
       scope: "all",
       staffId: "st1",
-      menus: ["dashboard", "orders", "afterSales", "financeReview", "reconciliation", "staff", "distributors", "shops", "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags", "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "miniDecor", "miniConfig", "guides", "logs", "trash"],
+      menus: ["dashboard", "orders", "afterSales", "tasks", "addonServices", "financeReview", "reconciliation", "staff", "distributors", "shops", "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags", "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "miniDecor", "miniConfig", "guides", "permissions", "logs", "trash"],
       actions: ["*"]
     },
     distributor: {
@@ -134,12 +138,21 @@ window.LXM_CONFIG = {
     }
   },
   orderStatuses: [
+    { value: "new", label: "待联系", color: "#F59E0B", customer: "预约已提交，等待客服确认" },
     { value: "pending", label: "待确认", color: "#F59E0B", customer: "已预约，待确认" },
+    { value: "contacted", label: "已联系", color: "#F59E0B", customer: "客服已联系，等待确认定金" },
+    { value: "deposit_pending", label: "待定金", color: "#F97316", customer: "待支付定金" },
+    { value: "deposit_paid", label: "已付定金", color: "#10B981", customer: "定金已确认，等待安排摄影师" },
     { value: "confirmed", label: "已确认", color: "#10B981", customer: "预约已确认" },
+    { value: "assigned", label: "已派单", color: "#3B82F6", customer: "摄影师已安排，等待拍摄" },
     { value: "shooting", label: "拍摄中", color: "#3B82F6", customer: "拍摄中" },
     { value: "retouching", label: "修片中", color: "#F97316", customer: "修片中" },
+    { value: "editing", label: "修片中", color: "#F97316", customer: "修片中" },
+    { value: "delivered", label: "已交付", color: "#F97316", customer: "成片已交付，请确认尾款" },
+    { value: "final_pending", label: "待尾款", color: "#F97316", customer: "待支付尾款" },
     { value: "completed", label: "已完成", color: "#6B7280", customer: "已完成" },
-    { value: "cancelled", label: "已取消", color: "#6B7280", customer: "已取消" }
+    { value: "cancelled", label: "已取消", color: "#6B7280", customer: "已取消" },
+    { value: "canceled", label: "已取消", color: "#6B7280", customer: "已取消" }
   ],
   visibleStatus: [
     { value: "reserved", label: "已预约，待确认" },
@@ -147,6 +160,7 @@ window.LXM_CONFIG = {
     { value: "scheduled", label: "已安排拍摄" },
     { value: "shooting", label: "拍摄中" },
     { value: "retouching", label: "修片中" },
+    { value: "editing", label: "修片中" },
     { value: "delivered", label: "成片已交付" },
     { value: "done", label: "已完成" }
   ],
@@ -162,6 +176,7 @@ window.LXM_CONFIG = {
     { key: "staff", name: "管理员工", super: true },
     { key: "shop", name: "管理商家", super: true },
     { key: "content", name: "管理内容与商品", super: true, content: true },
-    { key: "system", name: "系统配置", super: true }
+    { key: "system", name: "系统配置", super: true },
+    { key: "permissionManage", name: "配置菜单、角色和人员权限", super: true }
   ]
 };

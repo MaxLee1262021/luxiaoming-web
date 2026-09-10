@@ -78,7 +78,7 @@ function confirmedRefund(order) {
     .reduce((sum, item) => sum + Number(item.refundAmount || item.amount || 0), Number(order?.refundAmount || 0));
 }
 function retainedCancelledAmount(order) {
-  if (!["cancelled", "canceled", "terminated"].includes(order?.status)) return 0;
+  if (!isOrderCancelledStatus(order)) return 0;
   return Math.max(financePaid(order) - confirmedRefund(order), 0);
 }
 function isRetainedCancelledOrder(order) {
@@ -126,7 +126,10 @@ function log(action, target, detail, operator = roleProfile.value.name, meta = {
     snapshot: meta.snapshot || "",
   };
   state.logs.unshift(entry);
-  if (ctx.isServerConnected()) {
+  const session = window.LXM_AUTH?.getSession?.();
+  const dynamicRole = !!(session && (session.roleId || session.permissionsConfigured || session.permissionSource));
+  const canWriteAudit = !dynamicRole || (Array.isArray(session?.menuKeys) && session.menuKeys.includes("logs"));
+  if (ctx.isServerConnected() && canWriteAudit) {
     // 联网模式：审计日志实时写回服务端 logs 集合（fire-and-forget，失败不阻塞操作、不重复弹窗）。
     window.LXM_CLOUD.create("logs", entry).catch(() => {});
   } else if (!(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) {
@@ -222,8 +225,34 @@ async function persistOrderAction(order, action, payload = {}) {
 function statusMeta(value) {
   return statusDict.find((s) => s.value === value) || statusDict[0];
 }
+const COMPLETED_ORDER_STATUSES = new Set(["completed", "done", "delivered", "已完成", "已交付", "已完"]);
+const CANCELLED_ORDER_STATUSES = new Set(["cancelled", "canceled", "terminated", "已取消", "已中止", "中止"]);
+function orderStatusValue(value) { return value && typeof value === "object" ? value.status : value; }
+function isOrderCompletedStatus(value) { return COMPLETED_ORDER_STATUSES.has(String(orderStatusValue(value) || "").trim().toLowerCase()); }
+function isOrderCancelledStatus(value) { return CANCELLED_ORDER_STATUSES.has(String(orderStatusValue(value) || "").trim().toLowerCase()); }
+function isOrderTerminalStatus(value) { return isOrderCompletedStatus(value) || isOrderCancelledStatus(value); }
 function cityName(id) {
-  return (data.cities.find((c) => c.id === id) || {}).name || "-";
+  return cityById(id).name || "-";
+}
+function cityIdentitySet(value) {
+  if (value === undefined || value === null) return new Set();
+  if (typeof value !== "object") return new Set([String(value)]);
+  return new Set([value.id, value._id, value.cityId, value.code, value.name, value.city]
+    .filter((item) => item !== undefined && item !== null && String(item) !== "").map(String));
+}
+function identitiesOverlap(left, right) {
+  for (const id of left) if (right.has(id)) return true;
+  return false;
+}
+function sameCity(left, right) {
+  const a = cityIdentitySet(left); const b = cityIdentitySet(right);
+  if (identitiesOverlap(a, b)) return true;
+  const leftCity = cityById(left); const rightCity = cityById(right);
+  return !!leftCity.id && !!rightCity.id && String(leftCity.id) === String(rightCity.id);
+}
+function cityById(value) {
+  const target = cityIdentitySet(value);
+  return data.cities.find((city) => identitiesOverlap(cityIdentitySet(city), target)) || {};
 }
 function agentName(id) {
   return (data.agents.find((a) => a.id === id) || {}).name || "-";
@@ -232,7 +261,24 @@ function distributorName(id) {
   return (data.distributors.find((d) => d.id === id) || {}).name || "-";
 }
 function shopName(id) {
-  return (data.shops.find((s) => s.id === id) || {}).name || "-";
+  return shopById(id).name || "-";
+}
+function shopIdentitySet(value) {
+  if (value === undefined || value === null) return new Set();
+  if (typeof value !== "object") return new Set([String(value)]);
+  const ids = [value.id, value._id, value.shopId, value.shopCode];
+  if (value.source && typeof value.source === "object") ids.push(value.source.shopId, value.source.shopCode);
+  return new Set(ids.filter((item) => item !== undefined && item !== null && String(item) !== "").map(String));
+}
+function sameShop(left, right) {
+  const a = shopIdentitySet(left); const b = shopIdentitySet(right);
+  if (identitiesOverlap(a, b)) return true;
+  const leftShop = shopById(left); const rightShop = shopById(right);
+  return !!leftShop.id && !!rightShop.id && String(leftShop.id) === String(rightShop.id);
+}
+function shopById(value) {
+  const target = shopIdentitySet(value);
+  return data.shops.find((shop) => identitiesOverlap(shopIdentitySet(shop), target)) || {};
 }
 function isHeadquarterSource(row) {
   return row?.sourceType === "headquarter";
@@ -241,7 +287,7 @@ function orderSourceType(order) {
   if (!order) return "natural";
   if (order.sourceType === "manual") return "manual";
   if (order.sourceType === "headquarter") return "headquarter";
-  if (order.shopId) return "shop";
+  if (order.shopId || order.source?.shopId) return "shop";
   return "natural";
 }
 function orderSourceTypeText(order) {
@@ -258,8 +304,9 @@ function orderSourceName(order) {
   if (orderSourceType(order) === "manual") return order.sourceName || "客服手动创建";
   if (orderSourceType(order) === "natural") return order.sourceName || "小程序自然来";
   const distIds = orderDistributorIds(order);
-  if (distIds.length) return `${distIds.map(distributorName).join("、")} / ${shopName(order.shopId)}`;
-  return shopName(order.shopId);
+  const shopId = order.shopId || order.source?.shopId;
+  if (distIds.length) return `${distIds.map(distributorName).join("、")} / ${shopName(shopId)}`;
+  return shopName(shopId);
 }
 function staffName(id) {
   return (data.staff.find((s) => s.id === id) || {}).name || "总部摄影";
@@ -280,10 +327,28 @@ function albumsBySeries(id) {
   return data.albums.filter((a) => a.seriesId === id);
 }
 function samplesByAlbum(id, type = "") {
-  return data.samples.filter((sample) => sample.albumId === id && (!type || sample.type === type));
+  const albumId = String(id || "");
+  const album = data.albums.find((item) => String(item && (item.id || item._id) || "") === albumId);
+  const relationIds = new Set((Array.isArray(album?.photoIds) ? album.photoIds : []).map(String));
+  return data.samples.filter((sample) => {
+    const sampleId = String(sample && (sample.id || sample._id) || "");
+    const belongs = String(sample?.albumId || "") === albumId || relationIds.has(sampleId);
+    return belongs && (!type || sample.type === type);
+  });
 }
 function packagesByAlbum(id) {
-  return data.packages.filter((item) => item.albumId === id || (item.albumIds || []).includes(id));
+  return data.packages.filter((item) => item.albumId === id || (item.albumIds || []).includes(id)
+    || (Array.isArray(item.includedItems) && item.includedItems.some((included) => included && included.type === "album" && (included.target?.albumId === id || included.albumId === id || included.productId === id))));
+}
+function packagesBySeries(id) {
+  return data.packages.filter((item) => item.seriesId === id || (item.seriesIds || []).includes(id)
+    || (Array.isArray(item.includedItems) && item.includedItems.some((included) => included && (included.seriesId === id || included.target?.seriesId === id))));
+}
+function packagesByPeripheral(id) {
+  return data.packages.filter((item) => Array.isArray(item.includedItems) && item.includedItems.some((included) => included && included.type === "peripheral" && (included.peripheralId === id || included.productId === id || included.target?.peripheralId === id || included.target?.productId === id)));
+}
+function packagesReferencingPackage(id) {
+  return data.packages.filter((item) => Array.isArray(item.includedItems) && item.includedItems.some((included) => included && (included.packageId === id || included.productId === id || included.target?.packageId === id || included.target?.productId === id)));
 }
 function albumOrderRows(id) {
   const packageIds = packagesByAlbum(id).map((item) => item.id);
@@ -425,7 +490,7 @@ const spotRows = computed(() => {
   return rows;
 });
 function orderShop(order) {
-  return data.shops.find((s) => s.id === order.shopId) || {};
+  return shopById(order && (order.shopId || (order.source && order.source.shopId)));
 }
 function normalizeDateText(value) {
   if (!value) return "";
@@ -442,13 +507,15 @@ function inDateRange(value) {
 }
 function inRoleScope(orderOrShop) {
   const scope = roleProfile.value.scope;
-  const shop = orderOrShop.shopId ? orderShop(orderOrShop) : orderOrShop;
+  const shop = orderOrShop && (orderOrShop.shopId || orderOrShop.source?.shopId)
+    ? orderShop(orderOrShop)
+    : (orderOrShop || {});
   if (scope === "all" || scope === "content" || scope === "finance") return true;
   if (scope === "orders") return orderOrShop.assigneeId === roleProfile.value.staffId || orderOrShop.staffId === roleProfile.value.staffId;
   if (scope === "agent") return shop.agentId === (state.loginRole === "super" && state.filters.agentId ? state.filters.agentId : roleProfile.value.agentId);
-  if (scope === "city") return shop.cityId === roleProfile.value.cityId;
-  if (scope === "distributor") return orderOrShop.distributorId === roleProfile.value.distributorId || (shop.distributorIds || []).includes(roleProfile.value.distributorId) || shop.distributorId === roleProfile.value.distributorId;
-  if (scope === "shop") return shop.id === roleProfile.value.shopId || orderOrShop.shopId === roleProfile.value.shopId;
+  if (scope === "city") return sameCity(shop, roleProfile.value.cityId);
+  if (scope === "distributor") return (orderOrShop.distributorId || orderOrShop.source?.distributorId) === roleProfile.value.distributorId || (shop.distributorIds || []).includes(roleProfile.value.distributorId) || shop.distributorId === roleProfile.value.distributorId;
+  if (scope === "shop") return sameShop(shop, roleProfile.value.shopId) || sameShop(orderOrShop, roleProfile.value.shopId);
   if (scope === "selfTask") return orderOrShop.photographerId === roleProfile.value.staffId;
   return true;
 }
@@ -458,7 +525,7 @@ function canManageShopBinding() {
 function scanInRoleScope(scan) {
   if (!scan) return false;
   if (["super", "finance"].includes(state.role)) return true;
-  if (state.role === "merchant") return scan.shopId === roleProfile.value.shopId;
+  if (state.role === "merchant") return sameShop(scan, roleProfile.value.shopId);
   if (state.role === "distributor") return scan.distributorId === roleProfile.value.distributorId || (orderShop(scan).distributorIds || []).includes(roleProfile.value.distributorId) || orderShop(scan).distributorId === roleProfile.value.distributorId;
   if (state.role === "photo") {
     const order = data.orders.find((item) => item.id === scan.orderId);
@@ -519,7 +586,7 @@ function commission(order, type) {
   const shop = orderShop(order);
   const amount = netOrderAmount(order);
   if (type === "shop") {
-    if (!order?.shopId || isHeadquarterSource(order)) return 0;
+    if (!(order?.shopId || order?.source?.shopId) || isHeadquarterSource(order)) return 0;
     return amount * Number(shop.commissionRate || shop.shareRatio || 0) / 100;
   }
   if (type === "distributor") {
@@ -544,7 +611,7 @@ function commission(order, type) {
 }
 function commissionRateFor(type, id) {
   if (type === "shop") {
-    const shop = data.shops.find((item) => item.id === id) || {};
+    const shop = shopById(id);
     return Number(shop.commissionRate || shop.shareRatio || 0);
   }
   if (type === "distributor") {
@@ -579,7 +646,7 @@ function orderDistributorIds(order) {
   const shop = orderShop(order);
   if (shop && Array.isArray(shop.distributorIds) && shop.distributorIds.length) return shop.distributorIds;
   if (shop && shop.distributorId) return [shop.distributorId];
-  if (order && order.distributorId) return [order.distributorId];
+  if (order && (order.distributorId || order.source?.distributorId)) return [order.distributorId || order.source.distributorId];
   return [];
 }
 function orderDistributorSplits(order) {
@@ -621,7 +688,7 @@ function isOrderAfterSaleLocked(order = state.currentOrder) {
   return !!order && activeAfterSales(order).length > 0;
 }
 function canEditCurrentOrder() {
-  return canEditOrder() && state.currentOrder?.status !== "completed" && !isOrderAfterSaleLocked(state.currentOrder);
+  return canEditOrder() && !isOrderCompletedStatus(state.currentOrder) && !isOrderCancelledStatus(state.currentOrder) && !isOrderAfterSaleLocked(state.currentOrder);
 }
 function afterSaleBadge(order) {
   const rows = orderAfterSales(order);
@@ -825,7 +892,7 @@ function parseBusinessTime(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 function orderCompletedAt(order) {
-  if (!order || order.status !== "completed") return null;
+  if (!order || !isOrderCompletedStatus(order)) return null;
   const explicit = parseBusinessTime(order.completedAt || order.deliveredAt || order.finishedAt || order.completedTime);
   if (explicit) return explicit;
   const rows = orderTimelineRows(order);
@@ -840,7 +907,7 @@ function settlementAvailableAt(order) {
 function isSettlementObservationPending(order) {
   if (order?.settlementObservationReleased) return false;
   const availableAt = settlementAvailableAt(order);
-  return order?.status === "completed" && !!availableAt && Date.now() < availableAt.getTime();
+  return isOrderCompletedStatus(order) && !!availableAt && Date.now() < availableAt.getTime();
 }
 function settlementObservationText(order) {
   if (order?.settlementObservationReleased) return `订单静置期已由超管提前结束：${order.settlementObservationReleasedAt || "-"}`;
@@ -851,17 +918,17 @@ function settlementObservationText(order) {
   return isSettlementObservationPending(order) ? `订单静置期中，预计 ${text} 后可分账` : `订单静置期已满，${text} 后可分账`;
 }
 function canReleaseSettlementObservation(order) {
-  return state.role === "super" && !ctx.isReconciliationClosed.value && order?.status === "completed" && !order.settlementObservationReleased && isSettlementObservationPending(order);
+  return state.role === "super" && !ctx.isReconciliationClosed.value && isOrderCompletedStatus(order) && !order.settlementObservationReleased && isSettlementObservationPending(order);
 }
 function reconciliationBlockReasons(order, options = {}) {
   const afterSales = orderAfterSales(order);
-  const observationHold = order.status === "completed" && isSettlementObservationPending(order);
+  const observationHold = isOrderCompletedStatus(order) && isSettlementObservationPending(order);
   const refundPending = afterSales.some((item) => Number(item.refundAmount || item.amount || 0) > 0 && normalizeReviewStatus(item.financeStatus) !== "已审");
   const afterSalePending = afterSales.some((item) => normalizeAfterSaleStatus(item.status) !== "已完成");
   const reasons = [];
-  if (order.status !== "completed" && !isRetainedCancelledOrder(order)) reasons.push(`订单未完成：${statusMeta(order.status).label}`);
+  if (!isOrderCompletedStatus(order) && !isRetainedCancelledOrder(order)) reasons.push(`订单未完成：${statusMeta(order.status).label}`);
   if (auditedReceiptBase(order) < 0) reasons.push("订单实收为负");
-  if (order.status === "completed" && financeDue(order) > 0) reasons.push("收款待财务审");
+  if (isOrderCompletedStatus(order) && financeDue(order) > 0) reasons.push("收款待财务审");
   if (observationHold) reasons.push(settlementObservationText(order));
   if (options.includeReleasedNote && order.settlementObservationReleased && !observationHold) reasons.push(settlementObservationText(order));
   if (refundPending) reasons.push("退款待财务审核");
@@ -909,12 +976,12 @@ function releaseSettlementObservation(order) {
   }).catch(() => {});
 }
 function isReconciliationEligible(order) {
-  const normalCompleted = order.status === "completed" && financeDue(order) <= 0 && !isSettlementObservationPending(order);
+  const normalCompleted = isOrderCompletedStatus(order) && financeDue(order) <= 0 && !isSettlementObservationPending(order);
   const retainedCancelled = isRetainedCancelledOrder(order);
   return auditedReceiptBase(order) >= 0 && (normalCompleted || retainedCancelled) && !hasBlockingAfterSale(order) && !hasRiskBlock(order);
 }
 function isOrderDeliveredForSettlement(order) {
-  return !!order && (order.status === "completed" || ["done", "delivered"].includes(order.customerStatus));
+  return !!order && (isOrderCompletedStatus(order) || ["done", "delivered"].includes(order.customerStatus));
 }
 function isEstimatedReconciliationOrder(order) {
   if (!order) return false;
@@ -976,6 +1043,12 @@ function canCompleteOrderPayment(order) {
     agentName,
     distributorName,
     shopName,
+    shopIdentitySet,
+    sameShop,
+    shopById,
+    cityIdentitySet,
+    sameCity,
+    cityById,
     isHeadquarterSource,
     orderSourceType,
     orderSourceTypeText,
@@ -988,6 +1061,9 @@ function canCompleteOrderPayment(order) {
     albumsBySeries,
     samplesByAlbum,
     packagesByAlbum,
+    packagesBySeries,
+    packagesByPeripheral,
+    packagesReferencingPackage,
     albumOrderRows,
     albumRevenue,
     peripheralOrderRows,

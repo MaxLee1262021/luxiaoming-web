@@ -27,12 +27,19 @@
     const source = value || {};
     return {
       role: source.role || "",
+      roleId: source.roleId || "",
+      roleName: source.roleName || "",
       account: source.account || "",
       name: source.name || "",
       staffId: source.staffId || "",
       menus: Array.isArray(source.menus) ? source.menus.slice() : undefined,
       actions: Array.isArray(source.actions) ? source.actions.slice() : undefined,
       permissions: Array.isArray(source.permissions) ? source.permissions.slice() : undefined,
+      permissionKeys: Array.isArray(source.permissionKeys) ? source.permissionKeys.slice() : undefined,
+      menuKeys: Array.isArray(source.menuKeys) ? source.menuKeys.slice() : undefined,
+      menuDefinitions: Array.isArray(source.menuDefinitions) ? source.menuDefinitions.map((item) => ({ ...item })) : undefined,
+      permissionsConfigured: source.permissionsConfigured === true,
+      permissionSource: source.permissionSource || "",
       scope: source.scope || "",
       shopId: source.shopId || "",
       distributorId: source.distributorId || "",
@@ -264,6 +271,48 @@
     return jsonResponse(response);
   }
 
+  async function availableDataKeys() {
+    if (!hasSession()) throw authError("需要登录后读取数据权限", 401);
+    const response = await request(`${base}/meta/keys`);
+    const body = await jsonResponse(response);
+    return new Set(Array.isArray(body && body.keys) ? body.keys.map(String) : []);
+  }
+
+  // Permission data has its own normalized tables and must not be routed
+  // through the business-document collection API. Keeping these calls here
+  // gives every permission page the same bearer/session handling as the rest
+  // of the admin client.
+  async function permissionRequest(path = "", method = "GET", payload) {
+    if (!hasSession()) throw authError("需要登录后读取权限数据", 401);
+    const suffix = String(path || "").replace(/^\/?/, "/");
+    const init = { method, headers: { Accept: "application/json" } };
+    if (payload !== undefined) {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(payload || {});
+    }
+    return jsonResponse(await request(`${base}/permissions${suffix}`, init));
+  }
+
+  const permissionApi = {
+    snapshot: () => permissionRequest(""),
+    menus: () => permissionRequest("/menus"),
+    roles: () => permissionRequest("/roles"),
+    users: () => permissionRequest("/users"),
+    createMenu: (payload) => permissionRequest("/menus", "POST", payload),
+    updateMenu: (id, payload) => permissionRequest(`/menus/${encodeURIComponent(id)}`, "PUT", payload),
+    deleteMenu: (id) => permissionRequest(`/menus/${encodeURIComponent(id)}`, "DELETE"),
+    createRole: (payload) => permissionRequest("/roles", "POST", payload),
+    updateRole: (id, payload) => permissionRequest(`/roles/${encodeURIComponent(id)}`, "PUT", payload),
+    deleteRole: (id) => permissionRequest(`/roles/${encodeURIComponent(id)}`, "DELETE"),
+    setRoleGrants: (id, payload) => permissionRequest(`/roles/${encodeURIComponent(id)}/grants`, "PUT", payload),
+    createUser: (payload) => permissionRequest("/users", "POST", payload),
+    updateUser: (id, payload) => permissionRequest(`/users/${encodeURIComponent(id)}`, "PUT", payload),
+    disableUser: (id) => permissionRequest(`/users/${encodeURIComponent(id)}/disable`, "POST"),
+    enableUser: (id) => permissionRequest(`/users/${encodeURIComponent(id)}/enable`, "POST"),
+    deleteUser: (id) => permissionRequest(`/users/${encodeURIComponent(id)}`, "DELETE")
+  };
+  window.LXM_PERMISSIONS = permissionApi;
+
   async function merchantCodeStats(shopId) {
     if (!hasSession()) throw authError("需要登录后读取商家码统计", 401);
     const response = await request(`${base}/merchant-codes/stats?shopId=${encodeURIComponent(shopId || "")}`);
@@ -291,11 +340,22 @@
     if (loadPromise) return loadPromise;
     const all = (cfg.dataKeys || []).concat(cfg.stateKeys || [], cfg.docKeys || []);
     loadPromise = (async () => {
+      let allowedKeys = null;
+      try {
+        allowedKeys = await availableDataKeys();
+      } catch (error) {
+        if (error && error.status === 401) return { ok: false, status: 401 };
+        // Older servers may not expose /meta/keys. Retain the per-key guard
+        // below for backwards compatibility, while current servers avoid
+        // requests for collections the session is not allowed to read.
+      }
       for (const key of all) {
+        if (allowedKeys && !allowedKeys.has(key)) continue;
         try {
           if (key === "homeConfig") {
             const doc = await getDoc("homeConfig", "homeStats");
-            if (doc && doc.editorConfig && state && state.homeConfig !== undefined) state.homeConfig = doc.editorConfig;
+            const config = doc && doc.editorConfig && typeof doc.editorConfig === "object" ? doc.editorConfig : doc;
+            if (config && typeof config === "object" && state && state.homeConfig !== undefined) state.homeConfig = config;
             continue;
           }
           if (key === "siteConfig") {

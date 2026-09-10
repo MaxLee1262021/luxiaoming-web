@@ -11,6 +11,8 @@
     financeDue,
     hasBlockingAfterSale,
     isEstimatedReconciliationOrder,
+    isOrderCompletedStatus,
+    isOrderCancelledStatus,
     isReconciliationEligible,
     isRetainedCancelledOrder,
     isSettlementObservationPending,
@@ -28,7 +30,7 @@
 
 const reconciliationHoldRows = computed(() => scopedOrders.value.filter((order) => !isReconciliationEligible(order)).map((order) => {
   const afterSales = orderAfterSales(order);
-  const observationHold = order.status === "completed" && isSettlementObservationPending(order);
+  const observationHold = isOrderCompletedStatus(order) && isSettlementObservationPending(order);
   const reasons = reconciliationBlockReasons(order, { includeReleasedNote: true });
   return {
     ...order,
@@ -59,13 +61,13 @@ function openReconciliationDetail(type, label) {
     rows = scopedOrders.value;
     desc = "当前范围内全部订单，包含未完成和售后暂缓订单。";
   } else if (type === "pending") {
-    rows = scopedOrders.value.filter((order) => order.status !== "completed" && !isRetainedCancelledOrder(order));
+    rows = scopedOrders.value.filter((order) => !isOrderCompletedStatus(order) && !isRetainedCancelledOrder(order));
     desc = "未完成订单暂不参与本月分账。";
   } else if (type === "observation") {
     rows = scopedOrders.value.filter(isSettlementObservationPending);
     desc = `已完成/已交付订单进入 ${settlementObservationDays()} 天订单静置期，期满且无售后退款后才参与分账。`;
   } else if (type === "blocked") {
-    rows = scopedOrders.value.filter((order) => order.status === "completed" && hasBlockingAfterSale(order));
+    rows = scopedOrders.value.filter((order) => isOrderCompletedStatus(order) && hasBlockingAfterSale(order));
     desc = "存在退款相关或未结案售后，暂缓参与本月分账。";
   } else if (type === "eligible") {
     rows = eligibleScopedOrders();

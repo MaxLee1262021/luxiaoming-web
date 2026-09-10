@@ -199,6 +199,12 @@ window.LXM_PAGES = (() => {
     "component": "LxmPageLog"
   },
   {
+    "key": "permissions",
+    "folder": "system/permissions",
+    "slug": "permissions",
+    "component": "LxmPagePermissions"
+  },
+  {
     "key": "trash",
     "folder": "system/trash",
     "slug": "trash",

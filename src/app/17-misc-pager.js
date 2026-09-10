@@ -20,9 +20,14 @@
     financeReviewRecordRows,
     hasRiskBlock,
     isOrderAfterSaleLocked,
+    isOrderCancelledStatus,
+    isOrderCompletedStatus,
+    isOrderTerminalStatus,
     log,
     normalizeReviewStatus,
     operationLogRows,
+    persistContentMutation,
+    persistTrashRecord,
     productAuditRows,
     reconciliationHoldRows,
     reconciliationTransferRows,
@@ -47,7 +52,7 @@ function isFinanceLocked(order) {
 }
 function canOpenOrderForEdit(order) {
   if (!order) return false;
-  return order.status !== "completed" && order.status !== "cancelled" && !isFinanceLocked(order);
+  return !isOrderCompletedStatus(order) && !isOrderCancelledStatus(order) && !isFinanceLocked(order);
 }
 // 订单锁定原因汇总：订单抽屉顶部「订单锁定提醒」横幅的数据来源。
 // 汇总财务锁定 / 售后处理中 / 风控冻结 / 已完结已取消四类原因，让客服一眼看清当前为什么不能改。
@@ -57,15 +62,15 @@ function orderLockReasons(order) {
   if (isFinanceLocked(order)) reasons.push("财务已锁定：收款核对期间金额与状态暂不可修改");
   if (isOrderAfterSaleLocked(order)) reasons.push("售后处理中：完结、取消、转派与金额修改暂不可用");
   if (hasRiskBlock(order)) reasons.push(`风控冻结：${order.freezeReason || "存在风险标记，请联系管理员核实"}`);
-  if (order.status === "completed") reasons.push("订单已完成：仅支持查看与补充记录");
-  if (order.status === "cancelled") reasons.push("订单已取消：仅保留历史信息，不可再修改");
+  if (isOrderCompletedStatus(order)) reasons.push("订单已完成：仅支持查看与补充记录");
+  if (isOrderCancelledStatus(order)) reasons.push("订单已取消：仅保留历史信息，不可再修改");
   return reasons;
 }
 // 是否可调整订单加购商品：编辑权限 + 订单未完结未取消 + 无售后/财务/风控锁
 function canManageOrderAddons(order) {
   if (!order) return false;
   if (!canEditCurrentOrder()) return false;
-  if (["completed", "cancelled"].includes(order.status)) return false;
+  if (isOrderTerminalStatus(order)) return false;
   if (isOrderAfterSaleLocked(order) || isFinanceLocked(order) || hasRiskBlock(order)) return false;
   return true;
 }
@@ -74,7 +79,7 @@ function canRegisterDepositPayment(order) {
   if (!order) return false;
   if (!canEditCurrentOrder()) return false;
   if (["待审", "已审"].includes(normalizeReviewStatus(order.depositFinanceStatus))) return false;
-  if (["completed", "cancelled"].includes(order.status)) return false;
+  if (isOrderTerminalStatus(order)) return false;
   if (isOrderAfterSaleLocked(order) || isFinanceLocked(order) || hasRiskBlock(order)) return false;
   return true;
 }
@@ -85,7 +90,7 @@ function depositPaymentDisabledReason(order) {
   const status = normalizeReviewStatus(order.depositFinanceStatus);
   if (status === "待审") return "定金已提交财务审核，请等待财务确认";
   if (status === "已审") return "定金已通过财务审核，如需调整请联系财务处理";
-  if (["completed", "cancelled"].includes(order.status)) return "订单已完结或取消，不能再登记定金";
+  if (isOrderTerminalStatus(order)) return "订单已完结或取消，不能再登记定金";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，收款暂不可修改";
   if (isFinanceLocked(order)) return "财务已锁定该订单，收款暂不可修改";
   if (hasRiskBlock(order)) return "订单风控冻结中，请联系管理员核实";
@@ -179,23 +184,53 @@ function togglePackageModule(m) {
   if (idx >= 0) state.editContent.modules.splice(idx, 1);
   else state.editContent.modules.push(m);
 }
-function moveAlbumSample(sample, targetAlbumId) {
+async function moveAlbumSample(sample, targetAlbumId) {
   if (!sample) return;
   if (!targetAlbumId) return ElMessage.warning("请选择目标照片单品后再移动");
   const album = (data.albums || []).find((a) => a.id === targetAlbumId);
   if (!album) return ElMessage.warning("目标照片单品不存在");
+  const sampleId = sample.id || sample._id;
+  const previousAlbumId = sample.albumId || (data.albums || []).find((candidate) => (candidate.photoIds || []).map(String).includes(String(sampleId)))?.id;
+  const oldAlbum = previousAlbumId && String(previousAlbumId) !== String(targetAlbumId)
+    ? (data.albums || []).find((candidate) => String(candidate.id || candidate._id || "") === String(previousAlbumId))
+    : null;
+  const previousSample = { ...sample };
+  const previousOldAlbum = oldAlbum ? { ...oldAlbum, photoIds: Array.isArray(oldAlbum.photoIds) ? [...oldAlbum.photoIds] : [] } : null;
+  const previousAlbum = { ...album, photoIds: Array.isArray(album.photoIds) ? [...album.photoIds] : [] };
   sample.albumId = targetAlbumId;
-  if (!Array.isArray(album.samples)) album.samples = [];
-  if (!album.samples.find((s) => s.id === sample.id)) album.samples.push(sample);
+  if (album.seriesId !== undefined) sample.seriesId = album.seriesId;
+  if (album.spotId !== undefined) sample.spotId = album.spotId;
+  if (oldAlbum) {
+    oldAlbum.photoIds = (oldAlbum.photoIds || []).filter((id) => String(id) !== String(sampleId || ""));
+  }
+  if (!Array.isArray(album.photoIds)) album.photoIds = [];
+  if (!album.photoIds.map(String).includes(String(sampleId || ""))) album.photoIds.push(sampleId);
+  const rollback = async () => {
+    Object.assign(sample, previousSample);
+    if (oldAlbum && previousOldAlbum) { Object.assign(oldAlbum, previousOldAlbum); }
+    Object.assign(album, previousAlbum);
+    await persistContentMutation("samples", sample, null);
+    if (oldAlbum && previousOldAlbum) await persistContentMutation("albums", oldAlbum, null);
+    await persistContentMutation("albums", album, null);
+  };
+  if (!(await persistContentMutation("samples", sample, previousSample))) return;
+  if (oldAlbum && !(await persistContentMutation("albums", oldAlbum, previousOldAlbum))) { await rollback(); return; }
+  if (!(await persistContentMutation("albums", album, previousAlbum))) { await rollback(); return; }
   log("移动样片", "照片单品", `${sample.name || sample.id} -> ${album.name}`);
   ElMessage.success("样片已移动到目标照片单品");
 }
-function requestDeleteSample(sample) {
+async function requestDeleteSample(sample) {
   if (!sample) return;
+  const previous = { ...sample };
   sample.deleted = true;
-  state.trash.unshift({ id: `trash${Date.now()}`, type: "样片", name: sample.name || "样片", reason: "删除样片", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...sample } });
+  sample.isDeleted = true;
+  if (!(await persistContentMutation("samples", sample, previous))) return;
+  if (!(await persistTrashRecord({ id: `trash${Date.now()}`, type: "样片", sourceKey: "samples", name: sample.name || "样片", reason: "删除样片", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...sample } }))) {
+    Object.assign(sample, previous);
+    await persistContentMutation("samples", sample, null);
+    return;
+  }
   log("删除样片进入回收站", "照片单品", sample.name || "样片");
-  syncDeleteToServer("samples", sample.id || sample._id);
   ElMessage.success("样片已进入回收站，可在 30 天内恢复");
 }
 function undoTagReplacement(tag) {

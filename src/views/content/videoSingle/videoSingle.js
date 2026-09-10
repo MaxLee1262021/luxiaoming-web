@@ -18,9 +18,10 @@ window.LXM_PAGES.register({
     const remoteVideoSingles = Vue.ref(null);
     const remoteOn = Vue.ref(LXM_API.remoteOn());
     const remoteLoading = Vue.ref(false);
+    const serverConnected = () => !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && (!window.LXM_API_STATE || window.LXM_API_STATE.reachable !== false));
 
     const listSource = Vue.computed(() => {
-      if (remoteOn.value) return remoteVideoSingles.value || [];
+      if (remoteOn.value && remoteVideoSingles.value) return remoteVideoSingles.value;
       return ctx.videoSingleRows || [];
     });
 
@@ -63,7 +64,7 @@ window.LXM_PAGES.register({
       else tip("已切回本地演示数据");
     }
 
-    function saveSelectedVideoSingle() {
+    async function saveSelectedVideoSingle() {
       const s = selectedVideoSingle.value;
       if (!s) return;
       if (!s.title && !s.name) { tip("请填写短视频名称"); return; }
@@ -72,6 +73,15 @@ window.LXM_PAGES.register({
       s.type = "video";
       s.isVideoSingle = true;
       s.productKind = "video_single";
+      if (serverConnected() && [s.videoUrl, s.cover].some((value) => typeof value === "string" && value.startsWith("blob:"))) {
+        tip("本地视频仅用于预览，请填写可访问的视频地址后再保存");
+        return;
+      }
+      if (serverConnected() && typeof ctx.persistContentMutation === "function") {
+        const ok = await ctx.persistContentMutation("packages", s, { ...s });
+        if (ok) tip("已写入真实后端");
+        return;
+      }
       if (remoteOn.value) {
         LXM_API.saveDoc("packages", s)
           .then(() => tip("已写入真实后端"))

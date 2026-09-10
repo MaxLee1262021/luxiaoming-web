@@ -25,6 +25,8 @@
     persistAccountToCloud,
     roleName,
     roleProfile,
+    sameCity,
+    sameShop,
     state,
     syncShopDistributorRates,
     visibleDistributors
@@ -38,11 +40,11 @@ function isRemoteSession() {
 const staffRows = computed(() => {
   let list = data.staff;
   if (state.filters.staffRole) list = list.filter((s) => s.role === state.filters.staffRole);
-  if (state.filters.cityId) list = list.filter((s) => s.cityId === state.filters.cityId);
+  if (state.filters.cityId) list = list.filter((s) => sameCity(s, state.filters.cityId));
   if (state.filters.keyword) list = list.filter((s) => JSON.stringify(s).includes(state.filters.keyword));
   return list;
 });
-const distributorRows = computed(() => visibleDistributors.value.filter((d) => (!state.filters.cityId || d.cityId === state.filters.cityId) && (!state.filters.agentId || d.agentId === state.filters.agentId) && (!state.filters.keyword || JSON.stringify(d).includes(state.filters.keyword))));
+const distributorRows = computed(() => visibleDistributors.value.filter((d) => (!state.filters.cityId || sameCity(d, state.filters.cityId)) && (!state.filters.agentId || d.agentId === state.filters.agentId) && (!state.filters.keyword || JSON.stringify(d).includes(state.filters.keyword))));
 function permissionText(row) {
   const custom = (row.permissionKeys || []).map((key) => (LXM_CONFIG.permissionMatrix.find((p) => p.key === key) || {}).name).filter(Boolean);
   if (custom.length) return custom.join("");
@@ -306,8 +308,8 @@ function downloadMerchantQr(code) {
   ElMessage.success("已开始下载");
 }
 function shopStats(shopId) {
-  const orders = data.orders.filter((o) => o.shopId === shopId && !o.deleted);
-  const scans = data.scans.filter((s) => s.shopId === shopId);
+  const orders = data.orders.filter((o) => sameShop(o, shopId) && !o.deleted);
+  const scans = data.scans.filter((s) => sameShop(s, shopId));
   const eligibleOrders = orders.filter(isReconciliationEligible);
   return { scans: scans.length, orders: orders.length, amount: orders.reduce((s, o) => s + Number(o.totalAmount || 0), 0), commission: eligibleOrders.reduce((s, o) => s + orderSplit(o).shopAmount, 0), due: orders.reduce((s, o) => s + financeDue(o), 0) };
 }

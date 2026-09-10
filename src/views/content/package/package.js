@@ -26,9 +26,10 @@ window.LXM_PAGES.register({
     const remotePackages = Vue.ref(null);
     const remoteOn = Vue.ref(LXM_API.remoteOn());
     const remoteLoading = Vue.ref(false);
+    const serverConnected = () => !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && (!window.LXM_API_STATE || window.LXM_API_STATE.reachable !== false));
 
     const listSource = Vue.computed(() => {
-      if (remoteOn.value) return remotePackages.value || [];
+      if (remoteOn.value && remotePackages.value) return remotePackages.value;
       // 旅拍套餐：取 type=photo 且未删除的；视频单品另由 videoSingle 维护
       return (data.packages || []).filter((r) => r && !r.deleted && r.type !== "video");
     });
@@ -72,10 +73,15 @@ window.LXM_PAGES.register({
       else tip("已切回本地演示数据");
     }
 
-    function saveSelectedPackage() {
+    async function saveSelectedPackage() {
       const p = selectedPackage.value;
       if (!p) return;
       if (!p.name) { tip("请填写套餐名称"); return; }
+      if (serverConnected() && typeof ctx.persistContentMutation === "function") {
+        const ok = await ctx.persistContentMutation("packages", p, { ...p });
+        if (ok) tip("已写入真实后端");
+        return;
+      }
       if (remoteOn.value) {
         LXM_API.saveDoc("packages", p).then(() => tip("已写入真实后端")).catch((e) => tip("写入失败：" + e.message));
       } else {

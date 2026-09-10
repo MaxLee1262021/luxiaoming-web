@@ -79,6 +79,20 @@ module.exports = async function rpc(source, name, body = {}, ctx = {}) {
 
 /* ============================ 共享工具 ============================ */
 function getItemId(item = {}) { return item._id || item.id || ""; }
+const ARRAY_RESTORE_FIELDS = new Set(["products", "productItems", "items", "addons", "statusLogs", "followRecords", "paymentRecords", "contactPhones", "extraWechats", "logs"]);
+const BOOLEAN_RESTORE_FIELDS = new Set(["deleted", "isDeleted", "refundConfirmed", "riskBlocked", "frozen"]);
+async function restoreChangedFields(source, key, id, snapshot, changedFields) {
+  const original = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const patch = {};
+  for (const field of new Set(Array.isArray(changedFields) ? changedFields.map(String) : [])) {
+    if (Object.prototype.hasOwnProperty.call(original, field)) patch[field] = original[field];
+    else if (ARRAY_RESTORE_FIELDS.has(field)) patch[field] = [];
+    else if (BOOLEAN_RESTORE_FIELDS.has(field)) patch[field] = false;
+    else patch[field] = null;
+  }
+  if (!Object.keys(patch).length) return true;
+  return !!(await source.update(key, String(id), patch));
+}
 
 function pickConfiguredList(source = [], ids = [], limit = 8) {
   const list = Array.isArray(source) ? source : [];
@@ -250,26 +264,45 @@ async function getSiteGlobal(source) {
     const canonical = (await source.get("siteConfig", "global"))
       || (await source.get("siteConfig", "homeStats"))
       || (await source.get("config", "global"))
-    if (canonical) return canonical;
     const rows = await source.list("siteConfig");
-    if (Array.isArray(rows) && rows.length) {
-      const assembled = {};
-      for (const row of rows) {
-        if (!row || typeof row !== "object") continue;
-        const id = String(row.id || row._id || "");
-        if (!id || id === "global") continue;
-        const fragment = { ...row };
-        delete fragment.id;
-        delete fragment._id;
-        assembled[id] = normalizeSiteConfigFragment(id, fragment);
-      }
-      if (Object.keys(assembled).length) return assembled;
-    }
-    return {};
+    return mergeSiteConfigFragments(canonical, rows);
   } catch (e) {
     if (isDataSourceFailure(e)) throw e;
     return {};
   }
+}
+
+function mergeSiteConfigFragments(canonical, rows) {
+  const merged = canonical && typeof canonical === "object" ? { ...canonical } : {};
+  const fragments = {};
+  for (const row of (Array.isArray(rows) ? rows : [])) {
+    if (!row || typeof row !== "object") continue;
+    const id = String(row.id || row._id || "");
+    if (!id || id === "global" || id === "homeStats") continue;
+    const fragment = { ...row };
+    delete fragment.id;
+    delete fragment._id;
+    fragments[id] = normalizeSiteConfigFragment(id, fragment);
+  }
+  const hasValue = (value) => value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length > 0);
+  const mergeObject = (name, fragment) => {
+    if (!fragment || typeof fragment !== "object" || Array.isArray(fragment)) return;
+    const current = merged[name] && typeof merged[name] === "object" && !Array.isArray(merged[name]) ? merged[name] : {};
+    merged[name] = { ...fragment, ...Object.fromEntries(Object.entries(current).filter(([key, value]) => !["id", "_id"].includes(key) && hasValue(value))) };
+  };
+  if (!hasValue(merged.bookingNotice) && fragments.bookingNotice !== undefined) merged.bookingNotice = fragments.bookingNotice;
+  if (!hasValue(merged.privacyText) && fragments.privacyText !== undefined) merged.privacyText = fragments.privacyText;
+  if (!hasValue(merged.customPrice) || Object.values(merged.customPrice || {}).every((value) => !hasValue(value))) mergeObject("customPrice", fragments.customPrice);
+  else mergeObject("customPrice", fragments.customPrice);
+  const currentSearch = merged.search && typeof merged.search === "object" && !Array.isArray(merged.search) ? merged.search : {};
+  if (!hasValue(currentSearch.hotwords)) mergeObject("search", fragments.search);
+  else mergeObject("search", fragments.search);
+  if (!hasValue(merged.wechat) || Object.values(merged.wechat || {}).every((value) => !hasValue(value))) mergeObject("wechat", fragments.wechat);
+  else mergeObject("wechat", fragments.wechat);
+  if (!hasValue(merged.footprint) || Object.values(merged.footprint || {}).every((value) => !hasValue(value))) mergeObject("footprint", fragments.footprint);
+  else mergeObject("footprint", fragments.footprint);
+  for (const [id, fragment] of Object.entries(fragments)) if (!(id in merged) && !["bookingNotice", "privacyText", "customPrice", "search", "wechat", "footprint"].includes(id)) merged[id] = fragment;
+  return merged;
 }
 
 function normalizeSiteConfigFragment(id, fragment) {
@@ -452,7 +485,7 @@ const STATUS_GROUPS = {
   pending: ["pending", "new", "contacted", "deposit_pending"],
   confirmed: ["deposit_paid", "confirmed", "assigned"],
   shooting: ["shooting"],
-  editing: ["editing", "final_pending"],
+  editing: ["editing", "retouching", "final_pending"],
   completed: ["delivered", "completed"],
   canceled: ["canceled", "cancelled"]
 };
@@ -466,7 +499,7 @@ function customerStatusText(status) {
   return "预约处理中";
 }
 function shouldUseComputedStatus(status) {
-  return ["editing", "final_pending", "delivered", "completed", "canceled", "cancelled"].includes(status);
+  return ["editing", "retouching", "final_pending", "delivered", "completed", "canceled", "cancelled"].includes(status);
 }
 
 /* ============================ 登录 / 手机号 ============================ */
@@ -558,8 +591,8 @@ async function rpcGetHomeData(source, data = {}) {
     };
     const pageModules = config.pageModules || {};
 
-    let banners = [];
-    if (Array.isArray(config.carouselIds) && config.carouselIds.length) {
+    let banners = normalizeConfigBanners(config).slice(0, 6);
+    if (!banners.length && Array.isArray(config.carouselIds) && config.carouselIds.length) {
       const sampleMap = {};
       (await source.list("samples")).filter(isVisibleSimple).forEach(s => { if (s) sampleMap[getItemId(s)] = s; });
       banners = config.carouselIds
@@ -571,7 +604,6 @@ async function rpcGetHomeData(source, data = {}) {
           tag: item.tag || "", targetType: item.targetType || "", targetId: item.targetId || "", linkUrl: item.linkUrl || ""
         }));
     }
-    if (!banners.length) banners = normalizeConfigBanners(config);
     if (!banners.length) {
       const showcase = (await source.list("samples")).filter(s => s.isShowcase && isVisibleSimple(s)).slice(0, 6);
       banners = showcase.map(item => ({
@@ -591,6 +623,8 @@ async function rpcGetHomeData(source, data = {}) {
     const spots = pickConfiguredList(rawSpots, recommendations.hotSpotIds || recommendations.spotIds, 12);
 
     const rawSeries = (await source.list("series")).filter(isVisibleSimple);
+    const rawPackages = (await source.list("packages")).filter(isVisibleSimple)
+      .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 100);
     const albums = (await source.list("albums")).filter(isVisibleSimple);
     const configuredAlbums = pickConfiguredList(albums, recommendations.featuredAlbumIds || recommendations.albumIds, 20);
 
@@ -599,11 +633,10 @@ async function rpcGetHomeData(source, data = {}) {
     const series = rawSeries.map(item => {
       const spotIds = Array.isArray(item.spotIds) ? item.spotIds : (item.spotId ? [item.spotId] : []);
       const firstSpot = spots.find(sp => sp._id === spotIds[0] || sp.id === spotIds[0]);
-      return { ...item, albumCount: albumCountMap[item._id] || 0, firstSpotName: firstSpot ? firstSpot.name : "", spotCount: spotIds.length, packageCount: Array.isArray(item.packageIds) ? item.packageIds.length : 0 };
+      const packageCount = rawPackages.filter((pkg) => String(pkg.seriesId || "") === String(getItemId(item)) || (Array.isArray(item.packageIds) && item.packageIds.map(String).includes(String(getItemId(pkg))))).length;
+      return { ...item, albumCount: albumCountMap[item._id] || 0, firstSpotName: firstSpot ? firstSpot.name : "", spotCount: spotIds.length, packageCount };
     });
 
-    const rawPackages = (await source.list("packages")).filter(isVisibleSimple)
-      .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 100);
     const packages = pickConfiguredList(rawPackages, recommendations.hotPackageIds || recommendations.packageIds, 20);
     // 短视频单品（独立商品种类）随首页一并下发，小程序端与 getVideoSingles 同源合并
     const videoSingles = rawPackages.filter(isVideoSingleProduct).slice(0, 50).map(normalizeVideoSinglePackage);
@@ -619,7 +652,8 @@ async function rpcGetHomeData(source, data = {}) {
 
     let shopInfo = {};
     if (data.shopId) {
-      const shop = await source.get("shops", data.shopId);
+      const shopRows = await source.list("shops");
+      const shop = (Array.isArray(shopRows) ? shopRows : []).find((row) => matchesShopId(row, data.shopId));
       if (shop && shop.name) shopInfo = { name: shop.name, logo: shop.logo || "", description: shop.description || "" };
     }
     if (!shopInfo.name) shopInfo = { name: "鹿小鸣旅拍", logo: "", description: "长沙专业旅拍" };
@@ -685,7 +719,7 @@ async function rpcGetBookingData(source) {
     const allSeries = rawSeries.map(s => ({
       ...s,
       albumCount: albumCountMap[s._id] || 0,
-      packageCount: Array.isArray(s.packageIds) ? s.packageIds.length : 0,
+      packageCount: allPackages.filter((p) => String(p.seriesId || "") === String(getItemId(s)) || (Array.isArray(s.packageIds) && s.packageIds.map(String).includes(String(getItemId(p))))).length,
       firstSpotName: (() => { if (s.spotIds && s.spotIds.length) { const sp = spots.find(x => x._id === s.spotIds[0]); return sp ? sp.name : ""; } return ""; })()
     }));
     const hotPackages = allPackages.filter(p => p.isHot || p.isMainPush || p.mainPush);
@@ -700,13 +734,14 @@ async function rpcGetSeriesList(source, data = {}) {
   try {
     const { type, spotId, page = 1, pageSize = 10 } = data;
     let list = (await source.list("series")).filter(isVisibleSimple);
+    const allPackages = (await source.list("packages")).filter(isVisibleSimple);
     if (type) list = list.filter(s => s.productType === type || s.type === type);
     if (spotId) list = list.filter(s => (Array.isArray(s.spotIds) && s.spotIds.includes(spotId)) || s.spotId === spotId);
     list.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || "")));
     const total = list.length;
     const start = (Number(page) - 1) * Number(pageSize);
     const paged = list.slice(start, start + Number(pageSize)).map(s => ({
-      ...s, spotCount: Array.isArray(s.spotIds) ? s.spotIds.length : 0, packageCount: Array.isArray(s.packageIds) ? s.packageIds.length : 0
+      ...s, spotCount: Array.isArray(s.spotIds) ? s.spotIds.length : 0, packageCount: allPackages.filter((p) => String(p.seriesId || "") === String(getItemId(s)) || (Array.isArray(s.packageIds) && s.packageIds.map(String).includes(String(getItemId(p))))).length
     }));
     return { success: true, data: paged.map((item) => publicContentRow(item)), total, page: Number(page), pageSize: Number(pageSize) };
   } catch (err) {
@@ -851,17 +886,15 @@ async function rpcGetPhotoCollection(source, data = {}) {
     series.samples = samplesAll.filter(s => s.isShowcase).slice(0, 5);
     const photos = samplesAll.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || "")));
 
-    let packages = [];
-    if (series.packageIds && series.packageIds.length) {
-      const byIds = await source.list("packages");
-      packages = byIds.filter(p => series.packageIds.map(String).includes(String(getItemId(p))) && isVisibleSimple(p));
-    }
-    let featuredPackages = (await source.list("packages")).filter(p => p.isFeatured === true && isVisibleSimple(p))
+    const packagesAll = await source.list("packages");
+    const configuredPackageIds = new Set((Array.isArray(series.packageIds) ? series.packageIds : []).map(String));
+    const packages = packagesAll.filter((p) => isVisibleSimple(p) && (String(p.seriesId || "") === String(seriesId) || configuredPackageIds.has(String(getItemId(p)))));
+    let featuredPackages = packagesAll.filter(p => p.isFeatured === true && isVisibleSimple(p))
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     let spotPackages = [];
     if (series.spotIds && series.spotIds.length) {
       const targetSpotId = spotId || series.spotIds[0];
-      spotPackages = (await source.list("packages")).filter(p => String(p.spotId || "") === String(targetSpotId) && isVisibleSimple(p))
+      spotPackages = packagesAll.filter(p => String(p.spotId || "") === String(targetSpotId) && isVisibleSimple(p))
         .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     }
     const albums = await source.list("albums");
@@ -933,7 +966,7 @@ function getOrderOpenid(order) { return order.openid || order._openid || ""; }
 // spread the persisted order here: internal notes, payment records, source
 // attribution and alternate identity/contact aliases are admin-only fields.
 const PUBLIC_ORDER_ITEM_FIELDS = [
-  "id", "_id", "name", "title", "price", "quantity", "count", "productType",
+  "id", "_id", "name", "title", "price", "quantity", "qty", "count", "productType", "productId",
   "packageId", "packageName", "albumId", "albumName", "seriesId", "seriesName",
   "spotId", "spotName", "type", "duration", "cover", "coverUrl", "image"
 ];
@@ -951,6 +984,8 @@ function projectPublicDeliveryFiles(value) {
 }
 function projectPublicOrder(order = {}) {
   const id = getItemId(order);
+  const customerObject = order.customer && typeof order.customer === "object" && !Array.isArray(order.customer) ? order.customer : {};
+  const scalar = (value) => value !== undefined && value !== null && typeof value !== "object" ? value : "";
   const rawItems = Array.isArray(order.productItems) ? order.productItems : (Array.isArray(order.items) ? order.items : []);
   const productItems = rawItems.map((item) => {
     const out = {};
@@ -975,10 +1010,10 @@ function projectPublicOrder(order = {}) {
     appointmentAt: order.appointmentAt || "",
     timePeriod: order.timePeriod || order.time || order.bookingTime || "",
     type: order.type || (productItems[0] && productItems[0].type) || "photo",
-    contactName: order.contactName || order.name || "",
-    contactPhone: order.contactPhone || order.phone || "",
-    contactWechat: order.contactWechat || order.wechat || "",
-    message: order.message || order.customerRemark || order.remark || "",
+    contactName: scalar(order.contactName) || scalar(order.customerName) || scalar(customerObject.name) || scalar(customerObject.displayName) || scalar(order.customer) || scalar(order.name),
+    contactPhone: scalar(order.contactPhone) || scalar(order.phone),
+    contactWechat: scalar(order.contactWechat) || scalar(order.wechat),
+    message: scalar(order.message) || scalar(order.customerRemark) || scalar(order.remark),
     afterSaleStatus: order.afterSaleStatus || "",
     bookingMode: order.bookingMode || "consult",
     deliverFiles: projectPublicDeliveryFiles(Array.isArray(order.deliverFiles) ? order.deliverFiles : (Array.isArray(order.photos) ? order.photos : [])),
@@ -1045,7 +1080,7 @@ async function rpcOrderStatusCount(source, openid) {
   try {
     if (!openid) return { success: false, error: "请先完成微信登录" };
     const all = (await source.list("orders")).filter(o => !o.isDeleted && !o.deleted && (!openid || getOrderOpenid(o) === openid));
-    const groups = { pending: ["pending", "new", "contacted", "deposit_pending"], shooting: ["shooting"], editing: ["editing", "final_pending"], completed: ["delivered", "completed"] };
+    const groups = { pending: ["pending", "new", "contacted", "deposit_pending"], shooting: ["shooting"], editing: ["editing", "retouching", "final_pending"], completed: ["delivered", "completed"] };
     const result = {};
     for (const key of Object.keys(groups)) {
       result[key] = all.filter(o => groups[key].includes(o.status) || groups[key].includes(o.customerStatus)).length;
@@ -1179,10 +1214,26 @@ async function resolveBookingItems(source, items) {
   for (const input of items) {
     const item = input && typeof input === "object" ? { ...input } : {};
     let product = null;
-    let productType = "";
-    if (item.packageId) { product = packageMap.get(String(item.packageId)); productType = "package"; }
-    else if (item.albumId) { product = albumMap.get(String(item.albumId)); productType = "album"; }
-    else if (item.peripheralId) { product = peripheralMap.get(String(item.peripheralId)); productType = "peripheral"; }
+    let productType = String(item.productType || item.type || "").toLowerCase();
+    const productId = item.productId || item.id || item.packageId || item.albumId || item.peripheralId || "";
+    if (["video", "photo", "package", "video_package", "photo_package", "photo_single"].includes(productType) && productId) { product = packageMap.get(String(productId)); productType = "package"; }
+    else if (["album", "sample", "photo_album"].includes(productType) && productId) { product = albumMap.get(String(productId)); productType = "album"; }
+    else if (["peripheral", "addon", "accessory"].includes(productType) && productId) { product = peripheralMap.get(String(productId)); productType = "peripheral"; }
+    else if (item.packageId || productType === "package") { product = packageMap.get(String(item.packageId || productId)); productType = "package"; }
+    else if (item.albumId || productType === "album") { product = albumMap.get(String(item.albumId || productId)); productType = "album"; }
+    else if (item.peripheralId || productType === "peripheral") { product = peripheralMap.get(String(item.peripheralId || productId)); productType = "peripheral"; }
+    if (!product && productId) {
+      product = packageMap.get(String(productId));
+      if (product) productType = "package";
+      else {
+        product = albumMap.get(String(productId));
+        if (product) productType = "album";
+        else {
+          product = peripheralMap.get(String(productId));
+          if (product) productType = "peripheral";
+        }
+      }
+    }
     if (item.custom === true) {
       const count = Math.min(Math.max(Number(item.participantCount || item.count || 1), 1), 20);
       const base = Number(customConfig.singlePersonPrice ?? customConfig.single ?? 200);
@@ -1196,12 +1247,16 @@ async function resolveBookingItems(source, items) {
       if (productType === "package") item.packageId = canonicalId;
       if (productType === "album") item.albumId = canonicalId;
       if (productType === "peripheral") item.peripheralId = canonicalId;
+      item.productId = canonicalId;
       item.name = item.name || product.name || product.title || "";
       item.price = Number(product.specialPrice || product.price || product.salePrice || 0);
     }
     item.productType = item.productType || productType;
+    const quantity = Math.min(Math.max(Number(item.quantity ?? item.qty ?? 1), 1), 99);
+    item.quantity = quantity;
+    item.qty = quantity;
     if (!Number.isFinite(Number(item.price)) || Number(item.price) < 0) return { error: "预约商品价格无效" };
-    total += Number(item.price);
+    total += Number(item.price) * quantity;
     resolved.push(item);
   }
   return { items: resolved, totalPrice: total };
@@ -1210,19 +1265,27 @@ async function resolveBookingItems(source, items) {
 async function rpcCreateBooking(source, data = {}) {
   const openid = data.openid || "";
   const {
-    shopId, spotId, seriesId, packageId, name, phone, contactPhones = [], wechat, date, timePeriod, timeSlot, time, message, price, scene, items = [], totalPrice, codeId, placementType, placementLabel
+    shopId, spotId, seriesId, packageId, name: rawName, phone, contactPhones = [], wechat, date: rawDate, timePeriod, timeSlot, time, message, price, scene, items = [], productItems, totalPrice, codeId, placementType, placementLabel
   } = data;
+  const name = String(rawName || data.customerName || "").trim();
+  const scheduleRaw = String(rawDate || data.scheduleAt || data.bookingDate || "").trim();
+  let date = scheduleRaw;
+  let scheduleTime = "";
+  if (/^\d{4}-\d{2}-\d{2}[T ]/.test(scheduleRaw)) {
+    date = scheduleRaw.slice(0, 10);
+    scheduleTime = scheduleRaw.slice(11, 16);
+  }
+  const primaryPackageId = packageId || data.packageId || "";
   if (!openid) return { success: false, error: "请先完成微信登录" };
-  const itemList = Array.isArray(items) ? items : [];
-  const normalizedItems = itemList.length ? itemList : [{ spotId: spotId || "", seriesId: seriesId || "", albumId: data.albumId || "", packageId: packageId || "", price: price || 0 }];
-  const packageIds = Array.from(new Set(normalizedItems.map(i => i.packageId).filter(Boolean)));
-  const timeValue = time || timePeriod || timeSlot || "";
+  const itemList = Array.isArray(items) && items.length ? items : (Array.isArray(productItems) ? productItems : []);
+  const normalizedItems = itemList.length ? itemList : [{ spotId: spotId || "", seriesId: seriesId || "", albumId: data.albumId || "", packageId: primaryPackageId || "", productId: data.productId || "", productType: data.productType || "", price: price || 0 }];
+  const timeValue = time || timePeriod || timeSlot || data.bookingTime || scheduleTime || "";
   if (!String(name || "").trim() || !String(phone || "").trim() || !String(date || "").trim() || !String(timeValue || "").trim()) {
     return { success: false, error: "请完整填写姓名、手机号、预约日期和时间" };
   }
   if (!/^1[3-9]\d{9}$/.test(String(phone).trim())) return { success: false, error: "手机号格式不正确" };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date).trim()) || Number.isNaN(new Date(`${date}T00:00:00+08:00`).getTime())) return { success: false, error: "预约日期格式不正确" };
-  const hasBookingItem = !!packageId || !!data.albumId || !!seriesId || normalizedItems.some(item => item && (item.custom === true || item.packageId || item.albumId || item.seriesId));
+  const hasBookingItem = !!primaryPackageId || !!data.albumId || !!seriesId || normalizedItems.some(item => item && (item.custom === true || item.packageId || item.albumId || item.peripheralId || item.productId || item.seriesId));
   if (!hasBookingItem) return { success: false, error: "请选择预约拍摄项目" };
   const sourceResult = await validateBookingSource(source, { shopId, scene, codeId, placementType, placementLabel });
   if (sourceResult.error) return { success: false, error: sourceResult.error };
@@ -1238,6 +1301,13 @@ async function rpcCreateBooking(source, data = {}) {
     const resolvedItems = await resolveBookingItems(source, normalizedItems);
     if (resolvedItems.error) return { success: false, error: resolvedItems.error };
     const bookingItems = resolvedItems.items;
+    // Resolve aliases before enforcing package-level rules.  Older clients use
+    // product types such as video_package/photo_package, which normalize to a
+    // packageId inside resolveBookingItems.
+    const packageIds = Array.from(new Set(bookingItems
+      .filter((item) => item && item.packageId)
+      .map((item) => String(item.packageId))));
+    const firstPackageId = primaryPackageId || (bookingItems.find((item) => item && item.packageId) || {}).packageId || "";
     const serverTotalPrice = resolvedItems.totalPrice;
     let pkgNameMap = {};
     if (packageIds.length) {
@@ -1252,7 +1322,10 @@ async function rpcCreateBooking(source, data = {}) {
         if (minAdvance > 0 && daysUntil(date) < minAdvance) return { success: false, error: `${pkg.name || "套餐"}需至少提前${minAdvance}天预约` };
         const dayLimit = Number(pkg.dailyLimit || pkg.maxDailyBookings || pkg.appointmentLimit || 0);
         if (dayLimit > 0) {
-          const active = (await source.list("orders")).filter(o => !o.isDeleted && ACTIVE_ORDER_STATUSES.includes(o.status) && o.date === date && orderHasPackage(o, getItemId(pkg)) && orderMatchesTime(o, timeValue));
+          const active = (await source.list("orders")).filter(o => !o.isDeleted && !o.deleted && ACTIVE_ORDER_STATUSES.includes(o.status)
+            && String(o.date || o.bookingDate || o.appointmentAt || "").slice(0, 10) === date
+            && orderHasPackage(o, getItemId(pkg))
+            && orderMatchesTime(o, timeValue));
           if (active.length >= dayLimit) return { success: false, error: `${pkg.name || "套餐"}当前日期预约已满` };
         }
       }
@@ -1271,8 +1344,8 @@ async function rpcCreateBooking(source, data = {}) {
       spotName: (normalizedItems[0] && normalizedItems[0].spotName) || "",
       seriesId: seriesId || (normalizedItems[0] && normalizedItems[0].seriesId) || "",
       seriesName: (normalizedItems[0] && normalizedItems[0].seriesName) || "",
-      packageId,
-      packageName: (normalizedItems[0] && normalizedItems[0].packageName) || (packageId && pkgNameMap[packageId]) || "",
+      packageId: firstPackageId,
+      packageName: (normalizedItems[0] && normalizedItems[0].packageName) || (firstPackageId && pkgNameMap[firstPackageId]) || "",
       name,
       contactName: name,
       phone,
@@ -1284,7 +1357,7 @@ async function rpcCreateBooking(source, data = {}) {
       timePeriod: timeValue,
       timeSlot: timeValue,
       time: timeValue,
-      message: message || "",
+      message: message || data.remark || data.customerRemark || "",
       items: bookingItems,
       productItems: bookingItems,
       packageSnapshot: bookingItems[0] || {},
@@ -1348,7 +1421,7 @@ async function rpcUpdateOrderStatus(source, openid, data = {}) {
       try {
         await source.create("logs", { action: "deleteOrder", operator: openid, targetType: "order", targetId: orderId, detail: "客户移除已取消订单", createTime: new Date().toISOString() });
       } catch (error) {
-        try { await source.update("orders", orderId, original); } catch (_) {}
+        try { await restoreChangedFields(source, "orders", orderId, original, ["isDeleted", "deleted", "status", "customerStatus", "updateTime"]); } catch (_) {}
         return { success: false, error: "订单未删除，审计日志暂不可用" };
       }
       return updated ? { success: true } : { success: false, error: "订单不存在" };
@@ -1369,7 +1442,7 @@ async function applyStatusChange(source, { orderId, beforeStatus, newStatus, ope
   try {
     await source.create("logs", { action: "updateOrderStatus", operator: openid, operatorName: operatorName || "", targetType: "order", targetId: orderId, detail: `状态由${beforeStatus || "空"}更新为${newStatus}`, createTime: new Date().toISOString() });
   } catch (_) {
-    if (original) { try { await source.update("orders", orderId, original); } catch (__) {} }
+    if (original) { try { await restoreChangedFields(source, "orders", orderId, original, ["status", "customerStatus", "updateTime", "followRecords"]); } catch (__) {} }
     return { success: false, error: "状态未更新，审计日志暂不可用" };
   }
   return { success: true, customerStatus: customerStatusText(newStatus) };
@@ -1429,7 +1502,7 @@ async function rpcSubmitAfterSale(source, openid, data = {}) {
       await source.create("logs", { action: "submitAfterSale", operator: openid, targetType: "order", targetId: orderKey, detail: normalizedReason, createTime: now });
     } catch (error) {
       if (createdTicket) { try { await source.remove("afterSales", ticketId); } catch (_) {} }
-      if (updated) { try { await source.update("orders", orderKey, order); } catch (_) {} }
+      if (updated) { try { await restoreChangedFields(source, "orders", orderKey, order, ["afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId", "followRecords"]); } catch (_) {} }
       return { success: false, error: publicRpcError(error, "提交失败") };
     }
     return { success: true, data: { status: updated.afterSaleStatus, ticketId } };

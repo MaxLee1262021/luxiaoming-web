@@ -262,6 +262,7 @@ function makeFixture() {
   };
   collections.albums["smoke-album"] = { id: "smoke-album", name: "Smoke Album", status: "已上架" };
   collections.packages["smoke-package"] = { id: "smoke-package", name: "Smoke Package", status: "已上架", price: 100 };
+  collections.packages["smoke-package-conflict"] = { id: "smoke-package-conflict", name: "Smoke Conflict Package", status: "已上架", price: 80, conflictPackageIds: ["smoke-package"] };
   collections.packages["smoke-package-disabled"] = { id: "smoke-package-disabled", name: "Hidden Package", status: "已下架", price: 999 };
   collections.spots["smoke-spot"] = { id: "smoke-spot", name: "Smoke Spot", status: "启用" };
   collections.spots["smoke-spot-disabled"] = { id: "smoke-spot-disabled", name: "Hidden Spot", status: "已下架" };
@@ -771,6 +772,20 @@ async function runSmoke(options = {}) {
       assert.ok(created, "validated booking must be persisted");
       assert.equal(created.shopId, "smoke-shop", "server must use code-owned shop");
       assert.equal(created.distributorId, "smoke-distributor", "server must ignore forged distributor");
+    });
+    await check(report, "public booking enforces package conflicts after product-type alias normalization", async () => {
+      assert.ok(publicToken, "public login token is required");
+      const result = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
+        method: "POST", headers: authHeaders(publicToken), body: { data: {
+          name: "Synthetic User", phone: "13800000000", date: "2099-01-04", time: "11:00", codeId: "smoke-code",
+          items: [
+            { productId: "smoke-package", productType: "video_package" },
+            { productId: "smoke-package-conflict", productType: "photo_package" },
+          ],
+        } },
+      });
+      assert.equal(result.status, 200);
+      assert.equal(result.body && result.body.success, false, "alias package types must not bypass conflict rules");
     });
     for (const name of ["getMyOrders", "createBooking"]) {
       await check(report, `order RPC ${name} rejects missing主体`, async () => {

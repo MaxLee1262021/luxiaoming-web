@@ -19,9 +19,20 @@ const PORT = Number(process.env.PORT || 5192);
 const selected = require("./lib/selectSource.cjs")();
 const { source, mode, status: sourceStatus } = selected;
 const { createAuthStore } = require("./lib/auth.cjs");
+const createPermissionStore = require("./lib/permissionStore.cjs");
 const staticHandler = require("./lib/static.cjs")(root);
 const auth = createAuthStore();
-const apiHandler = require("./lib/api.cjs")(source, mode, { auth, sourceStatus });
+const permissionStore = createPermissionStore({
+  backend: mode,
+  jsonFile: process.env.DB_FILE,
+  dbHost: process.env.DB_HOST,
+  dbPort: Number(process.env.DB_PORT || 3306),
+  dbUser: process.env.DB_USER,
+  dbPassword: process.env.DB_PASSWORD || "",
+  dbName: process.env.DB_NAME,
+  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 3000),
+});
+const apiHandler = require("./lib/api.cjs")(source, mode, { auth, permissionStore, sourceStatus });
 
 // Demo seed is an explicit local operation. Production MySQL/cloud never gets
 // seeded implicitly, and an unavailable source is never replaced by mock data.
@@ -43,6 +54,7 @@ async function bootstrap() {
     });
   const shutdown = async () => {
     try { await auth.close(); } catch (_) {}
+    try { await permissionStore.close(); } catch (_) {}
     try { if (source && typeof source.close === "function") await source.close(); } catch (_) {}
     server.close(() => process.exit(0));
   };

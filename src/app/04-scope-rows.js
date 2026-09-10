@@ -21,6 +21,8 @@
     productName,
     resolveProduct,
     roleProfile,
+    sameCity,
+    sameShop,
     scanInRoleScope,
     shopName,
     state,
@@ -29,7 +31,7 @@
 
 const scopedShops = computed(() => {
   let list = data.shops.filter(inRoleScope);
-  if (state.filters.cityId) list = list.filter((s) => s.cityId === state.filters.cityId);
+  if (state.filters.cityId) list = list.filter((s) => sameCity(s, state.filters.cityId));
   if (state.filters.agentId) list = list.filter((s) => s.agentId === state.filters.agentId);
   if (state.filters.keyword) list = list.filter((s) => JSON.stringify(s).includes(state.filters.keyword));
   return list;
@@ -37,10 +39,10 @@ const scopedShops = computed(() => {
 const scopedOrders = computed(() => {
   let list = data.orders.filter((o) => !o.deleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
-  if (state.filters.cityId) list = list.filter((o) => orderShop(o).cityId === state.filters.cityId);
+  if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
   if (state.filters.distributorId) list = list.filter((o) => o.distributorId === state.filters.distributorId || orderDistributorIds(o).includes(state.filters.distributorId));
-  if (state.filters.shopId) list = list.filter((o) => o.shopId === state.filters.shopId);
+  if (state.filters.shopId) list = list.filter((o) => sameShop(o, state.filters.shopId));
   if (state.filters.sourceType) list = list.filter((o) => orderSourceType(o) === state.filters.sourceType);
   if (state.filters.status) list = list.filter((o) => o.status === state.filters.status);
   if (state.filters.financeStatus) list = list.filter((o) => orderFinanceStatus(o) === state.filters.financeStatus);
@@ -68,10 +70,10 @@ const scopedOrders = computed(() => {
 const reminderBaseOrders = computed(() => {
   let list = data.orders.filter((o) => !o.deleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
-  if (state.filters.cityId) list = list.filter((o) => orderShop(o).cityId === state.filters.cityId);
+  if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
   if (state.filters.distributorId) list = list.filter((o) => o.distributorId === state.filters.distributorId || orderDistributorIds(o).includes(state.filters.distributorId));
-  if (state.filters.shopId) list = list.filter((o) => o.shopId === state.filters.shopId);
+  if (state.filters.shopId) list = list.filter((o) => sameShop(o, state.filters.shopId));
   if (state.filters.sourceType) list = list.filter((o) => orderSourceType(o) === state.filters.sourceType);
   if (state.filters.assigneeId) list = list.filter((o) => o.assigneeId === state.filters.assigneeId);
   if (state.filters.photographerId) list = list.filter((o) => o.photographerId === state.filters.photographerId);
@@ -117,7 +119,7 @@ const afterSaleSummary = computed(() => ({
   done: afterSaleRecordRows.value.length,
 }));
 const scopedScans = computed(() => {
-  return data.scans.filter((s) => scanInRoleScope(s) && inDateRange(s.date) && (!state.filters.shopId || s.shopId === state.filters.shopId));
+  return data.scans.filter((s) => scanInRoleScope(s) && inDateRange(s.date) && (!state.filters.shopId || sameShop(s, state.filters.shopId)));
 });
 
   return {

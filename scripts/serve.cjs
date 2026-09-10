@@ -4,7 +4,7 @@ const path = require("path");
 require("dotenv").config();
 
 const root = path.resolve(__dirname, "..");
-const port = Number(process.env.PORT || 5191);
+const port = Number(process.env.PORT || 5192);
 const host = "127.0.0.1";
 
 // 统一使用 selectSource：开发期默认 json 自托管（数据在服务器本地文件），
@@ -12,8 +12,19 @@ const host = "127.0.0.1";
 const selected = require(path.join(root, "server/lib/selectSource.cjs"))();
 const { source, mode, status: sourceStatus } = selected;
 const { createAuthStore } = require(path.join(root, "server/lib/auth.cjs"));
+const createPermissionStore = require(path.join(root, "server/lib/permissionStore.cjs"));
 const auth = createAuthStore();
-const apiHandler = require(path.join(root, "server/lib/api.cjs"))(source, mode, { auth, sourceStatus });
+const permissionStore = createPermissionStore({
+  backend: mode,
+  jsonFile: process.env.DB_FILE,
+  dbHost: process.env.DB_HOST,
+  dbPort: Number(process.env.DB_PORT || 3306),
+  dbUser: process.env.DB_USER,
+  dbPassword: process.env.DB_PASSWORD || "",
+  dbName: process.env.DB_NAME,
+  connectTimeout: Number(process.env.DB_CONNECT_TIMEOUT_MS || 3000),
+});
+const apiHandler = require(path.join(root, "server/lib/api.cjs"))(source, mode, { auth, permissionStore, sourceStatus });
 const staticHandler = require(path.join(root, "server/lib/static.cjs"))(root);
 
 async function bootstrap() {
@@ -43,6 +54,7 @@ async function bootstrap() {
     });
   const shutdown = async () => {
     try { await auth.close(); } catch (_) {}
+    try { await permissionStore.close(); } catch (_) {}
     try { if (source && typeof source.close === "function") await source.close(); } catch (_) {}
     server.close(() => process.exit(0));
   };

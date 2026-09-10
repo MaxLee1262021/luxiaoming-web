@@ -23,9 +23,10 @@ window.LXM_PAGES.register({
     const remotePeripherals = Vue.ref(null);
     const remoteOn = Vue.ref(LXM_API.remoteOn());
     const remoteLoading = Vue.ref(false);
+    const serverConnected = () => !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && (!window.LXM_API_STATE || window.LXM_API_STATE.reachable !== false));
 
     const listSource = Vue.computed(() => {
-      if (remoteOn.value) return remotePeripherals.value || [];
+      if (remoteOn.value && remotePeripherals.value) return remotePeripherals.value;
       return (data.peripherals || []).filter((r) => r && !r.deleted);
     });
 
@@ -59,10 +60,15 @@ window.LXM_PAGES.register({
       if (remoteOn.value) refreshFromServer();
       else tip("已切回本地演示数据");
     }
-    function saveSelectedPeripheral() {
+    async function saveSelectedPeripheral() {
       const p = selectedPeripheral.value;
       if (!p) return;
       if (!p.name) { tip("请填写周边名称"); return; }
+      if (serverConnected() && typeof ctx.persistContentMutation === "function") {
+        const ok = await ctx.persistContentMutation("peripherals", p, { ...p });
+        if (ok) tip("已写入真实后端");
+        return;
+      }
       if (remoteOn.value) {
         LXM_API.saveDoc("peripherals", p).then(() => tip("已写入真实后端")).catch((e) => tip("写入失败：" + e.message));
       } else {

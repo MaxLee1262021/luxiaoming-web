@@ -47,6 +47,9 @@ window.LXM_VIEWS = {
               <button v-if="roleProfile.menus.includes('cities')" class="menu-btn menu-level-1" :class="{active:state.active==='cities'}" title="城市" @click="switchMenu('cities')"><span class="menu-mini" v-html="menuIcon('cities')"></span><span class="menu-text">城市</span></button>
               <button v-if="roleProfile.menus.includes('series')" class="menu-btn menu-level-1" :class="{active:state.active==='series'}" title="拍摄风格" @click="switchMenu('series')"><span class="menu-mini" v-html="menuIcon('series')"></span><span class="menu-text">拍摄风格</span></button>
             </div>
+            <template v-for="item in section.items.filter(entry => !['contentOverview','miniDecor','miniConfig','albums','videoSingles','packages','peripherals','guides','samples','spots','cities','series'].includes(entry.key || entry))" :key="item.key || item">
+              <button v-if="roleProfile.menus.includes(item.key || item)" class="menu-btn menu-level-1" :class="{active:state.active===(item.key || item)}" @click="switchMenu(item.key || item)"><span class="menu-mini" v-html="menuIcon(item.key || item) || (item.label || (LXM_CONFIG.menus.find(m=>m.key===(item.key || item))||{}).label || '?').slice(0,1)"></span><span class="menu-text">{{ item.label || (LXM_CONFIG.menus.find(m=>m.key===(item.key || item))||{}).label }}</span></button>
+            </template>
           </template>
           <template v-else v-for="item in section.items" :key="item.key || item">
             <button

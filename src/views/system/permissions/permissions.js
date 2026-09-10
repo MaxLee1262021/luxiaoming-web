@@ -6,14 +6,30 @@
   const { computed, onMounted, reactive, ref } = Vue;
   const ROLE_COLLECTION = "roles";
   const MENU_COLLECTION = "menus";
-  const USER_COLLECTION = "staff";
+  const USER_COLLECTION = "users";
   const ACTIONS = [
-    { key: "view", label: "查看" },
-    { key: "create", label: "新增" },
-    { key: "edit", label: "编辑" },
-    { key: "delete", label: "删除" },
+    { key: "view", label: "查看基础数据" },
+    { key: "dashboard", label: "访问经营看板" },
+    { key: "dashboardAll", label: "查看总部经营数据" },
+    { key: "dashboardShop", label: "查看商家经营数据" },
+    { key: "orderAll", label: "查看全部订单" },
+    { key: "orderSelf", label: "查看本人订单" },
+    { key: "orderStatus", label: "变更订单状态" },
+    { key: "orderEdit", label: "编辑订单" },
+    { key: "dispatch", label: "订单派单权限" },
+    { key: "assign", label: "派单" },
+    { key: "transfer", label: "转交" },
+    { key: "cancelOrder", label: "取消订单" },
+    { key: "financeReview", label: "财务审核" },
+    { key: "staff", label: "人员数据管理" },
+    { key: "shop", label: "商家数据管理" },
+    { key: "shopEdit", label: "管理商家" },
+    { key: "content", label: "内容数据管理" },
+    { key: "contentEdit", label: "编辑内容" },
+    { key: "shootUpdate", label: "更新拍摄任务" },
+    { key: "system", label: "系统配置" },
     { key: "export", label: "导出" },
-    { key: "approve", label: "审核" }
+    { key: "permissionManage", label: "权限管理" }
   ];
 
   const text = (value, fallback = "") => value === undefined || value === null ? fallback : String(value);
@@ -57,15 +73,16 @@
   }
 
   function defaultUser() {
-    return { id: "", name: "", account: "", phone: "", role: "service", status: "启用", password: "", permissionKeys: [] };
+    return { id: "", name: "", account: "", phone: "", email: "", role: "service", status: "启用", password: "", permissionKeys: [] };
   }
 
   function setup(ctx) {
-    const { ElMessage, data, roleProfile, state } = ctx;
+    const { data, roleProfile, state } = ctx;
+    const { ElMessage, ElMessageBox } = ElementPlus;
     const activeTab = ref("menus");
     const loading = ref(false);
     const saving = ref(false);
-    const readOnly = computed(() => state.role !== "super" && !roleProfile.value?.actions?.includes("permissionManage"));
+    const readOnly = computed(() => state.role !== "super");
     const canWrite = computed(() => !readOnly.value);
     const menuRows = ref(fallbackMenus());
     const roleRows = ref(fallbackRoles());
@@ -76,7 +93,7 @@
     const menuDialog = ref(false);
     const roleDialog = ref(false);
     const userDialog = ref(false);
-    const menuForm = reactive({ id: "", key: "", name: "", parentId: "", group: "", type: "menu", sort: 1, status: "启用" });
+    const menuForm = reactive({ id: "", key: "", name: "", parentId: "", group: "", routeKey: "dashboard", type: "menu", sort: 1, status: "启用" });
     const roleForm = reactive({ id: "", key: "", name: "", description: "", menus: [], actions: [], status: "启用" });
     const userForm = reactive(defaultUser());
 
@@ -96,6 +113,11 @@
     });
     const selectedRole = computed(() => roleRows.value.find((row) => row.id === selectedRoleId.value) || null);
     const menuOptions = computed(() => menuRows.value.filter((row) => row.id !== menuForm.id));
+    const routeOptions = computed(() => {
+      const labels = new Map((window.LXM_CONFIG?.menus || []).map((item) => [String(item.key), item.label || item.key]));
+      const keys = Array.isArray(window.LXM_CONFIG?.routeMenuKeys) ? window.LXM_CONFIG.routeMenuKeys : [];
+      return keys.map((key) => ({ key: String(key), label: labels.get(String(key)) || String(key) }));
+    });
     const activeMenuCount = computed(() => menuRows.value.filter((row) => (row.status || "启用") === "启用").length);
     const activeRoleCount = computed(() => roleRows.value.filter((row) => (row.status || "启用") === "启用").length);
 
@@ -111,23 +133,27 @@
     }
 
     async function loadCollection(key, target, fallback) {
-      if (!window.LXM_CLOUD?.getColl || !window.LXM_AUTH?.hasSession?.()) {
-        setRows(target, [], fallback, true, key);
+      const loader = key === MENU_COLLECTION ? window.LXM_PERMISSIONS?.menus
+        : key === ROLE_COLLECTION ? window.LXM_PERMISSIONS?.roles
+          : window.LXM_PERMISSIONS?.users;
+      if (typeof loader !== "function" || !window.LXM_AUTH?.hasSession?.()) {
+        setRows(target, [], fallback, false, key);
         return false;
       }
       try {
-        setRows(target, await window.LXM_CLOUD.getColl(key), fallback, false, key);
+        setRows(target, await loader(), fallback, false, key);
         return true;
       } catch (error) {
-        if (error?.status !== 403) console.warn(`[permissions] load ${key} failed`, error);
-        setRows(target, [], fallback, true, key);
+        console.warn(`[permissions] load ${key} failed`, error);
+        // An authenticated page must never substitute bundled demo rows for a
+        // denied or unavailable permission service.
+        setRows(target, [], fallback, false, key);
         return false;
       }
     }
 
     async function loadUsers() {
-      const loaded = await loadCollection(USER_COLLECTION, userRows, () => data?.staff || []);
-      if (!loaded && Array.isArray(data?.staff)) userRows.value = data.staff.map((row) => ({ ...row }));
+      await loadCollection(USER_COLLECTION, userRows, () => data?.staff || []);
     }
 
     async function loadAll() {
@@ -151,25 +177,25 @@
     }
 
     function requireRemoteWrite(method) {
-      if (!window.LXM_AUTH?.hasSession?.() || typeof window.LXM_CLOUD?.[method] !== "function") {
+      if (!window.LXM_AUTH?.hasSession?.() || typeof window.LXM_PERMISSIONS?.[method] !== "function") {
         throw new Error("当前未连接真实权限数据服务，不能保存");
       }
-      return window.LXM_CLOUD[method];
+      return window.LXM_PERMISSIONS[method];
     }
 
     function openMenu(row = null) {
       if (!ensureWriteAccess()) return;
-      Object.assign(menuForm, row ? { ...row } : { id: "", key: "", name: "", parentId: "", group: "", type: "menu", sort: menuRows.value.length + 1, status: "启用" });
+      Object.assign(menuForm, row ? { ...row, routeKey: row.routeKey || row.targetKey || row.key } : { id: "", key: "", name: "", parentId: "", group: "系统安全", routeKey: routeOptions.value[0]?.key || "dashboard", type: "menu", sort: menuRows.value.length + 1, status: "启用" });
       menuDialog.value = true;
     }
 
     async function saveMenu() {
-      if (!ensureWriteAccess() || !menuForm.key.trim() || !menuForm.name.trim()) return ElMessage.warning("请填写菜单标识和菜单名称");
+      if (!ensureWriteAccess() || !menuForm.key.trim() || !menuForm.name.trim() || !text(menuForm.routeKey).trim()) return ElMessage.warning("请填写菜单标识、菜单名称并选择目标页面");
       saving.value = true;
       try {
-        const payload = { ...menuForm, key: menuForm.key.trim(), name: menuForm.name.trim(), sort: Number(menuForm.sort || 0) };
-        const write = requireRemoteWrite(menuForm.id ? "update" : "create");
-        const saved = menuForm.id ? await write(MENU_COLLECTION, menuForm.id, payload) : await write(MENU_COLLECTION, payload);
+        const payload = { ...menuForm, key: menuForm.key.trim(), name: menuForm.name.trim(), routeKey: text(menuForm.routeKey).trim(), sort: Number(menuForm.sort || 0) };
+        const write = requireRemoteWrite(menuForm.id ? "updateMenu" : "createMenu");
+        const saved = menuForm.id ? await write(menuForm.id, payload) : await write(payload);
         const row = saved?.data || saved || payload;
         if (menuForm.id) {
           const index = menuRows.value.findIndex((item) => item.id === menuForm.id);
@@ -186,15 +212,30 @@
       }
     }
 
-    async function toggleMenu(row) {
+    async function toggleMenu(row, enabled) {
       if (!ensureWriteAccess()) return;
-      const nextStatus = (row.status || "启用") === "启用" ? "停用" : "启用";
+      const previousStatus = row.status || "启用";
+      const nextStatus = enabled === undefined ? (previousStatus === "启用" ? "停用" : "启用") : (enabled ? "启用" : "停用");
       try {
-        const saved = await requireRemoteWrite("update")(MENU_COLLECTION, row.id, { status: nextStatus });
+        const saved = await requireRemoteWrite("updateMenu")(row.id, { status: nextStatus });
         Object.assign(row, saved?.data || saved || { status: nextStatus });
         ElMessage.success(`菜单已${nextStatus}`);
       } catch (error) {
+        row.status = previousStatus;
         ElMessage.error(error?.message || "菜单状态保存失败");
+      }
+    }
+
+    async function deleteMenu(row) {
+      if (!ensureWriteAccess()) return;
+      try {
+        await ElMessageBox.confirm(`删除菜单“${row.name || row.label || row.key}”后，已授权该菜单的角色需要重新配置。`, "删除菜单", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
+        await requireRemoteWrite("deleteMenu")(row.id);
+        menuRows.value = menuRows.value.filter((item) => item.id !== row.id);
+        ElMessage.success("菜单已删除");
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        ElMessage.error(error?.message || "菜单删除失败，请先解除角色授权");
       }
     }
 
@@ -219,8 +260,8 @@
       saving.value = true;
       try {
         const payload = { ...roleForm, key: roleForm.key.trim(), name: roleForm.name.trim(), menus: unique(roleForm.menus), actions: unique(roleForm.actions) };
-        const write = requireRemoteWrite(roleForm.id ? "update" : "create");
-        const saved = roleForm.id ? await write(ROLE_COLLECTION, roleForm.id, payload) : await write(ROLE_COLLECTION, payload);
+        const write = requireRemoteWrite(roleForm.id ? "updateRole" : "createRole");
+        const saved = roleForm.id ? await write(roleForm.id, payload) : await write(payload);
         const row = saved?.data || saved || payload;
         if (roleForm.id) {
           const index = roleRows.value.findIndex((item) => item.id === roleForm.id);
@@ -242,11 +283,25 @@
       if (!ensureWriteAccess()) return;
       const nextStatus = (row.status || "启用") === "启用" ? "停用" : "启用";
       try {
-        const saved = await requireRemoteWrite("update")(ROLE_COLLECTION, row.id, { status: nextStatus });
+        const saved = await requireRemoteWrite("updateRole")(row.id, { status: nextStatus });
         Object.assign(row, saved?.data || saved || { status: nextStatus });
         ElMessage.success(`角色已${nextStatus}`);
       } catch (error) {
         ElMessage.error(error?.message || "角色状态保存失败");
+      }
+    }
+
+    async function deleteRole(row) {
+      if (!ensureWriteAccess()) return;
+      try {
+        await ElMessageBox.confirm(`删除角色“${row.name}”后无法恢复。请先将该角色下的人员调整到其他角色。`, "删除角色", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
+        await requireRemoteWrite("deleteRole")(row.id);
+        roleRows.value = roleRows.value.filter((item) => item.id !== row.id);
+        selectedRoleId.value = roleRows.value[0]?.id || "";
+        ElMessage.success("角色已删除");
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        ElMessage.error(error?.message || "角色删除失败，请先解除人员绑定");
       }
     }
 
@@ -266,8 +321,8 @@
       try {
         const payload = { ...userForm, name: userForm.name.trim(), account: userForm.account.trim(), permissionKeys: unique(userForm.permissionKeys) };
         if (!payload.password) delete payload.password;
-        const write = requireRemoteWrite(userForm.id ? "update" : "create");
-        const saved = userForm.id ? await write(USER_COLLECTION, userForm.id, payload) : await write(USER_COLLECTION, payload);
+        const write = requireRemoteWrite(userForm.id ? "updateUser" : "createUser");
+        const saved = userForm.id ? await write(userForm.id, payload) : await write(payload);
         const row = saved?.data || saved || payload;
         delete row.password;
         if (userForm.id) {
@@ -289,7 +344,9 @@
       if (!ensureWriteAccess()) return;
       const nextStatus = (row.status || "启用") === "启用" ? "停用" : "启用";
       try {
-        const saved = await requireRemoteWrite("update")(USER_COLLECTION, row.id, { status: nextStatus });
+        const saved = nextStatus === "停用"
+          ? await requireRemoteWrite("disableUser")(row.id)
+          : await requireRemoteWrite("enableUser")(row.id);
         Object.assign(row, saved?.data || saved || { status: nextStatus });
         ElMessage.success(`人员账号已${nextStatus}`);
       } catch (error) {
@@ -297,14 +354,27 @@
       }
     }
 
+    async function deleteUser(row) {
+      if (!ensureWriteAccess()) return;
+      try {
+        await ElMessageBox.confirm(`删除人员“${row.name || row.account}”会同时删除其后台登录账号，且无法恢复。`, "删除人员", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
+        await requireRemoteWrite("deleteUser")(row.id);
+        userRows.value = userRows.value.filter((item) => item.id !== row.id);
+        ElMessage.success("人员已删除");
+      } catch (error) {
+        if (error === "cancel" || error === "close") return;
+        ElMessage.error(error?.message || "人员删除失败");
+      }
+    }
+
     onMounted(loadAll);
     return {
       activeTab, loading, saving, readOnly, canWrite, menuRows, roleRows, userRows,
       menuFilter, userFilter, filteredMenus, filteredUsers, selectedRole,
-      menuOptions, activeMenuCount, activeRoleCount, ACTIONS, menuForm, roleForm, userForm,
+      menuOptions, routeOptions, activeMenuCount, activeRoleCount, ACTIONS, menuForm, roleForm, userForm,
       menuDialog, roleDialog, userDialog, selectedRoleId,
-      openMenu, saveMenu, toggleMenu, selectRole, openRole, editSelectedRole, saveRole, toggleRole,
-      openUser, saveUser, toggleUser, userRoleName, menuLabel, roleLabel, loadAll
+      openMenu, saveMenu, toggleMenu, deleteMenu, selectRole, openRole, editSelectedRole, saveRole, toggleRole, deleteRole,
+      openUser, saveUser, toggleUser, deleteUser, userRoleName, menuLabel, roleLabel, loadAll
     };
   }
 

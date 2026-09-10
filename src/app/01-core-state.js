@@ -287,6 +287,10 @@ const currentStaff = computed(() => data.staff.find((s) => s.id === state.curren
 const canPreviewRoles = computed(() => state.loginRole === "super");
 const menus = computed(() => LXM_CONFIG.menus.filter((m) => roleProfile.value.menus.includes(m.key)));
 const activeMenu = computed(() => LXM_CONFIG.menus.find((m) => m.key === state.active) || LXM_CONFIG.menus[0]);
+const activeRouteKey = computed(() => {
+  const key = activeMenu.value && (activeMenu.value.routeKey || activeMenu.value.targetKey || activeMenu.value.key);
+  return key === "videoProducts" ? "packages" : (key || "dashboard");
+});
 const groupLabelOf = (groupKey) => ((LXM_CONFIG.groups || []).includes(groupKey) ? groupKey : "");
 const breadcrumbTrail = computed(() => [groupLabelOf(activeMenu.value.group), activeMenu.value.label].filter(Boolean));
 const searchedMenus = computed(() => {
@@ -312,7 +316,11 @@ const manualOrderProducts = computed(() => [
   ...data.addonServices.filter((item) => item.enabled !== false).map((item) => ({ ...item, productType: "service" })),
   ...data.peripherals.filter((item) => ctx.productStatus(item) === "上架").map((item) => ({ ...item, productType: "peripheral" })),
 ]);
-const visibleCities = computed(() => state.role === "agent" && state.loginRole !== "super" ? data.cities.filter((c) => c.id === roleProfile.value.cityId) : data.cities);
+const visibleCities = computed(() => {
+  if (!(state.role === "agent" && state.loginRole !== "super")) return data.cities;
+  const target = String(roleProfile.value.cityId || "");
+  return data.cities.filter((city) => [city.id, city._id, city.cityId, city.code, city.name, city.city].filter(Boolean).map(String).includes(target));
+});
 const visibleDistributors = computed(() => {
   if (state.role === "agent") {
     const agentId = state.loginRole === "super" && state.filters.agentId ? state.filters.agentId : roleProfile.value.agentId;
@@ -340,6 +348,7 @@ const visibleDistributors = computed(() => {
     canPreviewRoles,
     menus,
     activeMenu,
+    activeRouteKey,
     groupLabelOf,
     breadcrumbTrail,
     searchedMenus,

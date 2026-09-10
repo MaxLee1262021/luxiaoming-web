@@ -16,8 +16,37 @@
 
 function remoteTrashEnabled() {
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
-  return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.update && window.LXM_CLOUD?.remove
+  return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.create && window.LXM_CLOUD?.update && window.LXM_CLOUD?.remove
     && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+}
+function trashRowKey(row) {
+  if (!row) return "";
+  const source = row.source && typeof row.source === "object" ? row.source : {};
+  if (row.refId) return `order:${row.refId}`;
+  if (row.sourceKey && (source.id || source._id)) return `${row.sourceKey}:${source.id || source._id}`;
+  return row.id ? `id:${row.id}` : "";
+}
+function addTrashLocal(row) {
+  const key = trashRowKey(row);
+  const existing = key && state.trash.find((item) => trashRowKey(item) === key);
+  if (existing) return existing;
+  state.trash.unshift(row);
+  return row;
+}
+async function persistTrashRecord(row) {
+  const inserted = addTrashLocal(row);
+  if (inserted !== row) return inserted;
+  if (!remoteTrashEnabled()) return row;
+  try {
+    const saved = await window.LXM_CLOUD.create("trash", row);
+    if (saved && typeof saved === "object") Object.assign(row, saved);
+    return row;
+  } catch (error) {
+    const index = state.trash.indexOf(row);
+    if (index >= 0) state.trash.splice(index, 1);
+    ElMessage.error((error && error.message) || "回收站记录保存失败，请稍后重试");
+    return null;
+  }
 }
 async function removeTrashRecordRemote(row) {
   if (!remoteTrashEnabled() || !row || !(row.id || row._id)) return true;
@@ -29,6 +58,7 @@ function trashSourceKey(row) {
   return ({
     "打卡": "spots", "打卡点": "spots", "照片单品": "albums", "摄影周边": "peripherals",
     "样片": "samples", "图片样片": "samples", "视频样片": "samples", "拍摄风格": "series", "城市": "cities",
+    "照片套餐": "packages", "短视频": "packages", "短视频套": "packages", "增值服务": "addonServices", "增值服": "addonServices",
   })[row && row.type] || "";
 }
 async function restoreSourceRecordRemote(row) {
@@ -77,41 +107,47 @@ async function restoreTrash(row) {
     addOrderTimeline(order, "从回收站恢复订单，状态回到待确认", roleProfile.value.name);
   }
   if (row.type === "打卡" && row.source) {
-    const existing = data.spots.find((item) => item.id === row.source.id);
-    if (existing) Object.assign(existing, row.source, { deleted: false, status: row.source.status === "停用" ? "启用" : row.source.status || "启用" });
-    else data.spots.unshift({ ...row.source, deleted: false, status: row.source.status || "启用" });
+    const sourceId = row.source.id || row.source._id;
+    const existing = data.spots.find((item) => (item.id || item._id) === sourceId);
+    if (existing) Object.assign(existing, row.source, { deleted: false, isDeleted: false, status: row.source.status === "停用" ? "启用" : row.source.status || "启用" });
+    else data.spots.unshift({ ...row.source, deleted: false, isDeleted: false, status: row.source.status || "启用" });
   }
   if (row.type === "照片单品" && row.source) {
-    const existing = data.albums.find((item) => item.id === row.source.id);
-    if (existing) Object.assign(existing, row.source, { deleted: false, status: row.source.status === "下架" ? "启用" : row.source.status || "启用" });
-    else data.albums.unshift({ ...row.source, deleted: false, status: row.source.status || "启用" });
+    const sourceId = row.source.id || row.source._id;
+    const existing = data.albums.find((item) => (item.id || item._id) === sourceId);
+    if (existing) Object.assign(existing, row.source, { deleted: false, isDeleted: false, status: row.source.status === "下架" ? "启用" : row.source.status || "启用" });
+    else data.albums.unshift({ ...row.source, deleted: false, isDeleted: false, status: row.source.status || "启用" });
   }
   if (row.type === "摄影周边" && row.source) {
-    const existing = data.peripherals.find((item) => item.id === row.source.id);
-    if (existing) Object.assign(existing, row.source, { deleted: false, status: row.source.status === "下架" ? "上架" : row.source.status || "上架", enabled: true, isShow: true });
-    else data.peripherals.unshift({ ...row.source, deleted: false, status: row.source.status || "上架", enabled: true, isShow: true });
+    const sourceId = row.source.id || row.source._id;
+    const existing = data.peripherals.find((item) => (item.id || item._id) === sourceId);
+    if (existing) Object.assign(existing, row.source, { deleted: false, isDeleted: false, status: row.source.status === "下架" ? "上架" : row.source.status || "上架", enabled: true, isShow: true });
+    else data.peripherals.unshift({ ...row.source, deleted: false, isDeleted: false, status: row.source.status || "上架", enabled: true, isShow: true });
   }
-  if (row.sourceKey && row.source) {
+  const sourceKey = row.sourceKey || trashSourceKey(row);
+  if (sourceKey && row.source) {
     const restoreMap = {
       packages: data.packages,
       addonServices: data.addonServices,
       tagLibrary: data.tagLibrary,
       series: data.series,
       samples: data.samples,
+      cities: data.cities,
     };
-    const target = restoreMap[row.sourceKey];
+    const target = restoreMap[sourceKey];
     if (target) {
-      const existing = target.find((item) => item.id === row.source.id);
-      const restored = { ...row.source, deleted: false };
-      if (row.sourceKey === "packages") {
+      const sourceId = row.source.id || row.source._id;
+      const existing = target.find((item) => (item.id || item._id) === sourceId);
+      const restored = { ...row.source, deleted: false, isDeleted: false };
+      if (sourceKey === "packages") {
         restored.status = restored.status === "下架" ? "上架" : restored.status || "上架";
         restored.isShow = restored.isShow !== false;
       }
-      if (row.sourceKey === "addonServices") {
+      if (sourceKey === "addonServices") {
         restored.enabled = true;
         restored.status = restored.status === "下架" ? "上架" : restored.status || "上架";
       }
-      if (row.sourceKey === "tagLibrary") restored.status = restored.status || "启用";
+      if (sourceKey === "tagLibrary") restored.status = restored.status || "启用";
       if (existing) Object.assign(existing, restored);
       else target.unshift(restored);
     }
@@ -165,6 +201,8 @@ async function clearTrash() {
 
   return {
     restoreTrash,
+    addTrashLocal,
+    persistTrashRecord,
     restoreAllTrash,
     purgeTrash,
     clearTrash

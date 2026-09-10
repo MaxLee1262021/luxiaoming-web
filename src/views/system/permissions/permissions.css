@@ -4,7 +4,7 @@
 
 .page-route-permissions .permissions-page {
   display: grid;
-  gap: 14px;
+  gap: 20px;
   min-width: 0;
 }
 
@@ -23,8 +23,8 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 18px;
-  padding: 18px 20px;
+  gap: 28px;
+  padding: 24px 28px;
   border-left: 4px solid var(--lxm-brand-strong, #ee2c2c);
 }
 
@@ -39,61 +39,82 @@
 .page-route-permissions h2,
 .page-route-permissions p { margin: 0; }
 .page-route-permissions h2 { font-size: 22px; line-height: 1.3; }
-.page-route-permissions .permissions-header p { margin-top: 6px; color: var(--lxm-muted, #7c6a5e); font-size: 13px; line-height: 1.6; }
-.page-route-permissions .permissions-header-actions { display: flex; align-items: center; gap: 10px; }
+.page-route-permissions .permissions-header p { max-width: 720px; margin-top: 8px; color: var(--lxm-muted, #7c6a5e); font-size: 13px; line-height: 1.7; }
+.page-route-permissions .permissions-header-actions { display: flex; align-items: center; gap: 12px; padding-top: 2px; white-space: nowrap; }
 
-.page-route-permissions .permissions-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.page-route-permissions .permissions-stat-grid > div { padding: 14px 16px; }
+.page-route-permissions .permissions-stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.page-route-permissions .permissions-stat-grid > div { min-height: 118px; padding: 20px 22px; }
 .page-route-permissions .permissions-stat-grid span,
 .page-route-permissions .permissions-stat-grid em { display: block; color: var(--lxm-muted, #7c6a5e); font-size: 12px; font-style: normal; }
-.page-route-permissions .permissions-stat-grid strong { display: block; margin: 6px 0 3px; color: var(--lxm-ink, #2a211b); font-size: 23px; }
+.page-route-permissions .permissions-stat-grid strong { display: block; margin: 10px 0 5px; color: var(--lxm-ink, #2a211b); font-size: 25px; }
 .page-route-permissions .permissions-stat-note { background: var(--lxm-brand-soft, #fbe6d8) !important; }
 
 .page-route-permissions .permissions-tabs { min-width: 0; }
-.page-route-permissions .permissions-toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
-.page-route-permissions .permissions-toolbar .el-input { max-width: 360px; }
+.page-route-permissions .permissions-toolbar { display: flex; gap: 14px; align-items: center; margin-bottom: 18px; }
+.page-route-permissions .permissions-toolbar .el-input { max-width: 420px; }
 .page-route-permissions .permissions-toolbar .el-button { margin-left: auto; }
-.page-route-permissions .user-toolbar .el-select { width: 160px; }
+.page-route-permissions .user-toolbar .el-select { width: 180px; }
 .page-route-permissions .user-toolbar .el-button { margin-left: 0; }
-.page-route-permissions .permissions-table-panel { padding: 14px; }
-.page-route-permissions .permissions-section-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-.page-route-permissions .permissions-section-title strong { display: block; margin-bottom: 4px; font-size: 15px; }
-.page-route-permissions .permissions-section-title p { color: var(--lxm-muted, #7c6a5e); font-size: 12px; line-height: 1.5; }
+.page-route-permissions .permissions-table-panel { padding: 20px 22px; }
+.page-route-permissions .permissions-section-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 18px; }
+.page-route-permissions .permissions-section-title strong { display: block; margin-bottom: 6px; font-size: 16px; }
+.page-route-permissions .permissions-section-title p { max-width: 680px; color: var(--lxm-muted, #7c6a5e); font-size: 12px; line-height: 1.65; }
 .page-route-permissions .muted { color: var(--lxm-muted, #7c6a5e); font-size: 12px; }
+.page-route-permissions .el-table .el-table__cell { padding-top: 11px; padding-bottom: 11px; }
 
-.page-route-permissions .role-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 12px; min-height: 510px; }
+.page-route-permissions .role-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 18px; min-height: 620px; }
 .page-route-permissions .role-list-panel,
-.page-route-permissions .role-editor-panel { padding: 14px; min-width: 0; }
-.page-route-permissions .role-list-item { display: flex; flex-direction: column; width: 100%; gap: 4px; padding: 11px 12px; border: 0; border-left: 3px solid transparent; background: transparent; color: var(--lxm-ink, #2a211b); text-align: left; cursor: pointer; }
+.page-route-permissions .role-editor-panel { padding: 20px 22px; min-width: 0; }
+.page-route-permissions .role-list-item { display: flex; flex-direction: column; width: 100%; gap: 5px; margin-bottom: 5px; padding: 15px 16px; border: 0; border-left: 3px solid transparent; border-radius: 4px; background: transparent; color: var(--lxm-ink, #2a211b); text-align: left; cursor: pointer; }
 .page-route-permissions .role-list-item:hover { background: var(--lxm-cream, #fff7ef); }
 .page-route-permissions .role-list-item.active { border-left-color: var(--lxm-brand-strong, #ee2c2c); background: var(--lxm-brand-soft, #fbe6d8); }
 .page-route-permissions .role-list-item span { font-size: 14px; font-weight: 700; }
 .page-route-permissions .role-list-item small { color: var(--lxm-muted, #7c6a5e); font-size: 11px; }
-.page-route-permissions .role-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0 20px; }
-.page-route-permissions .role-summary > div { padding: 13px; border: 1px solid var(--lxm-line, #efe6dd); border-radius: 6px; background: var(--lxm-bg, #faf7f3); }
+.page-route-permissions .role-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 22px 0 28px; }
+.page-route-permissions .role-summary > div { min-height: 92px; padding: 18px; border: 1px solid var(--lxm-line, #efe6dd); border-radius: 6px; background: var(--lxm-bg, #faf7f3); }
 .page-route-permissions .role-summary span { display: block; color: var(--lxm-muted, #7c6a5e); font-size: 12px; }
-.page-route-permissions .role-summary strong { display: block; margin-top: 5px; font-size: 17px; }
-.page-route-permissions .role-permission-block { padding: 14px 0; border-top: 1px solid var(--lxm-line, #efe6dd); }
-.page-route-permissions .role-permission-block h4 { margin: 0 0 10px; font-size: 14px; }
-.page-route-permissions .permission-chip-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.page-route-permissions .permission-check-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; width: 100%; }
-.page-route-permissions .permission-check-grid .el-checkbox { margin-right: 0; }
+.page-route-permissions .role-summary strong { display: block; margin-top: 9px; font-size: 19px; }
+.page-route-permissions .role-permission-block { padding: 20px 0; border-top: 1px solid var(--lxm-line, #efe6dd); }
+.page-route-permissions .role-permission-block h4 { margin: 0 0 13px; font-size: 14px; }
+.page-route-permissions .permission-chip-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.page-route-permissions .permission-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px 22px; width: 100%; padding: 4px 0; }
+.page-route-permissions .permission-check-grid .el-checkbox { min-height: 28px; margin-right: 0; line-height: 1.55; }
+
+.permissions-dialog.el-dialog { display: flex; flex-direction: column; max-width: calc(100vw - 28px); max-height: calc(100vh - 32px); margin-top: 16px !important; margin-bottom: 16px; }
+.permissions-dialog .el-dialog__header { padding: 22px 26px 16px; margin-right: 0; border-bottom: 1px solid var(--lxm-line, #efe6dd); }
+.permissions-dialog .el-dialog__body { flex: 1 1 auto; padding: 24px 28px; overflow-y: auto; }
+.permissions-dialog .el-form-item { margin-bottom: 18px; }
+.permissions-dialog .el-form-item:last-child { margin-bottom: 0; }
+.permissions-dialog .el-dialog__footer { padding: 16px 28px 22px; border-top: 1px solid var(--lxm-line, #efe6dd); }
+.permissions-role-dialog .permission-check-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 @media (max-width: 900px) {
   .page-route-permissions .permissions-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .page-route-permissions .role-layout { grid-template-columns: 1fr; }
-  .page-route-permissions .role-list-panel { max-height: 230px; overflow: auto; }
+  .page-route-permissions .role-list-panel { max-height: 280px; overflow: auto; }
+  .permissions-role-dialog .permission-check-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 620px) {
   .page-route-permissions .permissions-header,
   .page-route-permissions .permissions-toolbar { display: grid; grid-template-columns: 1fr; }
+  .page-route-permissions .permissions-page { gap: 16px; }
+  .page-route-permissions .permissions-header { gap: 16px; padding: 20px; }
   .page-route-permissions .permissions-header-actions { justify-content: space-between; }
   .page-route-permissions .permissions-toolbar .el-input,
   .page-route-permissions .user-toolbar .el-select { width: 100%; max-width: none; }
   .page-route-permissions .permissions-toolbar .el-button,
   .page-route-permissions .user-toolbar .el-button { margin-left: 0; width: 100%; }
   .page-route-permissions .permissions-stat-grid { grid-template-columns: 1fr; }
+  .page-route-permissions .permissions-stat-grid > div { min-height: auto; padding: 18px; }
+  .page-route-permissions .permissions-table-panel,
+  .page-route-permissions .role-list-panel,
+  .page-route-permissions .role-editor-panel { padding: 16px; }
+  .page-route-permissions .role-layout { gap: 14px; min-height: 0; }
   .page-route-permissions .role-summary,
   .page-route-permissions .permission-check-grid { grid-template-columns: 1fr; }
+  .permissions-dialog .el-dialog__header { padding: 18px 20px 14px; }
+  .permissions-dialog .el-dialog__body { padding: 20px; }
+  .permissions-dialog .el-dialog__footer { padding: 14px 20px 18px; }
+  .permissions-role-dialog .permission-check-grid { grid-template-columns: 1fr; }
 }

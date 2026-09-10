@@ -22,9 +22,10 @@ window.LXM_PAGES.register({
     const remoteAlbums = Vue.ref(null);
     const remoteOn = Vue.ref(LXM_API.remoteOn());
     const remoteLoading = Vue.ref(false);
+    const serverConnected = () => !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && (!window.LXM_API_STATE || window.LXM_API_STATE.reachable !== false));
 
     const listSource = Vue.computed(() => {
-      if (remoteOn.value) return remoteAlbums.value || [];
+      if (remoteOn.value && remoteAlbums.value) return remoteAlbums.value;
       return ctx.albumRows || [];
     });
 
@@ -67,10 +68,15 @@ window.LXM_PAGES.register({
       else tip("已切回本地演示数据");
     }
 
-    function saveSelectedAlbum() {
+    async function saveSelectedAlbum() {
       const a = selectedAlbum.value;
       if (!a) return;
       if (!a.name) { tip("请填写名称"); return; }
+      if (serverConnected() && typeof ctx.persistContentMutation === "function") {
+        const ok = await ctx.persistContentMutation("albums", a, { ...a });
+        if (ok) tip("已写入真实后端");
+        return;
+      }
       if (remoteOn.value) {
         LXM_API.saveDoc("albums", a).then(() => tip("已写入真实后端")).catch((e) => tip("写入失败：" + e.message));
       } else {

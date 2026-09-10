@@ -20,15 +20,25 @@
     money,
     openProduct,
     packageAuditText,
+    packagesBySeries,
+    persistTrashRecord,
     peripheralModeText,
     productStatus,
     seriesName,
     shelfRowKey,
     shelfRows,
+    sameCity,
     spotName,
     state,
     switchMenu
   } = ctx;
+
+async function addTrash(key, source, previous, row) {
+  if (await persistTrashRecord(row)) return true;
+  Object.assign(source, previous);
+  await persistContentMutation(key, source, null);
+  return false;
+}
 
 const videoSingleRows = computed(() => {
   // 短视频统一存进 packages 集合（type=video + isVideoSingle），小程序读 packages 作为视频商品，无需另接
@@ -87,7 +97,7 @@ async function deleteVideoSingle(row) {
   source.isShow = false;
   source.status = "下架";
   if (!(await persistContentMutation("packages", source, previous))) return;
-  state.trash.unshift({ id: `trash-vs-${source.id}-${Date.now()}`, type: "短视频", name: source.title || source.name, reason: "删除短视频", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
+  if (!(await addTrash("packages", source, previous, { id: `trash-vs-${source.id}-${Date.now()}`, type: "短视频", sourceKey: "packages", name: source.title || source.name, reason: "删除短视频", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
   log("删除短视频进入回收站", "短视频", source.title || source.name);
   ElMessage.success("短视频已进入回收站，可由超管恢复");
 }
@@ -129,7 +139,7 @@ async function saveSeries() {
 }
 async function requestDeleteSeries(row) {
   const refAlbums = data.albums.filter((a) => a.seriesId === row.id).length;
-  const refPackages = data.packages.filter((p) => p.seriesId === row.id).length;
+  const refPackages = packagesBySeries(row.id).length;
   const refVideos = (data.packages || []).filter((v) => v.isVideoSingle && v.seriesId === row.id).length;
   if (refAlbums + refPackages + refVideos > 0) {
     return ElMessage.warning(`该拍摄风格仍被引用：照片单品 ${refAlbums}、套餐 ${refPackages}、短视频 ${refVideos}，不能直接删除`);
@@ -138,29 +148,21 @@ async function requestDeleteSeries(row) {
   const previous = { ...source };
   source.deleted = true;
   source.isDeleted = true;
-  state.trash.unshift({ id: `trash-ser-${source.id}-${Date.now()}`, type: "拍摄风格", name: source.name, reason: "删除拍摄风格", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
-  if (!(await persistContentMutation("series", source, previous))) {
-    Object.assign(source, previous);
-    state.trash.shift();
-    return;
-  }
+  if (!(await persistContentMutation("series", source, previous))) return;
+  if (!(await addTrash("series", source, previous, { id: `trash-ser-${source.id}-${Date.now()}`, type: "拍摄风格", sourceKey: "series", name: source.name, reason: "删除拍摄风格", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
   log("删除拍摄风格进入回收站", "拍摄风格", source.name);
   ElMessage.success("拍摄风格已进入回收站，可由超管恢复");
 }
 
 async function requestDeleteCity(row) {
-  const refShops = data.shops.filter((s) => s.cityId === row.id).length;
+  const refShops = data.shops.filter((s) => sameCity(s, row)).length;
   const source = data.cities.find((item) => item.id === row.id) || row;
   const previous = { ...source };
   source.deleted = true;
   source.isDeleted = true;
   source.status = "筹备中";
-  state.trash.unshift({ id: `trash-city-${source.id}-${Date.now()}`, type: "城市", name: source.name, reason: "删除城市", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } });
-  if (!(await persistContentMutation("cities", source, previous))) {
-    Object.assign(source, previous);
-    state.trash.shift();
-    return;
-  }
+  if (!(await persistContentMutation("cities", source, previous))) return;
+  if (!(await addTrash("cities", source, previous, { id: `trash-city-${source.id}-${Date.now()}`, type: "城市", sourceKey: "cities", name: source.name, reason: "删除城市", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
   log("删除城市进入回收站", "城市管理", source.name);
   ElMessage.success(refShops > 0 ? `城市已进入回收站（仍有 ${refShops} 个商家引用，恢复后自动归位）` : "城市已进入回收站，可由超管恢复");
 }
@@ -356,15 +358,16 @@ async function saveContent() {
     if (Array.isArray(payload.includedItems)) {
       payload.includedItems = payload.includedItems.map((it) => {
         const item = { ...it };
+        const currentTarget = item.target && typeof item.target === "object" ? { ...item.target } : {};
         if (item.type === "album") {
-          const a = (data.albums || []).find((x) => x.name === item.name);
-          item.target = { page: "photoCollection", seriesId: a ? a.seriesId : (item.target && item.target.seriesId) || "", albumId: a ? a.id : "" };
+          const a = (data.albums || []).find((x) => x.id === (currentTarget.albumId || item.albumId) || x.name === item.name);
+          item.target = { page: "photoCollection", seriesId: a ? a.seriesId : currentTarget.seriesId || item.seriesId || "", albumId: a ? a.id : currentTarget.albumId || item.albumId || "" };
         } else if (item.type === "video") {
-          const v = (data.packages || []).find((x) => x.name === item.name && x.type === "video");
-          item.target = { page: "videoProductDetail", productId: v ? v.id : "", seriesId: v ? v.seriesId : "", spotId: v ? (v.spotId || (v.spotIds || [])[0]) : "" };
+          const v = (data.packages || []).find((x) => x.id === (currentTarget.productId || item.productId) && x.type === "video") || (data.packages || []).find((x) => x.name === item.name && x.type === "video");
+          item.target = { page: "videoProductDetail", productId: v ? v.id : currentTarget.productId || item.productId || "", seriesId: v ? v.seriesId : currentTarget.seriesId || item.seriesId || "", spotId: v ? (v.spotId || (v.spotIds || [])[0]) : currentTarget.spotId || item.spotId || "" };
         } else if (item.type === "peripheral") {
-          const p = (data.peripherals || []).find((x) => x.name === item.name);
-          item.target = { page: "peripheral", peripheralId: p ? p.id : "" };
+          const p = (data.peripherals || []).find((x) => x.id === (currentTarget.peripheralId || item.peripheralId || currentTarget.productId || item.productId) || x.name === item.name);
+          item.target = { page: "peripheral", peripheralId: p ? p.id : currentTarget.peripheralId || item.peripheralId || currentTarget.productId || item.productId || "" };
         }
         return item;
       });
@@ -514,6 +517,11 @@ function uploadContentCover(event) {
   const reader = new FileReader();
   reader.onload = () => {
     const dataUrl = reader.result;
+    const encodedSize = typeof dataUrl === "string" ? (typeof TextEncoder === "function" ? new TextEncoder().encode(dataUrl).length : dataUrl.length) : 0;
+    if (encodedSize > 60000) {
+      ElMessage.warning("图片编码超过数据库字段上限，请压缩图片或填写可访问的图片地址");
+      return;
+    }
     if (!state.editContent) return;
     state.editContent.cover = dataUrl;
     if (state.editContent.__key === "samples") state.editContent.url = dataUrl;
@@ -645,6 +653,46 @@ function buildMiniProgramHomeConfig() {
   const featuredPackageIds = state.homeConfig.featuredPackageIds || [];
   const featuredAlbumIds = state.homeConfig.featuredAlbumIds || [];
   const featuredPeripheralIds = state.homeConfig.featuredPeripheralIds || [];
+  const configuredHomeBanners = Array.isArray(state.homeConfig.homeBanners)
+    ? state.homeConfig.homeBanners.map((b, index) => ({
+      _id: b && (b._id || b.id) || `home-banner-${index + 1}`,
+      type: b && (b.type || b.mediaType) === "video" ? "video" : "image",
+      url: b && (b.url || b.image || b.imageUrl) || "",
+      cover: b && (b.cover || b.poster) || "",
+      title: b && b.title || "",
+      targetType: b && (b.targetType || b.linkType || b.jumpType) || "none",
+      targetId: b && (b.targetId || b.linkId || b.jumpId) || "",
+      linkUrl: b && (b.linkUrl || b.jumpUrl || b.targetUrl) || "",
+      effectiveTime: b && b.effectiveTime || ""
+    }))
+    : [];
+  const configuredExploreBanners = Array.isArray(state.homeConfig.exploreBanners)
+    ? state.homeConfig.exploreBanners.map((b, index) => ({
+      _id: b && (b._id || b.id) || `explore-banner-${index + 1}`,
+      type: b && (b.type || b.mediaType) === "video" ? "video" : "image",
+      url: b && (b.url || b.image || b.imageUrl) || "",
+      cover: b && (b.cover || b.poster) || "",
+      title: b && b.title || "",
+      targetType: b && (b.targetType || b.linkType || b.jumpType) || "none",
+      targetId: b && (b.targetId || b.linkId || b.jumpId) || "",
+      linkUrl: b && (b.linkUrl || b.jumpUrl || b.targetUrl) || "",
+      effectiveTime: b && b.effectiveTime || ""
+    }))
+    : [];
+  const sampleBanners = carouselIds.map((id, index) => {
+    const s = data.samples.find((x) => x.id === id) || {};
+    return {
+      _id: id,
+      id,
+      sort: index + 1,
+      type: "image",
+      url: s.url || "",
+      cover: s.cover || s.url || "",
+      targetType: "package_list",
+      targetId: "",
+      linkUrl: ""
+    };
+  });
   const pageModules = ctx.pageConfigPages.reduce((map, page) => {
     map[page.key] = {
       ...ctx.makeDefaultPageConfig(page.key),
@@ -671,19 +719,11 @@ function buildMiniProgramHomeConfig() {
       trustOrders: state.homeConfig.trustOrders,
       trustRate: state.homeConfig.trustRate
     },
-    banners: carouselIds.map((id, index) => {
-      const s = data.samples.find((x) => x.id === id) || {};
-      return {
-        id,
-        sort: index + 1,
-        type: "image",
-        url: s.url || "",
-        cover: s.cover || s.url || "",
-        targetType: "package_list",
-        targetId: "",
-        linkUrl: ""
-      };
-    }),
+    // Advanced home banners take precedence when they have media; the
+    // sample-carousel remains the public fallback when the editor list is
+    // empty or still contains only blank placeholders.
+    banners: configuredHomeBanners.some((b) => b.url || b.cover) ? configuredHomeBanners : sampleBanners,
+    homeBanners: configuredHomeBanners,
     homeModules: moduleDefinitions.map((item, index) => ({
       key: item.key,
       title: item.title,
@@ -702,16 +742,7 @@ function buildMiniProgramHomeConfig() {
     },
     pageModules,
     // 探索页轮播：与首页轮播「单独一套」，后台在 mini-decor 独立配置，互不干扰
-    exploreBanners: (state.homeConfig.exploreBanners || []).map((b) => ({
-      _id: b._id || 'exp-banner-' + Date.now(),
-      type: b.type === 'video' ? 'video' : 'image',
-      url: b.url || '',
-      cover: b.cover || '',
-      title: b.title || '',
-      targetType: b.targetType || 'none',
-      targetId: b.targetId || '',
-      linkUrl: b.linkUrl || ''
-    })),
+    exploreBanners: configuredExploreBanners,
     // 首页快捷入口（可后台配置的"导航"）：tabBar 不可运行时改，这里用首页快捷入口承载
     quickNav: state.homeConfig.quickNav || []
   };
@@ -758,7 +789,9 @@ async function saveSiteConfig() {
     customPrice: c.customPrice || {},
     bookingNotice: Array.isArray(c.bookingNotice) ? c.bookingNotice : [],
     privacyText: c.privacyText || "",
-    wechat: c.wechat || {},
+    // Content operators may edit the user-facing guide text, but never send
+    // integration credentials back through the config endpoint.
+    wechat: state.role === "content" ? { guideText: c.wechat?.guideText || "" } : (c.wechat || {}),
     search: {
       hotwords: Array.isArray(c.search?.hotwords) ? c.search.hotwords : []
     },

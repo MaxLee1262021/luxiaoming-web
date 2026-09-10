@@ -20,6 +20,8 @@
     finalGap,
     financePendingAmount,
     isDepositRegistrationConfirmed,
+    isOrderCancelledStatus,
+    isOrderCompletedStatus,
     isOrderAfterSaleLocked,
     log,
     money,
@@ -47,10 +49,10 @@ const serviceFlowSteps = [
 ];
 function serviceFlowIndex(order) {
   if (!order) return 0;
-  if (order.status === "completed") return 3;
+  if (["completed", "delivered", "final_pending"].includes(order.status)) return 3;
   if (["done", "delivered"].includes(order.customerStatus)) return 3;
-  if (order.status === "shooting") return 2;
-  if (order.status === "confirmed") return 1;
+  if (["shooting", "retouching", "editing"].includes(order.status)) return 2;
+  if (["confirmed", "deposit_paid", "assigned", "contacted"].includes(order.status)) return 1;
   return 0;
 }
 function serviceFlowCurrent(order) {
@@ -62,7 +64,7 @@ function serviceFlowClass(index, order) {
 }
 function serviceInternalStatusLabel(order) {
   if (!order) return "-";
-  if (order.status === "completed") return "已完";
+  if (isOrderCompletedStatus(order)) return "已完";
   if (["done", "delivered"].includes(order.customerStatus)) return "已交";
   return serviceFlowCurrent(order).label;
 }
@@ -72,30 +74,38 @@ function serviceCustomerStatusLabel(order) {
   return (LXM_CONFIG.visibleStatus.find((s) => s.value === order.customerStatus) || {}).label || statusMeta(order.status).customer || "-";
 }
 function canDispatchOrder(order = state.currentOrder) {
-  return !!order && canEditCurrentOrder() && ["pending", "confirmed"].includes(order.status) && !["done", "delivered"].includes(order.customerStatus);
+  return !!order && canEditCurrentOrder() && ["new", "pending", "contacted", "deposit_pending", "deposit_paid", "confirmed"].includes(order.status) && !["done", "delivered"].includes(order.customerStatus);
 }
 function canTransferCustomerService(order = state.currentOrder) {
   if (!order && state.transferForm.batch) return selectedOrders.value.some((item) => canTransferCustomerService(item));
   if (!order || state.orderReadonly || isOrderAfterSaleLocked(order)) return false;
-  if (state.role === "super") return !["completed", "cancelled"].includes(order.status);
-  return state.role === "service" && order.assigneeId === roleProfile.value.staffId && !["completed", "cancelled"].includes(order.status);
+  if (state.role === "super") return !["completed", "cancelled", "canceled"].includes(order.status);
+  return state.role === "service" && order.assigneeId === roleProfile.value.staffId && !["completed", "cancelled", "canceled"].includes(order.status);
 }
 function canTransferPhotographer(order = state.currentOrder) {
   if (!order && state.transferForm.batch) return selectedOrders.value.some((item) => canTransferPhotographer(item));
-  return !!order && state.role === "super" && !state.orderReadonly && !isOrderAfterSaleLocked(order) && !["completed", "cancelled"].includes(order.status);
+  return !!order && state.role === "super" && !state.orderReadonly && !isOrderAfterSaleLocked(order) && !["completed", "cancelled", "canceled"].includes(order.status);
 }
 function canTransferOrder(order = state.currentOrder) {
   if (!order && selectedOrders.value?.length) return selectedOrders.value.some((item) => canTransferCustomerService(item) || canTransferPhotographer(item));
   return canTransferCustomerService(order) || canTransferPhotographer(order);
 }
 function canRescheduleOrder(order = state.currentOrder) {
-  return !!order && canEditCurrentOrder() && ["pending", "confirmed"].includes(order.status) && !["done", "delivered"].includes(order.customerStatus);
+  return !!order && canEditCurrentOrder() && ["new", "pending", "contacted", "deposit_pending", "deposit_paid", "confirmed"].includes(order.status) && !["done", "delivered"].includes(order.customerStatus);
 }
 function defaultCustomerStatusForOrderStatus(status) {
   const map = {
     pending: "reserved",
+    new: "reserved",
+    contacted: "confirmed",
+    deposit_pending: "reserved",
+    deposit_paid: "confirmed",
+    assigned: "confirmed",
     confirmed: "confirmed",
     shooting: "shooting",
+    retouching: "shooting",
+    delivered: "done",
+    final_pending: "done",
     completed: "done",
     cancelled: "reserved",
   };
@@ -189,7 +199,7 @@ async function confirmOrderException() {
     Object.assign(order, original);
   }
 }
-function addOrderContact(type) {
+async function addOrderContact(type) {
   const order = state.currentOrder;
   if (!order) return;
   if (!canEditCurrentOrder()) return ElMessage.error("当前订单不能新增联系方式");
@@ -198,16 +208,25 @@ function addOrderContact(type) {
   const label = type === "phone" ? "手机" : "微信";
   const value = String(state.contactDraft[key] || "").trim();
   if (!value) return ElMessage.warning(`请填写新${label}`);
+  const original = JSON.parse(JSON.stringify(order));
   order[listKey] = order[listKey] || [];
   if ([order[key], ...order[listKey]].filter(Boolean).includes(value)) return ElMessage.warning(`${label}已存在`);
   order[listKey].push(value);
+  if (type === "phone") order.contactPhones = [...new Set([order.phone, ...(order.contactPhones || []), ...order.extraPhones].filter(Boolean))];
+  try {
+    await persistOrderAction(order, "update", { fields: { contactPhones: order.contactPhones || [], extraWechats: order.extraWechats || [] }, reason: `新增客户${label}` });
+  } catch (_) {
+    Object.keys(order).forEach((field) => { if (!(field in original)) delete order[field]; });
+    Object.assign(order, original);
+    return;
+  }
   state.contactDraft[key] = "";
   addOrderTimeline(order, `新增客户${label}：${value}`, currentOperatorName());
   ElMessage.success(`已新增${label}`);
 }
 function serviceFlowBadgeClass(order, type) {
   if (!order) return "";
-  if (order.status === "completed") return "completed";
+  if (isOrderCompletedStatus(order)) return "completed";
   if (type === "customer" && ["done", "delivered"].includes(order.customerStatus)) return "delivered";
   if (["done", "delivered"].includes(order.customerStatus)) return "delivered";
   return order.status || "";
@@ -230,7 +249,7 @@ function serviceFlowDisabledReason(step, order = state.currentOrder) {
   if (!canEditOrder()) return "当前角色没有推进订单状态权";
   if (state.orderReadonly) return "当前为只读查看模";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，订单状态已锁定";
-  if (order.status === "completed") return "订单已完成，不能重复推进";
+  if (isOrderCompletedStatus(order)) return "订单已完成，不能重复推进";
   const current = serviceFlowIndex(order);
   const target = serviceFlowSteps.findIndex((item) => item.key === step.key);
   if (target <= current) return "当前或历史状态不能重复点";
@@ -243,7 +262,7 @@ function dispatchDisabledReason(order = state.currentOrder) {
   if (!canEditOrder()) return "当前角色无权安排摄影";
   if (state.orderReadonly) return "当前为只读查看模";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，不能安排或改派摄影师";
-  if (!["pending", "confirmed"].includes(order.status) || ["done", "delivered"].includes(order.customerStatus)) return "拍摄开始后普通客服不能改派摄影师";
+  if (!["new", "pending", "contacted", "deposit_pending", "deposit_paid", "confirmed"].includes(order.status) || ["done", "delivered"].includes(order.customerStatus)) return "拍摄开始后普通客服不能改派摄影师";
   return "";
 }
 function rescheduleDisabledReason(order = state.currentOrder) {
@@ -251,7 +270,7 @@ function rescheduleDisabledReason(order = state.currentOrder) {
   if (!canEditOrder()) return "当前角色无权改期";
   if (state.orderReadonly) return "当前为只读查看模";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，不能改期拍摄";
-  if (!["pending", "confirmed"].includes(order.status) || ["done", "delivered"].includes(order.customerStatus)) return "拍摄中或已交付订单需超管异常流程处理";
+  if (!["new", "pending", "contacted", "deposit_pending", "deposit_paid", "confirmed"].includes(order.status) || ["done", "delivered"].includes(order.customerStatus)) return "拍摄中或已交付订单需超管异常流程处理";
   return "";
 }
 function finalPaymentDisabledReason(order = state.currentOrder) {
@@ -267,7 +286,7 @@ function completeDisabledReason(order = state.currentOrder) {
   if (!canEditOrder()) return "当前角色无权完成订单";
   if (state.orderReadonly) return "当前为只读查看模";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，不能完成订单";
-  if (order.status === "completed") return "订单已完成，不能重复操作";
+  if (isOrderCompletedStatus(order)) return "订单已完成，不能重复操作";
   if (!isDepositRegistrationConfirmed(order)) return "定金必须财务审核通过";
   if (!canCompleteOrderPayment(order)) return "尾款必须财务审核通过";
   return "";
@@ -277,7 +296,7 @@ function cancelDisabledReason(order = state.currentOrder) {
   if (!can("cancelOrder")) return "当前角色无权取消订单";
   if (!canEditCurrentOrder()) return "当前订单不可取消";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，不能取消订单";
-  if (order.status === "completed") return "已完成订单只能通过售后退款和财务冲正处理";
+  if (isOrderCompletedStatus(order)) return "已完成订单只能通过售后退款和财务冲正处理";
   return "";
 }
 async function setOrderStatus(status, customerStatus, label) {
@@ -618,13 +637,13 @@ async function updateTaskStatus(order, status) {
   } catch (_) {}
 }
 function canStartTask(order) {
-  return !!order && order.status === "confirmed" && !isOrderAfterSaleLocked(order);
+  return !!order && ["confirmed", "deposit_paid", "assigned"].includes(order.status) && !isOrderAfterSaleLocked(order);
 }
 function canCompleteTask(order) {
-  return !!order && order.status === "shooting" && !isOrderAfterSaleLocked(order);
+  return !!order && ["shooting", "retouching", "editing"].includes(order.status) && !isOrderAfterSaleLocked(order);
 }
 function canRejectTask(order) {
-  return !!order && ["confirmed", "shooting"].includes(order.status) && order.photographerId === roleProfile.value.staffId && !isOrderAfterSaleLocked(order);
+  return !!order && ["confirmed", "deposit_paid", "assigned", "shooting", "retouching"].includes(order.status) && order.photographerId === roleProfile.value.staffId && !isOrderAfterSaleLocked(order);
 }
 function rejectTask(order) {
   if (!can("shootUpdate")) return ElMessage.error("当前角色无权处理拍摄任务");
@@ -645,11 +664,11 @@ function rejectTask(order) {
 function cancelOrder(order) {
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单售后处理中，暂不能取消订单");
   if (!can("cancelOrder")) return ElMessage.error("当前角色无权取消订单");
-  if (order.status === "completed") return ElMessage.warning("已完成订单不能取");
+  if (isOrderCompletedStatus(order)) return ElMessage.warning("已完成订单不能取");
   ElMessageBox.confirm("取消订单后进入回收站。客服不能永久删除，只有超管可在回收站处理。是否继续？", "二次确认", { type: "warning", confirmButtonText: "确认取消订单", cancelButtonText: "暂不取消" }).then(async () => {
     try {
       await persistOrderAction(order, "cancel", { reason: "客服取消订单" });
-      state.trash.unshift({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
+      ctx.addTrashLocal?.({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
       log("取消订单", order.orderNo, "订单进入回收站");
       state.orderDrawer = false;
       ElMessage.success("订单已取消并进入回收站");

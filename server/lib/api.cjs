@@ -31,6 +31,7 @@ const CONTENT_KEYS = new Set([
 const ORDER_KEYS = new Set(["orders", "afterSales"]);
 const FINANCE_KEYS = new Set(["reconciliationTransfers", "financeSettings", "monthlyClosings", "adjustmentRecords"]);
 const FINANCE_DEFAULTS = { settlementObservationDays: 3, largeSettlementThreshold: 5000 };
+const FINANCE_DOCUMENT_FIELDS = new Set(["settlementObservationDays", "largeSettlementThreshold", "currency"]);
 
 // RPC names intended for the mini-program. Unknown names are admin-only and
 // are rejected unless an authenticated admin policy explicitly allows them.
@@ -61,14 +62,40 @@ const ACTION_PERMISSION_ALIAS = {
   orderEdit: "orderStatus", assign: "dispatch", transfer: "dispatch", cancelOrder: "orderStatus",
   financeReview: "financeReview", shopEdit: "shop", contentEdit: "content", shootUpdate: "orderStatus"
 };
+const DYNAMIC_PERMISSION_ALIASES = {
+  view: ["view", "read", "*.view", "system.view", "menu.view"],
+  dashboard: ["dashboard", "dashboard.view", "dashboardAll", "dashboardShop"],
+  orderEdit: ["orderEdit", "order.edit", "order.write", "orderStatus"],
+  assign: ["assign", "dispatch", "order.assign"],
+  transfer: ["transfer", "dispatch", "order.transfer"],
+  cancelOrder: ["cancelOrder", "orderStatus", "order.cancel"],
+  financeReview: ["financeReview", "finance.review", "finance.audit"],
+  shopEdit: ["shopEdit", "shop", "shop.edit"],
+  contentEdit: ["contentEdit", "content", "content.edit"],
+  shootUpdate: ["shootUpdate", "order.shoot", "orderStatus"],
+  export: ["export", "report.export"],
+  permissionManage: ["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"],
+};
+// A permission menu can use its own identifier, but it must target a page the
+// bundled admin client can render. This supports real menu CRUD without
+// creating navigation entries that lead nowhere.
+const ROUTE_MENU_KEYS = new Set([
+  "dashboard", "orders", "afterSales", "tasks", "addonServices", "financeReview", "reconciliation",
+  "staff", "distributors", "shops", "contentOverview", "spots", "cities", "series", "albums", "samples",
+  "contentTags", "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "miniDecor",
+  "miniConfig", "guides", "permissions", "logs", "trash"
+]);
+// These sets include read-only reference collections needed to render a
+// granted workflow (for example staff names in order dispatch). Navigation
+// visibility is separate from these data dependencies.
 const ROLE_READ_KEYS = {
-  service: new Set([...ORDER_KEYS, "shops", "distributors", "cities", "packages", "peripherals", "addonServices"]),
-  finance: new Set([...ORDER_KEYS, ...FINANCE_KEYS, "shops", "distributors"]),
-  photo: new Set(["orders", "packages", "spots", "series", "albums"]),
-  merchant: new Set(["shops", "orders", "merchantCodes", "scans", "packages", "albums", "spots", "series"]),
-  distributor: new Set(["distributors", "shops", "orders", "merchantCodes", "scans", "packages", "albums", "spots", "series"]),
+  service: new Set([...ORDER_KEYS, "shops", "distributors", "cities", "packages", "albums", "spots", "series", "samples", "peripherals", "addonServices", "staff"]),
+  finance: new Set([...ORDER_KEYS, ...FINANCE_KEYS, "shops", "distributors", "agents", "staff", "cities", "scans", "packages", "albums", "spots", "series", "samples", "peripherals", "addonServices"]),
+  photo: new Set(["orders", "packages", "spots", "series", "albums", "samples", "peripherals", "addonServices", "shops", "cities", "staff"]),
+  merchant: new Set(["shops", "orders", "merchantCodes", "scans", "packages", "albums", "spots", "series", "samples", "peripherals", "addonServices"]),
+  distributor: new Set(["distributors", "shops", "orders", "merchantCodes", "scans", "packages", "albums", "spots", "series", "samples", "peripherals", "addonServices", "staff"]),
   content: new Set([...CONTENT_KEYS]),
-  agent: new Set(["agents", "distributors", "shops", "orders", "merchantCodes", "scans"])
+  agent: new Set(["agents", "distributors", "shops", "orders", "merchantCodes", "scans", "packages", "albums", "spots", "series", "samples", "peripherals", "addonServices", "staff"])
 };
 const ROLE_WRITE_KEYS = {
   service: new Set(["orders", "afterSales", "logs"]),
@@ -81,6 +108,7 @@ const ROLE_WRITE_KEYS = {
 };
 const ORDER_SERVICE_FIELDS = new Set([
   "customer", "contactName", "phone", "contactPhone", "contactPhones", "wechat", "contactWechat",
+  "extraPhones", "extraWechats", "products", "productItems", "items", "addons",
   "appointmentAt", "time", "timePeriod", "timeSlot", "customerRemark", "internalNote", "assigneeId",
   "photographerId", "status", "customerStatus", "statusLogs", "followRecords", "sourceName", "sourceType",
   "sourceScene", "shopId", "distributorId", "afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId",
@@ -106,18 +134,18 @@ const ORDER_WORKFLOW_FIELDS = new Set([
 ]);
 const ORDER_UPDATE_FIELDS = {
   service: new Set([
-    "customer", "contactName", "phone", "contactPhone", "contactPhones", "wechat", "contactWechat",
+    "customer", "contactName", "phone", "contactPhone", "contactPhones", "extraPhones", "extraWechats", "wechat", "contactWechat",
     "appointmentAt", "time", "timePeriod", "timeSlot", "customerRemark", "internalNote", "assigneeId",
-    "photographerId", "priceAdjustReason", "totalAmount", "finalDiscountAmount", "finalDiscountReason", "depositPaid", "finalPaid",
+    "photographerId", "priceAdjustReason", "totalAmount", "products", "productItems", "items", "addons", "finalDiscountAmount", "finalDiscountReason", "depositPaid", "finalPaid",
     "depositFinanceStatus", "finalFinanceStatus"
   ]),
   finance: new Set(["depositFinanceStatus", "finalFinanceStatus"]),
   photo: new Set(["completedAt", "deliveryNote"]),
 };
 const ORDER_SERVICE_LOCKED_FIELDS = new Set([
-  "customer", "contactName", "phone", "contactPhone", "contactPhones", "wechat", "contactWechat",
+  "customer", "contactName", "phone", "contactPhone", "contactPhones", "extraPhones", "extraWechats", "wechat", "contactWechat",
   "appointmentAt", "time", "timePeriod", "timeSlot", "customerRemark", "assigneeId", "photographerId",
-  "totalAmount", "finalDiscountAmount", "finalDiscountReason", "priceAdjustReason", "depositPaid", "finalPaid",
+  "totalAmount", "products", "productItems", "items", "addons", "finalDiscountAmount", "finalDiscountReason", "priceAdjustReason", "depositPaid", "finalPaid",
   "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt"
 ]);
 
@@ -182,39 +210,121 @@ function normalizeRole(role) {
 
 function roleActions(session) { return ROLE_ACTIONS[normalizeRole(session && session.role)] || new Set(); }
 function hasAction(session, action) {
+  const custom = Array.isArray(session && (session.permissionKeys || session.permissions))
+    ? (session.permissionKeys || session.permissions).filter(Boolean).map(String)
+    : [];
+  const dynamicConfigured = !!(session && (session.permissionSource === "mysql" || session.permissionSource === "json-authz" || session.permissionsConfigured === true && session.roleId));
+  if (dynamicConfigured) {
+    if (custom.includes("*")) return true;
+    const aliases = DYNAMIC_PERMISSION_ALIASES[action] || [action];
+    return aliases.some((key) => custom.includes(key));
+  }
   const actions = roleActions(session);
   if (actions.has("*")) return true;
   if (!actions.has(action)) return false;
   // Every role's baseline `view` capability remains available even when the
   // staff record lists only extra mutable actions (legacy records omit view).
   if (action === "view" || action === "dashboard") return true;
-  const custom = Array.isArray(session && session.permissions) ? session.permissions.filter(Boolean) : [];
-  if (session && session.permissionsConfigured === true && !custom.length) return false;
-  if (!custom.length || custom.includes("*")) return true;
-  return custom.includes(action) || (ACTION_PERMISSION_ALIAS[action] && custom.includes(ACTION_PERMISSION_ALIAS[action]));
+  const legacyCustom = Array.isArray(session && session.permissions) ? session.permissions.filter(Boolean) : [];
+  if (session && session.permissionsConfigured === true && !legacyCustom.length) return false;
+  if (!legacyCustom.length || legacyCustom.includes("*")) return true;
+  return legacyCustom.includes(action) || (ACTION_PERMISSION_ALIAS[action] && legacyCustom.includes(ACTION_PERMISSION_ALIAS[action]));
+}
+function sessionHasMenu(session, candidate) {
+  const target = String(candidate || "");
+  const granted = Array.isArray(session && session.menuKeys) ? session.menuKeys.map(String) : [];
+  if (granted.includes(target)) return true;
+  const definitions = Array.isArray(session && session.menuDefinitions) ? session.menuDefinitions : [];
+  return definitions.some((menu) => {
+    const key = String(menu && (menu.key || menu.menuKey) || "");
+    const routeKey = String(menu && (menu.routeKey || menu.targetKey || menu.key || menu.menuKey) || "");
+    return granted.includes(key) && routeKey === target;
+  });
 }
 function canReadKey(session, key) {
   if (!KEY_SET.has(key)) return false;
-  if (normalizeRole(session.role) === "super") return hasAction(session, "view");
-  return hasAction(session, "view") && !!(ROLE_READ_KEYS[normalizeRole(session.role)] || new Set()).has(key);
+  const role = normalizeRole(session.role);
+  // A super administrator retains the platform-wide data view even when a
+  // navigation item is hidden; menu toggles are presentation controls for
+  // this role, while non-super roles remain grant-scoped below.
+  if (role === "super") return hasAction(session, "view");
+  if (!hasAction(session, "view")) return false;
+  if (dynamicRole(session) && (!Array.isArray(session.menuKeys) || !session.menuKeys.length)) return false;
+  if (Array.isArray(session.menuKeys) && session.menuKeys.length) {
+    const aliases = {
+      afterSales: ["afterSales", "service"], financeSettings: ["financeSettings", "reconciliation"],
+      monthlyClosings: ["monthlyClosings", "reconciliation"], adjustmentRecords: ["adjustmentRecords", "reconciliation"],
+      reconciliationTransfers: ["reconciliationTransfers", "reconciliation"], logs: ["logs", "permissions"],
+      staff: ["staff", "permissions"], agents: ["agents", "permissions"], distributors: ["distributors", "permissions"],
+      tagLibrary: ["tagLibrary", "contentTags"], homeConfig: ["homeConfig", "miniDecor"], siteConfig: ["siteConfig", "miniConfig"],
+    };
+    const hasGrantedMenu = (aliases[key] || [key]).some((candidate) => sessionHasMenu(session, candidate));
+    // Built-in roles may need hidden reference collections for an already
+    // granted page. Custom roles stay strictly menu-scoped.
+    if (!hasGrantedMenu && !ROLE_READ_KEYS[role]?.has(key)) return false;
+  }
+  return dynamicRole(session) ? customReadAllowed(session, key) : !!(ROLE_READ_KEYS[role] || new Set()).has(key);
 }
 function canWriteKey(session, key) {
   if (!KEY_SET.has(key)) return false;
-  if (normalizeRole(session.role) === "super") return true;
+  if (normalizeRole(session.role) === "super") return canReadKey(session, key) && hasAction(session, "view");
+  if (dynamicRole(session) && !canReadKey(session, key)) return false;
   const role = normalizeRole(session.role);
   const action = FINANCE_KEYS.has(key) || (role === "finance" && ORDER_KEYS.has(key)) ? "financeReview"
     : role === "photo" && key === "orders" ? "shootUpdate"
       : key === "staff" || key === "shops" || key === "merchantCodes" ? "shopEdit"
         : key === "orders" || key === "afterSales" ? "orderEdit"
           : key === "logs" ? "view" : "contentEdit";
-  return hasAction(session, action) && !!(ROLE_WRITE_KEYS[role] || new Set()).has(key);
+  return hasAction(session, action) && (!!(ROLE_WRITE_KEYS[role] || new Set()).has(key) || dynamicRole(session));
+}
+function dynamicRole(session) {
+  return !!(session && (session.permissionSource === "mysql" || session.permissionSource === "json-authz" || session.roleId));
+}
+function customDynamicRole(session) {
+  const role = normalizeRole(session && session.role);
+  return dynamicRole(session) && role !== "super" && !ROLE_READ_KEYS[role];
+}
+function customReadAllowed(session, key) {
+  if (!customDynamicRole(session)) return true;
+  if (["orders", "afterSales"].includes(key)) return hasAction(session, "orderAll") || hasAction(session, "orderSelf");
+  if (FINANCE_KEYS.has(key)) return hasAction(session, "financeReview");
+  if (CONTENT_KEYS.has(key)) return hasAction(session, "contentEdit") || hasAction(session, "content");
+  if (["shops", "merchantCodes", "scans"].includes(key)) return hasAction(session, "shopEdit");
+  return false;
 }
 
 function getRowId(row) { return String((row && (row.id || row._id)) || ""); }
+const ARRAY_RESTORE_FIELDS = new Set(["products", "productItems", "items", "addons", "statusLogs", "followRecords", "paymentRecords", "contactPhones", "extraWechats", "logs", "permissions", "orderIds", "orderNos"]);
+const BOOLEAN_RESTORE_FIELDS = new Set(["deleted", "isDeleted", "refundConfirmed", "riskBlocked", "frozen", "settlementObservationReleased"]);
+async function restoreChangedFields(source, key, id, snapshot, changedFields) {
+  const original = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const patch = {};
+  for (const field of new Set(Array.isArray(changedFields) ? changedFields.map(String) : [])) {
+    if (Object.prototype.hasOwnProperty.call(original, field)) patch[field] = original[field];
+    else if (ARRAY_RESTORE_FIELDS.has(field)) patch[field] = [];
+    else if (BOOLEAN_RESTORE_FIELDS.has(field)) patch[field] = false;
+    else patch[field] = null;
+  }
+  if (!Object.keys(patch).length) return true;
+  return !!(await source.update(key, String(id), patch));
+}
+function shopIdentityValues(row) {
+  return [row && row.id, row && row._id, row && row.shopId, row && row.shopCode].filter(Boolean).map(String);
+}
+function orderShopId(row) {
+  return row && (row.shopId || row.shopCode || row.source && typeof row.source === "object" && row.source.shopId) || "";
+}
+function orderDistributorId(row) {
+  return row && (row.distributorId || row.source && typeof row.source === "object" && row.source.distributorId) || "";
+}
 function shopMatches(row, session) {
   if (!row || !session) return false;
   const ids = new Set([session.shopId, session.shopCode].filter(Boolean).map(String));
-  return ids.has(String(row.id || "")) || ids.has(String(row._id || "")) || ids.has(String(row.shopId || ""));
+  return shopIdentityValues(row).some((id) => ids.has(id));
+}
+async function merchantOwnedShopIds(source, session) {
+  const rows = await source.list("shops");
+  return new Set((Array.isArray(rows) ? rows : []).filter((row) => shopMatches(row, session)).flatMap(shopIdentityValues));
 }
 function maskPhone(value) {
   const text = String(value || "");
@@ -239,6 +349,7 @@ const IDENTITY_FIELDS = ["openid", "_openid", "customerOpenid", "customer_openid
 const INTERNAL_FIELDS = ["internalNote", "paymentRecords", "source", "sourceCodeId", "sourceScene", "statusLogs", "followRecords"];
 const CONFIG_SENSITIVE_KEY = /(?:password|secret|token|private.?key|webhook|mch.?key|api.?key|credential|authorization|openid|unionid|internal|private|audit|phone|mobile|telephone|wechat|customer)/i;
 const CONFIG_SECRET_KEY = /(?:password|secret|token|private.?key|webhook|mch.?key|api.?key|credential|authorization|openid|unionid|internal|private|audit|phone|mobile|telephone|wechat|customer)/i;
+const CONFIG_CREDENTIAL_KEY = /^(?:corp.?id|app.?id|secret|token|private.?key|webhook|mch.?key|api.?key|credential|authorization)$/i;
 function normalizedFieldName(value) { return String(value || "").replace(/[^a-z0-9]/gi, "").toLowerCase(); }
 function isSecretFieldName(value) {
   const key = normalizedFieldName(value);
@@ -287,6 +398,16 @@ function redactConfigValue(value, seen = new WeakSet()) {
   if (Array.isArray(value)) return value.map((item) => redactConfigValue(item, seen)).filter((item) => item !== undefined);
   const out = {};
   for (const [key, child] of Object.entries(value)) {
+    if (normalizedFieldName(key) === "wechat" && child && typeof child === "object" && !Array.isArray(child)) {
+      const safeWechat = {};
+      for (const [field, item] of Object.entries(child)) {
+        if (CONFIG_CREDENTIAL_KEY.test(field) || CONFIG_SECRET_KEY.test(field)) continue;
+        const nextWechat = redactConfigValue(item, seen);
+        if (nextWechat !== undefined) safeWechat[field] = nextWechat;
+      }
+      out[key] = safeWechat;
+      continue;
+    }
     if (CONFIG_SENSITIVE_KEY.test(key)) continue;
     const next = redactConfigValue(child, seen);
     if (next !== undefined) out[key] = next;
@@ -298,18 +419,50 @@ function containsConfigSensitive(value, seen = new WeakSet()) {
   if (seen.has(value)) return false;
   seen.add(value);
   if (Array.isArray(value)) return value.some((item) => containsConfigSensitive(item, seen));
-  return Object.entries(value).some(([key, child]) => CONFIG_SECRET_KEY.test(key) || containsConfigSensitive(child, seen));
+  return Object.entries(value).some(([key, child]) => {
+    // `wechat` is a public config container; only its credential fields are
+    // restricted for content operators. User-facing guide text remains editable.
+    const container = ["wechat", "search", "customprice", "footprint"].includes(normalizedFieldName(key));
+    if (!container && (CONFIG_CREDENTIAL_KEY.test(key) || CONFIG_SECRET_KEY.test(key) && !/^guide.?text$/i.test(key))) return true;
+    return containsConfigSensitive(child, seen);
+  });
 }
 
 async function filterRows(source, session, key, value) {
   const rows = Array.isArray(value) ? value : (value && typeof value === "object" ? Object.values(value) : []);
   const role = normalizeRole(session.role);
+  // Custom roles receive no implicit headquarters scope. Their explicitly
+  // granted action keys decide both the module and the row set.
+  if (customDynamicRole(session)) {
+    if (["orders", "afterSales"].includes(key)) {
+      if (hasAction(session, "orderAll")) return rows;
+      if (hasAction(session, "orderSelf")) return rows.filter((row) => row && [row.createdById, row.assigneeId, row.photographerId, row.staffId].some((id) => String(id || "") === String(session.subjectId || "")));
+      return [];
+    }
+    if (FINANCE_KEYS.has(key)) return hasAction(session, "financeReview") ? rows : [];
+    if (CONTENT_KEYS.has(key)) return (hasAction(session, "contentEdit") || hasAction(session, "content")) ? rows : [];
+    if (["shops", "merchantCodes", "scans"].includes(key)) return hasAction(session, "shopEdit") ? rows : [];
+    return [];
+  }
   if (role === "super" || role === "finance" || role === "content") return rows;
   if (role === "service") return rows;
   if (role === "photo") return key === "orders" ? rows.filter((row) => row && String(row.photographerId || "") === String(session.subjectId || "")) : rows;
   if (role === "merchant") {
-    if (["shops", "merchantCodes", "scans"].includes(key)) return rows.filter((row) => shopMatches(row, session));
-    if (key === "orders") return rows.filter((row) => shopMatches({ shopId: row && row.shopId }, session));
+    if (key === "shops") return rows.filter((row) => shopMatches(row, session));
+    if (["merchantCodes", "scans"].includes(key)) {
+      const ownedShopIds = await merchantOwnedShopIds(source, session);
+      return rows.filter((row) => ownedShopIds.has(String(row && (row.shopId || row.shopCode || row.shop_id) || "")) || shopMatches(row, session));
+    }
+    if (key === "orders") {
+      const ownedShopIds = await merchantOwnedShopIds(source, session);
+      return rows.filter((row) => ownedShopIds.has(String(orderShopId(row))) || shopMatches({ shopId: orderShopId(row) }, session));
+    }
+    if (key === "afterSales") {
+      const orders = await source.list("orders");
+      const ownedShopIds = await merchantOwnedShopIds(source, session);
+      const ownedOrderIds = new Set((Array.isArray(orders) ? orders : []).filter((order) => ownedShopIds.has(String(orderShopId(order))) || shopMatches({ shopId: orderShopId(order) }, session)).map(getRowId));
+      return rows.filter((row) => ownedOrderIds.has(String(row && row.orderId || "")));
+    }
     return rows;
   }
   if (role === "distributor" || role === "agent") {
@@ -339,8 +492,8 @@ async function filterRows(source, session, key, value) {
       || (role === "distributor" && Array.isArray(row.distributorIds) && row.distributorIds.map(String).some((id) => scopeIds.has(id)))
     ));
     if (key === "orders") return rows.filter((row) => row && (
-      ownedShopIds.has(String(row.shopId || ""))
-      || scopeIds.has(String(row[relationField] || ""))
+      ownedShopIds.has(String(orderShopId(row)))
+      || scopeIds.has(String(row[relationField] || (relationField === "distributorId" ? orderDistributorId(row) : "") || ""))
       || (role === "distributor" && Array.isArray(row.distributorIds) && row.distributorIds.map(String).some((id) => scopeIds.has(id)))
     ));
   }
@@ -379,6 +532,7 @@ function redactRow(key, row, session) {
 function safeErrorStatus(error) {
   if (!error) return 500;
   if (["AUTH_STORE_UNAVAILABLE", "DATA_SOURCE_UNAVAILABLE", "DATA_SOURCE_CONFIG_INVALID", "DATA_SOURCE_INVALID"].includes(error.code)) return 503;
+  if (error.code === "DATA_TOO_LARGE") return 400;
   if (["DUPLICATE_RECORD", "ER_DUP_ENTRY"].includes(error.code)) return 409;
   if (/^(?:ER_|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNRESET|EACCES|EROFS|ENOSPC)/i.test(String(error.code || ""))) return 503;
   if (error.code === "REQUEST_TOO_LARGE") return 413;
@@ -427,6 +581,7 @@ function decodePart(value) {
 
 module.exports = function createApi(source, mode, options = {}) {
   const auth = options.auth || createAuthStore();
+  const permissionStore = options.permissionStore || null;
   const sourceStatus = options.sourceStatus || { configured: true, ready: true, persistent: mode !== "mock" };
   const nodeEnv = String(process.env.NODE_ENV || "").trim().toLowerCase();
   const productionLike = ["production", "prod", "staging"].includes(nodeEnv);
@@ -436,12 +591,57 @@ module.exports = function createApi(source, mode, options = {}) {
     : (process.env.ALLOW_DEV_OPENID !== undefined ? process.env.ALLOW_DEV_OPENID === "true" : true));
   const allowedOrigins = String(process.env.ADMIN_CORS_ORIGINS || "").split(",").map((x) => x.trim()).filter(Boolean);
   let authInit = null;
+  let permissionInit = null;
   function initAuth() {
-    if (!authInit) authInit = Promise.resolve(typeof auth.init === "function" ? auth.init() : auth);
+    if (!authInit) authInit = Promise.resolve().then(() => typeof auth.init === "function" ? auth.init() : auth).catch((error) => { authInit = null; throw error; });
     return authInit;
+  }
+  function initPermissions() {
+    if (!permissionStore) return Promise.resolve(null);
+    if (!permissionInit) permissionInit = Promise.resolve().then(() => typeof permissionStore.init === "function" ? permissionStore.init() : permissionStore).catch((error) => { permissionInit = null; throw error; });
+    return permissionInit;
   }
   async function refreshAdminSession(session, token) {
     if (!session || session.kind !== "admin") return session;
+    if (permissionStore && session.authzUserId) {
+      const user = await permissionStore.getUser(session.authzUserId);
+      if (!user || isDisabledStatus(user.status)) return null;
+      const userVersion = authzVersion(user.updatedAt);
+      if (session.authzUpdatedAt && session.authzUpdatedAt !== userVersion) return null;
+      const policy = await permissionStore.getPolicyForUser(user);
+      if (!policy || !policy.role || isDisabledStatus(policy.role.status)) return null;
+      const role = normalizeRole(policy.role.roleKey || policy.role.code);
+      if (!role) return null;
+      const extra = user.extra && typeof user.extra === "object" ? user.extra : {};
+      const subjectType = extra.subjectType || (extra.legacyKey === "shops" ? "merchant" : extra.legacyKey === "distributors" ? "distributor" : extra.legacyKey === "agents" ? "agent" : "staff");
+      const subjectId = String(extra.subjectId || extra.legacyId || session.subjectId || user.id);
+      const menuDefinitions = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
+      return {
+        ...session,
+        role,
+        roleName: policy.role && policy.role.name ? policy.role.name : (session.roleName || role),
+        roleId: policy.role && policy.role.id ? policy.role.id : user.roleId,
+        menuKeys: Array.isArray(policy.menuKeys) ? policy.menuKeys.map(String) : [],
+        menuDefinitions: (Array.isArray(menuDefinitions) ? menuDefinitions : []).map((menu) => ({
+          key: String(menu.menuKey || menu.key || menu.id || ""), label: String(menu.name || menu.label || menu.menuKey || menu.key || ""),
+          group: String((menu.meta && menu.meta.group) || menu.group || ""), path: String(menu.path || ""), icon: String(menu.icon || ""),
+          routeKey: String((menu.meta && (menu.meta.routeKey || menu.meta.targetKey)) || menu.routeKey || menu.targetKey || menu.menuKey || menu.key || menu.id || ""),
+          sort: Number(menu.sortNo ?? menu.sort ?? 0), status: permissionStatus(menu.status)
+        })).filter((menu) => menu.key),
+        permissionKeys: Array.isArray(policy.permissionKeys) ? policy.permissionKeys.map(String) : [],
+        permissions: Array.isArray(policy.permissionKeys) ? policy.permissionKeys.map(String) : [],
+        permissionsConfigured: true,
+        permissionSource: permissionStore.backend === "mysql" ? "mysql" : "json-authz",
+        authzUpdatedAt: userVersion,
+        subjectType,
+        subjectId,
+        account: user.account || session.account,
+        shopId: subjectType === "merchant" ? String(extra.shopId || subjectId) : String(extra.shopId || session.shopId || ""),
+        shopCode: String(extra.shopCode || session.shopCode || ""),
+        distributorId: subjectType === "distributor" ? subjectId : String(extra.distributorId || session.distributorId || ""),
+        agentId: subjectType === "agent" ? subjectId : String(extra.agentId || session.agentId || ""),
+      };
+    }
     const key = session.subjectType === "merchant" ? "shops" : session.subjectType === "distributor" ? "distributors" : session.subjectType === "agent" ? "agents" : "staff";
     const current = await source.get(key, session.subjectId);
     if (!current || current.isDeleted || current.deleted || isDisabledStatus(current.status)) return null;
@@ -486,7 +686,12 @@ module.exports = function createApi(source, mode, options = {}) {
     let sessions;
     try { sessions = await auth.health(); }
     catch (_) { sessions = { backend: auth.kind || "unknown", configured: true, ready: false, error: "unavailable", required: true }; }
-    const ready = data.ready !== false && sessions.ready !== false;
+    let permission = { backend: mode === "mysql" ? "mysql" : "json", configured: !!permissionStore, ready: true, persistent: false };
+    if (permissionStore && typeof permissionStore.health === "function") {
+      try { permission = await permissionStore.health(); }
+      catch (_) { permission = { backend: mode, configured: true, ready: false, persistent: mode === "mysql", error: "unavailable" }; }
+    }
+    const ready = data.ready !== false && sessions.ready !== false && permission.ready !== false;
     const authInfo = {
       required: true,
       sessionStore: sessions.backend || "unknown",
@@ -499,6 +704,7 @@ module.exports = function createApi(source, mode, options = {}) {
       data,
       dataStore: data,
       sessions,
+      permissions: permission,
       auth: authInfo,
       redis: { configured: sessions.backend === "redis", ready: sessions.backend === "redis" ? sessions.ready : false }
     };
@@ -557,6 +763,12 @@ module.exports = function createApi(source, mode, options = {}) {
   }
   async function requireSession(req, res, pathname, kind = "admin") {
     await initAuth();
+    if (kind === "admin" && permissionStore) {
+      try { await initPermissions(); }
+      catch (e) {
+        if (permissionStore.required || safeErrorStatus(e) === 503) { json(res, 503, { error: "权限数据服务暂不可用" }); return null; }
+      }
+    }
     const token = parseBearer(req);
     if (!token) { await auditDenied(null, pathname, "缺少 Authorization Bearer 会话"); json(res, 401, { error: "未登录或会话已过期" }); return null; }
     let session;
@@ -580,6 +792,75 @@ module.exports = function createApi(source, mode, options = {}) {
   function forbidden(res, session, pathname, detail = "当前角色无权访问") {
     auditDenied(session, pathname, detail); json(res, 403, { error: detail });
   }
+  function dynamicActionKeys(permissionKeys = []) {
+    const keys = new Set((Array.isArray(permissionKeys) ? permissionKeys : []).map(String));
+    if (keys.has("*")) return ["*"];
+    const output = new Set(keys);
+    const aliases = {
+      view: ["view", "read", "*.view", "system.view"], dashboard: ["dashboard", "dashboard.view"],
+      orderEdit: ["orderEdit", "order.edit", "order.write", "orderStatus"], assign: ["assign", "dispatch", "order.assign"],
+      transfer: ["transfer", "order.transfer"], cancelOrder: ["cancelOrder", "order.cancel"], financeReview: ["financeReview", "finance.review", "finance.audit"],
+      shopEdit: ["shopEdit", "shop", "shop.edit"], contentEdit: ["contentEdit", "content", "content.edit"], shootUpdate: ["shootUpdate", "order.shoot", "orderStatus"],
+      export: ["export", "report.export"], permissionManage: ["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"]
+    };
+    Object.entries(aliases).forEach(([action, candidates]) => { if (candidates.some((candidate) => keys.has(candidate))) output.add(action); });
+    return [...output];
+  }
+  function authzSubject(user, policy) {
+    const extra = user && user.extra && typeof user.extra === "object" ? user.extra : {};
+    const roleKey = normalizeRole(policy && policy.role && (policy.role.roleKey || policy.role.code));
+    const legacyKey = extra.legacyKey || (extra.subjectType === "merchant" ? "shops" : extra.subjectType === "distributor" ? "distributors" : extra.subjectType === "agent" ? "agents" : "staff");
+    const subjectType = extra.subjectType || (legacyKey === "shops" ? "merchant" : legacyKey === "distributors" ? "distributor" : legacyKey === "agents" ? "agent" : "staff");
+    const subjectId = String(extra.subjectId || extra.legacyId || user.id || "");
+    return { roleKey, legacyKey, subjectType, subjectId, extra };
+  }
+  function authzVersion(value) {
+    if (!value) return "";
+    if (value instanceof Date) return value.toISOString();
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toISOString();
+  }
+  async function handlePermissionLogin(req, res, account, password, lockKey) {
+    if (!permissionStore || !permissionStore.required) return false;
+    await initPermissions();
+    const user = await permissionStore.authenticate(account, password);
+    if (!user) {
+      const result = await auth.recordLoginFailure(lockKey);
+      if (result.blocked) return json(res, 429, { ok: false, error: "账号或密码错（失败次数过多，账号已临时锁定）" });
+      return json(res, 401, { ok: false, error: "账号或密码错" });
+    }
+    if (isDisabledStatus(user.status)) return json(res, 403, { ok: false, error: "该账号已被停用，请联系管理员启用后再登录" });
+    const policy = await permissionStore.getPolicyForUser(user);
+    const subject = authzSubject(user, policy);
+    if (!policy || !policy.role || !subject.roleKey || isDisabledStatus(policy.role.status)) return json(res, 403, { ok: false, error: "该账号绑定的角色不存在或已停用" });
+    const permissionKeys = Array.isArray(policy.permissionKeys) ? [...new Set(policy.permissionKeys.map(String))] : [];
+    const menuKeys = Array.isArray(policy.menuKeys) ? [...new Set(policy.menuKeys.map(String))] : [];
+    const menuDefinitions = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
+    const sessionPayload = {
+      kind: "admin", authzUserId: String(user.id), authzUpdatedAt: authzVersion(user.updatedAt), subjectType: subject.subjectType,
+      subjectId: subject.subjectId, account: user.account, name: user.name, role: subject.roleKey,
+      roleName: policy.role && policy.role.name ? policy.role.name : subject.roleKey,
+      roleId: policy.role && policy.role.id ? policy.role.id : user.roleId, menuKeys, permissionKeys,
+      menuDefinitions: (Array.isArray(menuDefinitions) ? menuDefinitions : []).map((menu) => ({
+        key: String(menu.menuKey || menu.key || menu.id || ""), label: String(menu.name || menu.label || menu.menuKey || menu.key || ""),
+        group: String((menu.meta && menu.meta.group) || menu.group || ""), path: String(menu.path || ""), icon: String(menu.icon || ""),
+        routeKey: String((menu.meta && (menu.meta.routeKey || menu.meta.targetKey)) || menu.routeKey || menu.targetKey || menu.menuKey || menu.key || menu.id || ""),
+        sort: Number(menu.sortNo ?? menu.sort ?? 0), status: permissionStatus(menu.status)
+      })).filter((menu) => menu.key),
+      permissions: permissionKeys, permissionsConfigured: true, permissionSource: permissionStore.backend === "mysql" ? "mysql" : "json-authz",
+      shopId: subject.subjectType === "merchant" ? String(subject.extra.shopId || subject.subjectId) : String(subject.extra.shopId || ""),
+      shopCode: String(subject.extra.shopCode || ""), distributorId: subject.subjectType === "distributor" ? subject.subjectId : String(subject.extra.distributorId || ""),
+      agentId: subject.subjectType === "agent" ? subject.subjectId : String(subject.extra.agentId || "")
+    };
+    await auth.clearLoginFailures(lockKey);
+    const session = await auth.createSession(sessionPayload);
+    return json(res, 200, {
+      ok: true, role: sessionPayload.role, roleName: sessionPayload.roleName, roleId: sessionPayload.roleId || "", account: user.account, name: user.name || account,
+      staffId: sessionPayload.subjectId, shopId: sessionPayload.shopId, distributorId: sessionPayload.distributorId, agentId: sessionPayload.agentId,
+      menus: menuKeys, menuKeys, menuDefinitions: sessionPayload.menuDefinitions, permissions: permissionKeys, permissionKeys, actions: dynamicActionKeys(permissionKeys),
+      token: session.token, expiresAt: session.expiresAt, expiresIn: Math.floor(session.ttlMs / 1000)
+    });
+  }
   async function handleLogin(req, res, body) {
     await initAuth();
     const account = String(body && body.account || "").trim();
@@ -592,6 +873,7 @@ module.exports = function createApi(source, mode, options = {}) {
         const lock = await auth.isLoginLocked(lockKey);
         if (lock && lock.lockedUntil > Date.now()) return json(res, 429, { ok: false, error: "失败次数过多，账号已临时锁定" });
       }
+      if (permissionStore && permissionStore.required) return await handlePermissionLogin(req, res, account, password, lockKey);
       const staffList = await source.list("staff");
       const shopList = await source.list("shops");
       let distributorList = [];
@@ -710,35 +992,65 @@ module.exports = function createApi(source, mode, options = {}) {
   async function readConfigDocument(key, id) {
     let value = await source.get(key, id);
     if (key === "financeSettings" && id === "global") {
-      if (value && typeof value === "object") return { ...FINANCE_DEFAULTS, ...value, id: "global", _id: "global" };
+      if (value && typeof value === "object") {
+        const clean = Object.fromEntries(Object.entries(value).filter(([field]) => FINANCE_DOCUMENT_FIELDS.has(field)));
+        return { ...FINANCE_DEFAULTS, ...clean, id: "global", _id: "global" };
+      }
     }
-    if (value || !["siteConfig", "financeSettings"].includes(key) || id !== "global") return value;
-    // Legacy seeds stored each siteConfig section as its own document. Assemble
-    // those fragments for reads; the next save writes the canonical singleton.
-    const rows = await source.list("siteConfig");
-    if (!Array.isArray(rows) || !rows.length) return null;
+    if (key === "siteConfig" && id === "global") {
+      const rows = await source.list("siteConfig");
+      const merged = mergeSiteConfigFragments(value, rows);
+      return Object.keys(merged).length ? { ...merged, id: "global", _id: "global" } : value;
+    }
+    if (value || key !== "financeSettings" || id !== "global") return value;
+    // Finance settings and site configuration are separate documents. Never
+    // use siteConfig fragments as a fallback for a missing finance singleton.
+    const rows = await source.list("financeSettings");
     const assembled = {};
-    for (const row of rows) {
+    for (const row of (Array.isArray(rows) ? rows : [])) {
       if (!row || typeof row !== "object") continue;
       const fragmentId = String(row.id || row._id || "");
       if (!fragmentId || fragmentId === "global") continue;
       const fragment = { ...row };
       delete fragment.id;
       delete fragment._id;
-      if (key === "financeSettings") {
-        if (Object.prototype.hasOwnProperty.call(fragment, "value") && Object.keys(fragment).length === 1) assembled[fragmentId] = fragment.value;
-        else Object.assign(assembled, fragment);
-      } else {
-        assembled[fragmentId] = normalizeConfigFragment(fragmentId, fragment);
-      }
+      if (Object.prototype.hasOwnProperty.call(fragment, "value") && Object.keys(fragment).length === 1 && FINANCE_DOCUMENT_FIELDS.has(fragmentId)) assembled[fragmentId] = fragment.value;
+      else Object.assign(assembled, Object.fromEntries(Object.entries(fragment).filter(([field]) => FINANCE_DOCUMENT_FIELDS.has(field))));
     }
-    return Object.keys(assembled).length ? { ...FINANCE_DEFAULTS, ...assembled, id: "global", _id: "global" } : (key === "financeSettings" ? { ...FINANCE_DEFAULTS, id: "global", _id: "global" } : null);
+    return { ...FINANCE_DEFAULTS, ...assembled, id: "global", _id: "global" };
   }
   function normalizeConfigFragment(id, fragment) {
     const numericKeys = Object.keys(fragment).every((key) => /^\d+$/.test(key));
     if (id === "bookingNotice" && numericKeys) return Object.keys(fragment).sort((a, b) => Number(a) - Number(b)).map((key) => fragment[key]);
     if (id === "privacyText" && numericKeys) return Object.keys(fragment).sort((a, b) => Number(a) - Number(b)).map((key) => fragment[key]).join("");
     return fragment;
+  }
+  function mergeSiteConfigFragments(canonical, rows) {
+    const merged = canonical && typeof canonical === "object" ? { ...canonical } : {};
+    const fragments = {};
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+      if (!row || typeof row !== "object") continue;
+      const fragmentId = String(row.id || row._id || "");
+      if (!fragmentId || fragmentId === "global" || fragmentId === "homeStats") continue;
+      const fragment = { ...row };
+      delete fragment.id;
+      delete fragment._id;
+      fragments[fragmentId] = normalizeConfigFragment(fragmentId, fragment);
+    }
+    const hasValue = (value) => value !== undefined && value !== null && value !== "" && (!Array.isArray(value) || value.length > 0);
+    const mergeObject = (name, fragment) => {
+      if (!fragment || typeof fragment !== "object" || Array.isArray(fragment)) return;
+      const current = merged[name] && typeof merged[name] === "object" && !Array.isArray(merged[name]) ? merged[name] : {};
+      merged[name] = { ...fragment, ...Object.fromEntries(Object.entries(current).filter(([key, value]) => !["id", "_id"].includes(key) && hasValue(value))) };
+    };
+    if (!hasValue(merged.bookingNotice) && fragments.bookingNotice !== undefined) merged.bookingNotice = fragments.bookingNotice;
+    if (!hasValue(merged.privacyText) && fragments.privacyText !== undefined) merged.privacyText = fragments.privacyText;
+    mergeObject("customPrice", fragments.customPrice);
+    mergeObject("search", fragments.search);
+    mergeObject("wechat", fragments.wechat);
+    mergeObject("footprint", fragments.footprint);
+    for (const [fragmentId, fragment] of Object.entries(fragments)) if (!(fragmentId in merged) && !["bookingNotice", "privacyText", "customPrice", "search", "wechat", "footprint"].includes(fragmentId)) merged[fragmentId] = fragment;
+    return merged;
   }
   function financeApproved(value) {
     return normalizeFinanceStatus(value) === "已审";
@@ -758,7 +1070,8 @@ module.exports = function createApi(source, mode, options = {}) {
     return null;
   }
   function entityIds(entity) {
-    return new Set([entity && entity.id, entity && entity._id, entity && entity.shopId].filter(Boolean).map(String));
+    return new Set([entity && entity.id, entity && entity._id, entity && entity.shopId, entity && entity.shopCode,
+      entity && entity.code, entity && entity.distributorId, entity && entity.agentId].filter(Boolean).map(String));
   }
   async function findSettlementEntity(type, id) {
     const wanted = String(id || "").trim();
@@ -771,6 +1084,8 @@ module.exports = function createApi(source, mode, options = {}) {
   function orderDistributorIds(order, shop) {
     const direct = Array.isArray(order && order.distributorIds) ? order.distributorIds : [];
     if (direct.length) return direct.map(String);
+    const sourceDistributor = order && order.source && typeof order.source === "object" ? order.source.distributorId : "";
+    if (sourceDistributor) return [String(sourceDistributor)];
     const shopIds = Array.isArray(shop && shop.distributorIds) ? shop.distributorIds : [];
     if (shopIds.length) return shopIds.map(String);
     if (shop && shop.distributorId) return [String(shop.distributorId)];
@@ -835,11 +1150,12 @@ module.exports = function createApi(source, mode, options = {}) {
     let expectedAmount = 0;
     for (const order of orders) {
       let shop = null;
-      try { shop = order.shopId ? await source.get("shops", String(order.shopId)) : null; }
+      const orderShopId = order.shopId || (order.source && typeof order.source === "object" ? order.source.shopId : "") || "";
+      try { shop = orderShopId ? await findSettlementEntity({ collection: "shops" }, String(orderShopId)) : null; }
       catch (_) { return { error: "商家数据暂不可用", status: 503 }; }
       const entitySet = entityIds(entity);
       const relationOk = type.key === "shop"
-        ? entitySet.has(String(order.shopId || ""))
+        ? entitySet.has(String(orderShopId))
         : type.key === "distributor"
           ? orderDistributorIds(order, shop).some((id) => entitySet.has(id))
           : entitySet.has(String(order.photographerId || ""));
@@ -904,6 +1220,313 @@ module.exports = function createApi(source, mode, options = {}) {
       .filter((ticket) => ticket && isAfterSaleTerminalStatus(ticket.status) && financeApproved(ticket.financeStatus))
       .reduce((sum, ticket) => sum + Number(ticket.refundAmount || ticket.amount || 0), 0) : 0);
   }
+  function permissionAdminAllowed(session) {
+    // Keep the authority-of-authority boundary explicit. Role grants can
+    // mint further privileges, so only the system super administrator may
+    // change menus, roles, or login accounts.
+    return normalizeRole(session && session.role) === "super" && hasAction(session, "view");
+  }
+  function permissionStatus(value, fallback = "active") {
+    const text = String(value || "").trim().toLowerCase();
+    if (["停用", "禁用", "inactive", "disabled", "deleted"].includes(text)) return "disabled";
+    return text === "" ? fallback : "active";
+  }
+  function permissionStatusLabel(value) { return permissionStatus(value) === "disabled" ? "停用" : "启用"; }
+  function permissionMenuOutput(row = {}) {
+    const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
+    const key = String(row.menuKey || row.key || row.id || "");
+    const routeKey = String(row.routeKey || row.targetKey || meta.routeKey || meta.targetKey || key);
+    return {
+      ...row, id: String(row.id || key), key, menuKey: key, label: row.label || row.name || key, name: row.name || row.label || key,
+      parentKey: row.parentKey || row.parentId || meta.parentKey || "", parentId: row.parentId || row.parentKey || meta.parentKey || "",
+      group: row.group || meta.group || "", path: row.path || `/${key}`, icon: row.icon || meta.icon || "", sort: Number(row.sort ?? row.sortNo ?? meta.sort ?? 0), sortNo: Number(row.sortNo ?? row.sort ?? meta.sort ?? 0),
+      routeKey, targetKey: routeKey, type: row.type || meta.type || "menu", status: permissionStatusLabel(row.status), enabled: permissionStatus(row.status) !== "disabled", meta
+    };
+  }
+  async function permissionMenus() {
+    const rows = permissionStore && typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
+    return (Array.isArray(rows) ? rows : []).map(permissionMenuOutput).sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key));
+  }
+  async function permissionRoles() {
+    const rows = permissionStore && typeof permissionStore.listRoles === "function" ? await permissionStore.listRoles() : [];
+    const output = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const id = String(row.id || "");
+      const grants = permissionStore && typeof permissionStore.getRoleGrants === "function" ? await permissionStore.getRoleGrants(id) : { menuKeys: [], permissionKeys: [] };
+      const key = String(row.roleKey || row.code || row.key || id);
+      output.push({ ...row, id, key, roleKey: key, name: row.name || key, status: permissionStatusLabel(row.status), menus: [...new Set((grants.menuKeys || []).map(String))], menuKeys: [...new Set((grants.menuKeys || []).map(String))], actions: [...new Set((grants.permissionKeys || []).map(String))], permissionKeys: [...new Set((grants.permissionKeys || []).map(String))] });
+    }
+    return output;
+  }
+  async function permissionUsers() {
+    const rows = permissionStore && typeof permissionStore.listUsers === "function" ? await permissionStore.listUsers() : [];
+    const roles = await permissionRoles();
+    const roleMap = new Map(roles.map((row) => [String(row.id), row]));
+    return (Array.isArray(rows) ? rows : []).map((row) => {
+      const role = roleMap.get(String(row.roleId || row.role || ""));
+      const roleKey = role ? role.roleKey : String(row.role || row.roleId || "");
+      const extra = row.extra && typeof row.extra === "object" ? row.extra : {};
+      return { ...row, id: String(row.id || row._id || ""), name: row.name || row.displayName || row.account, role: roleKey, roleId: role ? role.id : row.roleId, roleName: role ? role.name : roleKey, status: permissionStatusLabel(row.status), permissionKeys: Array.isArray(row.permissionKeys) ? row.permissionKeys : (Array.isArray(extra.permissionKeys) ? extra.permissionKeys : []) };
+    });
+  }
+  async function validateRoleGrants(roleKey, sourceMenus, sourcePermissions) {
+    const menuKeys = [...new Set((Array.isArray(sourceMenus) ? sourceMenus : []).map(String).filter(Boolean))];
+    const permissionKeys = [...new Set((Array.isArray(sourcePermissions) ? sourcePermissions : []).map(String).filter(Boolean))];
+    if (roleKey === "super" && !permissionKeys.includes("*")) return { ok: false, status: 409, error: "超级管理员必须保留全部权限" };
+    if (roleKey !== "super" && permissionKeys.some((key) => key === "*" || ["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"].includes(key))) return { ok: false, status: 403, error: "只有超级管理员可以授予权限管理能力" };
+    const validMenus = new Set((await permissionMenus()).filter((menu) => menu.enabled !== false).map((menu) => String(menu.key)));
+    if (menuKeys.some((key) => !validMenus.has(key))) return { ok: false, status: 400, error: "授权菜单不存在或已停用" };
+    return { ok: true, menuKeys, permissionKeys };
+  }
+  async function permissionUserContext(userId) {
+    const user = await permissionStore.getUser(userId);
+    if (!user) return null;
+    const roles = await permissionRoles();
+    const role = roles.find((item) => String(item.id) === String(user.roleId) || String(item.roleKey) === String(user.roleId) || String(item.roleKey) === String(user.role)) || null;
+    const extra = user.extra && typeof user.extra === "object" ? user.extra : {};
+    const legacyKey = ["staff", "shops", "distributors", "agents"].includes(String(extra.legacyKey)) ? String(extra.legacyKey) : "staff";
+    const legacyId = String(extra.legacyId || user.id || userId);
+    return { user, roles, role, extra, legacyKey, legacyId };
+  }
+  async function assertPermissionUserMutable(res, session, context, deletingOrDisabling) {
+    if (!context) { json(res, 404, { error: "人员不存在" }); return false; }
+    const { user, role, roles } = context;
+    if (String(user.id) === String(session.authzUserId || "") || String(user.account) === String(session.account)) {
+      json(res, 409, { error: deletingOrDisabling ? "不能删除或停用当前登录账号" : "不能修改当前登录账号状态" });
+      return false;
+    }
+    if (deletingOrDisabling && role && role.roleKey === "super") {
+      const activeSupers = (await permissionStore.listUsers()).filter((item) => {
+        const itemRole = roles.find((candidate) => String(candidate.id) === String(item.roleId) || String(candidate.roleKey) === String(item.roleId) || String(candidate.roleKey) === String(item.role));
+        return itemRole && itemRole.roleKey === "super" && !isDisabledStatus(item.status);
+      });
+      if (activeSupers.length <= 1) { json(res, 409, { error: "至少保留一个启用中的超级管理员" }); return false; }
+    }
+    return true;
+  }
+  async function setPermissionUserStatus(res, session, userId, status) {
+    const context = await permissionUserContext(userId);
+    if (!(await assertPermissionUserMutable(res, session, context, permissionStatus(status) === "disabled"))) return null;
+    const normalized = permissionStatus(status);
+    const legacyBefore = await source.get(context.legacyKey, context.legacyId).catch(() => null);
+    const authBefore = typeof permissionStore.getUserState === "function" ? await permissionStore.getUserState(userId) : context.user;
+    const updated = await permissionStore.updateUser(userId, { status: normalized });
+    if (!updated) { json(res, 404, { error: "人员不存在" }); return null; }
+    try {
+      if (legacyBefore) await source.update(context.legacyKey, context.legacyId, { status: normalized === "disabled" ? "停用" : "启用" });
+    } catch (_) {
+      try { await permissionStore.restoreUserState(userId, authBefore); } catch (__) {}
+      json(res, 503, { error: "账号状态已回滚，业务数据服务暂不可用，请稍后重试" });
+      return null;
+    }
+    await auditMutation(session, normalized === "disabled" ? "停用权限人员" : "启用权限人员", "authz_users", userId, `权限中心${normalized === "disabled" ? "停用" : "启用"}账号`);
+    return updated;
+  }
+  async function deletePermissionUser(res, session, userId) {
+    const context = await permissionUserContext(userId);
+    if (!(await assertPermissionUserMutable(res, session, context, true))) return null;
+    const legacyBefore = await source.get(context.legacyKey, context.legacyId).catch(() => null);
+    try {
+      if (legacyBefore && !(await source.remove(context.legacyKey, context.legacyId))) throw Object.assign(new Error("业务人员不存在"), { code: "NOT_FOUND" });
+      const removed = await permissionStore.deleteUser(userId);
+      if (!removed) throw Object.assign(new Error("人员不存在"), { code: "NOT_FOUND" });
+    } catch (_) {
+      try { if (legacyBefore) await source.create(context.legacyKey, legacyBefore); } catch (__) {}
+      json(res, 503, { error: "人员删除未完成，已尽力恢复业务数据，请稍后重试" });
+      return null;
+    }
+    await auditMutation(session, "删除权限人员", "authz_users", userId, "权限中心删除人员账号");
+    return { ok: true, id: userId };
+  }
+  async function permissionRoute(req, res, parts, session, pathname) {
+    if (!permissionStore) return json(res, 503, { error: "权限数据服务未初始化" });
+    if (!permissionAdminAllowed(session)) return forbidden(res, session, pathname, "只有权限管理员可以配置菜单、角色和人员");
+    try { await initPermissions(); } catch (_) { return json(res, 503, { error: "权限数据服务暂不可用" }); }
+    const resource = String(parts[1] || "").toLowerCase();
+    const idPart = parts[2] ? decodePart(parts[2]) : "";
+    const action = String(parts[3] || "").toLowerCase();
+    if (req.method === "GET") {
+      if (!resource) {
+        const snapshot = await permissionStore.snapshot();
+        const permissions = [...new Set((Array.isArray(snapshot.rolePermissions) ? snapshot.rolePermissions : []).map((row) => String(row.permissionKey || row.permission_key || "")).filter(Boolean))].sort();
+        return json(res, 200, { menus: await permissionMenus(), roles: await permissionRoles(), users: await permissionUsers(), permissions });
+      }
+      if (resource === "menus") return json(res, 200, await permissionMenus());
+      if (resource === "roles") {
+        if (idPart && action === "grants") {
+          const roles = await permissionRoles(); const row = roles.find((item) => item.id === idPart || item.roleKey === idPart);
+          return row ? json(res, 200, { roleId: row.id, menuKeys: row.menuKeys, permissionKeys: row.permissionKeys }) : json(res, 404, { error: "角色不存在" });
+        }
+        return json(res, 200, await permissionRoles());
+      }
+      if (resource === "users" || resource === "staff") return json(res, 200, await permissionUsers());
+      return json(res, 404, { error: "权限资源不存在" });
+    }
+    if (!["POST", "PUT", "DELETE"].includes(req.method)) return json(res, 405, { error: "方法不支持" });
+    if ((resource === "users" || resource === "staff") && ["disable", "enable"].includes(action)) {
+      if (req.method !== "POST") return json(res, 405, { error: "请使用 POST 更新人员状态" });
+      const updated = await setPermissionUserStatus(res, session, idPart, action === "disable" ? "disabled" : "active");
+      if (!updated) return;
+      return json(res, 200, { ...updated, status: permissionStatusLabel(updated.status) });
+    }
+    if (req.method === "DELETE") {
+      if (!idPart) return json(res, 400, { error: "缺少权限记录 id" });
+      if (resource === "users" || resource === "staff") {
+        const deleted = await deletePermissionUser(res, session, idPart);
+        if (!deleted) return;
+        return json(res, 200, deleted);
+      }
+      if (resource === "menus") {
+        const current = await permissionStore.getMenu(idPart);
+        if (!current) return json(res, 404, { error: "菜单不存在" });
+        const menuKey = String(current.menuKey || current.key || idPart);
+        const roles = await permissionRoles();
+        if (roles.some((role) => (role.menus || []).map(String).includes(menuKey))) return json(res, 409, { error: "菜单仍被角色授权，不能删除" });
+        if ((await permissionMenus()).some((menu) => String(menu.parentKey || menu.parentId || "") === menuKey)) return json(res, 409, { error: "菜单仍包含下级菜单，不能删除" });
+        const ok = await permissionStore.deleteMenu(idPart);
+        if (ok) await auditMutation(session, "删除权限菜单", "authz_menus", idPart, "权限中心删除菜单");
+        return json(res, ok ? 200 : 404, { ok });
+      }
+      if (resource === "roles") {
+        const roles = await permissionRoles(); const current = roles.find((item) => item.id === idPart || item.roleKey === idPart);
+        if (current && ["super", "admin"].includes(String(current.roleKey))) return json(res, 409, { error: "系统角色不可删除" });
+        const users = await permissionStore.listUsers();
+        if ((Array.isArray(users) ? users : []).some((user) => String(user.roleId || user.role || "") === String(idPart) || String(user.roleId || "") === String(current && current.roleKey || ""))) return json(res, 409, { error: "角色仍绑定人员，不能删除" });
+        const ok = await permissionStore.deleteRole(idPart);
+        if (ok) await auditMutation(session, "删除权限角色", "authz_roles", idPart, "权限中心删除角色");
+        return json(res, ok ? 200 : 404, { ok });
+      }
+      return json(res, 404, { error: "权限资源不存在" });
+    }
+    const body = await readBody(req);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "请求体无效" });
+    if (resource === "menus") {
+      const current = idPart ? await permissionStore.getMenu(idPart) : null;
+      const key = String(body.key || body.menuKey || (current && (current.menuKey || current.key)) || body.id || "").trim();
+      const name = String(body.name || body.label || (current && (current.name || current.label)) || "").trim();
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{1,127}$/.test(key) || !name) return json(res, 400, { error: "菜单标识或名称无效" });
+      if (current && String(current.menuKey || current.key || "") !== key) return json(res, 409, { error: "已有菜单不允许修改标识" });
+      const currentMeta = current && current.meta && typeof current.meta === "object" ? current.meta : {};
+      const routeKey = String(body.routeKey || body.targetKey || currentMeta.routeKey || currentMeta.targetKey || (current && (current.routeKey || current.targetKey)) || key).trim();
+      if (!ROUTE_MENU_KEYS.has(routeKey)) return json(res, 400, { error: "目标页面必须是已注册后台页面" });
+      const parentKey = String(body.parentKey || body.parentId || (current && (current.parentKey || current.parentId)) || "").slice(0, 128) || null;
+      if (parentKey) {
+        const menus = await permissionMenus();
+        const byKey = new Map(menus.map((menu) => [String(menu.key), menu]));
+        if (!byKey.has(parentKey)) return json(res, 400, { error: "上级菜单不存在" });
+        const seen = new Set([key]);
+        let cursor = parentKey;
+        while (cursor) {
+          if (seen.has(cursor)) return json(res, 400, { error: "菜单层级不能形成循环" });
+          seen.add(cursor);
+          const row = byKey.get(cursor);
+          cursor = row && row.parentKey ? String(row.parentKey) : "";
+        }
+      }
+      const payload = { id: idPart || body.id || `menu_${key}`, menuKey: key, key, name: name.slice(0, 128), path: String(body.path || (current && current.path) || `/${routeKey}`).slice(0, 255), icon: String(body.icon || (current && current.icon) || "").slice(0, 64), parentKey, sortNo: Math.max(0, Math.min(9999, Number(body.sortNo ?? body.sort ?? (current && (current.sortNo ?? current.sort)) ?? 0) || 0)), status: body.status === undefined ? permissionStatus(current && current.status) : permissionStatus(body.status), meta: { ...currentMeta, group: String(body.group ?? currentMeta.group ?? (current && current.group) ?? "").slice(0, 64), type: String(body.type ?? currentMeta.type ?? (current && current.type) ?? "menu").slice(0, 24), routeKey } };
+      const saved = idPart ? await permissionStore.updateMenu(idPart, payload) : await permissionStore.createMenu(payload);
+      if (!saved) return json(res, 404, { error: "菜单不存在" });
+      await auditMutation(session, idPart ? "更新权限菜单" : "新增权限菜单", "authz_menus", saved.id || payload.id, "权限中心菜单配置");
+      return json(res, idPart ? 200 : 201, permissionMenuOutput(saved));
+    }
+    if (resource === "roles") {
+      if (action === "grants" && idPart) {
+        const roles = await permissionRoles(); const current = roles.find((item) => item.id === idPart || item.roleKey === idPart);
+        if (!current) return json(res, 404, { error: "角色不存在" });
+        const grants = await validateRoleGrants(current.roleKey, Array.isArray(body.menuKeys) ? body.menuKeys : body.menus, Array.isArray(body.permissionKeys) ? body.permissionKeys : body.actions);
+        if (!grants.ok) return json(res, grants.status, { error: grants.error });
+        const saved = await permissionStore.setRoleGrants(current.id, grants);
+        await auditMutation(session, "更新角色授权", "authz_roles", current.id, "权限中心角色菜单与操作权限变更");
+        return json(res, 200, { roleId: current.id, menuKeys: grants.menuKeys, permissionKeys: grants.permissionKeys, ...saved });
+      }
+      const currentRole = idPart ? (await permissionRoles()).find((item) => item.id === idPart || item.roleKey === idPart) : null;
+      const key = String(body.key || body.roleKey || body.code || (currentRole && (currentRole.roleKey || currentRole.key)) || "").trim();
+      const name = String(body.name || (currentRole && currentRole.name) || "").trim();
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{1,63}$/.test(key) || !name) return json(res, 400, { error: "角色标识或名称无效" });
+      const payload = { id: idPart || body.id || `role_${key}`, roleKey: key, key, name: name.slice(0, 128), description: String(body.description ?? (currentRole && currentRole.description) ?? "").slice(0, 500), status: body.status === undefined ? permissionStatus(currentRole && currentRole.status) : permissionStatus(body.status) };
+      if (currentRole && currentRole.roleKey === "super" && key !== "super") return json(res, 409, { error: "系统超级管理员角色不允许修改标识" });
+      if (currentRole && currentRole.roleKey === "super" && payload.status === "disabled") {
+        const activeSupers = (await permissionStore.listUsers()).filter((user) => String(user.roleId || "") === String(currentRole.id) && !isDisabledStatus(user.status));
+        if (activeSupers.length <= 1) return json(res, 409, { error: "至少保留一个启用中的超级管理员" });
+      }
+      const grantsProvided = Array.isArray(body.menuKeys) || Array.isArray(body.menus) || Array.isArray(body.permissionKeys) || Array.isArray(body.actions);
+      const grants = grantsProvided ? await validateRoleGrants(key, body.menuKeys || body.menus, body.permissionKeys || body.actions) : null;
+      if (grants && !grants.ok) return json(res, grants.status, { error: grants.error });
+      const saved = idPart ? await permissionStore.updateRole(idPart, payload) : await permissionStore.createRole(payload);
+      if (!saved) return json(res, 404, { error: "角色不存在" });
+      if (grants) {
+        try { await permissionStore.setRoleGrants(saved.id, grants); }
+        catch (error) {
+          try {
+            if (currentRole) await permissionStore.updateRole(saved.id, { roleKey: currentRole.roleKey, name: currentRole.name, description: currentRole.description, status: permissionStatus(currentRole.status) });
+            else await permissionStore.deleteRole(saved.id);
+          } catch (_) {}
+          throw error;
+        }
+      }
+      await auditMutation(session, idPart ? "更新权限角色" : "新增权限角色", "authz_roles", saved.id || payload.id, "权限中心角色配置");
+      const all = await permissionRoles();
+      return json(res, idPart ? 200 : 201, all.find((item) => item.id === String(saved.id || payload.id)) || { ...saved, key });
+    }
+    if (resource === "users" || resource === "staff") {
+      const existingUser = idPart ? await permissionStore.getUser(idPart) : null;
+      const existingExtra = existingUser && existingUser.extra && typeof existingUser.extra === "object" ? existingUser.extra : {};
+      const account = String(body.account || body.username || (existingUser && existingUser.account) || "").trim();
+      const name = String(body.name || body.displayName || (existingUser && (existingUser.name || existingUser.displayName)) || account).trim();
+      const roles = await permissionRoles();
+      const existingRole = existingUser && roles.find((item) => String(item.id) === String(existingUser.roleId) || String(item.roleKey) === String(existingUser.roleId) || String(item.roleKey) === String(existingUser.role));
+      const roleKey = String(body.role || body.roleKey || (existingRole && existingRole.roleKey) || (existingUser && existingUser.role) || "service").trim();
+      if (!/^[A-Za-z0-9_.@-]{2,128}$/.test(account) || !name || !roleKey) return json(res, 400, { error: "人员账号、姓名或角色无效" });
+      const role = roles.find((item) => item.roleKey === roleKey || item.id === roleKey);
+      if (!role || role.status === "停用") return json(res, 400, { error: "绑定角色不存在或已停用" });
+      if (role.roleKey === "super" && normalizeRole(session.role) !== "super") return json(res, 403, { error: "只有超级管理员可以绑定超级管理员角色" });
+      const password = body.password === undefined ? "" : String(body.password);
+      if (!idPart && !password) return json(res, 400, { error: "新增人员必须设置密码" });
+      if (password && (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password))) return json(res, 400, { error: "密码至少 8 位且同时包含字母和数字" });
+      const userId = idPart || String(body.id || `staff_${crypto.randomBytes(8).toString("hex")}`);
+      const requestedPermissions = Array.isArray(body.permissionKeys) ? body.permissionKeys : Array.isArray(body.permissions) ? body.permissions : (Array.isArray(existingUser && existingUser.permissionKeys) ? existingUser.permissionKeys : (Array.isArray(existingExtra.permissionKeys) ? existingExtra.permissionKeys : []));
+      const inferredSubjectType = existingExtra.subjectType || (existingExtra.legacyKey === "shops" ? "merchant" : existingExtra.legacyKey === "distributors" ? "distributor" : existingExtra.legacyKey === "agents" ? "agent" : "staff");
+      const inferredLegacyKey = existingExtra.legacyKey || (inferredSubjectType === "merchant" ? "shops" : inferredSubjectType === "distributor" ? "distributors" : inferredSubjectType === "agent" ? "agents" : "staff");
+      const extra = { ...existingExtra, ...(body.extra && typeof body.extra === "object" ? body.extra : {}), permissionKeys: [...new Set(requestedPermissions.map(String).filter(Boolean))], subjectType: String(body.subjectType || inferredSubjectType), subjectId: String(body.subjectId || existingExtra.subjectId || userId), legacyKey: inferredLegacyKey, legacyId: String(existingExtra.legacyId || userId), distributorId: String(body.distributorId ?? existingExtra.distributorId ?? ""), agentId: String(body.agentId ?? existingExtra.agentId ?? ""), shopId: String(body.shopId ?? existingExtra.shopId ?? "") };
+      const payload = { id: userId, account, name, displayName: name, roleId: role.id, role: role.roleKey, status: body.status === undefined ? permissionStatus(existingUser && existingUser.status) : permissionStatus(body.status), phone: String(body.phone ?? (existingUser && existingUser.phone) ?? "").slice(0, 64), email: String(body.email ?? (existingUser && existingUser.email) ?? "").slice(0, 255), extra, permissionKeys: requestedPermissions };
+      const superRole = roles.find((item) => item.roleKey === "super");
+      const existingIsSuper = !!(existingUser && ((superRole && String(existingUser.roleId || "") === String(superRole.id)) || String(existingUser.role || "") === "super"));
+      if (existingIsSuper && (role.roleKey !== "super" || payload.status === "disabled")) {
+        const activeSupers = (await permissionStore.listUsers()).filter((user) => {
+          const userRole = String(user.roleId || user.role || "");
+          return (superRole && userRole === String(superRole.id)) || userRole === "super";
+        }).filter((user) => !isDisabledStatus(user.status));
+        if (activeSupers.length <= 1) return json(res, 409, { error: "至少保留一个启用中的超级管理员" });
+      }
+      if (password) payload.password = password;
+      const previousAuthzUser = existingUser;
+      const previousAuthzState = idPart && typeof permissionStore.getUserState === "function" ? await permissionStore.getUserState(idPart) : null;
+      const previousLegacy = idPart ? await source.get(String(existingExtra.legacyKey || "staff"), String(existingExtra.legacyId || userId)).catch(() => null) : null;
+      const saved = idPart ? await permissionStore.updateUser(idPart, payload) : await permissionStore.createUser(payload);
+      if (!saved) return json(res, 404, { error: "人员不存在" });
+      // Subject identity is authorization metadata and belongs only to
+      // lxm_auth_users. The business projection retains its operational
+      // scope fields without duplicating auth-only values into generic leaves.
+      const legacy = { id: userId, name, account, role: role.roleKey, status: payload.status, phone: payload.phone, email: payload.email, permissionKeys: payload.permissionKeys, permissions: payload.permissionKeys, shopId: extra.shopId, distributorId: extra.distributorId, agentId: extra.agentId };
+      try {
+        const legacyKey = String(extra.legacyKey || "staff");
+        const legacyId = String(extra.legacyId || userId);
+        const old = previousLegacy || await source.get(legacyKey, legacyId);
+        const legacyPayload = { ...legacy, id: legacyId };
+        if (old) await source.update(legacyKey, legacyId, legacyPayload); else await source.create(legacyKey, legacyPayload);
+      } catch (_) {
+        try {
+          if (previousAuthzState && typeof permissionStore.restoreUserState === "function") await permissionStore.restoreUserState(idPart, previousAuthzState);
+          else if (previousAuthzUser) await permissionStore.updateUser(idPart, previousAuthzUser);
+          else await permissionStore.deleteUser(userId);
+        } catch (__) {}
+        return json(res, 503, { error: "人员资料已回滚，业务数据服务暂不可用，请稍后重试" });
+      }
+      await auditMutation(session, idPart ? "更新权限人员" : "新增权限人员", "authz_users", saved.id || userId, "权限中心人员账号配置");
+      return json(res, idPart ? 200 : 201, { ...saved, role: role.roleKey, roleName: role.name, status: permissionStatusLabel(saved.status), permissionKeys: payload.permissionKeys });
+    }
+    return json(res, 404, { error: "权限资源不存在" });
+  }
   async function collectionRoute(req, res, parts, session, pathname) {
     const key = decodePart(parts[1]); const id = parts[2] ? decodePart(parts[2]) : "";
     if (!KEY_SET.has(key)) { const e = new Error("不支持的数据集合"); e.code = "DATA_KEY_INVALID"; throw e; }
@@ -923,7 +1546,8 @@ module.exports = function createApi(source, mode, options = {}) {
       return json(res, 200, rows.map((row) => redactRow(key, row, session)));
     }
     if (!["POST", "PUT", "DELETE"].includes(method)) return json(res, 405, { error: "方法不支持" });
-    if (!canWriteKey(session, key)) return forbidden(res, session, pathname);
+    const contentTrashPost = key === "trash" && normalizeRole(session.role) === "content" && method === "POST";
+    if (!canWriteKey(session, key) && !contentTrashPost) return forbidden(res, session, pathname);
     if (key === "logs" && method !== "POST" && normalizeRole(session.role) !== "super") return forbidden(res, session, pathname, "审计日志只能由超管维护");
     if (DOCUMENT_KEYS.has(key)) return json(res, 405, { error: "配置文档必须通过固定文档接口写入" });
     if (ORDER_KEYS.has(key) && ["PUT", "DELETE"].includes(method)) {
@@ -947,18 +1571,44 @@ module.exports = function createApi(source, mode, options = {}) {
       const current = await source.get(key, id);
       if (!current || !(await filterRows(source, session, key, [current])).length) return json(res, 404, { error: "未找到记录" });
       const ok = await source.remove(key, id);
+      if (ok && permissionStore && permissionStore.required && PASSWORD_KEYS.has(key)) {
+        try { await permissionStore.disableUser(id); }
+        catch (_) {
+          try { await source.create(key, current); } catch (__) {}
+          return json(res, 503, { error: "账号已回滚，权限数据服务暂不可用，请稍后重试" });
+        }
+      }
       if (ok && !(await auditMutation(session, "删除数据", key, id, "管理端删除记录"))) {
         try { await source.create(key, current); } catch (_) {}
+        if (permissionStore && permissionStore.required && PASSWORD_KEYS.has(key)) {
+          try { await permissionStore.syncLegacyAccount(key, current); } catch (_) {}
+        }
         return json(res, 503, { error: "记录已回滚，审计日志暂不可用，请稍后重试" });
       }
       return json(res, ok ? 200 : 404, { ok });
     }
     const body = await readBody(req);
     if (!body || Array.isArray(body) || typeof body !== "object") return json(res, 400, { error: "请求体无效" });
+    if (contentTrashPost) {
+      const validated = await validateContentTrashPost(body);
+      if (validated.error) return json(res, validated.status, { error: validated.error });
+      body.sourceKey = validated.sourceKey;
+      body.sourceId = validated.sourceId;
+      body.source = validated.current;
+      body.restorable = true;
+    }
+    let permissionCredential = "";
     if (PASSWORD_KEYS.has(key)) {
       if (normalizeRole(session.role) !== "super") return forbidden(res, session, pathname, "只有系统超管可以管理账号");
       const policyErr = passwordPolicyError(key, body); if (policyErr) return json(res, 400, { error: policyErr });
       sanitizePasswordBody(key, body);
+      if (permissionStore && permissionStore.required && method === "POST" && !body.password) return json(res, 400, { error: "新增账号必须设置登录密码" });
+      if (permissionStore && permissionStore.required && body.password) {
+        permissionCredential = String(body.password);
+        delete body.password;
+        delete body.passwordHash;
+        delete body.password_hash;
+      }
       if (Array.isArray(body.permissionKeys)) {
         body.permissions = [...new Set(body.permissionKeys.map(String))];
         delete body.permissionKeys;
@@ -1132,9 +1782,16 @@ module.exports = function createApi(source, mode, options = {}) {
       const current = await source.get(key, id);
       if (!current || !(await filterRows(source, session, key, [current])).length) return json(res, 404, { error: "未找到记录" });
       const updated = await source.update(key, id, body);
+      if (updated && permissionStore && permissionStore.required && PASSWORD_KEYS.has(key)) {
+        try { await permissionStore.syncLegacyAccount(key, permissionCredential ? { ...updated, password: permissionCredential } : updated); }
+        catch (_) {
+          try { await restoreChangedFields(source, key, id, current, Object.keys(body)); } catch (__) {}
+          return json(res, 503, { error: "人员资料已回滚，权限数据服务暂不可用，请稍后重试" });
+        }
+      }
       if (updated && FINANCE_KEYS.has(key)) {
         if (!(await auditMutation(session, "更新财务记录", key, id, "服务端财务记录变更"))) {
-          try { await source.update(key, id, current); } catch (__) {}
+          try { await restoreChangedFields(source, key, id, current, Object.keys(body)); } catch (__) {}
           return json(res, 503, { error: "财务记录已回滚，审计日志暂不可用，请稍后重试" });
         }
       } else if (updated && key !== "logs") {
@@ -1144,6 +1801,13 @@ module.exports = function createApi(source, mode, options = {}) {
     }
     if (key === "orders" && !["super", "service"].includes(normalizeRole(session.role))) return forbidden(res, session, pathname, "当前角色不能创建订单");
     const created = await source.create(key, body);
+    if (created && permissionStore && permissionStore.required && PASSWORD_KEYS.has(key)) {
+      try { await permissionStore.syncLegacyAccount(key, permissionCredential ? { ...created, password: permissionCredential } : created); }
+      catch (_) {
+        try { await source.remove(key, getRowId(created)); } catch (__) {}
+        return json(res, 503, { error: "人员资料已回滚，权限数据服务暂不可用，请稍后重试" });
+      }
+    }
     let linkedOrder = null;
     let orderBefore = null;
     if (key === "afterSales") {
@@ -1162,7 +1826,9 @@ module.exports = function createApi(source, mode, options = {}) {
         await source.create("logs", { action: "创建售后", operator: session.account, operatorId: session.subjectId, targetType: "afterSale", targetId: getRowId(created), detail: String(body.reason || "").trim(), createTime: now });
       } catch (error) {
         try { await source.remove(key, getRowId(created)); } catch (_) {}
-        if (orderBefore) { try { await source.update("orders", String(body.orderId), orderBefore); } catch (_) {} }
+        if (orderBefore) {
+          try { await restoreChangedFields(source, "orders", String(body.orderId), orderBefore, ["afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId", "followRecords", "statusLogs", "updateTime"]); } catch (_) {}
+        }
         return json(res, 503, { error: "售后已回滚，关联或审计保存失败，请稍后重试" });
       }
     }
@@ -1221,12 +1887,12 @@ module.exports = function createApi(source, mode, options = {}) {
     }
     const saved = await source.upsert(key, id, body);
     if (key === "financeSettings" && !(await auditMutation(session, "更新财务参数", key, id, "服务端财务参数变更"))) {
-      try { await source.upsert(key, id, previousFinanceSettings || FINANCE_DEFAULTS); } catch (_) {}
+       try { await restoreChangedFields(source, key, id, previousFinanceSettings || FINANCE_DEFAULTS, Object.keys(body)); } catch (_) {}
       return json(res, 503, { error: "财务参数已回滚，审计日志暂不可用，请稍后重试" });
     }
     if (key !== "financeSettings" && !(await auditMutation(session, "更新配置文档", key, id, "服务端配置文档变更"))) {
       try {
-        if (previousDocument) await source.upsert(key, id, previousDocument);
+        if (previousDocument) await restoreChangedFields(source, key, id, previousDocument, Object.keys(body));
         else await source.remove(key, id);
       } catch (_) {}
       return json(res, 503, { error: "配置文档已回滚，审计日志暂不可用，请稍后重试" });
@@ -1329,12 +1995,12 @@ module.exports = function createApi(source, mode, options = {}) {
       label = "开始拍摄";
     } else if (action === "deliver") {
       if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能交付自己的拍摄任务");
-      if (!canTransition(["shooting", "retouching"], "delivered")) return json(res, 409, { error: "订单当前状态不能标记交付" });
+      if (!canTransition(["shooting", "retouching", "editing"], "delivered")) return json(res, 409, { error: "订单当前状态不能标记交付" });
       if (Number(current.finalPaid || 0) > 0 && !financeApproved(current.finalFinanceStatus)) return json(res, 409, { error: "尾款尚未完成财务审核，不能标记交付" });
       patch.deliveryNote = reason;
       label = "标记成片交付";
     } else if (action === "complete") {
-      if (!canTransition(["delivered", "shooting", "final_pending"], "completed")) return json(res, 409, { error: "订单当前状态不能完成" });
+      if (!canTransition(["delivered", "shooting", "editing", "final_pending"], "completed")) return json(res, 409, { error: "订单当前状态不能完成" });
       if (Number(current.depositPaid || 0) > 0 && !financeApproved(current.depositFinanceStatus)) return json(res, 409, { error: "定金尚未完成财务审核，不能完成订单" });
       if (Number(current.finalPaid || 0) > 0 && !financeApproved(current.finalFinanceStatus)) return json(res, 409, { error: "尾款尚未完成财务审核，不能完成订单" });
       patch.completedAt = now;
@@ -1455,13 +2121,16 @@ module.exports = function createApi(source, mode, options = {}) {
     try {
       await source.create("logs", { action: label, operator: session.account, operatorId: session.subjectId, targetType: "order", targetId: orderId, detail: reason || `${beforeStatus} -> ${updated.status}`, createTime: now });
     } catch (_) {
-      try { await source.update("orders", orderId, current); } catch (__) {}
+      try { await restoreChangedFields(source, "orders", orderId, current, Object.keys(patch)); } catch (__) {}
       return json(res, 503, { error: "订单已回滚，审计日志暂不可用，请稍后重试" });
     }
     if (action === "cancel") {
       try {
         await source.create("trash", { id: `trash_${orderId}_${Date.now()}`, refId: orderId, type: "订单", name: updated.orderNo || orderId, reason, operator: session.account, time: now, restorable: true });
-      } catch (_) { /* the order flag remains authoritative if trash projection fails */ }
+      } catch (_) {
+        try { await restoreChangedFields(source, "orders", orderId, current, Object.keys(patch)); } catch (__) {}
+        return json(res, 503, { error: "订单已回滚，回收站记录保存失败，请稍后重试" });
+      }
     }
     return json(res, 200, { ok: true, auditRecorded: true, data: redactRow("orders", updated, session) });
   }
@@ -1541,10 +2210,11 @@ module.exports = function createApi(source, mode, options = {}) {
     patch.logs = [logLine, ...(Array.isArray(current.logs) ? current.logs : [])].slice(0, 100);
     let updatedTicket;
     let updatedOrder;
+    let orderPatch;
     try {
       updatedTicket = await source.update("afterSales", ticketId, patch);
       if (!updatedTicket) throw new Error("售后工单已不存在");
-      const orderPatch = {
+      orderPatch = {
         afterSaleStatus: orderAfterSaleStatus,
         afterSaleId: ticketId,
         followRecords: [...(Array.isArray(order.followRecords) ? order.followRecords : []), {
@@ -1558,14 +2228,15 @@ module.exports = function createApi(source, mode, options = {}) {
       updatedOrder = await source.update("orders", orderId, orderPatch);
       if (!updatedOrder) throw new Error("关联订单保存失败");
     } catch (error) {
-      try { if (updatedTicket) await source.update("afterSales", ticketId, current); } catch (_) {}
-      throw error;
+      try { if (updatedTicket) await restoreChangedFields(source, "afterSales", ticketId, current, Object.keys(patch)); } catch (_) {}
+      try { if (updatedOrder && orderPatch) await restoreChangedFields(source, "orders", orderId, order, Object.keys(orderPatch)); } catch (_) {}
+      return json(res, 503, { error: "售后已回滚，关联订单保存失败，请稍后重试" });
     }
     try {
       await source.create("logs", { action: `售后${action}`, operator: session.account, operatorId: session.subjectId, targetType: "afterSale", targetId: ticketId, detail: reason, createTime: now });
     } catch (_) {
-      try { await source.update("afterSales", ticketId, current); } catch (__) {}
-      try { await source.update("orders", orderId, order); } catch (__) {}
+      try { await restoreChangedFields(source, "afterSales", ticketId, current, Object.keys(patch)); } catch (__) {}
+      try { if (orderPatch) await restoreChangedFields(source, "orders", orderId, order, Object.keys(orderPatch)); } catch (__) {}
       return json(res, 503, { error: "售后已回滚，审计日志暂不可用，请稍后重试" });
     }
     const safeTicket = redactRow("afterSales", updatedTicket, session);
@@ -1582,12 +2253,19 @@ module.exports = function createApi(source, mode, options = {}) {
     const requested = String(parsed.query.shopId || ""); let shopId = requested;
     if (role === "merchant") {
       const own = [session.shopId, session.shopCode].filter(Boolean).map(String);
-      if (requested && !own.includes(requested)) return forbidden(res, session, pathname, "不能访问其他商家数据");
+      let ownedShop = null;
+      if (requested && !own.includes(requested)) {
+        try {
+          const candidates = await source.list("shops");
+          ownedShop = (Array.isArray(candidates) ? candidates : []).find((item) => shopMatches(item, session) && shopMatches(item, { shopId: requested, shopCode: requested }));
+        } catch (_) {}
+        if (!ownedShop) return forbidden(res, session, pathname, "不能访问其他商家数据");
+      }
       // Merchant-code documents historically store the external shopCode while
       // order rows use the internal shop id. Resolve both forms before querying.
       try {
         const shops = await source.list("shops");
-        const row = (Array.isArray(shops) ? shops : []).find((item) => shopMatches(item, session));
+        const row = ownedShop || (Array.isArray(shops) ? shops : []).find((item) => shopMatches(item, session));
         shopId = (row && (row.shopId || row.id || row._id)) || session.shopCode || session.shopId || "";
       } catch (_) { shopId = session.shopCode || session.shopId || ""; }
     }
@@ -1619,11 +2297,21 @@ module.exports = function createApi(source, mode, options = {}) {
       if (req.method !== "POST") return json(res, 405, { error: "请使用 POST" });
       if (!(role === "super" || role === "merchant") || !hasAction(session, "shopEdit")) return forbidden(res, session, pathname, "当前角色无权生成商家码");
       const body = await readBody(req); const target = String(body.shopId || shopId || "");
-      if (role === "merchant" && ![String(session.shopId), String(session.shopCode)].includes(target)) return forbidden(res, session, pathname, "不能为其他商家生成二维码");
+      if (role === "merchant" && !shopMatches({ shopId: target }, session) && !shopMatches({ id: target }, session)) return forbidden(res, session, pathname, "不能为其他商家生成二维码");
       return json(res, 200, await source.generateMerchantCode({ ...body, shopId: target }));
     }
     if (pathname.endsWith("/stats")) return json(res, 200, await source.merchantCodeStats(shopId));
     return json(res, 200, await source.listMerchantCodes(shopId));
+  }
+  async function validateContentTrashPost(body) {
+    const allowed = new Set(["cities", "spots", "series", "albums", "samples", "packages", "addonServices", "peripherals", "tagLibrary"]);
+    const sourceKey = String(body && body.sourceKey || "");
+    const sourceDocument = body && body.source && typeof body.source === "object" && !Array.isArray(body.source) ? body.source : null;
+    const sourceId = String(sourceDocument && (sourceDocument.id || sourceDocument._id) || body && (body.sourceId || body.refId) || "");
+    if (!allowed.has(sourceKey) || !sourceId || !sourceDocument) return { error: "回收站源记录无效", status: 400 };
+    const current = await source.get(sourceKey, sourceId).catch(() => null);
+    if (!current || !(current.deleted === true || current.isDeleted === true)) return { error: "源记录尚未软删除", status: 409 };
+    return { sourceKey, sourceId, current };
   }
   return async function handle(req, res, pathname) {
     const rid = crypto.randomBytes(8).toString("hex"); res.setHeader("X-Request-Id", rid); setHeaders(req, res);
@@ -1654,13 +2342,22 @@ module.exports = function createApi(source, mode, options = {}) {
         return json(res, 200, {
           ok: true,
           account: session.account,
+          name: session.name || session.account,
           role: session.role,
+          roleName: session.roleName || session.role,
+          roleId: session.roleId || "",
           staffId: session.subjectId,
           shopId: session.shopId || "",
           distributorId: session.distributorId || "",
           agentId: session.agentId || "",
           permissions: Array.isArray(session.permissions) ? session.permissions : [],
+          permissionKeys: Array.isArray(session.permissionKeys) ? session.permissionKeys : (Array.isArray(session.permissions) ? session.permissions : []),
+          actions: dynamicActionKeys(Array.isArray(session.permissionKeys) ? session.permissionKeys : session.permissions),
+          menus: Array.isArray(session.menuKeys) ? session.menuKeys : [],
+          menuKeys: Array.isArray(session.menuKeys) ? session.menuKeys : [],
+          menuDefinitions: Array.isArray(session.menuDefinitions) ? session.menuDefinitions : [],
           permissionsConfigured: session.permissionsConfigured === true,
+          permissionSource: session.permissionSource || "",
           expiresAt: session.expiresAt,
         });
       }
@@ -1670,9 +2367,18 @@ module.exports = function createApi(source, mode, options = {}) {
         const body = await readBody(req); const oldPassword = String(body.oldPassword || ""); const newPassword = String(body.newPassword || "");
         if (!oldPassword || !newPassword) return json(res, 400, { ok: false, error: "请完整填写原密码和新密码" });
         const strength = validatePasswordStrength(newPassword); if (!strength.ok || newPassword === oldPassword) return json(res, 400, { ok: false, error: strength.ok ? "新密码不能与原密码相同" : strength.reason });
-        const key = session.subjectType === "merchant" ? "shops" : session.subjectType === "distributor" ? "distributors" : session.subjectType === "agent" ? "agents" : "staff"; const current = await source.get(key, session.subjectId);
-        if (!current || !verifyPassword(current.password, oldPassword)) return json(res, 401, { ok: false, error: "原密码不正确" });
-        await source.update(key, session.subjectId, { password: hashPassword(newPassword) });
+        const key = session.subjectType === "merchant" ? "shops" : session.subjectType === "distributor" ? "distributors" : session.subjectType === "agent" ? "agents" : "staff";
+        if (permissionStore && permissionStore.required && session.authzUserId) {
+          const authenticated = await permissionStore.authenticate(session.account, oldPassword);
+          if (!authenticated) return json(res, 401, { ok: false, error: "原密码不正确" });
+          await permissionStore.updateUser(session.authzUserId, { password: newPassword });
+          // The MySQL business projection intentionally has no credential
+          // field; the normalized auth table is the sole password authority.
+        } else {
+          const current = await source.get(key, session.subjectId);
+          if (!current || !verifyPassword(current.password, oldPassword)) return json(res, 401, { ok: false, error: "原密码不正确" });
+          await source.update(key, session.subjectId, { password: hashPassword(newPassword) });
+        }
         try { await source.create("logs", { action: "修改密码", operator: session.account, operatorId: session.subjectId, targetType: key, targetId: session.subjectId, detail: "账号本人修改登录密码", createTime: new Date().toISOString() }); } catch (_) {}
         try { await auth.revokeSession(parseBearer(req)); } catch (_) {}
         return json(res, 200, { ok: true, reauthenticate: true });
@@ -1716,6 +2422,10 @@ module.exports = function createApi(source, mode, options = {}) {
       if (parts[0] === "merchant-code" || parts[0] === "merchant-codes") {
         const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin"); if (!session) return;
         return await merchantRoute(req, res, parsed, session, `/api/${parts.join("/")}`);
+      }
+      if (parts[0] === "permissions" || parts[0] === "permission") {
+        const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin"); if (!session) return;
+        return await permissionRoute(req, res, parts, session, `/api/${parts.join("/")}`);
       }
       if (parts[0] === "collection") {
         const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin"); if (!session) return;

@@ -7,6 +7,7 @@
   const {
     ElMessage,
     activeMenu,
+    activeRouteKey,
     adjustmentRecordRows,
     afterSaleRows,
     cityRank,
@@ -50,8 +51,8 @@
     visibleReconciliationSettlementRows
   } = ctx;
 
-const activePageComponent = computed(() => window.LXM_PAGES?.componentNameFor(state.active === "videoProducts" ? "packages" : state.active) || "LxmPageDashboard");
-const activePageMeta = computed(() => window.LXM_PAGES?.pageFor(state.active === "videoProducts" ? "packages" : state.active) || {});
+const activePageComponent = computed(() => window.LXM_PAGES?.componentNameFor(activeRouteKey.value) || "LxmPageDashboard");
+const activePageMeta = computed(() => window.LXM_PAGES?.pageFor(activeRouteKey.value) || {});
 const exportOptions = computed(() => {
   const all = [
     { key: "dashboardSummary", menu: "dashboard", name: "经营汇总报表", desc: "导出当前经营看板核心指标、扫码转化、收款进度。", rows: 1, roles: ["super", "agent", "distributor", "merchant", "service", "finance"] },
