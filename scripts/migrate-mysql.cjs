@@ -308,6 +308,26 @@ async function ensureNormalizedIndexes(conn) {
     const subject = rows.filter((row) => String(row.column_name).toLowerCase() === "subject_type" || String(row.column_name).toLowerCase() === "subject_id");
     if (!subject.length) await execute(conn, "ALTER TABLE lxm_auth_users ADD KEY idx_auth_user_subject (subject_type,subject_id)");
   }
+  // These identities make booking retries and payment callbacks durable across
+  // multiple Node instances. Blank historical values are normalized to NULL so
+  // MySQL unique indexes retain their normal nullable semantics.
+  async function uniqueIdentity(table, column, indexName) {
+    if (!(await tableExists(conn, table))) return;
+    const columns = await tableColumns(conn, table);
+    if (!columns.has(column)) return;
+    await execute(conn, `UPDATE ${quote(table)} SET ${quote(column)}=NULL WHERE ${quote(column)}=''`);
+    const duplicates = await query(conn, `SELECT ${quote(column)} AS value_text,COUNT(*) AS count FROM ${quote(table)} WHERE ${quote(column)} IS NOT NULL GROUP BY ${quote(column)} HAVING COUNT(*)>1 LIMIT 1`);
+    if (duplicates.length) throw Object.assign(new Error(`${table}.${column} 存在重复幂等标识，不能安全建立唯一索引`), { code: "MIGRATION_VERIFY_FAILED" });
+    const indexes = await query(conn, "SELECT index_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=? AND index_name=?", [table, indexName]);
+    if (!indexes.length) await execute(conn, `ALTER TABLE ${quote(table)} ADD UNIQUE KEY ${quote(indexName)} (${quote(column)})`);
+  }
+  await uniqueIdentity("lxm_orders", "bookingIdempotencyKey", "uq_order_booking_idempotency");
+  for (const [column, indexName] of [
+    ["payment_id", "uq_order_payment_id"],
+    ["idempotency_key", "uq_order_payment_idempotency"],
+    ["confirmation_idempotency_key", "uq_order_payment_confirmation_key"],
+    ["external_transaction_id", "uq_order_payment_transaction"],
+  ]) await uniqueIdentity("lxm_order_payment_records", column, indexName);
 }
 
 async function migrateLegacyBusiness(conn) {

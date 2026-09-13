@@ -4,7 +4,7 @@
             </div>
             <div class="tenant-scope-bar" :class="{collapsed:state.scopeCollapsed}">
               <div><strong>当前数据范围</strong><span v-if="!state.scopeCollapsed">{{ roleProfile.name }} · 鹿小鸣长沙自营 · {{ state.filters.shopId ? shopName(state.filters.shopId) : '全部商家' }}</span></div>
-              <div class="scope-actions"><template v-if="!state.scopeCollapsed"><el-button v-if="canEditOrder()" size="small" type="primary" @click="createManualOrder">手动创建订单</el-button><el-button size="small" @click="exportOrders">按筛选导出订单</el-button><el-button size="small" :disabled="!state.selectedOrderIds.length" @click="state.selectedOrderIds=[]">清空勾选</el-button></template><el-button size="small" plain @click="state.scopeCollapsed=!state.scopeCollapsed">{{ state.scopeCollapsed ? '展开' : '收起' }}</el-button></div>
+              <div class="scope-actions"><template v-if="!state.scopeCollapsed"><el-button v-if="canEditOrder()" size="small" type="primary" @click="createManualOrder">手动创建订单</el-button><el-button size="small" :loading="state.orderRefreshing" @click="refreshOrders">刷新订单</el-button><el-button size="small" @click="exportOrders">按筛选导出订单</el-button><el-button size="small" :disabled="!state.selectedOrderIds.length" @click="state.selectedOrderIds=[]">清空勾选</el-button></template><el-button size="small" plain @click="state.scopeCollapsed=!state.scopeCollapsed">{{ state.scopeCollapsed ? '展开' : '收起' }}</el-button></div>
             </div>
             <div v-if="!state.scopeCollapsed" class="filter-card">
               <el-date-picker v-model="state.filters.dateRange" type="daterange" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" :shortcuts="orderDateShortcuts" style="width:280px" />

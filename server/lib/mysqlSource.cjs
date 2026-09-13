@@ -436,7 +436,7 @@ module.exports = function createMysqlSource(cfg = {}) {
       const relation = RELATIONS[relationName];
       const parent = relationParent(relationName);
       if (!relation || !parent) continue;
-      if (relationName === "account_permissions") output[relationName] = await query(pool, `SELECT * FROM \`${relation.table}\` WHERE collection_name=? AND account_id=? ORDER BY sort_no`, [key, id]);
+      if (relationName === "account_permissions") continue;
       else {
         const orderBy = relationOrderColumns(relation).map((name) => `\`${name}\``).join(",");
         output[relationName] = await query(pool, `SELECT * FROM \`${relation.table}\` WHERE ${parent.columns[0]}=? ORDER BY ${orderBy}`, [id]);
@@ -478,8 +478,8 @@ module.exports = function createMysqlSource(cfg = {}) {
     for (const relationName of RELATION_BY_KEY[key] || []) {
       const relation = RELATIONS[relationName]; const parent = relationParent(relationName);
       if (!relation || !parent) continue;
-      if (relationName === "account_permissions") await execute(conn, `DELETE FROM \`${relation.table}\` WHERE collection_name=? AND account_id=?`, [key, id]);
-      else await execute(conn, `DELETE FROM \`${relation.table}\` WHERE ${parent.columns[0]}=?`, [id]);
+      if (relationName === "account_permissions") continue;
+      await execute(conn, `DELETE FROM \`${relation.table}\` WHERE ${parent.columns[0]}=?`, [id]);
     }
     await execute(conn, `DELETE FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id=?`, [key, id]);
   }
@@ -487,6 +487,7 @@ module.exports = function createMysqlSource(cfg = {}) {
   async function writeRelations(conn, key, id, relations, attributes) {
     await deleteRelations(conn, key, id);
     for (const [name, rows] of Object.entries(relations || {})) {
+      if (name === "account_permissions") continue;
       const definition = RELATIONS[name]; if (!definition) continue;
       for (const row of (Array.isArray(rows) ? rows : [])) {
         const statement = relationInsertSql(definition, row);

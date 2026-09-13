@@ -14,9 +14,9 @@
     clearOrderFilters,
     computed,
     currentOperatorName,
+    data,
     currentStaff,
     dashboard,
-    data,
     due,
     isOrderAfterSaleLocked,
     isOrderCancelledStatus,
@@ -57,6 +57,36 @@ function handleMessage(row) {
 }
 function onOrderSelection(rows) {
   state.selectedOrderIds = rows.map((row) => row.id);
+}
+async function refreshOrders() {
+  const connected = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.getColl && window.LXM_CLOUD_MODE !== "mock");
+  if (!connected) return ElMessage.info("当前为本地演示数据，无需刷新");
+  state.orderRefreshing = true;
+  try {
+    const response = await window.LXM_CLOUD.getColl("orders");
+    const rows = Array.isArray(response) ? response : (response && (response.data || response.rows) || []);
+    data.orders = rows.filter((row) => row && typeof row === "object").map((row) => {
+      const next = { ...row };
+      next.id = next.id || next._id || "";
+      next._id = next._id || next.id;
+      next.products = Array.isArray(next.products) ? next.products : (Array.isArray(next.productItems) ? next.productItems : (Array.isArray(next.items) ? next.items : []));
+      next.productItems = Array.isArray(next.productItems) ? next.productItems : next.products;
+      next.items = Array.isArray(next.items) ? next.items : next.products;
+      next.customer = next.customer || next.contactName || next.name || "";
+      next.totalAmount = next.totalAmount === undefined ? (next.totalPrice ?? next.price ?? 0) : next.totalAmount;
+      next.totalPrice = next.totalPrice === undefined ? next.totalAmount : next.totalPrice;
+      next.appointmentAt = next.appointmentAt || next.date || "";
+      next.timePeriod = next.timePeriod || next.time || "";
+      return next;
+    });
+    state.orderPage = 1;
+    state.selectedOrderIds = [];
+    ElMessage.success(`已刷新 ${data.orders.length} 条订单`);
+  } catch (error) {
+    ElMessage.error((error && error.message) || "订单刷新失败，请稍后重试");
+  } finally {
+    state.orderRefreshing = false;
+  }
 }
 function exportOrders() {
   log("导出订单", "订单管理", `按当前筛选导"${scopedOrders.value.length} 条，选中 ${selectedOrders.value.length} 条`);
@@ -166,7 +196,6 @@ function resetManualOrderForm() {
     productType: defaultProduct.productType || defaultProduct.type || "package",
     appointmentAt: `${today} 10:00`,
     timePeriod: "待客服确",
-    depositPaid: 0,
     internalNote: "",
   };
 }
@@ -208,9 +237,8 @@ async function confirmCreateManualOrder() {
     appointmentAt: form.appointmentAt,
     timePeriod: form.timePeriod || "待客服确",
     totalAmount: Number(product.price || 0),
-    depositPaid: Number(form.depositPaid || 0),
     finalPaid: 0,
-    depositFinanceStatus: Number(form.depositPaid || 0) > 0 ? "待审" : "",
+    depositFinanceStatus: "",
     finalFinanceStatus: "",
     paymentVerify: "未核销",
     packageSnapshot: selected.id ? { name: selected.name, price: Number(product.price || 0), originalPrice: Number(selected.originalPrice || selected.price || product.price || 0) } : {},
@@ -244,7 +272,7 @@ async function confirmCreateManualOrder() {
   state.filters.keyword = "";
   log("创建订单", order.orderNo, "客服在订单管理手动创建新订单");
   openOrder(order, { mode: "service" });
-  ElMessage.success("订单已创建，可继续安排摄影师或登记收");
+  ElMessage.success("订单已创建，请先在订单详情登记订金并等待财务确认");
 }
 function openOrderById(id, options = {}) {
   const order = data.orders.find((o) => o.id === id || o.orderNo === id);
@@ -499,7 +527,7 @@ function reviewFinanceItem(row, approved = true) {
   }).then(() => applyFinanceReview(row, approved)).catch(() => {});
 }
 async function applyFinanceReview(row, approved = true) {
-  const order = data.orders.find((item) => item.id === row.orderId);
+  const order = data.orders.find((item) => item && (item.id === row.orderId || item._id === row.orderId));
   if (!order) return;
   const original = JSON.parse(JSON.stringify(order));
   const status = approved ? "已审" : "已驳";
@@ -507,24 +535,25 @@ async function applyFinanceReview(row, approved = true) {
     applyRefundReview(row, approved);
     return;
   }
-  order[row.field] = status;
-  row.status = status;
-  if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = status;
   const typeText = row.type;
   const amountText = money(row.amount);
-  if (!approved && row.field === "finalFinanceStatus" && order.status === "completed") {
-    order.status = "shooting";
-    order.customerStatus = "shooting";
-  }
-  addOrderTimeline(order, `财务${approved ? "审核通过" : "审核驳回"}${typeText} ${amountText}`, currentOperatorName());
-  log("财务审核", order.orderNo, `${typeText} / ${status} / ${amountText}`);
   const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
-  if (connected && window.LXM_CLOUD?.update) {
+  if (connected && window.LXM_CLOUD?.orderAction) {
     try {
-      await persistOrderAction(order, "update", {
-        fields: {
-          [row.field]: status,
-        },
+      const phase = row.field === "depositFinanceStatus" ? "deposit" : "final";
+      const pendingRecord = (Array.isArray(order.paymentRecords) ? order.paymentRecords : [])
+        .filter((record) => record && String(record.phase || "") === phase && String(record.status || "").toLowerCase() === "pending")
+        .slice(-1)[0];
+      const orderId = String(order.id || order._id || row.orderId || "order");
+      const idempotencyKey = String((pendingRecord && (pendingRecord.idempotencyKey || pendingRecord.confirmationIdempotencyKey))
+        || `finance-${orderId}-${phase}-${row.id}-${approved ? "confirm" : "reject"}`)
+        .replace(/[^A-Za-z0-9_.:-]/g, "-")
+        .slice(0, 120);
+      await persistOrderAction(order, "payment", {
+        phase,
+        amount: Number(row.amount || 0),
+        paymentStatus: approved ? "confirmed" : "failed",
+        idempotencyKey,
         reason: `财务审核${approved ? "通过" : "驳回"}${typeText}`,
       });
     } catch (error) {
@@ -532,7 +561,15 @@ async function applyFinanceReview(row, approved = true) {
       Object.assign(order, original);
       return ElMessage.error((error && error.message) || "财务审核未保存，请稍后重试");
     }
+  } else {
+    order[row.field] = status;
+    const paymentField = row.field === "depositFinanceStatus" ? "depositPaymentStatus" : "finalPaymentStatus";
+    order[paymentField] = approved ? "confirmed" : "failed";
   }
+  row.status = status;
+  if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = status;
+  addOrderTimeline(order, `财务${approved ? "审核通过" : "审核驳回"}${typeText} ${amountText}`, currentOperatorName());
+  log("财务审核", order.orderNo, `${typeText} / ${status} / ${amountText}`);
   ElMessage.success(`${typeText} ${approved ? "审核通过" : "审核驳回"}`);
 }
 function openFinanceReview(row) {
@@ -633,6 +670,7 @@ async function addFollowLog(text) {
   return {
     handleMessage,
     onOrderSelection,
+    refreshOrders,
     exportOrders,
     batchCancelOrders,
     canBatchAcceptOrder,

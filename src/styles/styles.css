@@ -1750,6 +1750,217 @@ button[disabled] {
   gap: 10px;
 }
 
+.content-edit-form .form-grid .map-picker-field {
+  grid-column: 1 / -1;
+}
+
+.map-picker-field__row {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.map-picker-field__value {
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.map-picker-field__row .el-button--primary.is-plain {
+  background: #fff7f1 !important;
+  border-color: #f0b79b !important;
+  box-shadow: none !important;
+  color: #ad441e !important;
+}
+
+.map-picker-field__row .el-button--primary.is-plain:hover {
+  background: #ffeadf !important;
+  border-color: #dc7448 !important;
+  color: #8d3212 !important;
+}
+
+.amap-picker-dialog .el-dialog {
+  width: min(820px, calc(100vw - 24px)) !important;
+  border-radius: 8px;
+}
+
+.amap-picker-dialog .el-dialog__body {
+  padding: 16px;
+}
+
+.amap-picker-shell {
+  display: grid;
+  gap: 12px;
+}
+
+.amap-picker-selection {
+  min-height: 34px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dce5ef;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+}
+
+.amap-picker-selection__copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.amap-picker-selection__copy strong,
+.amap-picker-selection__copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amap-picker-selection__copy strong {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.amap-picker-selection__copy span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.amap-picker-search {
+  min-width: 0;
+}
+
+.amap-picker-search .el-input-group__append {
+  padding: 0;
+  overflow: hidden;
+}
+
+.amap-picker-search .el-input-group__append .el-button {
+  min-width: 64px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.amap-picker-search-feedback {
+  margin-top: -5px;
+  color: #a34b25;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.amap-picker-map-wrap {
+  position: relative;
+  min-height: 440px;
+  overflow: hidden;
+  border: 1px solid #dce5ef;
+  border-radius: 6px;
+  background: #eef2f7;
+}
+
+.amap-picker-search-results {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  left: 12px;
+  width: min(360px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  border: 1px solid #d7e0eb;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, .16);
+}
+
+.amap-picker-search-result {
+  width: 100%;
+  min-height: 54px;
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #e8edf3;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.amap-picker-search-result:last-child {
+  border-bottom: 0;
+}
+
+.amap-picker-search-result:hover,
+.amap-picker-search-result:focus-visible {
+  background: #fff4ee;
+  outline: none;
+}
+
+.amap-picker-search-result strong,
+.amap-picker-search-result span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.amap-picker-search-result strong {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.amap-picker-search-result span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.amap-picker-map {
+  width: 100%;
+  height: 440px;
+}
+
+.amap-picker-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  background: rgba(248, 250, 252, .92);
+  color: #475569;
+  font-size: 13px;
+  text-align: center;
+}
+
+.amap-picker-overlay--error {
+  color: #9a3412;
+}
+
+.amap-picker-spinner {
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  border: 2px solid #cbd5e1;
+  border-top-color: var(--lxm-brand-strong, #EE2C2C);
+  border-radius: 50%;
+  animation: amap-picker-spin .8s linear infinite;
+}
+
+@keyframes amap-picker-spin {
+  to { transform: rotate(360deg); }
+}
+
 .content-edit-form .package-edit-block {
   display: grid;
   gap: 10px;
@@ -1846,6 +2057,12 @@ button[disabled] {
   .content-form-section-head {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .amap-picker-map-wrap,
+  .amap-picker-map {
+    min-height: 340px;
+    height: 340px;
   }
 }
 
@@ -2495,6 +2712,7 @@ td strong {
   background: rgba(255,255,255,.06);
   font-size: 13px;
   font-weight: 700;
+  cursor: default;
 }
 
 .menu-folder:hover {
@@ -2559,13 +2777,6 @@ td strong {
   min-height: 34px;
   font-size: 12px;
   color: rgba(255,255,255,.64);
-}
-
-.menu-level-3 {
-  padding-left: 44px;
-  min-height: 32px;
-  font-size: 12px;
-  color: rgba(255,255,255,.58);
 }
 
 .menu-branch {
@@ -6264,6 +6475,17 @@ body {
 
 .service-workbench .step-line {
   display: none;
+}
+
+.flow-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.flow-action-row .el-button + .el-button {
+  margin-left: 0;
 }
 
 .status-meta {

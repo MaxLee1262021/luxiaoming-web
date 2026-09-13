@@ -1,5 +1,5 @@
-// Select a data source. Misconfiguration is represented as an unavailable
-// source; it must never silently downgrade a production request to JSON/mock.
+// Select the MySQL-backed data source used by every runtime API request.
+// JSON remains available only for isolated Node test fixtures.
 const path = require("path");
 const fs = require("fs");
 const root = path.resolve(__dirname, "..", "..");
@@ -54,39 +54,10 @@ function safeJsonPath(raw) {
 }
 
 module.exports = function selectSource() {
-  const dataMode = String(process.env.DATA_MODE || "json").trim().toLowerCase();
+  const dataMode = String(process.env.DATA_MODE || "mysql").trim().toLowerCase();
   const nodeEnv = String(process.env.NODE_ENV || "").trim().toLowerCase();
-  const productionLike = ["production", "prod", "staging"].includes(nodeEnv);
-  if (productionLike && (!process.env.DATA_MODE || ["json", "mock"].includes(dataMode))) {
-    const source = unavailableSource(dataMode, "production_data_mode_required");
-    return { source, mode: dataMode, status: { configured: false, ready: false, persistent: dataMode !== "mock", error: "production_data_mode_required" } };
-  }
-
-  if (dataMode === "mock") {
-    try {
-      return { source: require("./mockSource.cjs")(root), mode: "mock", status: { configured: true, ready: true, persistent: false } };
-    } catch (e) {
-      return { source: unavailableSource("mock", "mock_load_failed"), mode: "mock", status: { configured: false, ready: false, persistent: false, error: "mock_load_failed" } };
-    }
-  }
-
-  if (dataMode === "cloud") {
-    const envId = String(process.env.CLOUDBASE_ENV_ID || "").trim();
-    const sid = String(process.env.CLOUDBASE_SECRET_ID || "").trim();
-    const skey = String(process.env.CLOUDBASE_SECRET_KEY || "").trim();
-    if (!envId || !sid || !skey) {
-      const source = unavailableSource("cloud", "cloud_credentials_missing");
-      return { source, mode: "cloud", status: { configured: false, ready: false, persistent: true, error: "cloud_credentials_missing" } };
-    }
-    try {
-      return { source: require("./cloudSource.cjs")({ envId, secretId: sid, secretKey: skey }), mode: "cloud", status: { configured: true, ready: true, persistent: true } };
-    } catch (e) {
-      const source = unavailableSource("cloud", "cloud_driver_unavailable");
-      return { source, mode: "cloud", status: { configured: false, ready: false, persistent: true, error: "cloud_driver_unavailable" } };
-    }
-  }
-
-  if (dataMode === "mysql") {
+  const testJsonFixture = nodeEnv === "test" && process.env.LXM_ALLOW_TEST_JSON_SOURCE === "true" && dataMode === "json";
+  if (!testJsonFixture) {
     const dbPortRaw = String(process.env.DB_PORT || "").trim();
     if (dbPortRaw && (!/^\d+$/.test(dbPortRaw) || Number(dbPortRaw) < 1 || Number(dbPortRaw) > 65535)) {
       const source = unavailableSource("mysql", "mysql_config_invalid");
@@ -117,11 +88,7 @@ module.exports = function selectSource() {
     }
   }
 
-  if (dataMode !== "json") {
-    const source = unavailableSource("invalid", "unknown_data_mode");
-    return { source, mode: "invalid", status: { configured: false, ready: false, persistent: false, error: "unknown_data_mode" } };
-  }
-
+  // Test-only branch: runtime servers never select the JSON adapter.
   const jsonFile = safeJsonPath(process.env.DB_FILE);
   if (jsonFile === null) {
     const source = unavailableSource("json", "json_path_outside_root");

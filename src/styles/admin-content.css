@@ -400,3 +400,157 @@
 .lxm-upload input[type="file"] { font-size: 13px; color: var(--lxm-ink-2); }
 .lxm-upload__hint { font-size: 12px; color: #9b8e84; line-height: 1.5; }
 
+/* ---------- 基础内容：城市 / 打卡点 / 拍摄风格统一表格 ---------- */
+.basic-content-table .lxm-table-card {
+  min-width: 0;
+}
+
+.basic-content-table .el-table .cell {
+  min-width: 0;
+}
+
+.basic-content-table .el-table td.el-table__cell {
+  vertical-align: middle;
+}
+
+.basic-content-table--city .lxm-toolbar {
+  grid-template-columns: minmax(280px, 1fr) 180px auto;
+}
+
+.basic-content-table--spot .lxm-toolbar {
+  grid-template-columns: minmax(260px, 1fr) 180px 150px auto;
+}
+
+.basic-content-table--series .lxm-toolbar {
+  grid-template-columns: minmax(240px, 1fr) 180px 140px 140px auto;
+}
+
+.basic-content-name-cell,
+.basic-content-media-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.basic-content-name-cell > div,
+.basic-content-media-cell > div {
+  min-width: 0;
+}
+
+.basic-content-name-cell strong,
+.basic-content-media-cell strong {
+  display: block;
+  overflow: hidden;
+  color: var(--lxm-ink);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.basic-content-name-cell span,
+.basic-content-media-cell span,
+.basic-content-muted {
+  display: block;
+  overflow: hidden;
+  color: var(--lxm-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.basic-content-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.basic-content-status-dot.active {
+  background: var(--lxm-success, #10b981);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, .14);
+}
+
+.basic-content-media-cell img,
+.basic-content-media-placeholder {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.basic-content-media-placeholder {
+  display: grid;
+  place-items: center;
+  background: var(--lxm-bg, #f8fafc);
+  color: var(--lxm-brand);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.basic-content-tag-list,
+.basic-content-link-list,
+.basic-content-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  min-width: 0;
+}
+
+.basic-content-tag-list .el-tag {
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.basic-content-link-list .el-button,
+.basic-content-actions .el-button {
+  margin-left: 0;
+}
+
+.basic-content-link-list .el-button + .el-button::before {
+  margin-right: 6px;
+  color: var(--lxm-line);
+  content: "/";
+}
+
+.basic-content-number-cell,
+.basic-content-status-cell {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+.basic-content-number-cell strong {
+  color: var(--lxm-ink);
+  font-size: 13px;
+}
+
+.basic-content-number-cell span,
+.basic-content-hot {
+  color: var(--lxm-muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.basic-content-hot {
+  color: #b45309;
+}
+
+@media (max-width: 980px) {
+  .basic-content-table--city .lxm-toolbar,
+  .basic-content-table--spot .lxm-toolbar,
+  .basic-content-table--series .lxm-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .basic-content-table .lxm-table-card {
+    overflow-x: auto;
+  }
+}

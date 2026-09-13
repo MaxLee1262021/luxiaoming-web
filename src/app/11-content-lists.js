@@ -34,9 +34,15 @@ async function persistMutation(key, row, previous = null) {
   if (typeof ctx.persistContentMutation !== "function") return true;
   return ctx.persistContentMutation(key, row, previous);
 }
+function restoreRecord(source, previous = {}) {
+  Object.keys(source || {}).forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(previous, key)) delete source[key];
+  });
+  Object.assign(source, previous);
+}
 async function addTrash(key, source, previous, row) {
   if (await persistTrashRecord(row)) return true;
-  Object.assign(source, previous);
+  restoreRecord(source, previous);
   await persistMutation(key, source, null);
   return false;
 }
@@ -602,19 +608,34 @@ function selectSpot(id) {
   state.contentScope = { type: "spot", id };
   state.filters.contentSpotId = id;
 }
+function spotRowId(row) {
+  if (!row || typeof row !== "object") return "";
+  const value = row.id !== undefined && row.id !== null && row.id !== "" ? row.id : row._id;
+  return value === undefined || value === null ? "" : String(value);
+}
+function findSpotSource(row) {
+  const id = spotRowId(row);
+  return id ? data.spots.find((item) => spotRowId(item) === id) || null : null;
+}
 async function toggleSpotVisible(spot) {
-  const source = data.spots.find((item) => item.id === spot.id) || spot;
+  const source = findSpotSource(spot);
+  if (!source) return ElMessage.warning("打卡点不存在或已删除，请刷新后重试");
   const previous = { ...source };
   source.isShow = source.isShow === false;
   source.status = source.isShow === false ? "停用" : "启用";
-  if (!(await persistMutation("spots", source, previous))) return;
+  if (!(await persistMutation("spots", source, previous))) {
+    restoreRecord(source, previous);
+    return;
+  }
   log(source.isShow === false ? "关闭打卡点展" : "开启打卡点展示", "打卡点设", source.name);
   ElMessage.success(`${source.name} ${source.isShow === false ? "关闭展示" : "开启展示"}`);
 }
-async function batchSetSpotVisible(visible) {
+async function batchSetSpotVisible(visible, rows = spotRows.value) {
+  const candidates = Array.isArray(rows) ? rows : spotRows.value;
+  if (!candidates.length) return ElMessage.warning("当前筛选条件下没有可处理的打卡点");
   const changed = [];
-  spotRows.value.forEach((spotRow) => {
-    const source = data.spots.find((spot) => spot.id === spotRow.id);
+  candidates.forEach((spotRow) => {
+    const source = findSpotSource(spotRow);
     if (source) {
       changed.push([source, { ...source }]);
       source.isShow = visible;
@@ -623,26 +644,32 @@ async function batchSetSpotVisible(visible) {
   });
   for (const [source, previous] of changed) {
     if (!(await persistMutation("spots", source, previous))) {
-      Object.assign(source, previous);
+      restoreRecord(source, previous);
       return;
     }
   }
-  log(visible ? "批量开启打卡点展示" : "批量关闭打卡点展示", "打卡点设置", `${spotRows.value.length} 个点位`);
+  log(visible ? "批量开启打卡点展示" : "批量关闭打卡点展示", "打卡点设置", `${changed.length} 个点位`);
   ElMessage.success(`已${visible ? "开启" : "关闭"}当前筛选点位展示`);
 }
 async function requestDeleteSpot(spot) {
-  const summary = spotDependencySummary(spot);
+  const source = findSpotSource(spot);
+  if (!source) return ElMessage.warning("打卡点不存在或已删除，请刷新后重试");
+  const sourceId = spotRowId(source);
+  const summary = spotDependencySummary(source.id ? source : { ...source, id: sourceId });
   if (!summary.canDelete) {
     return ElMessage.warning(`该点位仍有关联数据：拍摄风格 ${summary.series}、照片单品 ${summary.albums}、商品 ${summary.products}、订单 ${summary.orders}，不能直接删除`);
   }
-  const previous = { ...spot };
-  spot.deleted = true;
-  spot.isDeleted = true;
-  spot.status = "停用";
-  const synced = await persistMutation("spots", spot, previous);
-  if (!synced) return;
-  if (!(await addTrash("spots", spot, previous, { id: `trash${Date.now()}`, type: "打卡", sourceKey: "spots", name: spot.name, reason: "删除打卡", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...spot } }))) return;
-  log("删除打卡点进入回收站", "打卡点设", spot.name);
+  const previous = { ...source };
+  source.deleted = true;
+  source.isDeleted = true;
+  source.status = "停用";
+  const synced = await persistMutation("spots", source, previous);
+  if (!synced) {
+    restoreRecord(source, previous);
+    return;
+  }
+  if (!(await addTrash("spots", source, previous, { id: `trash-spot-${sourceId}-${Date.now()}`, type: "打卡", sourceKey: "spots", name: source.name, reason: "删除打卡", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
+  log("删除打卡点进入回收站", "打卡点设", source.name);
   ElMessage.success("打卡点已进入回收站，可在 30 天内恢复");
 }
 // ===== 短视频（独立内容类型，自包含，不进入 spots 层级 contentRows 体系）=====

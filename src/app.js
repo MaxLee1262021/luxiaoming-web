@@ -6,6 +6,18 @@ const { ElMessage, ElMessageBox } = ElementPlus;
 const LXM_ELEMENT_LOCALE = {
   name: "zh-cn",
   el: {
+    pagination: {
+      goto: "前往",
+      pagesize: "条/页",
+      total: "共 {total} 条",
+      pageClassifier: "页",
+      page: "页",
+      prev: "上一页",
+      next: "下一页",
+      currentPage: "第 {pager} 页",
+      prevPages: "向前 {pager} 页",
+      nextPages: "向后 {pager} 页"
+    },
     datepicker: {
       now: "此刻",
       today: "今天",

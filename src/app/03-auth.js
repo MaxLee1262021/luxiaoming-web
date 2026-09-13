@@ -28,8 +28,7 @@
   const RUNTIME_STATE_KEYS = ["homeConfig", "siteConfig", "logs", "trash"];
   const roleDefaults = Object.fromEntries(Object.entries(LXM_CONFIG.roles || {}).map(([key, profile]) => [key, {
     ...profile,
-    menus: Array.isArray(profile.menus) ? profile.menus.slice() : [],
-    actions: Array.isArray(profile.actions) ? profile.actions.slice() : []
+    menus: Array.isArray(profile.menus) ? profile.menus.slice() : []
   }]));
   const serverRoleOverrides = Object.create(null);
   const knownMenuKeys = new Set([
@@ -87,27 +86,24 @@
     if (!target || !base) return;
     Object.assign(target, {
       ...base,
-      menus: base.menus.slice(),
-      actions: base.actions.slice()
+      menus: base.menus.slice()
     });
+    state.menuRevision += 1;
   }
 
   function applyRoleConfig(key, payload = {}) {
     const target = LXM_CONFIG.roles && LXM_CONFIG.roles[key];
     if (!target) return false;
     restoreRoleDefaults(key);
-    const permissions = payload.permissions && typeof payload.permissions === "object" && !Array.isArray(payload.permissions) ? payload.permissions : {};
-    const permissionList = Array.isArray(payload.permissionKeys) ? payload.permissionKeys : (Array.isArray(payload.permissions) ? payload.permissions : []);
-    const menus = Array.isArray(payload.menus) ? payload.menus : (Array.isArray(permissions.menus) ? permissions.menus : permissions.menuKeys);
-    const actions = Array.isArray(payload.actions) ? payload.actions : (Array.isArray(permissions.actions) ? permissions.actions : (permissions.actionKeys || permissionList));
+    const menus = Array.isArray(payload.menuKeys) ? payload.menuKeys : payload.menus;
     if (Array.isArray(menus)) target.menus = [...new Set(menus.filter((item) => knownMenuKeys.has(item)))];
-    if (Array.isArray(actions)) target.actions = [...new Set(actions.map(String))];
-    if (payload.scope || permissions.scope) target.scope = payload.scope || permissions.scope;
-    if (payload.shopId || permissions.shopId) target.shopId = payload.shopId || permissions.shopId;
-    if (payload.staffId || permissions.staffId) target.staffId = payload.staffId || permissions.staffId;
-    if (payload.distributorId || permissions.distributorId) target.distributorId = payload.distributorId || permissions.distributorId;
-    if (payload.agentId || permissions.agentId) target.agentId = payload.agentId || permissions.agentId;
+    if (payload.scope) target.scope = payload.scope;
+    if (payload.shopId) target.shopId = payload.shopId;
+    if (payload.staffId) target.staffId = payload.staffId;
+    if (payload.distributorId) target.distributorId = payload.distributorId;
+    if (payload.agentId) target.agentId = payload.agentId;
     if (payload.home && knownMenuKeys.has(payload.home)) target.home = payload.home;
+    state.menuRevision += 1;
     return true;
   }
 
@@ -116,9 +112,6 @@
     const source = envelope.session && typeof envelope.session === "object"
       ? envelope.session
       : envelope.user && typeof envelope.user === "object" ? envelope.user : envelope;
-    const rawPermissions = source.permissions !== undefined ? source.permissions : envelope.permissions;
-    const permissionList = Array.isArray(rawPermissions) ? rawPermissions : [];
-    const permissions = rawPermissions && typeof rawPermissions === "object" && !Array.isArray(rawPermissions) ? rawPermissions : {};
     return {
       ok: envelope.ok !== false,
       token: source.token || envelope.token || fallback.token || "",
@@ -128,17 +121,13 @@
       account: source.account || envelope.account || fallback.account || "",
       name: source.name || envelope.name || fallback.name || "",
       staffId: source.staffId || envelope.staffId || fallback.staffId || "",
-      menus: Array.isArray(source.menus) ? source.menus : (Array.isArray(envelope.menus) ? envelope.menus : permissions.menus),
+      menus: Array.isArray(source.menus) ? source.menus : (Array.isArray(envelope.menus) ? envelope.menus : source.menuKeys),
       menuKeys: Array.isArray(source.menuKeys) ? source.menuKeys : (Array.isArray(envelope.menuKeys) ? envelope.menuKeys : (Array.isArray(source.menus) ? source.menus : [])),
       menuDefinitions: Array.isArray(source.menuDefinitions) ? source.menuDefinitions : (Array.isArray(envelope.menuDefinitions) ? envelope.menuDefinitions : []),
-      actions: Array.isArray(source.actions) ? source.actions : (Array.isArray(envelope.actions) ? envelope.actions : (permissions.actions || permissionList)),
-      scope: source.scope || envelope.scope || permissions.scope || fallback.scope || "",
-      shopId: source.shopId || envelope.shopId || permissions.shopId || fallback.shopId || "",
-      distributorId: source.distributorId || envelope.distributorId || permissions.distributorId || fallback.distributorId || "",
-      agentId: source.agentId || envelope.agentId || permissions.agentId || fallback.agentId || "",
-      permissions: Array.isArray(rawPermissions) ? permissionList : permissions,
-      permissionKeys: Array.isArray(source.permissionKeys) ? source.permissionKeys : (Array.isArray(envelope.permissionKeys) ? envelope.permissionKeys : permissionList),
-      permissionsConfigured: source.permissionsConfigured === true || envelope.permissionsConfigured === true || rawPermissions !== undefined,
+      scope: source.scope || envelope.scope || fallback.scope || "",
+      shopId: source.shopId || envelope.shopId || fallback.shopId || "",
+      distributorId: source.distributorId || envelope.distributorId || fallback.distributorId || "",
+      agentId: source.agentId || envelope.agentId || fallback.agentId || "",
       permissionSource: source.permissionSource || envelope.permissionSource || fallback.permissionSource || "",
       expiresAt: source.expiresAt || envelope.expiresAt || fallback.expiresAt || 0,
     };
@@ -207,19 +196,24 @@ function mergeServerDefinitions(session) {
     if (!key) return;
     knownMenuKeys.add(key);
     const existing = (LXM_CONFIG.menus || []).find((menu) => menu.key === key);
-    const next = { key, routeKey: String(item.routeKey || item.targetKey || key), label: String(item.label || item.name || key), group: String(item.group || "系统安全"), path: String(item.path || `/${key}`), icon: String(item.icon || "") };
+    const next = {
+      key,
+      routeKey: String(item.routeKey || item.targetKey || key),
+      targetKey: String(item.targetKey || item.routeKey || key),
+      label: String(item.label || item.name || key),
+      group: String(item.group || "其他功能"),
+      parentKey: String(item.parentKey || item.parentId || ""),
+      parentId: String(item.parentId || item.parentKey || ""),
+      path: String(item.path || `/${key}`),
+      icon: String(item.icon || ""),
+      sort: Number(item.sort ?? item.sortNo ?? 0),
+      status: item.status === "disabled" || item.status === "停用" ? "停用" : "启用",
+      containerOnly: item.containerOnly === true
+    };
     if (existing) Object.assign(existing, next);
     else LXM_CONFIG.menus.push(next);
-    const sections = Array.isArray(LXM_CONFIG.navSections) ? LXM_CONFIG.navSections : [];
-    let section = sections.find((candidate) => candidate.label === next.group) || sections.find((candidate) => candidate.key === "system");
-    if (!section) {
-      section = { key: `dynamic-${next.group || "system"}`, label: next.group || "系统安全", desc: "系统权限菜单", items: [] };
-      sections.push(section);
-      LXM_CONFIG.navSections = sections;
-    }
-    const items = Array.isArray(section.items) ? section.items : (section.items = []);
-    if (!items.some((candidate) => (candidate && (candidate.key || candidate)) === key)) items.push(key);
   });
+  if (definitions.length) state.menuRevision += 1;
 }
 
 function ensureServerRole(session) {
@@ -228,12 +222,22 @@ function ensureServerRole(session) {
   mergeServerDefinitions(session);
   if (!LXM_CONFIG.roles[role]) {
     const menus = Array.isArray(session.menus) ? session.menus.map(String).filter((key) => knownMenuKeys.has(key)) : [];
-    const actions = Array.isArray(session.actions) ? session.actions.map(String) : (Array.isArray(session.permissionKeys) ? session.permissionKeys.map(String) : ["view"]);
-    const profile = { name: session.roleName || role, home: menus[0] || "dashboard", scope: "all", menus, actions };
+    const profile = { name: session.roleName || role, home: menus[0] || "dashboard", scope: "all", menus };
     LXM_CONFIG.roles[role] = profile;
-    roleDefaults[role] = { ...profile, menus: menus.slice(), actions: actions.slice() };
+    roleDefaults[role] = { ...profile, menus: menus.slice() };
   }
   return true;
+}
+
+function isEnabledMenu(key, profile = roleProfile.value) {
+  const menuKey = String(key || "");
+  const menu = (LXM_CONFIG.menus || []).find((item) => item && item.key === menuKey);
+  return !!(menu && !["停用", "disabled", "inactive"].includes(String(menu.status || "").trim().toLowerCase()) && (profile.menus || []).includes(menuKey));
+}
+
+function defaultActiveMenu(profile = roleProfile.value) {
+  if (isEnabledMenu(profile.home, profile)) return profile.home;
+  return (profile.menus || []).find((key) => isEnabledMenu(key, profile)) || "";
 }
 
 function loginDemo(account, password) {
@@ -291,7 +295,7 @@ function applyLogin(raw, options = {}) {
   state.previewRole = role;
   state.mobileMenuOpen = false;
   resetPageState();
-  state.active = roleProfile.value.menus.includes(roleProfile.value.home) ? roleProfile.value.home : (roleProfile.value.menus[0] || "dashboard");
+  state.active = defaultActiveMenu();
   log("登录", "后台", `${session.name || session.account || "账号"} 登录`);
 }
 
@@ -393,6 +397,10 @@ async function persistAccountToCloud(key, row) {
   if (!row || !connected || !window.LXM_CLOUD) return true;
   try {
     const doc = { ...row };
+    // Account records now inherit access solely from their role's menu grants.
+    // Do not carry historical per-user action grants back into the API.
+    delete doc.permissionKeys;
+    delete doc.permissions;
     if (!doc.password) delete doc.password;
     let res;
     if (row.id) {
@@ -502,7 +510,7 @@ function logout() {
 }
 function switchMenu(key, options = {}) {
   if (key === "videoProducts") key = "videoSingles";
-  if (!roleProfile.value.menus.includes(key)) {
+  if (!isEnabledMenu(key)) {
     ElMessage.warning("当前角色无权访问该页");
     return;
   }
@@ -536,7 +544,7 @@ function switchRole(key) {
     state.filters.agentId = roleProfile.value.agentId || "";
     state.filters.cityId = "";
   }
-  state.active = roleProfile.value.menus.includes(roleProfile.value.home) ? roleProfile.value.home : (roleProfile.value.menus[0] || "dashboard");
+  state.active = defaultActiveMenu();
   state.mobileMenuOpen = false;
   log("切换角色", roleName(key), "超级管理员预览角色后");
 }

@@ -16,6 +16,8 @@
   <link rel="stylesheet" data-admin-ops href="./src/styles/admin-ops.css" />
   <script src="./public/vendor/vue.global.js"></script>
   <script src="./public/vendor/element-plus.index.full.min.js"></script>
+  <script src="./runtime-config.js"></script>
+  <script src="./src/api/amap-picker.js"></script>
 </head>
 <body>
   <div id="app"></div>
@@ -26,7 +28,7 @@
     // The full local demo fixture is available only when index.html is opened
     // directly from disk. It is never requested from the HTTP static server.
     if (window.location && window.location.protocol === "file:") {
-      document.write('<script src="./src/mock/business-data.js"><\\/script>');
+      document.write('<script src="./src/mock/business-data.js"><\/script>');
     }
   </script>
   <script src="./src/utils/format.js"></script>

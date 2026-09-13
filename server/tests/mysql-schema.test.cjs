@@ -18,6 +18,11 @@ test("normalized migration has no opaque business/auth payload columns", () => {
   for (const key of schema.ALL_KEYS) assert.match(migration, new RegExp("CREATE TABLE IF NOT EXISTS \\`lxm_" + key + "\\`", "i"));
   assert.match(migration, /lxm_collection_values/);
   assert.match(migration, /lxm_order_products/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `lxm_orders`[\s\S]*?`bookingIdempotencyKey` VARCHAR\(128\) NULL/i);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `lxm_orders`[\s\S]*?`finalDue` DECIMAL\(18,2\) NULL/i);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `lxm_orders`[\s\S]*?`workflowStage` VARCHAR\(64\) NULL/i);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS `lxm_order_payment_records`[\s\S]*?payment_id VARCHAR\(128\) NULL[\s\S]*?phase VARCHAR\(32\) NULL[\s\S]*?idempotency_key VARCHAR\(128\) NULL[\s\S]*?external_transaction_id VARCHAR\(160\) NULL/i);
+  assert.match(migration, /UNIQUE KEY uq_order_payment_idempotency \(idempotency_key\)/i);
   assert.match(migration, /lxm_log_order_exception_snapshots/);
   assert.doesNotMatch(migration, /`snapshot`\s+TEXT/i);
   assert.match(migration, /`snapshotText`\s+VARCHAR\(500\)/i);
@@ -27,6 +32,10 @@ test("normalized migration has no opaque business/auth payload columns", () => {
   }
   assert.match(migration, /lxm_auth_user_permissions/);
   for (const relation of Object.values(schema.RELATIONS)) assert.match(migration, new RegExp("CREATE TABLE IF NOT EXISTS [`]?" + relation.table + "", "i"));
+  for (const sql of [migration, normalizedMigration]) {
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS `lxm_cities`[\s\S]*?`latitude` DECIMAL\(20,6\) NULL[\s\S]*?`longitude` DECIMAL\(20,6\) NULL[\s\S]*?`coordType` VARCHAR\(255\) NULL/i);
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS `lxm_spots`[\s\S]*?`district` VARCHAR\(255\) NULL[\s\S]*?`latitude` DECIMAL\(20,6\) NULL[\s\S]*?`longitude` DECIMAL\(20,6\) NULL[\s\S]*?`coordType` VARCHAR\(255\) NULL/i);
+  }
 });
 
 test("document splitter keeps scalar columns and typed relation leaves", () => {
@@ -56,6 +65,107 @@ test("document splitter keeps scalar columns and typed relation leaves", () => {
   assert.deepEqual(restored.products[0].snapshot.serviceTags, ["精修"]);
   assert.equal(restored.customField.enabled, true);
   assert.deepEqual(restored.customField.values, []);
+});
+
+test("sparse order workflow details remain typed leaves instead of widening MySQL orders", () => {
+  const input = {
+    id: "order-workflow-leaf",
+    selectionStatus: "confirmed",
+    selectionConfirmedAt: "2026-09-12T10:00:00.000Z",
+    selectionConfirmedBy: "staff-1",
+    selectionNote: "线下确认",
+    shootingStartedAt: "2026-09-12T09:00:00.000Z",
+    shootingCompletedAt: "2026-09-12T09:50:00.000Z",
+    shootingCompletedBy: "staff-1",
+    appointmentLocation: "橘子洲头",
+    peopleCount: 2,
+  };
+  const split = schema.splitDocument("orders", input);
+  for (const field of Object.keys(input).filter((field) => field !== "id")) {
+    assert.equal(Object.prototype.hasOwnProperty.call(split.columns, field), false, `${field} must not widen lxm_orders`);
+    assert.ok(split.attributes.some((row) => row.path === field), `${field} must be persisted as a typed leaf`);
+  }
+  const restored = schema.hydrateDocument("orders", { id: split.id, ...split.columns }, { collection_values: split.attributes, ...split.relations });
+  for (const [field, value] of Object.entries(input)) if (field !== "id") assert.equal(restored[field], value);
+  for (const sql of [migration, normalizedMigration]) {
+    const orderDdl = sql.match(/CREATE TABLE IF NOT EXISTS `lxm_orders`[\s\S]*?\) ENGINE=InnoDB[^;]*;/i);
+    assert.ok(orderDdl, "orders DDL must be present");
+    assert.doesNotMatch(orderDdl[0], /`(?:selectionStatus|selectionConfirmedAt|selectionConfirmedBy|selectionNote|shootingStartedAt|shootingCompletedAt|shootingCompletedBy|appointmentLocation|peopleCount)`/i);
+  }
+});
+
+test("city and spot map fields round-trip through normalized storage", () => {
+  const city = schema.splitDocument("cities", {
+    id: "city-map",
+    name: "长沙",
+    status: "运营中",
+    description: "城市中心",
+    sort: 20,
+    enabled: true,
+    latitude: 28.195,
+    longitude: 112.95,
+    coordType: "gcj02"
+  });
+  const restoredCity = schema.hydrateDocument("cities", { id: city.id, ...city.columns }, {
+    collection_values: city.attributes,
+    ...city.relations
+  });
+  assert.deepEqual(
+    {
+      latitude: restoredCity.latitude,
+      longitude: restoredCity.longitude,
+      coordType: restoredCity.coordType,
+      description: restoredCity.description,
+      sort: restoredCity.sort,
+      enabled: restoredCity.enabled
+    },
+    { latitude: 28.195, longitude: 112.95, coordType: "gcj02", description: "城市中心", sort: 20, enabled: true }
+  );
+  assert.equal(city.attributes.some((row) => ["latitude", "longitude", "coordType"].includes(row.path)), false);
+
+  const spot = schema.splitDocument("spots", {
+    id: "spot-map",
+    name: "橘子洲",
+    cityId: "city-map",
+    city: "长沙",
+    cityCode: "cs",
+    district: "岳麓区",
+    latitude: 28.1863,
+    longitude: 112.9498,
+    coordType: "gcj02",
+    visitCount: 312,
+    tags: ["江景", "日落"]
+  });
+  const restoredSpot = schema.hydrateDocument("spots", { id: spot.id, ...spot.columns }, {
+    collection_values: spot.attributes,
+    ...spot.relations
+  });
+  assert.deepEqual(
+    {
+      cityId: restoredSpot.cityId,
+      city: restoredSpot.city,
+      cityCode: restoredSpot.cityCode,
+      district: restoredSpot.district,
+      latitude: restoredSpot.latitude,
+      longitude: restoredSpot.longitude,
+      coordType: restoredSpot.coordType,
+      visitCount: restoredSpot.visitCount,
+      tags: restoredSpot.tags
+    },
+    {
+      cityId: "city-map",
+      city: "长沙",
+      cityCode: "cs",
+      district: "岳麓区",
+      latitude: 28.1863,
+      longitude: 112.9498,
+      coordType: "gcj02",
+      visitCount: 312,
+      tags: ["江景", "日落"]
+    }
+  );
+  assert.equal(spot.attributes.some((row) => ["district", "latitude", "longitude", "coordType", "visitCount"].includes(row.path)), false);
+  assert.ok(spot.attributes.some((row) => row.path === "tags[0]"));
 });
 
 test("credential-shaped fields are excluded from business leaves", () => {
@@ -271,12 +381,18 @@ test("home materialized fields do not leave typed attribute duplicates for empty
   assert.equal(split.attributes.some((row) => /^recommendations\.(?:hotPackageIds|guideIds)/.test(row.path)), false);
 });
 
-test("account aliases and order product aliases remain relational", () => {
+test("account permission aliases are ignored while order product aliases remain relational", () => {
   const staff = schema.splitDocument("staff", {
     id: "staff-relational", permissionKeys: ["view", "orderEdit"], subjectType: "staff", subjectId: "staff-relational"
   });
-  assert.deepEqual(staff.relations.account_permissions.map((row) => row.permission_key), ["view", "orderEdit"]);
+  assert.equal(staff.relations.account_permissions, undefined);
   assert.equal(staff.attributes.some((row) => /^(permissionKeys|subjectType|subjectId)/.test(row.path)), false);
+  const restoredStaff = schema.hydrateDocument("staff", { id: staff.id }, {
+    collection_values: staff.attributes,
+    account_permissions: [{ collection_name: "staff", account_id: staff.id, permission_key: "orderEdit", sort_no: 0 }],
+    ...staff.relations
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(restoredStaff, "permissions"), false);
   const shop = schema.splitDocument("shops", { id: "shop-relational", distributorIds: [], distributorRates: {} });
   assert.equal(shop.attributes.some((row) => /^(distributorIds|distributorRates)/.test(row.path)), false);
   const order = schema.splitDocument("orders", {

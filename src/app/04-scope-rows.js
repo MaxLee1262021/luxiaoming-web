@@ -36,8 +36,14 @@ const scopedShops = computed(() => {
   if (state.filters.keyword) list = list.filter((s) => JSON.stringify(s).includes(state.filters.keyword));
   return list;
 });
+function orderProducts(order = {}) {
+  if (Array.isArray(order.products)) return order.products;
+  if (Array.isArray(order.productItems)) return order.productItems;
+  if (Array.isArray(order.items)) return order.items;
+  return [];
+}
 const scopedOrders = computed(() => {
-  let list = data.orders.filter((o) => !o.deleted && inRoleScope(o));
+  let list = data.orders.filter((o) => o && !o.deleted && !o.isDeleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
   if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
@@ -60,15 +66,15 @@ const scopedOrders = computed(() => {
   if (state.filters.rescheduleStatus) list = list.filter((o) => state.filters.rescheduleStatus === "has" ? hasRescheduleRecord(o) : !hasRescheduleRecord(o));
   if (state.filters.assigneeId) list = list.filter((o) => o.assigneeId === state.filters.assigneeId);
   if (state.filters.photographerId) list = list.filter((o) => o.photographerId === state.filters.photographerId);
-  if (state.filters.productType) list = list.filter((o) => o.products.some((p) => p.type === state.filters.productType || resolveProduct(p).type === state.filters.productType));
+  if (state.filters.productType) list = list.filter((o) => orderProducts(o).some((p) => p && (p.type === state.filters.productType || p.productType === state.filters.productType || resolveProduct(p).type === state.filters.productType)));
   if (state.filters.keyword) {
     const kw = state.filters.keyword.toLowerCase();
-    list = list.filter((o) => JSON.stringify({ ...o, shop: shopName(o.shopId), products: o.products.map(productName) }).toLowerCase().includes(kw));
+    list = list.filter((o) => JSON.stringify({ ...o, shop: shopName(o.shopId), products: orderProducts(o).map(productName) }).toLowerCase().includes(kw));
   }
   return list;
 });
 const reminderBaseOrders = computed(() => {
-  let list = data.orders.filter((o) => !o.deleted && inRoleScope(o));
+  let list = data.orders.filter((o) => o && !o.deleted && !o.isDeleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
   if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
@@ -77,16 +83,16 @@ const reminderBaseOrders = computed(() => {
   if (state.filters.sourceType) list = list.filter((o) => orderSourceType(o) === state.filters.sourceType);
   if (state.filters.assigneeId) list = list.filter((o) => o.assigneeId === state.filters.assigneeId);
   if (state.filters.photographerId) list = list.filter((o) => o.photographerId === state.filters.photographerId);
-  if (state.filters.productType) list = list.filter((o) => o.products.some((p) => p.type === state.filters.productType || resolveProduct(p).type === state.filters.productType));
+  if (state.filters.productType) list = list.filter((o) => orderProducts(o).some((p) => p && (p.type === state.filters.productType || p.productType === state.filters.productType || resolveProduct(p).type === state.filters.productType)));
   if (state.filters.keyword) {
     const kw = state.filters.keyword.toLowerCase();
-    list = list.filter((o) => JSON.stringify({ ...o, shop: shopName(o.shopId), products: o.products.map(productName) }).toLowerCase().includes(kw));
+    list = list.filter((o) => JSON.stringify({ ...o, shop: shopName(o.shopId), products: orderProducts(o).map(productName) }).toLowerCase().includes(kw));
   }
   return list;
 });
-const taskOrders = computed(() => data.orders.filter((o) => !o.deleted && o.photographerId === roleProfile.value.staffId));
+const taskOrders = computed(() => data.orders.filter((o) => o && !o.deleted && !o.isDeleted && o.photographerId === roleProfile.value.staffId));
 function afterSaleOrder(row) {
-  return data.orders.find((order) => order.id === row.orderId) || {};
+  return data.orders.find((order) => order && (order.id === row.orderId || order._id === row.orderId)) || {};
 }
 const afterSaleRows = computed(() => {
   let list = data.afterSales.filter((row) => {
@@ -104,7 +110,7 @@ const afterSaleRows = computed(() => {
       orderNo: order.orderNo,
       shopId: order.shopId,
       amount: Number(row.refundAmount || row.amount || 0),
-      orderStatus: statusMeta(order.status).label,
+      orderStatus: (statusMeta(order.status) || {}).label || order.status || "-",
       customerVisibleStatus: row.customerVisibleStatus || row.status,
       submitSource: row.submitSource || "后台提交",
     };

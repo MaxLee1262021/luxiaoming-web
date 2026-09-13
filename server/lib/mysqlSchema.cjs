@@ -27,6 +27,9 @@ const FINANCE_DOCUMENT_FIELDS = new Set(["settlementObservationDays", "largeSett
 const S = {
   id: "VARCHAR(128) NOT NULL",
   short: "VARCHAR(255) NULL",
+  key: "VARCHAR(128) NULL",
+  ref: "VARCHAR(128) NULL",
+  status: "VARCHAR(64) NULL",
   text: "TEXT NULL",
   money: "DECIMAL(18,2) NULL",
   number: "DECIMAL(20,6) NULL",
@@ -62,7 +65,9 @@ function withBase(list, options = {}) {
 const COLLECTIONS = {
   cities: withBase([
     { name: "name", type: S.short }, { name: "mode", type: S.short }, { name: "status", type: S.short },
-    { name: "code", type: S.short }, { name: "cityId", type: S.short }, { name: "visible", type: S.bool }
+    { name: "code", type: S.short }, { name: "cityId", type: S.short }, { name: "description", type: S.text },
+    { name: "sort", type: S.integer }, { name: "enabled", type: S.bool }, { name: "visible", type: S.bool },
+    { name: "latitude", type: S.number }, { name: "longitude", type: S.number }, { name: "coordType", type: S.short }
   ]),
   agents: withBase([
     { name: "name", type: S.short }, { name: "account", type: S.short }, { name: "phone", type: S.short },
@@ -96,10 +101,13 @@ const COLLECTIONS = {
   ]),
   spots: withBase([
     { name: "name", type: S.short }, { name: "city", type: S.short }, { name: "cityId", type: S.short },
-    { name: "tag", type: S.short }, { name: "hotScore", type: S.number }, { name: "sort", type: S.integer },
+    { name: "cityCode", type: S.short }, { name: "district", type: S.short }, { name: "tag", type: S.short },
+    { name: "hotScore", type: S.number }, { name: "sort", type: S.integer },
     { name: "intro", type: S.text }, { name: "description", type: S.text }, { name: "address", type: S.text },
-    { name: "checkinCount", type: S.integer }, { name: "image", type: S.text }, { name: "cover", type: S.text },
-    { name: "status", type: S.short }, { name: "isShow", type: S.bool }, { name: "visible", type: S.bool }
+    { name: "checkinCount", type: S.integer }, { name: "visitCount", type: S.integer }, { name: "image", type: S.text },
+    { name: "cover", type: S.text }, { name: "coverUrl", type: S.text }, { name: "shopId", type: S.short },
+    { name: "latitude", type: S.number }, { name: "longitude", type: S.number }, { name: "coordType", type: S.short },
+    { name: "status", type: S.short }, { name: "enabled", type: S.bool }, { name: "isShow", type: S.bool }, { name: "visible", type: S.bool }
   ]),
   series: withBase([
     { name: "spotId", type: S.short }, { name: "name", type: S.short }, { name: "intro", type: S.text },
@@ -190,7 +198,7 @@ const COLLECTIONS = {
     { name: "status", type: S.short }
   ]),
   orders: withBase([
-    { name: "orderNo", type: S.short }, { name: "openid", type: S.short }, { name: "_openid", type: S.short },
+    { name: "orderNo", type: S.short }, { name: "bookingIdempotencyKey", type: S.key }, { name: "openid", type: S.short }, { name: "_openid", type: S.short },
     { name: "customer", type: S.text }, { name: "name", type: S.short }, { name: "contactName", type: S.short },
     { name: "phone", type: S.short }, { name: "contactPhone", type: S.short }, { name: "customerPhone", type: S.short },
     { name: "wechat", type: S.short }, { name: "contactWechat", type: S.short }, { name: "customerWechat", type: S.short },
@@ -202,17 +210,21 @@ const COLLECTIONS = {
     { name: "date", type: S.short }, { name: "appointmentAt", type: S.time }, { name: "bookingDate", type: S.short },
     { name: "bookingTime", type: S.short }, { name: "timePeriod", type: S.short }, { name: "timeSlot", type: S.short },
     { name: "time", type: S.short }, { name: "message", type: S.text }, { name: "price", type: S.money },
-    { name: "totalPrice", type: S.money }, { name: "totalAmount", type: S.money }, { name: "depositDue", type: S.money },
-    { name: "depositPaid", type: S.money }, { name: "depositPaidAt", type: S.time }, { name: "finalPaid", type: S.money },
-    { name: "finalPaidAt", type: S.time }, { name: "finalDiscountAmount", type: S.money }, { name: "finalDiscountReason", type: S.text },
+    { name: "totalPrice", type: S.money }, { name: "totalAmount", type: S.money }, { name: "depositRatio", type: S.number }, { name: "depositDue", type: S.money }, { name: "finalDue", type: S.money },
+    { name: "depositPaid", type: S.money }, { name: "depositPaidAt", type: S.time }, { name: "depositConfirmedAt", type: S.time }, { name: "depositConfirmedBy", type: S.ref }, { name: "finalPaid", type: S.money },
+    { name: "finalPaidAt", type: S.time }, { name: "finalConfirmedAt", type: S.time }, { name: "finalConfirmedBy", type: S.ref }, { name: "finalDiscountAmount", type: S.money }, { name: "finalDiscountReason", type: S.text },
     { name: "priceAdjustReason", type: S.text }, { name: "bookingMode", type: S.short }, { name: "status", type: S.short },
-    { name: "customerStatus", type: S.short }, { name: "assigneeId", type: S.short }, { name: "serviceUser", type: S.short },
+    { name: "customerStatus", type: S.short }, { name: "workflowStage", type: S.status }, { name: "dispatchStatus", type: S.status }, { name: "depositRefundable", type: S.bool }, { name: "depositRefundableAt", type: S.time }, { name: "assigneeId", type: S.short }, { name: "serviceUser", type: S.short },
     { name: "serviceUserId", type: S.short }, { name: "photographer", type: S.short }, { name: "photographerId", type: S.short },
-    { name: "photographerCommissionRate", type: S.number }, { name: "completedAt", type: S.time }, { name: "deliveredAt", type: S.time },
+    { name: "photographerCommissionRate", type: S.number }, { name: "completedAt", type: S.time }, { name: "deliveredAt", type: S.time }, { name: "deliveredBy", type: S.ref }, { name: "deliveryMethod", type: S.status },
     { name: "finishedAt", type: S.time }, { name: "completedTime", type: S.time }, { name: "serviceNote", type: S.text },
     { name: "deliveryNote", type: S.text }, { name: "customerRemark", type: S.text }, { name: "internalNote", type: S.text },
-    { name: "paymentVerify", type: S.short }, { name: "depositFinanceStatus", type: S.short }, { name: "finalFinanceStatus", type: S.short },
+    { name: "paymentVerify", type: S.short }, { name: "depositFinanceStatus", type: S.short }, { name: "finalFinanceStatus", type: S.short }, { name: "depositPaymentStatus", type: S.status }, { name: "finalPaymentStatus", type: S.status },
     { name: "financeStatus", type: S.short }, { name: "refundAmount", type: S.money }, { name: "refundConfirmed", type: S.bool },
+    // Workflow detail facts below deliberately use lxm_collection_values.
+    // The established orders table is already wide on MySQL 5.7; storing these
+    // sparse values as typed leaves avoids a row-size migration failure while
+    // retaining their document keys during split/hydrate.
     { name: "afterSaleStatus", type: S.short }, { name: "afterSaleReason", type: S.text }, { name: "afterSaleCreateTime", type: S.time },
     { name: "afterSaleId", type: S.short }, { name: "riskBlocked", type: S.bool }, { name: "riskFlag", type: S.short },
     { name: "frozen", type: S.bool }, { name: "freezeReason", type: S.text }, { name: "riskReason", type: S.text },
@@ -432,8 +444,21 @@ const RELATIONS = {
   },
   order_payment_records: {
     table: "lxm_order_payment_records",
-    columns: ["order_id VARCHAR(128) NOT NULL", "record_no INT NOT NULL", "payment_type VARCHAR(64) NULL", "amount DECIMAL(18,2) NULL", "status VARCHAR(64) NULL", "operator VARCHAR(255) NULL", "paid_at VARCHAR(64) NULL", "note TEXT NULL"],
-    primary: "PRIMARY KEY (order_id, record_no)"
+    columns: [
+      "order_id VARCHAR(128) NOT NULL", "record_no INT NOT NULL", "payment_id VARCHAR(128) NULL",
+      "phase VARCHAR(32) NULL", "payment_type VARCHAR(64) NULL", "amount DECIMAL(18,2) NULL", "status VARCHAR(64) NULL",
+      "attempt INT NULL", "provider VARCHAR(64) NULL", "idempotency_key VARCHAR(128) NULL", "confirmation_idempotency_key VARCHAR(128) NULL",
+      "external_transaction_id VARCHAR(160) NULL", "operator VARCHAR(255) NULL", "operator_id VARCHAR(128) NULL",
+      "paid_at VARCHAR(64) NULL", "record_created_at VARCHAR(64) NULL", "record_updated_at VARCHAR(64) NULL", "admin_registered_at VARCHAR(64) NULL", "note TEXT NULL"
+    ],
+    primary: "PRIMARY KEY (order_id, record_no)",
+    indexes: [
+      "KEY idx_order_payment_phase (order_id, phase)",
+      "UNIQUE KEY uq_order_payment_id (payment_id)",
+      "UNIQUE KEY uq_order_payment_idempotency (idempotency_key)",
+      "UNIQUE KEY uq_order_payment_confirmation_key (confirmation_idempotency_key)",
+      "UNIQUE KEY uq_order_payment_transaction (external_transaction_id)"
+    ]
   },
   log_order_exception_snapshots: {
     table: "lxm_log_order_exception_snapshots",
@@ -769,8 +794,7 @@ function flattenLeaves(value, path, out, ordinal = 0) {
 
 function knownNestedKeys(key) {
   const values = {
-    shops: ["distributorIds", "distributorRates", "agentIds", "permissions"],
-    agents: ["permissions"], distributors: ["permissions"], staff: ["permissions"],
+    shops: ["distributorIds", "distributorRates", "agentIds"],
     series: ["spotIds"],
     albums: ["photoIds", "tags"],
     packages: ["spotIds", "tags", "serviceTags", "mutualExclusionIds", "mutexPackageIds", "conflictPackageIds", "exclusivePackageIds", "includedItems", "items"],
@@ -822,9 +846,8 @@ function isMaterializedPath(key, path, input) {
   const primitive = (field) => coversPrimitiveArray(path, field, input);
   const objectFields = (field, fields) => coversObjectFields(path, field, fields, input);
   const arrayFields = (field, fields) => coversArrayFields(path, field, fields, input);
-  if (key === "shops") return primitive("distributorIds") || primitive("agentIds") || primitive("permissions")
+  if (key === "shops") return primitive("distributorIds") || primitive("agentIds")
     || coversObjectContainer(path, "distributorRates", input) || objectFields("distributorRates", new Set(Object.keys(input.distributorRates || {})));
-  if (["agents", "distributors", "staff"].includes(key)) return primitive("permissions");
   if (key === "series") return primitive("spotIds");
   if (key === "albums") return primitive("photoIds") || primitive("tags");
   if (key === "packages") {
@@ -855,7 +878,7 @@ function isMaterializedPath(key, path, input) {
     const follow = arrayPath(path, "followRecords");
     if (follow && follow.rest && ["type", "action", "operator", "operatorId", "note", "reason", "from", "to", "createTime"].includes(follow.rest)) return true;
     const payment = arrayPath(path, "paymentRecords");
-    if (payment && payment.rest && ["type", "paymentType", "amount", "status", "operator", "paidAt", "createdAt", "note"].includes(payment.rest)) return true;
+    if (payment && payment.rest && ["id", "phase", "type", "paymentType", "amount", "status", "attempt", "provider", "idempotencyKey", "confirmationIdempotencyKey", "externalTransactionId", "operator", "operatorId", "paidAt", "createdAt", "updatedAt", "adminRegisteredAt", "note"].includes(payment.rest)) return true;
     return false;
   }
   if (key === "afterSales") {
@@ -976,10 +999,10 @@ function normalizeDocumentAliases(key, document) {
     if (input.price === undefined && input.comboPrice !== undefined) input.price = input.comboPrice;
   }
   if (["agents", "distributors", "shops", "staff"].includes(key)) {
-    if (!Array.isArray(input.permissions) && Array.isArray(input.permissionKeys)) input.permissions = input.permissionKeys;
     // Subject identity is stored by the normalized authorization tables. It
     // is not a business-collection attribute and should not be mirrored into
     // lxm_collection_values during account projection updates.
+    delete input.permissions;
     delete input.permissionKeys;
     delete input.subjectType;
     delete input.subjectId;
@@ -1102,9 +1125,6 @@ function materializeRelations(key, input) {
     const agents = Array.isArray(input.agentIds) ? input.agentIds : (input.agentId ? [input.agentId] : []);
     add("shop_agents", agents.map((id, index) => ({ shop_id: String(input.id || input._id || ""), agent_id: String(id), sort_no: index })));
   }
-  if (["agents", "distributors", "shops", "staff"].includes(key) && Array.isArray(input.permissions)) {
-    add("account_permissions", input.permissions.map((permission, index) => ({ collection_name: key, account_id: String(input.id || input._id || ""), permission_key: String(permission), sort_no: index })));
-  }
   if (key === "series") add("series_spots", (Array.isArray(input.spotIds) ? input.spotIds : (input.spotId ? [input.spotId] : [])).map((id, index) => ({ series_id: String(input.id || input._id || ""), spot_id: String(id), sort_no: index })));
   if (key === "albums") {
     add("album_samples", (Array.isArray(input.photoIds) ? input.photoIds : []).map((id, index) => ({ album_id: String(input.id || input._id || ""), sample_id: String(id), sort_no: index })));
@@ -1144,7 +1164,15 @@ function materializeRelations(key, input) {
     add("order_addons", (Array.isArray(input.addons) ? input.addons : []).map((item, index) => ({ order_id: orderId, item_no: index, addon_id: item && (item.id || item.addonId) || null, addon_type: item && (item.type || item.productType) || null, name: item && item.name || null, price: numberOrNull(item && item.price), quantity: numberOrNull(item && (item.quantity ?? item.qty ?? item.count)) })));
     add("order_status_logs", (Array.isArray(input.statusLogs) ? input.statusLogs : []).map((item, index) => ({ order_id: orderId, log_no: index, time: item && item.time || null, operator: item && item.operator || null, operator_id: item && item.operatorId || null, action: item && item.action || (typeof item === "string" ? item : null), type: item && item.type || null, from_status: item && item.from || null, to_status: item && item.to || null, create_time: item && item.createTime || null })));
     add("order_follow_records", (Array.isArray(input.followRecords) ? input.followRecords : []).map((item, index) => ({ order_id: orderId, record_no: index, type: item && item.type || null, action: item && item.action || null, operator: item && item.operator || null, operator_id: item && item.operatorId || null, note: item && item.note || null, reason: item && item.reason || null, from_status: item && item.from || null, to_status: item && item.to || null, create_time: item && item.createTime || null })));
-    add("order_payment_records", (Array.isArray(input.paymentRecords) ? input.paymentRecords : []).map((item, index) => ({ order_id: orderId, record_no: index, payment_type: item && (item.type || item.paymentType) || null, amount: numberOrNull(item && item.amount), status: item && item.status || null, operator: item && item.operator || null, paid_at: item && (item.paidAt || item.createdAt) || null, note: item && item.note || null })));
+    add("order_payment_records", (Array.isArray(input.paymentRecords) ? input.paymentRecords : []).map((item, index) => ({
+      order_id: orderId, record_no: index, payment_id: item && (item.id || item._id) || null,
+      phase: item && item.phase || null, payment_type: item && (item.type || item.paymentType) || null,
+      amount: numberOrNull(item && item.amount), status: item && item.status || null, attempt: numberOrNull(item && item.attempt), provider: item && item.provider || null,
+      idempotency_key: item && item.idempotencyKey || null, confirmation_idempotency_key: item && item.confirmationIdempotencyKey || null,
+      external_transaction_id: item && item.externalTransactionId || null, operator: item && item.operator || null, operator_id: item && item.operatorId || null,
+      paid_at: item && item.paidAt || null, record_created_at: item && item.createdAt || null, record_updated_at: item && item.updatedAt || null,
+      admin_registered_at: item && item.adminRegisteredAt || null, note: item && item.note || null
+    })));
   }
   if (key === "afterSales") {
     const ticketId = String(input.id || input._id || "");
@@ -1267,7 +1295,6 @@ function hydrateDocument(key, row, relationRows = {}) {
     output.distributorRates = { ...(output.distributorRates && typeof output.distributorRates === "object" ? output.distributorRates : {}), ...Object.fromEntries(rel.filter((r) => r.rate !== null && r.rate !== undefined).map((r) => [r.distributor_id, Number(r.rate)])) };
     const agents = rows("shop_agents").map((r) => r.agent_id); if (agents.length) { output.agentIds = agents; output.agentId = output.agentId || agents[0]; }
   }
-  if (["agents", "distributors", "shops", "staff"].includes(key)) output.permissions = rows("account_permissions").sort((a, b) => Number(a.sort_no || 0) - Number(b.sort_no || 0)).map((r) => r.permission_key);
   if (key === "series") output.spotIds = rows("series_spots").sort((a, b) => a.sort_no - b.sort_no).map((r) => r.spot_id);
   if (key === "albums") {
     output.photoIds = rows("album_samples").sort((a, b) => a.sort_no - b.sort_no).map((r) => r.sample_id);
@@ -1350,7 +1377,14 @@ function hydrateDocument(key, row, relationRows = {}) {
     const existingFollow = Array.isArray(output.followRecords) ? output.followRecords : [];
     output.followRecords = rows("order_follow_records").sort((a, b) => a.record_no - b.record_no).map((r) => compactObject({ ...(existingFollow[r.record_no] || {}), type: r.type, action: r.action, operator: r.operator, operatorId: r.operator_id, note: r.note, reason: r.reason, from: r.from_status, to: r.to_status, createTime: r.create_time }));
     const existingPayments = Array.isArray(output.paymentRecords) ? output.paymentRecords : [];
-    output.paymentRecords = rows("order_payment_records").sort((a, b) => a.record_no - b.record_no).map((r) => compactObject({ ...(existingPayments[r.record_no] || {}), type: r.payment_type, paymentType: r.payment_type, amount: r.amount == null ? undefined : Number(r.amount), status: r.status, operator: r.operator, paidAt: r.paid_at, createdAt: r.paid_at, note: r.note }));
+    output.paymentRecords = rows("order_payment_records").sort((a, b) => a.record_no - b.record_no).map((r) => compactObject({
+      ...(existingPayments[r.record_no] || {}), id: r.payment_id || existingPayments[r.record_no] && (existingPayments[r.record_no].id || existingPayments[r.record_no]._id),
+      phase: r.phase, type: r.payment_type, paymentType: r.payment_type, amount: r.amount == null ? undefined : Number(r.amount), status: r.status,
+      attempt: r.attempt == null ? undefined : Number(r.attempt), provider: r.provider, idempotencyKey: r.idempotency_key,
+      confirmationIdempotencyKey: r.confirmation_idempotency_key, externalTransactionId: r.external_transaction_id,
+      operator: r.operator, operatorId: r.operator_id, paidAt: r.paid_at, createdAt: r.record_created_at || r.paid_at,
+      updatedAt: r.record_updated_at || r.record_created_at || r.paid_at, adminRegisteredAt: r.admin_registered_at, note: r.note
+    }));
     // Preserve the field names used by the original mini-program contract in
     // addition to the admin-facing canonical names.
     output.orderId = output.id;

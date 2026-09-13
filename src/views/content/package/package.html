@@ -1,179 +1,108 @@
-<div class="package-design-page">
-  <div class="pkg-toolbar">
+<div class="package-table-page">
+  <div class="package-table-head">
     <div>
-      <span class="eyebrow">{{ state.active==='videoProducts' ? '短视频产品' : '内容商品' }}</span>
-      <h3>{{ state.active==='videoProducts' ? '短视频' : '套餐设置' }}</h3>
-      <p>
-        {{ state.active==='videoProducts'
-          ? '统一维护短视频商品的成片时长、条数、航拍、剪辑、价格、素材关联、上下架与审核记录。'
-          : '统一维护照片套餐与短视频的价格、服务内容、素材关联、预约限流、上下架和审核记录。' }}
-      </p>
+      <span class="package-table-eyebrow">内容商品</span>
+      <h3>旅拍套餐</h3>
+      <p>维护小程序展示的名称、封面、价格、说明、服务内容、适用点位和主推状态。</p>
     </div>
-    <div class="pkg-toolbar-actions">
-      <div class="pkg-seg" role="tablist" aria-label="套餐类型">
-        <button role="tab" :aria-selected="true" :class="{active: true}" @click="switchMenu('packages')">照片套餐</button>
-      </div>
-      <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
-        <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
-        <span class="remote-dot"></span>{{ remoteOn ? '数据源：真实后端' : '数据源：演示数据' }}
-      </label>
-      <el-button v-if="state.role==='super' && remoteOn" plain @click="refreshFromServer">刷新真实数据</el-button>
-      <el-button plain @click="clearContentFilters">重置筛选</el-button>
-      <el-button plain @click="openContentLogs(state.active==='videoProducts' ? '短视频' : '套餐')">操作日志</el-button>
-      <el-button plain @click="openContentTrash">回收站</el-button>
-      <el-button @click="switchMenu('shelfProducts', { preserveFilters: true })">商品货架</el-button>
-      <el-button type="primary" v-if="can('contentEdit')" @click="state.active==='videoProducts' ? openContent() : openContentQuick('packages', { type: 'photo' })">
-        {{ state.active==='videoProducts' ? '新增短视频' : '新增套餐' }}
-      </el-button>
+    <div class="package-table-actions">
+      <el-button plain :loading="loading" @click="refreshPackages">刷新</el-button>
+      <el-button type="primary" v-if="canEdit()" @click="openCreate">新增套餐</el-button>
     </div>
   </div>
 
-  <div class="pkg-stat-grid">
-    <div class="metric-card">
-      <span>{{ state.active==='videoProducts' ? '短视频总数' : '套餐总数' }}</span>
-      <strong>{{ packageSummary.total }}</strong>
-      <em>{{ state.active==='videoProducts' ? '独立短视频商品' : `拍照 ${packageSummary.photo} / 短视频 ${packageSummary.video}` }}</em>
-    </div>
-    <div class="metric-card">
-      <span>{{ state.active==='videoProducts' ? '在售短视频' : '在售套餐' }}</span>
-      <strong>{{ packageSummary.onSale }}</strong>
-      <em>满足小程序货架展示条件</em>
-    </div>
-    <div class="metric-card">
-      <span>{{ state.active==='videoProducts' ? '主推短视频' : '主推套餐' }}</span>
-      <strong>{{ packageSummary.mainPush }}</strong>
-      <em>首页、点位详情优先展示</em>
-    </div>
-    <div class="metric-card warning">
-      <span>待处理审核</span>
-      <strong>{{ packageSummary.needAudit }}</strong>
-      <em>调价、上下架、主推变更需留痕</em>
-    </div>
-    <div class="metric-card">
-      <span>{{ state.active==='videoProducts' ? '短视频成交额' : '套餐成交额' }}</span>
-      <strong>{{ money(packageSummary.revenue) }}</strong>
-      <em>来自当前订单演示数据</em>
-    </div>
+  <div class="package-table-summary" aria-label="套餐概览">
+    <span><b>{{ summary.total }}</b> 个套餐</span>
+    <span><b>{{ summary.visible }}</b> 个小程序可见</span>
+    <span><b>{{ summary.mainPush }}</b> 个首页主推</span>
   </div>
 
-  <div class="pkg-filter-row">
-    <el-input v-model="state.filters.keyword" clearable :placeholder="state.active==='videoProducts' ? '搜索短视频名称、标签、说明' : '搜索套餐名称、标签、说明'" />
-    <el-select v-if="state.active!=='videoProducts'" v-model="state.filters.shelfType" clearable placeholder="套餐类型">
-      <el-option label="照片套餐" value="packages" />
-      <el-option label="短视频" value="video" />
+  <div class="package-table-filters">
+    <el-input v-model="keyword" clearable placeholder="搜索套餐名称、说明或服务内容" />
+    <el-select v-model="spotFilter" clearable filterable placeholder="全部打卡点">
+      <el-option v-for="spot in (data.spots || []).filter(Boolean)" :key="spot.id || spot._id" :label="spot.name" :value="spot.id || spot._id" />
     </el-select>
-    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
-      <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+    <el-select v-model="visibilityFilter" clearable placeholder="全部状态">
+      <el-option label="小程序可见" value="visible" />
+      <el-option label="已下架" value="hidden" />
     </el-select>
-    <el-select v-model="state.filters.contentStatus" clearable placeholder="上下架状态">
-      <el-option label="上架" value="上架" />
-      <el-option label="下架" value="下架" />
-      <el-option label="草稿" value="草稿" />
-      <el-option label="待审核" value="待审核" />
-    </el-select>
+    <el-button plain @click="resetFilters">重置</el-button>
   </div>
 
-  <div class="pkg-editor">
-    <!-- 左：列表 -->
-    <aside class="pkg-list">
-      <div class="pkg-list-head">
-        <strong>{{ state.active==='videoProducts' ? '短视频' : '照片套餐' }}</strong>
-        <span>{{ listSource.length }} 项</span>
-      </div>
-      <div class="pkg-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
-        <button v-for="pkg in listSource" v-if="pkg" :key="pkg.id||pkg._id" class="pkg-list-item" :class="{active: isSelected(pkg)}" @click="selectPackage(pkg)">
-          <span class="pli-cover"><img v-if="pkg.cover" :src="pkg.cover" /><i v-else>套</i></span>
-          <span class="pli-main">
-            <strong>{{ pkg.name || (pkg.type==='video' ? '未命名短视频' : '未命名套餐') }}</strong>
-            <em>{{ money(pkg.price||0) }} · {{ productStatus(pkg) }}</em>
-          </span>
-        </button>
-        <div v-if="listSource.length===0" class="empty-state">
-          <strong>暂无{{ state.active==='videoProducts' ? '短视频' : '套餐' }}</strong><span>先新增{{ state.active==='videoProducts' ? '短视频' : '套餐' }}再配置。</span>
-        </div>
-      </div>
-    </aside>
-
-    <!-- 中：表单 -->
-    <section class="pkg-form" v-if="selectedPackage">
-      <div class="pkg-form-head">
-        <div>
-          <strong>编辑{{ state.active==='videoProducts' ? '短视频' : '套餐' }}</strong>
-          <p>改完点「保存」；开关类直接切换即时生效。完整 6 区块配置走「高级编辑」。</p>
-        </div>
-        <div class="pkg-form-actions">
-           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedPackage">保存</el-button>
-           <el-button v-if="can('contentEdit')" @click="openContent(selectedPackage)">高级编辑</el-button>
-          <el-button @click="previewContent(selectedPackage)">预览</el-button>
-          <el-button type="danger" v-if="can('contentEdit')" @click="requestDeletePackage(selectedPackage)">删除</el-button>
-        </div>
-      </div>
-
-      <div class="pkg-form-body">
-         <label class="pf-field"><span>名称</span><el-input v-model="selectedPackage.name" :disabled="!can('contentEdit')" /></label>
-        <div class="pf-row">
-          <label class="pf-field"><span>关联打卡点</span>
-             <el-select v-model="selectedPackage.spotId" filterable clearable placeholder="选择打卡点" :disabled="!can('contentEdit')">
-              <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
-            </el-select>
-          </label>
-          <label class="pf-field"><span>拍摄风格</span>
-             <el-select v-model="selectedPackage.seriesId" filterable clearable placeholder="选择拍摄风格" :disabled="!can('contentEdit')">
-              <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
-            </el-select>
-          </label>
-        </div>
-        <div class="pf-row">
-           <label class="pf-field"><span>售价（元）</span><el-input-number v-model="selectedPackage.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
-           <label class="pf-field"><span>原价（元）</span><el-input-number v-model="selectedPackage.originalPrice" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
-        </div>
-         <label class="pf-field"><span>简介 / 商品说明</span><el-input type="textarea" :rows="3" v-model="selectedPackage.intro" :disabled="!can('contentEdit')" /></label>
-
-        <div class="pf-switches">
-           <label><span>上架展示</span><el-switch v-model="selectedPackage.isShow" :disabled="!can('contentEdit')" /></label>
-           <label><span>主页主推</span><el-switch v-model="selectedPackage.isMainPush" :disabled="!can('contentEdit')" /></label>
-        </div>
-
-        <div class="pf-meta">
-          <span>价格：{{ packagePriceText(selectedPackage) }}</span>
-          <span>服务：{{ packageServiceText(selectedPackage) }}</span>
-          <span>预约：{{ packageBookingText(selectedPackage) }}</span>
-          <span>审核：{{ packageAuditText(selectedPackage) }}</span>
-          <span>关联：{{ relationText(selectedPackage) }}</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- 右：手机实时预览（小程序客人端真实效果） -->
-    <aside class="pkg-preview" v-if="selectedPackage">
-      <div class="lxm-phone">
-        <div class="lxm-phone-notch"></div>
-        <div class="lxm-phone-screen">
-          <div class="phone-banner">{{ state.active==='videoProducts' ? '短视频' : '旅拍套餐' }}</div>
-          <div class="pd-card">
-            <div class="pd-cover" :class="{off: productStatus(selectedPackage)==='下架'}">
-              <img v-if="selectedPackage.cover" :src="selectedPackage.cover" />
-              <i v-else>套</i>
-              <span v-if="productStatus(selectedPackage)!=='下架'" class="pd-badge">在售</span>
-              <span v-else class="pd-badge off">下架</span>
-            </div>
-            <div class="pd-info">
-              <strong class="pd-title">{{ selectedPackage.name || (state.active==='videoProducts' ? '未命名短视频' : '未命名套餐') }}</strong>
-              <div class="pd-price">{{ money(selectedPackage.price||0) }}</div>
-              <div class="pd-note">{{ selectedPackage.intro || '暂无套餐说明' }}</div>
-              <div class="pd-tags">
-                <span v-if="selectedPackage.isMainPush" class="ok">主页主推</span>
-                <span v-else class="warn">非主推</span>
-              </div>
+  <div class="package-table-wrap" v-loading="loading" element-loading-text="正在刷新套餐…">
+    <el-table :data="tableRows" row-key="id" empty-text="暂无旅拍套餐，点击“新增套餐”开始维护。">
+      <el-table-column label="套餐" min-width="250">
+        <template #default="{ row }">
+          <div class="package-cell-title">
+            <img v-if="row.cover" :src="row.cover" alt="" />
+            <span v-else class="package-cover-placeholder">套</span>
+            <div>
+              <strong>{{ row.name || '未命名套餐' }}</strong>
+              <p>{{ row.description || '未填写套餐说明' }}</p>
             </div>
           </div>
-        </div>
-      </div>
-      <p class="preview-tip">↑ 小程序客人端真实效果预览（与小程序展示一致）</p>
-    </aside>
+        </template>
+      </el-table-column>
+      <el-table-column label="适用打卡点" min-width="150">
+        <template #default="{ row }"><span class="table-muted">{{ packageSpotNames(row) }}</span></template>
+      </el-table-column>
+      <el-table-column label="套餐内容" min-width="180">
+        <template #default="{ row }">
+          <div class="package-tag-list">
+            <el-tag v-for="tag in row.serviceTags.slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
+            <span v-if="!row.serviceTags.length" class="table-muted">未填写</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="照片留影" min-width="130">
+        <template #default="{ row }"><span class="table-muted">{{ packageAlbumName(row) }}</span></template>
+      </el-table-column>
+      <el-table-column label="售价" width="128" align="right">
+        <template #default="{ row }">
+          <div class="package-price"><b>{{ priceText(row).price }}</b><del v-if="priceText(row).original">{{ priceText(row).original }}</del></div>
+        </template>
+      </el-table-column>
+      <el-table-column label="小程序展示" width="116" align="center">
+        <template #default="{ row }"><el-tag :type="statusText(row) === '已上架' ? 'success' : 'info'" effect="light">{{ statusText(row) }}</el-tag></template>
+      </el-table-column>
+      <el-table-column label="首页主推" width="100" align="center">
+        <template #default="{ row }"><el-tag v-if="row.isMainPush" type="warning" effect="light">主推</el-tag><span v-else class="table-muted">-</span></template>
+      </el-table-column>
+      <el-table-column label="操作" width="228" fixed="right" align="right">
+        <template #default="{ row }">
+          <div class="package-table-row-actions">
+            <el-button link type="primary" v-if="canEdit()" @click="openEdit(row)">编辑</el-button>
+            <el-button link :type="statusText(row) === '已上架' ? 'warning' : 'success'" v-if="canEdit()" @click="toggleVisible(row)">{{ statusText(row) === '已上架' ? '下架' : '上架' }}</el-button>
+            <el-button link :type="row.isMainPush ? 'info' : 'warning'" v-if="canEdit()" @click="toggleMainPush(row)">{{ row.isMainPush ? '取消主推' : '设为主推' }}</el-button>
+            <el-button link type="danger" v-if="canEdit()" @click="requestDeletePackage(row)">删除</el-button>
+          </div>
+        </template>
+      </el-table-column>
+    </el-table>
   </div>
 
-  <div v-if="!selectedPackage" class="empty-state">
-    <strong>请选择左侧{{ state.active==='videoProducts' ? '短视频' : '套餐' }}</strong><span>点击列表项即可在中栏编辑、右栏预览。</span>
-  </div>
+  <el-dialog v-model="dialogVisible" :close-on-click-modal="false" :close-on-press-escape="!saving" :title="form && form.id ? '编辑旅拍套餐' : '新增旅拍套餐'" width="680px" class="package-simple-dialog" @close="closeDialog">
+    <div v-if="form" class="package-simple-form">
+      <div class="package-form-tip">这些字段会直接影响小程序首页、点位页、套餐详情和预约页。</div>
+      <div class="package-form-grid">
+        <label class="package-form-field package-form-field--wide"><span>套餐名称</span><el-input v-model="form.name" maxlength="50" show-word-limit placeholder="例如：长沙夜景双人旅拍套餐" /></label>
+        <label class="package-form-field"><span>售价（元）</span><el-input-number v-model="form.price" :min="0" :step="50" controls-position="right" /></label>
+        <label class="package-form-field"><span>原价（元）</span><el-input-number v-model="form.originalPrice" :min="0" :step="50" controls-position="right" /></label>
+        <label class="package-form-field package-form-field--wide"><span>封面图 URL</span><el-input v-model="form.cover" placeholder="填写可访问的图片地址，留空使用默认占位图" /></label>
+        <label class="package-form-field package-form-field--wide"><span>适用打卡点</span><el-select v-model="form.spotIds" multiple filterable placeholder="不选择表示全城通用"><el-option v-for="spot in (data.spots || []).filter(Boolean)" :key="spot.id || spot._id" :label="spot.name" :value="spot.id || spot._id" /></el-select></label>
+        <label class="package-form-field"><span>拍摄风格</span><el-select v-model="form.seriesId" clearable filterable placeholder="可选"><el-option v-for="series in (data.series || []).filter(Boolean)" :key="series.id || series._id" :label="series.name" :value="series.id || series._id" /></el-select></label>
+        <label class="package-form-field"><span>关联照片留影</span><el-select v-model="form.albumId" clearable filterable placeholder="可选"><el-option v-for="album in (data.albums || []).filter(Boolean)" :key="album.id || album._id" :label="album.name" :value="album.id || album._id" /></el-select></label>
+        <label class="package-form-field package-form-field--wide"><span>服务内容</span><el-input v-model="form.serviceTagsText" placeholder="用顿号、逗号或换行分隔，例如：拍摄60分钟、精修12张、1套服装" /></label>
+        <label class="package-form-field package-form-field--wide"><span>套餐说明</span><el-input v-model="form.description" type="textarea" :rows="3" maxlength="160" show-word-limit placeholder="小程序套餐详情页展示的说明" /></label>
+      </div>
+      <div class="package-form-switches">
+        <el-switch v-model="form.isShow" active-text="小程序上架展示" inactive-text="暂不展示" />
+        <el-switch v-model="form.isMainPush" active-text="首页主推" inactive-text="普通套餐" />
+      </div>
+    </div>
+    <template #footer>
+      <el-button :disabled="saving" @click="closeDialog">取消</el-button>
+      <el-button type="primary" :loading="saving" @click="saveForm">保存</el-button>
+    </template>
+  </el-dialog>
 </div>

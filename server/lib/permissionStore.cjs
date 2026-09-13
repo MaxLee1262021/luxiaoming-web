@@ -6,8 +6,8 @@ const path = require("path");
 const crypto = require("crypto");
 
 const AUTHZ_KEYS = ["menus", "roles", "roleMenus", "rolePermissions", "users"];
+const BUILTIN_ADMIN_ACCOUNT = "admin";
 const LEGACY_ROLE_ALIASES = { admin: "super", administrator: "super", photographer: "photo" };
-const AUTHORITY_PERMISSION_KEYS = new Set(["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"]);
 const BUSINESS_KEYS = [
   "cities", "agents", "distributors", "shops", "staff", "spots", "series", "albums", "samples",
   "packages", "addonServices", "peripherals", "tagLibrary", "guides", "stories", "scans", "orders",
@@ -18,6 +18,68 @@ const BUSINESS_KEYS = [
 function clone(v) { return v == null ? v : JSON.parse(JSON.stringify(v)); }
 function id(prefix) { return `${prefix}_${crypto.randomBytes(8).toString("hex")}`; }
 function now() { return new Date().toISOString(); }
+function isBuiltinAdminAccount(user) {
+  const account = user && typeof user === "object" ? user.account : user;
+  return String(account || "").trim().toLowerCase() === BUILTIN_ADMIN_ACCOUNT;
+}
+function menuKey(menu) { return String(menu && (menu.menuKey || menu.key || menu.id) || ""); }
+function menuParentKey(menu) {
+  if (menu && Object.prototype.hasOwnProperty.call(menu, "parentKey")) return String(menu.parentKey || "");
+  return String(menu && menu.parentId || "");
+}
+function normalizeMenu(input = {}, current = {}) {
+  const next = { ...(current || {}), ...(input || {}) };
+  const hasParentKey = Object.prototype.hasOwnProperty.call(input || {}, "parentKey");
+  const hasParentId = Object.prototype.hasOwnProperty.call(input || {}, "parentId");
+  if (hasParentKey || hasParentId) {
+    const raw = hasParentKey ? input.parentKey : input.parentId;
+    const parent = raw === undefined || raw === null ? "" : String(raw).trim();
+    next.parentKey = parent || null;
+    next.parentId = parent || null;
+  } else if (Object.prototype.hasOwnProperty.call(next, "parentKey")) {
+    const parent = String(next.parentKey || "").trim();
+    next.parentKey = parent || null;
+    next.parentId = parent || null;
+  }
+  return next;
+}
+function menuEnabled(menu) {
+  return !["disabled", "停用", "禁用", "inactive"].includes(String(menu && menu.status || "").trim().toLowerCase());
+}
+
+// A role may select a second-level entry directly. Validate its enabled parent
+// chain here, but keep the parent out of menuKeys so navigation authorization
+// never expands from a child to its container page.
+function effectiveMenuKeys(menuRows, sourceKeys) {
+  const rows = Array.isArray(menuRows) ? menuRows : [];
+  const byKey = new Map(rows.map((menu) => [menuKey(menu), menu]).filter(([key]) => key));
+  const requested = [...new Set((Array.isArray(sourceKeys) ? sourceKeys : []).map(String).filter(Boolean))];
+  const allowed = new Set();
+  for (const requestedKey of requested) {
+    const seen = new Set();
+    let current = byKey.get(requestedKey);
+    let valid = !!current;
+    let depth = 0;
+    while (current) {
+      const key = menuKey(current);
+      depth += 1;
+      if (!key || seen.has(key) || !menuEnabled(current) || depth > 2) {
+        valid = false;
+        break;
+      }
+      seen.add(key);
+      const parentKey = menuParentKey(current);
+      if (!parentKey) break;
+      current = byKey.get(parentKey);
+      if (!current) {
+        valid = false;
+        break;
+      }
+    }
+    if (valid) allowed.add(requestedKey);
+  }
+  return rows.map(menuKey).filter((key) => allowed.has(key));
+}
 
 function hashPassword(plain) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -37,14 +99,14 @@ function verifyPassword(stored, plain) {
 }
 function safeUser(user) {
   if (!user) return null;
-  const { password, passwordHash, password_hash, ...rest } = user;
+  const { password, passwordHash, password_hash, permissions, permissionKeys, ...rest } = user;
   const scrub = (value) => {
     if (!value || typeof value !== "object") return value;
     if (value instanceof Date || Buffer.isBuffer(value)) return value;
     if (Array.isArray(value)) return value.map(scrub);
     const out = {};
     for (const [key, child] of Object.entries(value)) {
-      if (/password|token|secret|private.?key|authorization/i.test(key)) continue;
+      if (/password|token|secret|private.?key|authorization|^permissions$|^permissionKeys$/i.test(key)) continue;
       out[key] = scrub(child);
     }
     return out;
@@ -56,7 +118,13 @@ function normalizeUser(input = {}) {
   out.account = String(out.account || out.username || "").trim();
   out.name = String(out.name || out.displayName || out.account).trim();
   out.role = String(out.role || "service").trim().toLowerCase();
-  out.permissions = Array.isArray(out.permissions) ? [...new Set(out.permissions.map(String))] : [];
+  delete out.permissions;
+  delete out.permissionKeys;
+  if (out.extra && typeof out.extra === "object" && !Array.isArray(out.extra)) {
+    out.extra = { ...out.extra };
+    delete out.extra.permissions;
+    delete out.extra.permissionKeys;
+  }
   out.status = out.status || "active";
   out.updatedAt = now();
   return out;
@@ -91,7 +159,19 @@ function createJson(options) {
   }
   function bucket(key) { return load().authz[key]; }
   function values(key) { return Object.values(bucket(key)).map(clone); }
-  async function listMenus() { return values("menus"); }
+  function canonicalMenu(input = {}, current = {}) {
+    const next = normalizeMenu(input, current);
+    const parent = String(next.parentKey || "");
+    if (parent) {
+      const match = Object.values(bucket("menus")).find((menu) => menuKey(menu) === parent || String(menu && menu.id || "") === parent);
+      if (match) {
+        next.parentKey = menuKey(match);
+        next.parentId = next.parentKey;
+      }
+    }
+    return next;
+  }
+  async function listMenus() { return values("menus").map((menu) => canonicalMenu(menu)); }
   async function listRoles() { return values("roles"); }
   async function listUsers() { return values("users").map(safeUser); }
   async function createEntity(key, data, prefix) {
@@ -107,16 +187,18 @@ function createJson(options) {
   async function removeEntity(key, entityId) { if (!bucket(key)[entityId]) return false; delete bucket(key)[entityId]; persist(); return true; }
   return {
     mode: "json", backend: "json", async ensureSchema() { load(); persist(); return { backend: "json", ready: true }; },
-    listMenus, getMenu: async (x) => clone(bucket("menus")[x] || null), createMenu: (x) => createEntity("menus", x, "menu"), updateMenu: (x, p) => updateEntity("menus", x, p), deleteMenu: (x) => removeEntity("menus", x),
-    listRoles, getRole: async (x) => clone(bucket("roles")[x] || null), createRole: (x) => createEntity("roles", x, "role"), updateRole: (x, p) => updateEntity("roles", x, p), deleteRole: async (x) => { if (!bucket("roles")[x]) return false; delete bucket("roles")[x]; delete bucket("roleMenus")[x]; delete bucket("rolePermissions")[x]; persist(); return true; },
+    listMenus, getMenu: async (x) => { const row = bucket("menus")[x]; return row ? clone(canonicalMenu(row)) : null; }, createMenu: (x) => createEntity("menus", canonicalMenu(x), "menu"), updateMenu: async (x, p) => updateEntity("menus", x, canonicalMenu(p, bucket("menus")[x] || {})), deleteMenu: (x) => removeEntity("menus", x),
+    listRoles, getRole: async (x) => clone(bucket("roles")[x] || null), createRole: (x) => createEntity("roles", x, "role"), updateRole: (x, p) => updateEntity("roles", x, p), deleteRole: async (x) => { if (!bucket("roles")[x]) return false; delete bucket("roles")[x]; delete bucket("roleMenus")[x]; persist(); return true; },
     listUsers, getUser: async (x) => safeUser(bucket("users")[x]), getUserState: async (x) => clone(bucket("users")[x] || null), createUser: async (x) => { const item = normalizeUser(x); if (item.password && !String(item.password).startsWith("lxm1$")) item.password = hashPassword(item.password); return createEntity("users", item, "usr"); },
     updateUser: async (x, p) => { const current = bucket("users")[x] || {}; const patch = normalizeUser({ ...current, ...p }); if (patch.password && !String(patch.password).startsWith("lxm1$")) patch.password = hashPassword(patch.password); return updateEntity("users", x, patch); }, deleteUser: (x) => removeEntity("users", x),
     setRoleMenus: async (roleId, menuIds) => { const item = { roleId, menuIds: [...new Set((menuIds || []).map(String))], updatedAt: now() }; bucket("roleMenus")[roleId] = item; persist(); return clone(item); },
     getRoleMenus: async (roleId) => clone(bucket("roleMenus")[roleId] || { roleId, menuIds: [] }),
-    setRolePermissions: async (roleId, permissions) => { const item = { roleId, permissions: [...new Set((permissions || []).map(String))], updatedAt: now() }; bucket("rolePermissions")[roleId] = item; persist(); return clone(item); },
-    getRolePermissions: async (roleId) => clone(bucket("rolePermissions")[roleId] || { roleId, permissions: [] }),
+    // Legacy action grants remain in the JSON document for compatibility, but
+    // the active authorization policy is menu-only.
+    setRolePermissions: async (roleId) => ({ roleId }),
+    getRolePermissions: async (roleId) => ({ roleId }),
     async authenticate(account, password) { const found = values("users").find((u) => u.account === String(account).trim()); if (!found || ["disabled", "停用", "禁用"].includes(String(found.status).toLowerCase()) || !verifyPassword(found.password || found.passwordHash, password)) return null; return safeUser(found); },
-    async snapshot() { const out = {}; for (const k of AUTHZ_KEYS) out[k] = values(k); return out; },
+    async snapshot() { return { menus: values("menus"), roles: values("roles"), roleMenus: values("roleMenus"), users: await listUsers() }; },
     async close() {}
   };
 }
@@ -125,7 +207,7 @@ function createMysql(options) {
   return require("./mysqlPermissionStore.cjs")(options);
 }
 function createPermissionStore(options = {}) {
-  const backend = String(options.backend || process.env.DATA_MODE || process.env.BACKEND || "json").toLowerCase();
+  const backend = String(options.backend || process.env.DATA_MODE || process.env.BACKEND || "mysql").toLowerCase();
   let store;
   try {
     store = backend === "mysql" ? createMysql(options) : createJson(options);
@@ -155,35 +237,34 @@ function createPermissionStore(options = {}) {
   store.removeMenu = store.deleteMenu;
   store.removeRole = store.deleteRole;
   store.setRoleGrants = async (roleId, grants = {}) => {
-    if (typeof store.setRoleGrantsAtomic === "function") {
-      return store.setRoleGrantsAtomic(roleId, grants.menuKeys || grants.menuIds || [], grants.permissionKeys || grants.permissions || []);
-    }
     const menus = await store.setRoleMenus(roleId, grants.menuKeys || grants.menuIds || []);
-    const permissions = await store.setRolePermissions(roleId, grants.permissionKeys || grants.permissions || []);
-    return { roleId, menuKeys: menus.menuKeys || menus.menuIds || [], permissionKeys: permissions.permissionKeys || permissions.permissions || [] };
+    return { roleId, menuKeys: menus.menuKeys || menus.menuIds || [] };
   };
   store.getPolicyForUser = async (user) => {
     const roleId = user && (user.roleId || user.role_id || user.role);
     let role = roleId && await store.getRole(roleId);
     if (!role && roleId && typeof store.listRoles === "function") role = (await store.listRoles()).find((r) => (r.roleKey || r.code) === roleId) || null;
-    const resolvedRoleId = role && role.id ? role.id : roleId;
-    const grants = resolvedRoleId ? await store.getRoleGrants(resolvedRoleId) : { menuKeys: [], permissionKeys: [] };
     const menuRows = typeof store.listMenus === "function" ? await store.listMenus() : [];
-    const activeMenus = new Set((Array.isArray(menuRows) ? menuRows : [])
-      .filter((menu) => !["disabled", "停用", "禁用", "inactive"].includes(String(menu.status || "").toLowerCase()))
-      .map((menu) => String(menu.menuKey || menu.key || menu.id || "")));
-    const menuKeys = (grants.menuKeys || []).map(String).filter((key) => !menuRows.length || activeMenus.has(key));
-    const extra = user && user.extra && typeof user.extra === "object" ? user.extra : {};
-    const direct = Array.isArray(user && user.permissionKeys) ? user.permissionKeys : (Array.isArray(extra.permissionKeys) ? extra.permissionKeys : []);
     const roleKey = String(role && (role.roleKey || role.code || role.key) || "").trim().toLowerCase();
-    const permissionKeys = [...new Set([...(grants.permissionKeys || []), ...direct].map(String))]
-      .filter((key) => roleKey === "super" || (key !== "*" && !AUTHORITY_PERMISSION_KEYS.has(key)));
-    return { user: safeUser(user), role: role || null, menuKeys: [...new Set(menuKeys)], permissionKeys };
+    if (isBuiltinAdminAccount(user)) {
+      const roles = typeof store.listRoles === "function" ? await store.listRoles() : [];
+      const superRole = (Array.isArray(roles) ? roles : []).find((item) => String(item.roleKey || item.code || item.key || "") === "super") || {};
+      return {
+        user: safeUser(user),
+        role: { ...superRole, id: superRole.id || "role_super", roleKey: "super", key: "super", name: superRole.name || "系统管理员", status: "active" },
+        menuKeys: effectiveMenuKeys(menuRows, (Array.isArray(menuRows) ? menuRows : []).map(menuKey)),
+        isBuiltinAdmin: true
+      };
+    }
+    const resolvedRoleId = role && role.id ? role.id : roleId;
+    const grants = roleKey === "super"
+      ? { menuKeys: (Array.isArray(menuRows) ? menuRows : []).map(menuKey) }
+      : (resolvedRoleId ? await store.getRoleGrants(resolvedRoleId) : { menuKeys: [] });
+    return { user: safeUser(user), role: role || null, menuKeys: effectiveMenuKeys(menuRows, grants.menuKeys) };
   };
   store.getRoleGrants = async (roleId) => {
     const menus = await store.getRoleMenus(roleId);
-    const permissions = await store.getRolePermissions(roleId);
-    return { roleId, menuKeys: menus.menuIds || menus.menuKeys || [], permissionKeys: permissions.permissions || permissions.permissionKeys || [] };
+    return { roleId, menuKeys: menus.menuIds || menus.menuKeys || [] };
   };
   store.disableUser = async (userId) => store.updateUser(userId, { status: "disabled" });
   store.restoreUserState = async (userId, state) => {
@@ -197,9 +278,10 @@ function createPermissionStore(options = {}) {
     const legacyId = String(doc.id || doc._id || `${key}_${doc.account}`);
     const role = normalizeAuthzRole(doc.role || (key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "service"));
     const existing = await store.getUser(legacyId);
-    const previousExtra = existing && existing.extra && typeof existing.extra === "object" ? existing.extra : {};
-    const permissionKeys = Array.isArray(doc.permissionKeys) ? doc.permissionKeys : (Array.isArray(doc.permissions) ? doc.permissions : previousExtra.permissionKeys || []);
-    const extra = { ...previousExtra, permissionKeys, legacyKey: key, legacyId, subjectType: key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "staff", subjectId: legacyId, shopId: doc.shopId || previousExtra.shopId || "", distributorId: doc.distributorId || previousExtra.distributorId || "", agentId: doc.agentId || previousExtra.agentId || "" };
+    const previousExtra = existing && existing.extra && typeof existing.extra === "object" ? { ...existing.extra } : {};
+    delete previousExtra.permissions;
+    delete previousExtra.permissionKeys;
+    const extra = { ...previousExtra, legacyKey: key, legacyId, subjectType: key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "staff", subjectId: legacyId, shopId: doc.shopId || previousExtra.shopId || "", distributorId: doc.distributorId || previousExtra.distributorId || "", agentId: doc.agentId || previousExtra.agentId || "" };
     let roleId = doc.roleId || (existing && existing.roleId) || "";
     if (!roleId || String(roleId) === String(role)) {
       try {
@@ -209,7 +291,7 @@ function createPermissionStore(options = {}) {
       } catch (_) {}
     }
     if (!roleId) roleId = String(role).startsWith("role_") ? String(role) : `role_${role}`;
-    const payload = { id: legacyId, account: doc.account, name: doc.name || doc.title || doc.account, role, roleId, status: doc.status || "active", phone: doc.phone || doc.contactPhone || "", email: doc.email || "", extra, permissionKeys, permissions: permissionKeys };
+    const payload = { id: legacyId, account: doc.account, name: doc.name || doc.title || doc.account, role, roleId, status: doc.status || "active", phone: doc.phone || doc.contactPhone || "", email: doc.email || "", extra };
     if (doc.password || doc.passwordHash) payload.password = doc.password || doc.passwordHash;
     return existing ? store.updateUser(legacyId, payload) : store.createUser(payload);
   };
@@ -217,6 +299,7 @@ function createPermissionStore(options = {}) {
 }
 createPermissionStore.hashPassword = hashPassword;
 createPermissionStore.verifyPassword = verifyPassword;
+createPermissionStore.isBuiltinAdminAccount = isBuiltinAdminAccount;
 createPermissionStore.AUTHZ_KEYS = AUTHZ_KEYS;
 createPermissionStore.BUSINESS_KEYS = BUSINESS_KEYS;
 module.exports = createPermissionStore;

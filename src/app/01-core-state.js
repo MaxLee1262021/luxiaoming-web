@@ -26,6 +26,7 @@ const state = reactive({
   advFiltersOpen: false,
   orderPage: 1,
   orderPageSize: 12,
+  orderRefreshing: false,
   listPage: ["staff","shops","distributors","tags","trash","cities","logs","shelf","tasks","afterSaleActive","afterSaleRecords","financeReview","financeReviewRecords","productAudit","reconSettlement","reconHold","reconTransfer","reconAdjustments"].reduce((o, k) => (o[k] = { page: 1, size: 12 }, o), {}),
   filters: {
     dateRange: "",
@@ -97,7 +98,6 @@ const state = reactive({
     productType: "package",
     appointmentAt: "",
     timePeriod: "待客服确",
-    depositPaid: 0,
     internalNote: "",
   },
   orderDrawer: false,
@@ -105,7 +105,14 @@ const state = reactive({
   orderWorkMode: "service",
   currentOrder: null,
   dispatchDialog: false,
-  dispatchForm: { photographerId: "", note: "" },
+  dispatchForm: {
+    photographerId: "",
+    appointmentAt: "",
+    timePeriod: "",
+    appointmentLocation: "",
+    peopleCount: 1,
+    note: ""
+  },
   transferDialog: false,
   transferForm: { assigneeId: "", photographerId: "", note: "", batch: false },
   batchNoteDialog: false,
@@ -135,9 +142,9 @@ const state = reactive({
   addonKeyword: "",
   addonScope: { type: "common", id: "" },
   addonOpen: { common: true, commonPeripheral: true, commonService: true, root: true, contentRoot: true, navContent: true, navProduct: true, point: {}, seriesRoot: {}, series: {} },
-  contentMenuOpen: { assets: true, products: true, internal: true },
   sidebarCollapsed: false,
   menuSearch: "",
+  menuRevision: 0,
   selectedAddonKeys: [],
   imagePreview: false,
   zoomUrl: "",
@@ -176,6 +183,19 @@ const state = reactive({
   contentScope: { type: "", id: "" },
   contentDialog: false,
   editContent: null,
+  amapPicker: {
+    open: false,
+    loading: false,
+    error: "",
+    selection: null,
+    address: "",
+    district: "",
+    resolvingAddress: false,
+    searchKeyword: "",
+    searching: false,
+    searchError: "",
+    searchResults: []
+  },
   videoSingleDialog: false,
   videoSingleForm: null,
   seriesDialog: false,
@@ -232,7 +252,7 @@ if (window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData) {
 // ===== 演示模式本地持久化（无云密钥也能完整体验管理流程）=====
 // 仅演示模式生效；接真实云后由 /api 接管，本地存储自动让位。
 const LXM_STORAGE_KEY = "lxm_admin_local_v1";
-const LXM_PERSIST_KEYS = ["spots","series","albums","samples","packages","addonServices","peripherals","tagLibrary","guides","stories"];
+const LXM_PERSIST_KEYS = ["cities","spots","series","albums","samples","packages","addonServices","peripherals","tagLibrary","guides","stories"];
 let _lxmPersistTimer = null;
 function lxmSafeStringify(obj) {
   const seen = new WeakSet();
@@ -282,22 +302,67 @@ if (state.lastShelfBatchResult === undefined) state.lastShelfBatchResult = null;
 const contentKeys = ["spots", "series", "albums", "samples", "shelfProducts", "packages", "videoProducts", "contentTags", "addonServices", "peripherals", "guides", "stories", "homeConfig", "cities"];
 const statusDict = LXM_CONFIG.orderStatuses;
 const serviceStatusDict = computed(() => statusDict.filter((status) => !["completed", "cancelled"].includes(status.value)));
-const roleProfile = computed(() => LXM_CONFIG.roles[state.role] || LXM_CONFIG.roles.super);
+const roleProfile = computed(() => {
+  state.menuRevision;
+  return LXM_CONFIG.roles[state.role] || LXM_CONFIG.roles.super;
+});
 const currentStaff = computed(() => data.staff.find((s) => s.id === state.currentStaffId) || null);
 const canPreviewRoles = computed(() => state.loginRole === "super");
-const menus = computed(() => LXM_CONFIG.menus.filter((m) => roleProfile.value.menus.includes(m.key)));
-const activeMenu = computed(() => LXM_CONFIG.menus.find((m) => m.key === state.active) || LXM_CONFIG.menus[0]);
+const isMenuEnabled = (menu) => !["停用", "disabled", "inactive"].includes(String(menu?.status || "").trim().toLowerCase());
+const menus = computed(() => {
+  state.menuRevision;
+  return LXM_CONFIG.menus.filter((m) => roleProfile.value.menus.includes(m.key) && isMenuEnabled(m));
+});
+const sidebarSections = computed(() => {
+  state.menuRevision;
+  const allowed = new Set((roleProfile.value.menus || []).map(String));
+  const rows = (LXM_CONFIG.menus || [])
+    .filter((item) => item && isMenuEnabled(item) && (allowed.has(String(item.key)) || item.containerOnly === true))
+    .map((item, index) => ({ ...item, _index: index, navigable: allowed.has(String(item.key)), children: [] }));
+  const byKey = new Map(rows.map((item) => [String(item.key), item]));
+  const parentKeyOf = (item) => String(item.parentKey || item.parentId || "").trim();
+  const sortRows = (items) => items.sort((left, right) => {
+    const leftSort = Number(left.sort ?? left.sortNo ?? 0);
+    const rightSort = Number(right.sort ?? right.sortNo ?? 0);
+    return leftSort - rightSort || left._index - right._index || String(left.key).localeCompare(String(right.key));
+  });
+  const roots = [];
+  rows.forEach((item) => {
+    const parent = byKey.get(parentKeyOf(item));
+    // A malformed legacy third level is flattened rather than rendered as a
+    // third navigation level. The server rejects new records of that shape.
+    if (parent && !parentKeyOf(parent)) parent.children.push(item);
+    else roots.push(item);
+  });
+  const sections = new Map();
+  sortRows(roots).forEach((item) => {
+    sortRows(item.children);
+    item.children = item.children.filter((child) => child.navigable);
+    if (!item.navigable && !item.children.length) return;
+    const group = String(item.group || "其他功能").trim() || "其他功能";
+    if (!sections.has(group)) sections.set(group, { key: `group-${group}`, label: group, items: [] });
+    sections.get(group).items.push(item);
+  });
+  return [...sections.values()];
+});
+const activeMenu = computed(() => {
+  state.menuRevision;
+  return menus.value.find((menu) => menu.key === state.active)
+    || menus.value[0]
+    || { key: "", label: "", group: "" };
+});
 const activeRouteKey = computed(() => {
   const key = activeMenu.value && (activeMenu.value.routeKey || activeMenu.value.targetKey || activeMenu.value.key);
-  return key === "videoProducts" ? "packages" : (key || "dashboard");
+  return key === "videoProducts" ? "packages" : (key || "");
 });
-const groupLabelOf = (groupKey) => ((LXM_CONFIG.groups || []).includes(groupKey) ? groupKey : "");
+const groupLabelOf = (groupKey) => String(groupKey || "").trim();
 const breadcrumbTrail = computed(() => [groupLabelOf(activeMenu.value.group), activeMenu.value.label].filter(Boolean));
 const searchedMenus = computed(() => {
+  state.menuRevision;
   const keyword = (state.menuSearch || "").trim().toLowerCase();
   if (!keyword) return [];
   return LXM_CONFIG.menus
-    .filter((m) => roleProfile.value.menus.includes(m.key))
+    .filter((m) => roleProfile.value.menus.includes(m.key) && isMenuEnabled(m))
     .filter((m) => m.label.toLowerCase().includes(keyword) || groupLabelOf(m.group).toLowerCase().includes(keyword))
     .slice(0, 12)
     .map((m) => ({ key: m.key, label: m.label, groupLabel: groupLabelOf(m.group) }));
@@ -347,6 +412,7 @@ const visibleDistributors = computed(() => {
     currentStaff,
     canPreviewRoles,
     menus,
+    sidebarSections,
     activeMenu,
     activeRouteKey,
     groupLabelOf,

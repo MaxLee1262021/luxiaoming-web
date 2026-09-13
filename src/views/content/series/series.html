@@ -1,112 +1,108 @@
-<div class="lxm-page">
+<div class="lxm-page basic-content-table basic-content-table--series">
   <header class="lxm-page-head">
     <div>
-      <span class="lxm-eyebrow">拍摄风格</span>
-      <h3 class="lxm-page-head__title">拍摄风格（分类）</h3>
-      <p class="lxm-page-head__desc">拍摄风格是<b>分类标签</b>，不是独立内容。维护古装 / 胶片 / 现代等取值，供「照片单品」「短视频」「套餐」在各自页面下拉选择。小程序按此风格做入口与筛选。</p>
+      <span class="lxm-eyebrow">基础内容 · 第三步</span>
+      <h3 class="lxm-page-head__title">拍摄风格管理</h3>
+      <p class="lxm-page-head__desc">拍摄风格是挂在照片单品、短视频和套餐上的分类。一个风格可关联多个打卡点，表格集中展示它的下游商品引用。</p>
     </div>
     <div class="lxm-page-head__actions">
       <el-button plain @click="openContentLogs('拍摄风格')">操作日志</el-button>
-      <el-button type="primary" v-if="can('contentEdit')" @click="openSeries()">新增拍摄风格</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
+      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('series')">新增拍摄风格</el-button>
     </div>
   </header>
 
   <div class="lxm-kpi-grid">
-    <div class="lxm-kpi"><span class="lxm-kpi__label">风格总数</span><strong class="lxm-kpi__value">{{ data.series.length }}</strong><span class="lxm-kpi__hint">分类取值</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">热推</span><strong class="lxm-kpi__value">{{ data.series.filter(s => s.isHot).length }}</strong><span class="lxm-kpi__hint">标记优先展示</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">短视频类</span><strong class="lxm-kpi__value">{{ data.series.filter(s => s.productType === 'video').length }}</strong><span class="lxm-kpi__hint">用于短视频</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">拍照类</span><strong class="lxm-kpi__value">{{ data.series.filter(s => s.productType !== 'video').length }}</strong><span class="lxm-kpi__hint">用于照片</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">风格总数</span><strong class="lxm-kpi__value">{{ seriesSummary.total }}</strong><span class="lxm-kpi__hint">当前筛选范围</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">启用展示</span><strong class="lxm-kpi__value">{{ seriesSummary.active }}</strong><span class="lxm-kpi__hint">可被下游商品选择</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">拍照类</span><strong class="lxm-kpi__value">{{ seriesSummary.photo }}</strong><span class="lxm-kpi__hint">照片留影分类</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">关联照片单品</span><strong class="lxm-kpi__value">{{ seriesSummary.albums }}</strong><span class="lxm-kpi__hint">直接引用的照片商品</span></div>
   </div>
 
   <div class="lxm-toolbar">
-    <el-input v-model="state.filters.keyword" clearable placeholder="搜索拍摄风格名称 / 风格" />
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索风格名称、风格标签或简介" />
     <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
-      <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
+      <el-option v-for="spot in (data.spots || []).filter(i=>!i.deleted && !i.isDeleted)" :key="spot.id || spot._id" :label="spot.name" :value="spot.id || spot._id" />
     </el-select>
-    <el-button @click="clearContentFilters">重置</el-button>
+    <el-select v-model="seriesTypeFilter" clearable placeholder="全部商品类型">
+      <el-option label="拍照类" value="photo" />
+      <el-option label="短视频类" value="video" />
+    </el-select>
+    <el-select v-model="state.filters.contentStatus" clearable placeholder="全部状态">
+      <el-option label="启用" value="启用" />
+      <el-option label="停用" value="停用" />
+    </el-select>
+    <el-button plain @click="resetSeriesFilters">重置</el-button>
   </div>
 
-  <div class="lxm-cards" v-if="data.series.filter(s => !s.deleted).length">
-    <article v-for="item in data.series.filter(s => !s.deleted && (!state.filters.keyword || (s.name || '').toLowerCase().includes(state.filters.keyword.toLowerCase()) || (s.style || '').includes(state.filters.keyword)) && (!state.filters.contentSpotId || !item.spotId || item.spotId === state.filters.contentSpotId || (item.spotIds && item.spotIds.includes(state.filters.contentSpotId))) )" :key="item.id" class="lxm-card">
-      <div class="lxm-card__cover">
-        <img :src="item.cover" />
-        <span v-if="item.isHot" class="lxm-card__badge lxm-card__badge--hot">热推</span>
-        <span class="lxm-card__badge" :class="item.productType === 'video' ? 'lxm-card__badge--video' : ''">{{ item.productType === 'video' ? '短视频' : '拍照' }}</span>
+  <section class="lxm-table-card panel">
+    <div class="section-title-row compact">
+      <div>
+        <h3>拍摄风格清单</h3>
+        <p>风格删除会校验照片单品、套餐和短视频引用；有依赖时请先在下游列表迁移关联后再处理。</p>
       </div>
-      <div class="lxm-card__body">
-        <h4 class="lxm-card__title">{{ item.name }}</h4>
-        <div class="lxm-card__meta">
-          <span>{{ item.style || '未设风格' }}</span>
-          <span>{{ spotName(item.spotId) }}</span>
-          <span :class="(item.status || '启用') === '停用' ? 'is-off' : ''">{{ item.status || '启用' }}</span>
-        </div>
-        <div class="lxm-card__tags" v-if="item.intro">
-          <span class="lxm-pill lxm-pill--muted">{{ item.intro }}</span>
-        </div>
-      </div>
-      <div class="lxm-card__actions">
-        <el-button link type="primary" v-if="can('contentEdit')" @click="openSeries(item)">编辑</el-button>
-        <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteSeries(item)">删除</el-button>
-        <el-button link @click="openContentLogs('拍摄风格')">日志</el-button>
-      </div>
-    </article>
-  </div>
-  <div v-else class="lxm-empty-inline">
-    <strong>暂无拍摄风格</strong>
-    <span>先新增一个风格取值（如古装 / 胶片 / 现代），再在照片单品、短视频页面选择。</span>
-    <el-button type="primary" v-if="can('contentEdit')" @click="openSeries()">新增拍摄风格</el-button>
-  </div>
-
-  <el-dialog v-model="state.seriesDialog" :title="(state.seriesForm && state.seriesForm.id && data.series.find(s => s.id === state.seriesForm.id)) ? '编辑拍摄风格' : '新增拍摄风格'" width="620px" destroy-on-close>
-    <div v-if="state.seriesForm" class="lxm-form">
-      <div class="lxm-form__row">
-        <label>风格名称</label>
-        <el-input v-model="state.seriesForm.name" placeholder="如：复古胶片、新中式" />
-      </div>
-      <div class="lxm-form__row lxm-form__row--split">
-        <div>
-          <label>风格类型</label>
-          <el-input v-model="state.seriesForm.style" placeholder="如：胶片 / 古装 / 街拍" />
-        </div>
-        <div>
-          <label>归属</label>
-          <el-select v-model="state.seriesForm.productType" style="width:100%">
-            <el-option label="拍照" value="photo" />
-            <el-option label="短视频" value="video" />
-          </el-select>
-        </div>
-      </div>
-      <div class="lxm-form__row">
-        <label>关联打卡点</label>
-        <el-select v-model="state.seriesForm.spotId" filterable placeholder="选择打卡点" style="width:100%">
-          <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
-        </el-select>
-      </div>
-      <div class="lxm-form__row">
-        <label>封面图</label>
-        <el-input v-model="state.seriesForm.cover" placeholder="封面图 URL（留空将用占位图）" />
-      </div>
-      <div class="lxm-form__row">
-        <label>简介</label>
-        <el-input v-model="state.seriesForm.intro" type="textarea" :rows="2" placeholder="风格说明" />
-      </div>
-      <div class="lxm-form__row lxm-form__row--split">
-        <div>
-          <label>状态</label>
-          <el-select v-model="state.seriesForm.status" style="width:100%">
-            <el-option label="启用" value="启用" />
-            <el-option label="停用" value="停用" />
-          </el-select>
-        </div>
-        <div>
-          <label>热推</label>
-          <el-switch v-model="state.seriesForm.isHot" />
-        </div>
-      </div>
+      <el-tag type="info">{{ seriesTableRows.length }} 个风格</el-tag>
     </div>
-    <template #footer>
-      <el-button @click="state.seriesDialog = false">取消</el-button>
-      <el-button type="primary" @click="saveSeries">保存</el-button>
-    </template>
-  </el-dialog>
+    <el-table :data="pagedList('series', seriesTableRows)" row-key="id" border stripe empty-text="暂无符合条件的拍摄风格，试试重置筛选或新增风格">
+      <el-table-column label="拍摄风格" min-width="242">
+        <template #default="{row}">
+          <div class="basic-content-media-cell">
+            <img v-if="row.cover" :src="row.cover" alt="" />
+            <span v-else class="basic-content-media-placeholder">风</span>
+            <div>
+              <strong>{{ row.name || '未命名风格' }}</strong>
+              <span>{{ row.intro || '未填写风格说明' }}</span>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="类型 / 标签" min-width="158">
+        <template #default="{row}">
+          <div class="basic-content-tag-list">
+            <el-tag size="small" :type="row.productType === 'video' ? 'warning' : 'info'">{{ productTypeText(row) }}</el-tag>
+            <el-tag v-for="style in seriesStyles(row).slice(0, 2)" :key="style" size="small" effect="plain">{{ style }}</el-tag>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="关联打卡点" min-width="165">
+        <template #default="{row}">
+          <div class="basic-content-tag-list">
+            <el-tag v-for="name in seriesSpotNames(row).slice(0, 2)" :key="name" size="small" effect="plain">{{ name }}</el-tag>
+            <span v-if="!seriesSpotNames(row).length" class="basic-content-muted">未关联</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="下游资产" min-width="196">
+        <template #default="{row}">
+          <div class="basic-content-link-list">
+            <el-button link type="primary" @click="goToAlbums(row)">照片 {{ row.summary.albums }}</el-button>
+            <el-button link type="primary" @click="goToShelf(row)">套餐 {{ row.summary.packages }}</el-button>
+            <el-button link type="primary" @click="goToShelf(row)">短视频 {{ row.summary.videos }}</el-button>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="122">
+        <template #default="{row}">
+          <div class="basic-content-status-cell">
+            <el-tag :type="isSeriesVisible(row) ? 'success' : 'info'">{{ seriesStatusText(row) }}</el-tag>
+            <span v-if="row.isHot" class="basic-content-hot">热推</span>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="232" fixed="right">
+        <template #default="{row}">
+          <div class="basic-content-actions">
+            <el-button link type="primary" @click="goToAlbums(row)">照片单品</el-button>
+            <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
+            <el-button link :type="isSeriesVisible(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleSeriesVisible(row)">{{ isSeriesVisible(row) ? '停用' : '启用' }}</el-button>
+            <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteSeries(row)">删除</el-button>
+          </div>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="seriesTableRows.length">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="seriesTableRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('series').size" :current-page="pager('series').page" @current-change="pager('series').page = $event" @size-change="onListPageSizeChange('series', $event)" />
+      <span class="pager-info">第 {{ Math.min(seriesTableRows.length, (pager('series').page - 1) * pager('series').size + 1) }}–{{ Math.min(seriesTableRows.length, pager('series').page * pager('series').size) }} 条 / 共 {{ seriesTableRows.length }} 条</span>
+    </div>
+  </section>
 </div>

@@ -33,12 +33,8 @@
       name: source.name || "",
       staffId: source.staffId || "",
       menus: Array.isArray(source.menus) ? source.menus.slice() : undefined,
-      actions: Array.isArray(source.actions) ? source.actions.slice() : undefined,
-      permissions: Array.isArray(source.permissions) ? source.permissions.slice() : undefined,
-      permissionKeys: Array.isArray(source.permissionKeys) ? source.permissionKeys.slice() : undefined,
       menuKeys: Array.isArray(source.menuKeys) ? source.menuKeys.slice() : undefined,
       menuDefinitions: Array.isArray(source.menuDefinitions) ? source.menuDefinitions.map((item) => ({ ...item })) : undefined,
-      permissionsConfigured: source.permissionsConfigured === true,
       permissionSource: source.permissionSource || "",
       scope: source.scope || "",
       shopId: source.shopId || "",
@@ -304,7 +300,6 @@
     createRole: (payload) => permissionRequest("/roles", "POST", payload),
     updateRole: (id, payload) => permissionRequest(`/roles/${encodeURIComponent(id)}`, "PUT", payload),
     deleteRole: (id) => permissionRequest(`/roles/${encodeURIComponent(id)}`, "DELETE"),
-    setRoleGrants: (id, payload) => permissionRequest(`/roles/${encodeURIComponent(id)}/grants`, "PUT", payload),
     createUser: (payload) => permissionRequest("/users", "POST", payload),
     updateUser: (id, payload) => permissionRequest(`/users/${encodeURIComponent(id)}`, "PUT", payload),
     disableUser: (id) => permissionRequest(`/users/${encodeURIComponent(id)}/disable`, "POST"),
@@ -330,7 +325,20 @@
   }
 
   function normalizeIds(value) {
-    if (Array.isArray(value)) value.forEach((item) => { if (item && item._id && !item.id) item.id = item._id; });
+    if (Array.isArray(value)) value.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      if (item._id && !item.id) item.id = item._id;
+      // Keep the admin templates compatible with both legacy and normalized
+      // order payloads returned by JSON and MySQL sources.
+      if (item.id && !item._id) item._id = item.id;
+      if (Array.isArray(item.productItems) && !Array.isArray(item.products)) item.products = item.productItems;
+      if (Array.isArray(item.items) && !Array.isArray(item.products)) item.products = item.items;
+      if (!item.customer) item.customer = item.contactName || item.name || "";
+      if (item.totalAmount === undefined) item.totalAmount = item.totalPrice !== undefined ? item.totalPrice : item.price;
+      if (item.totalPrice === undefined) item.totalPrice = item.totalAmount;
+      if (item.appointmentAt === undefined) item.appointmentAt = item.date || "";
+      if (item.timePeriod === undefined) item.timePeriod = item.time || "";
+    });
     return value;
   }
 

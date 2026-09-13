@@ -1,64 +1,79 @@
-<div class="city-manage-page">
-  <div class="city-toolbar">
+<div class="lxm-page basic-content-table basic-content-table--city">
+  <header class="lxm-page-head">
     <div>
-      <span class="eyebrow">多城市管理</span>
-      <h3>城市管理</h3>
-      <p>维护鹿小鸣已开通的城市与运营模式。新增城市并设为「运营中」后，小程序城市切换器即可对该城市开放（需配合小程序多城能力）。</p>
+      <span class="lxm-eyebrow">基础内容 · 第一步</span>
+      <h3 class="lxm-page-head__title">城市管理</h3>
+      <p class="lxm-page-head__desc">城市是打卡点、门店和小程序探索页内容的归属根节点。先开通城市，再配置对应的打卡点和拍摄风格。</p>
     </div>
-    <div class="city-toolbar-actions">
-      <el-button plain @click="cityKeyword='';cityStatusFilter=''">重置筛选</el-button>
+    <div class="lxm-page-head__actions">
       <el-button plain @click="openContentLogs('城市管理')">操作日志</el-button>
-      <el-button plain @click="switchMenu('trash')">回收站</el-button>
+      <el-button plain @click="openContentTrash">回收站</el-button>
       <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('cities')">新增城市</el-button>
     </div>
+  </header>
+
+  <div class="lxm-kpi-grid">
+    <div class="lxm-kpi"><span class="lxm-kpi__label">城市总数</span><strong class="lxm-kpi__value">{{ citySummary.total }}</strong><span class="lxm-kpi__hint">含运营中与筹备中</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">运营中</span><strong class="lxm-kpi__value">{{ citySummary.active }}</strong><span class="lxm-kpi__hint">小程序可开放</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">关联打卡点</span><strong class="lxm-kpi__value">{{ citySummary.spots }}</strong><span class="lxm-kpi__hint">城市下的内容资产</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">合作门店</span><strong class="lxm-kpi__value">{{ citySummary.shops }}</strong><span class="lxm-kpi__hint">城市下的渠道门店</span></div>
   </div>
 
-  <div class="city-stat-grid">
-    <div><span>城市总数</span><strong>{{ visibleCities.filter(c=>!c.deleted).length }}</strong><em>含筹备中</em></div>
-    <div><span>运营中</span><strong>{{ visibleCities.filter(c=>!c.deleted && c.status==='运营中').length }}</strong><em>小程序可开放</em></div>
-    <div><span>筹备中</span><strong>{{ visibleCities.filter(c=>!c.deleted && c.status==='筹备中').length }}</strong><em>尚未开放</em></div>
-  </div>
-
-  <div class="city-filter-row">
-    <el-input v-model="cityKeyword" clearable placeholder="搜索城市名称" />
-    <el-select v-model="cityStatusFilter" clearable placeholder="上线状态">
+  <div class="lxm-toolbar">
+    <el-input v-model="cityKeyword" clearable placeholder="搜索城市名称、编码或简介" />
+    <el-select v-model="cityStatusFilter" clearable placeholder="全部上线状态">
       <el-option label="运营中" value="运营中" />
       <el-option label="筹备中" value="筹备中" />
     </el-select>
+    <el-button plain @click="resetCityFilters">重置</el-button>
   </div>
 
-  <section class="city-table-card panel">
+  <section class="lxm-table-card panel">
     <div class="section-title-row compact">
       <div>
-        <h3>城市明细</h3>
-        <p>城市是小程序多城能力的根配置；删除进入回收站，超管可在 30 天内恢复。</p>
+        <h3>城市清单</h3>
+        <p>删除城市前会校验直属打卡点和合作门店，避免留下无法归属的内容资产。</p>
       </div>
       <el-tag type="info">{{ cityRows.length }} 个城市</el-tag>
     </div>
-    <el-table :data="pagedList('cities', cityRows)" border stripe empty-text="暂无符合条件的城市，试试重置筛选或新增城市">
-      <el-table-column label="城市" min-width="200">
+    <el-table :data="pagedList('cities', cityRows)" row-key="id" border stripe empty-text="暂无符合条件的城市，试试重置筛选或新增城市">
+      <el-table-column label="城市" min-width="210">
         <template #default="{row}">
-          <div class="city-name-cell">
-            <i class="city-dot" :class="row.status==='运营中' ? 'on' : 'off'"></i>
-            <div><strong>{{ row.name }}</strong><span>{{ row.id }}</span></div>
+          <div class="basic-content-name-cell">
+            <i class="basic-content-status-dot" :class="{active:isCityActive(row)}"></i>
+            <div><strong>{{ row.name || '未命名城市' }}</strong><span>{{ row.code || row.cityId || row.id }}</span></div>
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="mode" label="运营模式" width="120" />
-      <el-table-column label="上线状态" width="120">
-        <template #default="{row}"><el-tag :type="row.status==='运营中' ? 'success' : 'info'">{{ row.status }}</el-tag></template>
+      <el-table-column prop="mode" label="运营模式" width="112">
+        <template #default="{row}"><span>{{ row.mode || '-' }}</span></template>
       </el-table-column>
-      <el-table-column prop="description" label="简介" min-width="200" show-overflow-tooltip />
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="关联打卡点" width="132" align="center">
+        <template #default="{row}"><el-button link type="primary" @click="viewCitySpots(row)">{{ citySpotCount(row) }} 个</el-button></template>
+      </el-table-column>
+      <el-table-column label="合作门店" width="112" align="center">
+        <template #default="{row}"><strong>{{ cityShopCount(row) }}</strong></template>
+      </el-table-column>
+      <el-table-column label="上线状态" width="112">
+        <template #default="{row}"><el-tag :type="cityStatusType(row)">{{ isCityActive(row) ? '运营中' : '筹备中' }}</el-tag></template>
+      </el-table-column>
+      <el-table-column prop="description" label="运营说明" min-width="240" show-overflow-tooltip>
+        <template #default="{row}"><span class="basic-content-muted">{{ row.description || row.desc || '未填写' }}</span></template>
+      </el-table-column>
+      <el-table-column label="操作" width="236" fixed="right">
         <template #default="{row}">
-          <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
-          <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteCity(row)">删除</el-button>
+          <div class="basic-content-actions">
+            <el-button link type="primary" @click="viewCitySpots(row)">查看点位</el-button>
+            <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
+            <el-button link :type="isCityActive(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleCityVisible(row)">{{ isCityActive(row) ? '筹备' : '开通' }}</el-button>
+            <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteCity(row)">删除</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
-    <div class="table-pager" v-if="cityRows.length > 0">
+    <div class="table-pager" v-if="cityRows.length">
       <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="cityRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('cities').size" :current-page="pager('cities').page" @current-change="pager('cities').page = $event" @size-change="onListPageSizeChange('cities', $event)" />
-      <span class="pager-info">第 {{ Math.min(cityRows.length, (pager('cities').page-1)*pager('cities').size+1) }}–{{ Math.min(cityRows.length, pager('cities').page*pager('cities').size) }} 条 / 共 {{ cityRows.length }} 条</span>
+      <span class="pager-info">第 {{ Math.min(cityRows.length, (pager('cities').page - 1) * pager('cities').size + 1) }}–{{ Math.min(cityRows.length, pager('cities').page * pager('cities').size) }} 条 / 共 {{ cityRows.length }} 条</span>
     </div>
   </section>
 </div>

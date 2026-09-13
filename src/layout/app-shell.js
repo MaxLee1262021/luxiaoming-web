@@ -26,40 +26,20 @@ window.LXM_VIEWS = {
             <div v-if="!searchedMenus.length" class="menu-search-empty">没有找到「{{ state.menuSearch.trim() }}」相关菜单</div>
           </div>
         </div>
-        <div v-for="section in LXM_CONFIG.navSections" :key="section.key" class="menu-section" v-show="!section.hidden && section.items.some(item => roleProfile.menus.includes(item.key || item))">
-          <div class="menu-group"><strong>{{ section.label }}</strong><span>{{ section.desc }}</span></div>
-          <template v-if="section.key==='content'">
-            <button v-if="roleProfile.menus.includes('contentOverview')" class="menu-btn menu-level-1" :class="{active:state.active==='contentOverview'}" title="内容总览" @click="switchMenu('contentOverview')"><span class="menu-mini" v-html="menuIcon('contentOverview')"></span><span class="menu-text">内容总览</span></button>
-            <button v-if="roleProfile.menus.includes('miniDecor')" class="menu-btn menu-level-1" :class="{active:state.active==='miniDecor'}" title="小程序首页" @click="switchMenu('miniDecor')"><span class="menu-mini" v-html="menuIcon('miniDecor')"></span><span class="menu-text">小程序首页</span></button>
-            <button v-if="roleProfile.menus.includes('miniConfig')" class="menu-btn menu-level-1" :class="{active:state.active==='miniConfig'}" title="小程序全局配置" @click="switchMenu('miniConfig')"><span class="menu-mini" v-html="menuIcon('miniConfig')"></span><span class="menu-text">小程序全局配置</span></button>
-            <button v-if="['albums','videoSingles','packages','peripherals','guides'].some(k=>roleProfile.menus.includes(k))" class="content-menu-subtitle" :class="{closed:!state.contentMenuOpen.products}" @click="state.contentMenuOpen.products=!state.contentMenuOpen.products"><span class="sub-dot"></span><span>旅拍内容</span><em>{{ state.contentMenuOpen.products ? '收起' : '展开' }}</em></button>
-            <div v-show="state.contentMenuOpen.products">
-              <button v-if="roleProfile.menus.includes('albums')" class="menu-btn menu-level-1" :class="{active:state.active==='albums'}" title="照片留影" @click="switchMenu('albums')"><span class="menu-mini" v-html="menuIcon('albums')"></span><span class="menu-text">照片留影</span></button>
-              <button v-if="roleProfile.menus.includes('videoSingles')" class="menu-btn menu-level-1" :class="{active:state.active==='videoSingles'}" title="视频摄像" @click="switchMenu('videoSingles')"><span class="menu-mini" v-html="menuIcon('videoSingles')"></span><span class="menu-text">视频摄像</span></button>
-              <button v-if="roleProfile.menus.includes('packages')" class="menu-btn menu-level-1" :class="{active:state.active==='packages'}" title="旅拍套餐" @click="switchMenu('packages')"><span class="menu-mini" v-html="menuIcon('packages')"></span><span class="menu-text">旅拍套餐</span></button>
-              <button v-if="roleProfile.menus.includes('peripherals')" class="menu-btn menu-level-1" :class="{active:state.active==='peripherals'}" title="影像周边" @click="switchMenu('peripherals')"><span class="menu-mini" v-html="menuIcon('peripherals')"></span><span class="menu-text">影像周边</span></button>
-              <button v-if="roleProfile.menus.includes('guides')" class="menu-btn menu-level-1" :class="{active:state.active==='guides'}" title="旅拍灵感" @click="switchMenu('guides')"><span class="menu-mini" v-html="menuIcon('guides')"></span><span class="menu-text">旅拍灵感</span></button>
-            </div>
-            <button v-if="roleProfile.menus.includes('samples')" class="menu-btn menu-level-1" :class="{active:state.active==='samples'}" title="素材库" @click="switchMenu('samples')"><span class="menu-mini" v-html="menuIcon('samples')"></span><span class="menu-text">素材库</span></button>
-            <button v-if="['spots','cities','series'].some(k=>roleProfile.menus.includes(k))" class="content-menu-subtitle" :class="{closed:!state.contentMenuOpen.assets}" @click="state.contentMenuOpen.assets=!state.contentMenuOpen.assets"><span class="sub-dot"></span><span>基础内容</span><em>{{ state.contentMenuOpen.assets ? '收起' : '展开' }}</em></button>
-            <div v-show="state.contentMenuOpen.assets">
-              <button v-if="roleProfile.menus.includes('spots')" class="menu-btn menu-level-1" :class="{active:state.active==='spots'}" title="打卡点" @click="switchMenu('spots')"><span class="menu-mini" v-html="menuIcon('spots')"></span><span class="menu-text">打卡点</span></button>
-              <button v-if="roleProfile.menus.includes('cities')" class="menu-btn menu-level-1" :class="{active:state.active==='cities'}" title="城市" @click="switchMenu('cities')"><span class="menu-mini" v-html="menuIcon('cities')"></span><span class="menu-text">城市</span></button>
-              <button v-if="roleProfile.menus.includes('series')" class="menu-btn menu-level-1" :class="{active:state.active==='series'}" title="拍摄风格" @click="switchMenu('series')"><span class="menu-mini" v-html="menuIcon('series')"></span><span class="menu-text">拍摄风格</span></button>
-            </div>
-            <template v-for="item in section.items.filter(entry => !['contentOverview','miniDecor','miniConfig','albums','videoSingles','packages','peripherals','guides','samples','spots','cities','series'].includes(entry.key || entry))" :key="item.key || item">
-              <button v-if="roleProfile.menus.includes(item.key || item)" class="menu-btn menu-level-1" :class="{active:state.active===(item.key || item)}" @click="switchMenu(item.key || item)"><span class="menu-mini" v-html="menuIcon(item.key || item) || (item.label || (LXM_CONFIG.menus.find(m=>m.key===(item.key || item))||{}).label || '?').slice(0,1)"></span><span class="menu-text">{{ item.label || (LXM_CONFIG.menus.find(m=>m.key===(item.key || item))||{}).label }}</span></button>
-            </template>
-          </template>
-          <template v-else v-for="item in section.items" :key="item.key || item">
-            <button
-              v-if="roleProfile.menus.includes(item.key || item)"
-              class="menu-btn"
-              :class="[{active:state.active===(item.key || item)}, item.level !== undefined ? 'menu-level-' + item.level : '']"
-              @click="switchMenu(item.key || item)"
-            >
-              <span class="menu-mini" v-html="menuIcon(item.key || item) || (item.label || (LXM_CONFIG.menus.find(m=>m.key===item)||{}).label || '?').slice(0,1)"></span><span class="menu-text">{{ item.label || (LXM_CONFIG.menus.find(m=>m.key===item)||{}).label }}</span>
+        <div v-for="section in sidebarSections" :key="section.key" class="menu-section">
+          <div class="menu-group"><strong>{{ section.label }}</strong></div>
+          <template v-for="item in section.items" :key="item.key">
+            <button v-if="item.navigable" class="menu-btn" :class="{active:state.active===item.key}" :data-menu-key="item.key" data-menu-level="1" :title="item.label" @click="switchMenu(item.key)">
+              <span class="menu-mini" v-html="menuIcon(item.key) || item.label.slice(0,1)"></span><span class="menu-text">{{ item.label }}</span>
             </button>
+            <div v-else class="menu-btn menu-folder" :data-menu-key="item.key" data-menu-level="1" aria-disabled="true">
+              <span class="menu-mini" v-html="menuIcon(item.key) || item.label.slice(0,1)"></span><span class="menu-text">{{ item.label }}</span>
+            </div>
+            <div v-if="item.children.length" class="menu-folder-body">
+              <button v-for="child in item.children" :key="child.key" class="menu-btn menu-level-2" :class="{active:state.active===child.key}" :data-menu-key="child.key" data-menu-level="2" :title="child.label" @click="switchMenu(child.key)">
+                <span class="menu-mini" v-html="menuIcon(child.key) || child.label.slice(0,1)"></span><span class="menu-text">{{ child.label }}</span>
+              </button>
+            </div>
           </template>
         </div>
       </aside>
@@ -126,7 +106,8 @@ window.LXM_VIEWS = {
         </header>
 
         <section class="lxm-content">
-          <component :is="activePageComponent" />
+          <component v-if="activePageComponent" :is="activePageComponent" />
+          <div v-else class="empty-state">当前角色未获授权菜单</div>
         </section>
       </main>
 
@@ -267,13 +248,9 @@ window.LXM_VIEWS = {
             <div class="service-workbench-body">
               <div class="service-card flow-card">
                 <div class="service-card-head"><strong>订单流程</strong><span>{{ serviceFlowCurrent(state.currentOrder).note }}</span></div>
-                <div v-if="state.currentOrder.status==='shooting' && !['done','delivered'].includes(state.currentOrder.customerStatus)" class="stage-operation-note">
-                  <strong>拍摄中可继续处理</strong>
-                  <span>可登记/确认尾款、添加跟进、提交售后；普通客服不可改派摄影师或改期，异常换人/改期由超管处理。</span>
-                </div>
                 <div class="status-steps flow-steps">
                   <template v-for="(step,index) in serviceFlowSteps" :key="step.key">
-                    <el-tooltip :content="serviceFlowDisabledReason(step,state.currentOrder) || '可推进到该状态'" placement="top" :disabled="canSetServiceFlowStep(step,state.currentOrder)">
+                    <el-tooltip :content="serviceFlowDisabledReason(step,state.currentOrder) || step.note" placement="top" :disabled="canSetServiceFlowStep(step,state.currentOrder)">
                       <span class="disabled-tip-wrap"><button class="step-node" :class="serviceFlowClass(index,state.currentOrder)" :disabled="!canSetServiceFlowStep(step,state.currentOrder)" @click="setServiceFlowStep(step)">
                         <span class="step-dot">{{ index + 1 }}</span>
                         <span class="step-label">{{ step.label }}</span>
@@ -281,6 +258,14 @@ window.LXM_VIEWS = {
                     </el-tooltip>
                     <span v-if="index < serviceFlowSteps.length - 1" class="step-line" :class="{done:index < serviceFlowIndex(state.currentOrder)}"></span>
                   </template>
+                </div>
+                <div class="flow-action-row">
+                  <el-button v-if="canAcceptOrder(state.currentOrder)" size="small" type="primary" plain @click="acceptOrder(state.currentOrder)">接单并联系</el-button>
+                  <el-button v-if="canDispatchOrder(state.currentOrder)" size="small" type="primary" @click="openDispatchDialog(state.currentOrder)">确认安排并派单</el-button>
+                  <el-button v-if="canStartTask(state.currentOrder)" size="small" type="primary" plain @click="startShooting(state.currentOrder)">开始拍摄</el-button>
+                  <el-button v-if="canCompleteTask(state.currentOrder)" size="small" type="warning" plain @click="completeShooting(state.currentOrder)">标记拍摄完成</el-button>
+                  <el-button v-if="canConfirmOfflineSelection(state.currentOrder)" size="small" type="warning" @click="confirmOfflineSelection(state.currentOrder)">确认线下选片</el-button>
+                  <el-button v-if="canDeliverOrder(state.currentOrder)" size="small" type="success" @click="deliverOrder(state.currentOrder)">登记成片交付</el-button>
                 </div>
                 <div class="status-meta">
                   <span><b>内部订单状态</b><em class="tag-internal">{{ serviceInternalStatusLabel(state.currentOrder) }}</em></span>
@@ -308,7 +293,9 @@ window.LXM_VIEWS = {
                   <label><span>微信号</span><div class="contact-list"><strong>{{ visibleWechat(state.currentOrder) }}</strong><small v-for="item in (state.currentOrder.extraWechats || [])" :key="item">{{ item }}</small><div class="contact-add"><el-input v-model="state.contactDraft.wechat" size="small" placeholder="新增微信号" :disabled="!canEditCurrentOrder()" /><el-button size="small" plain :disabled="!canEditCurrentOrder() || !state.contactDraft.wechat" @click="addOrderContact('wechat')">新增</el-button></div></div></label>
                   <label><span>订单来源</span><div class="plain-value"><strong>{{ orderSourceTypeText(state.currentOrder) }}</strong><small>{{ orderSourceName(state.currentOrder) }}</small></div></label>
                   <label><span>负责客服</span><div class="plain-value"><strong>{{ serviceOwnerName(state.currentOrder) }}</strong><small>跟当前客服账号绑定</small></div></label>
-                  <label><span>摄影师</span><div class="plain-action"><div><strong>{{ photographerDisplayName(state.currentOrder.photographerId) }}</strong><small>{{ canDispatchOrder(state.currentOrder) ? '预约成功后可安排摄影师' : dispatchDisabledReason(state.currentOrder) }}</small></div><el-tooltip :content="dispatchDisabledReason(state.currentOrder)" placement="top" :disabled="canDispatchOrder(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!canDispatchOrder(state.currentOrder)" @click="openDispatchDialog(state.currentOrder)">安排</el-button></span></el-tooltip></div></label>
+                  <label><span>摄影师</span><div class="plain-action"><div><strong>{{ photographerDisplayName(state.currentOrder.photographerId) }}</strong><small>{{ canDispatchOrder(state.currentOrder) ? '订金确认后可安排摄影师' : dispatchDisabledReason(state.currentOrder) }}</small></div><el-tooltip :content="dispatchDisabledReason(state.currentOrder)" placement="top" :disabled="canDispatchOrder(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!canDispatchOrder(state.currentOrder)" @click="openDispatchDialog(state.currentOrder)">安排</el-button></span></el-tooltip></div></label>
+                  <label><span>确认拍摄地点</span><div class="plain-value"><strong>{{ state.currentOrder.appointmentLocation || state.currentOrder.shootLocation || state.currentOrder.location || '待确认' }}</strong><small>派单确认后同步给摄影师</small></div></label>
+                  <label><span>参与人数</span><div class="plain-value"><strong>{{ state.currentOrder.peopleCount || state.currentOrder.participantCount || '待确认' }}</strong><small>以派单确认信息为准</small></div></label>
                   <label class="wide"><span>预约时间</span><div class="plain-action"><div><strong>{{ state.currentOrder.appointmentAt || '待确认' }}</strong><small>{{ state.currentOrder.timePeriod || '待客服确认' }}</small></div><el-tooltip :content="rescheduleDisabledReason(state.currentOrder)" placement="top" :disabled="canRescheduleOrder(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!canRescheduleOrder(state.currentOrder)" @click="openRescheduleDialog(state.currentOrder)">改期拍摄</el-button></span></el-tooltip></div></label>
                 </div>
               </div>
@@ -319,13 +306,15 @@ window.LXM_VIEWS = {
                   <div class="amount-row"><span class="amount-label">订单总价<small>原始订单金额，不可修改</small></span><span class="amount-value total">{{ money(state.currentOrder.totalAmount) }}</span></div>
                   <div class="amount-row"><span class="amount-label">优惠券减免<small>客人有优惠时添加</small></span><span class="amount-action-value"><span v-if="state.currentOrder.finalDiscountAmount" class="coupon-tag">优惠 -{{ money(state.currentOrder.finalDiscountAmount) }}</span><span v-else class="amount-tag none">未添加</span><el-button size="small" plain :disabled="!!state.moneyEdit || !canEditCurrentOrder() || ['待审','已审','待审核','已审核'].includes(state.currentOrder.finalFinanceStatus)" @click="enableMoneyEdit('couponAmount')">添加优惠券</el-button></span></div>
                   <div v-if="state.moneyEdit==='couponAmount'" class="coupon-editor amount-editor"><label>优惠金额</label><el-input-number v-model="state.moneyDraft" :min="0" :max="Math.max(Number(state.currentOrder.totalAmount || 0) - Number(state.currentOrder.depositPaid || 0), 0)" /><label>优惠原因</label><el-input v-model="state.currentOrder.priceAdjustReason" type="textarea" :rows="2" :disabled="!canEditCurrentOrder()" placeholder="请填写优惠原因，如：新客首单优惠" /><div class="edit-actions"><el-button size="small" @click="cancelMoneyEdit">取消</el-button><el-button size="small" type="primary" @click="confirmMoneyEdit('couponAmount')">确认添加</el-button></div></div>
-                  <div class="amount-row"><span class="amount-label">已收定金<small>{{ normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='已审' ? '财务已核对到账' : normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='待审' ? '已提交财务核对' : normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='已驳' ? '财务已驳回，请重新核对' : '客服登记，确认后锁定' }}</small></span><span class="amount-action-value deposit-action" :title="depositPaymentDisabledReason(state.currentOrder)"><span v-if="['待审','已审','已驳'].includes(normalizeReviewStatus(state.currentOrder.depositFinanceStatus))" :class="['amount-tag', normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='已审' ? 'done' : normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='已驳' ? 'rejected' : 'pending']">{{ normalizeReviewStatus(state.currentOrder.depositFinanceStatus) }}</span><el-input-number v-model="state.currentOrder.depositPaid" :min="0" :disabled="!canRegisterDepositPayment(state.currentOrder)" /><el-button size="small" type="primary" plain :disabled="!canRegisterDepositPayment(state.currentOrder) || !state.currentOrder.depositPaid" @click="confirmPaymentRegistration('depositPaid')">确认</el-button></span></div>
-                  <div class="amount-row"><span class="amount-label">应收尾款<small>= 订单总价 - 优惠 - 定金</small></span><span class="amount-action-value"><span class="amount-value">{{ money(expectedFinalAmount(state.currentOrder)) }}</span><el-tooltip :content="finalPaymentDisabledReason(state.currentOrder)" placement="top" :disabled="canConfirmFinalPayment(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" type="primary" plain :disabled="!canConfirmFinalPayment(state.currentOrder)" @click="confirmFinalPaymentWithCheck">确认尾款</el-button></span></el-tooltip></span></div>
+                  <div class="amount-row"><span class="amount-label">应收订金<small>{{ state.currentOrder.depositPaymentStatus==='confirmed' || normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='已审' ? '财务已核对到账' : state.currentOrder.depositPaymentStatus==='pending' || normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='待审' ? '已提交财务核对' : '客服登记后由财务确认到账' }}</small></span><span class="amount-action-value deposit-action"><span class="amount-value">{{ money(state.currentOrder.depositDue || 0) }}</span><span v-if="state.currentOrder.depositPaymentStatus==='pending' || ['待审','已审','已驳'].includes(normalizeReviewStatus(state.currentOrder.depositFinanceStatus))" :class="['amount-tag', normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='已审' ? 'done' : normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='已驳' ? 'rejected' : 'pending']">{{ normalizeReviewStatus(state.currentOrder.depositFinanceStatus)==='未提' ? '待登记' : normalizeReviewStatus(state.currentOrder.depositFinanceStatus) }}</span><el-tooltip :content="depositPaymentActionDisabledReason(state.currentOrder)" placement="top" :disabled="canRegisterDepositPaymentAction(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" type="primary" plain :disabled="!canRegisterDepositPaymentAction(state.currentOrder)" @click="confirmPaymentRegistration('depositPaid')">登记订金</el-button></span></el-tooltip></span></div>
+                  <div class="amount-row"><span class="amount-label">应收尾款<small>线下选片与成片交付登记后开放，财务到账确认后可完成</small></span><span class="amount-action-value"><span class="amount-value">{{ money(state.currentOrder.finalDue !== undefined ? state.currentOrder.finalDue : expectedFinalAmount(state.currentOrder)) }}</span><el-tooltip :content="finalPaymentDisabledReason(state.currentOrder)" placement="top" :disabled="canRegisterFinalPayment(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" type="primary" plain :disabled="!canRegisterFinalPayment(state.currentOrder)" @click="confirmFinalPaymentWithCheck">登记尾款</el-button></span></el-tooltip></span></div>
                   <div class="amount-row"><span class="amount-label">财务待审核入账<small>客服已登记、财务未审核</small></span><span class="amount-value finance">{{ money(financePendingAmount(state.currentOrder)) }}</span></div>
                 </div>
-                <div v-if="!isDepositRegistrationConfirmed(state.currentOrder)" class="amount-alert warn"><span>!</span><p><b>请先完成定金登记</b>定金登记后即可确认尾款；财务审核通过后才会进入月度对账。</p></div>
-                <div v-else-if="finalGap(state.currentOrder)>0" class="amount-alert warn"><span>!</span><p><b>尾款未收齐</b>若客人享受优惠，请先添加优惠券。</p></div>
-                <div v-else class="amount-alert success"><span>✓</span><p><b>客服收款口径已对平</b>{{ state.currentOrder.finalDiscountAmount ? '已记录优惠券减免，等待财务复核。' : '定金与尾款已覆盖订单应收金额。' }}</p></div>
+                <div v-if="!isPhaseConfirmed(state.currentOrder,'deposit')" class="amount-alert warn"><span>!</span><p><b>等待订金到账确认</b>订金经财务确认后才能派单。</p></div>
+                <div v-else-if="!isSelectionConfirmed(state.currentOrder)" class="amount-alert warn"><span>!</span><p><b>等待线下选片确认</b>拍摄完成后登记选片，才可登记成片交付。</p></div>
+                <div v-else-if="!hasDeliveryRecord(state.currentOrder)" class="amount-alert warn"><span>!</span><p><b>等待成片交付登记</b>交付记录完成后才会开放尾款登记。</p></div>
+                <div v-else-if="!isPhaseConfirmed(state.currentOrder,'final')" class="amount-alert warn"><span>!</span><p><b>等待尾款到账确认</b>尾款经财务确认后才可完成订单。</p></div>
+                <div v-else class="amount-alert success"><span>✓</span><p><b>收款事实已确认</b>可继续登记交付或完成订单。</p></div>
               </div>
 
               <div class="service-card">
@@ -336,7 +325,7 @@ window.LXM_VIEWS = {
               <div class="bottom-actions">
                 <el-button type="primary" :loading="state.saving" :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed'" @click="saveOrder">{{ state.currentOrder.status==='shooting' ? '保存履约备注' : '确认客户信息' }}</el-button>
                 <el-tooltip v-if="canEditCurrentOrder()" :content="isOrderAfterSaleLocked(state.currentOrder) ? '售后处理中，请先完成当前售后工单' : '发起新的售后工单'" placement="top" :disabled="!isOrderAfterSaleLocked(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="warning" plain :disabled="isOrderAfterSaleLocked(state.currentOrder)" @click="openAfterSaleSubmit()">提交售后</el-button></span></el-tooltip>
-                <el-tooltip :content="completeDisabledReason(state.currentOrder)" placement="top" :disabled="canEditCurrentOrder() && state.currentOrder.status!=='completed' && canCompleteOrderPayment(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="success" plain :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed' || !canCompleteOrderPayment(state.currentOrder)" @click="openCompleteOrderDialog(state.currentOrder)">订单完成</el-button></span></el-tooltip>
+                  <el-tooltip :content="completeDisabledReason(state.currentOrder)" placement="top" :disabled="canCompleteWorkflow(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="success" plain :disabled="!canCompleteWorkflow(state.currentOrder)" @click="openCompleteOrderDialog(state.currentOrder)">订单完成</el-button></span></el-tooltip>
                 <el-tooltip v-if="can('cancelOrder')" :content="cancelDisabledReason(state.currentOrder)" placement="top" :disabled="canEditCurrentOrder() && state.currentOrder.status!=='completed' && !isOrderAfterSaleLocked(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="danger" plain :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed' || isOrderAfterSaleLocked(state.currentOrder)" @click="cancelOrder(state.currentOrder)">订单取消</el-button></span></el-tooltip>
               </div>
             </div>
@@ -454,7 +443,7 @@ window.LXM_VIEWS = {
 
     <el-dialog :close-on-click-modal="false" v-model="state.completeOrderDialog" title="订单完成核对" width="620px">
       <div v-if="state.currentOrder" class="complete-check">
-        <div class="note-box warning"><b>完成前核对</b><p>订单完成前请确认成片已交付，且客服已登记定金、尾款并对平订单应收金额；未审核通过的金额可以完成履约，但不会进入月度对账和分成。</p></div>
+        <div class="note-box warning"><b>完成前核对</b><p>订单完成前请确认成片已交付，且定金与尾款均已由财务确认到账。未确认的收款或缺少交付记录不能完成订单。</p></div>
         <div class="detail-grid compact">
           <div class="detail-item"><span>订单号</span><strong>{{ state.currentOrder.orderNo }}</strong></div>
           <div class="detail-item"><span>客户</span><strong>{{ state.currentOrder.customer }}</strong></div>
@@ -465,12 +454,11 @@ window.LXM_VIEWS = {
           <div class="detail-item"><span>尾款差额</span><strong :class="{danger:finalGap(state.currentOrder)>0}">{{ money(finalGap(state.currentOrder)) }}</strong></div>
           <div class="detail-item"><span>财务待审核入账</span><strong :class="{danger:financePendingAmount(state.currentOrder)>0}">{{ money(financePendingAmount(state.currentOrder)) }}</strong></div>
         </div>
-        <div v-if="state.currentOrder && financeDue(state.currentOrder)>0" class="note-box warning"><b>对账提醒</b><p>当前还有金额未通过财务审核；订单可先完成履约，但该金额暂不进入月度对账，需财务审核通过后统计入账。</p></div>
-        <el-input v-model="state.completeOrderNote" type="textarea" :rows="3" placeholder="填写尾款核对备注，例如：客服已登记尾款，成片已发送给客人，待财务复核到账。" />
+        <el-input v-model="state.completeOrderNote" type="textarea" :rows="3" placeholder="填写完成备注，例如：交付方式、客户确认情况或异常说明。" />
       </div>
       <template #footer>
         <el-button @click="state.completeOrderDialog=false">取消</el-button>
-        <el-button type="primary" :disabled="!canCompleteOrderPayment(state.currentOrder)" @click="confirmCompleteOrder">确认订单完成</el-button>
+        <el-button type="primary" :disabled="!canCompleteWorkflow(state.currentOrder)" @click="confirmCompleteOrder">确认订单完成</el-button>
       </template>
     </el-dialog>
 
@@ -604,7 +592,7 @@ window.LXM_VIEWS = {
         <label class="wide"><span>下单商品</span><el-select v-model="state.manualOrderForm.productId" filterable placeholder="选择套餐、短视频、增值服务或周边"><el-option v-for="p in manualOrderProducts" :key="p.productType + '-' + p.id" :label="p.name + ' / ' + money(p.specialPrice || p.price || 0)" :value="p.id" /></el-select></label>
         <label><span>拍摄时间</span><el-date-picker v-model="state.manualOrderForm.appointmentAt" type="datetime" value-format="YYYY-MM-DD HH:mm" format="YYYY-MM-DD HH:mm" placeholder="选择拍摄时间" /></label>
         <label><span>预约时段</span><el-select v-model="state.manualOrderForm.timePeriod"><el-option label="上午" value="上午" /><el-option label="下午" value="下午" /><el-option label="晚上" value="晚上" /><el-option label="待客服确认" value="待客服确认" /></el-select></label>
-        <label><span>已收定金</span><el-input-number v-model="state.manualOrderForm.depositPaid" :min="0" /></label>
+        <div class="dialog-note wide">订单创建后默认进入待付订金。请在订单详情通过“登记订金”创建核对记录，财务确认到账后才能派单。</div>
         <label class="wide"><span>内部备注</span><el-input v-model="state.manualOrderForm.internalNote" type="textarea" :rows="3" placeholder="仅后台可见，例如沟通重点、服装需求、特殊行程" /></label>
       </div>
       <template #footer>
@@ -615,7 +603,11 @@ window.LXM_VIEWS = {
     <el-dialog :close-on-click-modal="false" v-model="state.dispatchDialog" title="安排摄影师" width="620px">
       <div class="form-grid labeled-form single">
         <label><span>摄影师</span><el-select v-model="state.dispatchForm.photographerId" filterable placeholder="请选择摄影师"><el-option v-for="s in photographers" :key="s.id" :label="s.name" :value="s.id" /></el-select></label>
-        <label><span>派单备注</span><el-input v-model="state.dispatchForm.note" type="textarea" :rows="3" placeholder="例如客人偏好、拍摄地点、注意事项" /></label>
+        <label><span>确认拍摄时间</span><el-date-picker v-model="state.dispatchForm.appointmentAt" type="datetime" value-format="YYYY-MM-DD HH:mm" format="YYYY-MM-DD HH:mm" placeholder="选择确认拍摄时间" /></label>
+        <label><span>确认时段</span><el-select v-model="state.dispatchForm.timePeriod" clearable placeholder="可选"><el-option label="上午" value="上午" /><el-option label="下午" value="下午" /><el-option label="晚上" value="晚上" /></el-select></label>
+        <label><span>确认拍摄地点</span><el-input v-model="state.dispatchForm.appointmentLocation" placeholder="填写实际集合或拍摄地点" /></label>
+        <label><span>参与人数</span><el-input-number v-model="state.dispatchForm.peopleCount" :min="1" :max="20" /></label>
+        <label class="full"><span>派单备注</span><el-input v-model="state.dispatchForm.note" type="textarea" :rows="3" placeholder="例如客人偏好、妆造需求、拍摄注意事项" /></label>
       </div>
       <template #footer>
         <el-button @click="state.dispatchDialog=false">取消</el-button>
@@ -762,13 +754,12 @@ window.LXM_VIEWS = {
         <div class="form-grid labeled-form">
           <label><span>姓名</span><el-input v-model="state.editStaff.name" placeholder="请输入员工姓名" /></label>
           <label><span>登录账号</span><el-input v-model="state.editStaff.account" placeholder="用于后台登录" /></label>
-          <label><span>登录密码</span><el-input v-model="state.editStaff.password" type="password" show-password placeholder="至少 8 位，含字母和数字；编辑时留空则不修改" /></label>
+          <label v-if="!state.editStaff.id || isAdminAccount"><span>登录密码</span><el-input v-model="state.editStaff.password" type="password" show-password placeholder="至少 8 位，含字母和数字；编辑时留空则不修改" /></label>
           <label><span>手机号</span><el-input v-model="state.editStaff.phone" placeholder="员工联系电话" /></label>
-          <label><span>角色</span><el-select v-model="state.editStaff.role" placeholder="选择角色" @change="applyRoleDefaultPermissions"><el-option v-for="(r,k) in LXM_CONFIG.roles" :key="k" :label="r.name" :value="k" /></el-select></label>
+          <label><span>角色</span><el-select v-model="state.editStaff.role" placeholder="选择角色"><el-option v-for="(r,k) in LXM_CONFIG.roles" :key="k" :label="r.name" :value="k" /></el-select></label>
           <label v-if="state.editStaff.role==='photo'"><span>摄影师分成比例</span><el-input-number v-model="state.editStaff.commissionRate" :min="0" :max="100" /><em>%</em></label>
           <label v-if="state.editStaff.role==='photo'"><span>摄影师结算周期</span><el-select v-model="state.editStaff.settlementCycle" placeholder="选择结算周期"><el-option v-for="c in LXM_CONFIG.settlementCycles" :key="c" :label="c" :value="c" /></el-select></label>
         </div>
-        <div class="permission-edit"><div class="section-title-row"><h3>权限配置</h3><el-button size="small" @click="applyRoleDefaultPermissions">套用角色默认权限</el-button></div><el-checkbox-group v-model="state.editStaff.permissionKeys"><el-checkbox v-for="p in LXM_CONFIG.permissionMatrix" :key="p.key" :label="p.key">{{ p.name }}</el-checkbox></el-checkbox-group><p>人员管理只维护内部账号、角色权限和摄影师分成规则；订单、营业额、月度核对统一到经营看板和财务管理查看。</p></div>
       </div>
       <template #footer><el-button @click="state.staffDialog=false">取消</el-button><el-button type="primary" @click="saveStaff">保存</el-button></template>
     </el-dialog>
@@ -779,7 +770,7 @@ window.LXM_VIEWS = {
           <label><span>分销员姓名</span><el-input v-model="state.editDistributor.name" placeholder="请输入姓名" /></label>
           <label><span>手机号</span><el-input v-model="state.editDistributor.phone" placeholder="分销员联系电话" /></label>
           <label><span>登录账号</span><el-input v-model="state.editDistributor.account" placeholder="用于后台登录" /></label>
-          <label><span>登录密码</span><el-input v-model="state.editDistributor.password" type="password" show-password placeholder="至少 8 位，含字母和数字；编辑时留空则不修改" /></label>
+          <label v-if="!state.editDistributor.id || isAdminAccount"><span>登录密码</span><el-input v-model="state.editDistributor.password" type="password" show-password placeholder="至少 8 位，含字母和数字；编辑时留空则不修改" /></label>
           <label><span>分销分成比例</span><el-input-number v-model="state.editDistributor.commissionRate" :min="0" :max="100" /><em>%</em></label>
           <label><span>结算周期</span><el-select v-model="state.editDistributor.settlementCycle" placeholder="选择结算周期"><el-option v-for="c in LXM_CONFIG.settlementCycles" :key="c" :label="c" :value="c" /></el-select></label>
           <label><span>账号状态</span><el-select v-model="state.editDistributor.status" placeholder="选择状态"><el-option label="启用" value="启用" /><el-option label="停用" value="停用" /></el-select></label>
@@ -816,7 +807,7 @@ window.LXM_VIEWS = {
           <label><span>二维码场景</span><el-input v-model="state.editShop.scene" placeholder="如门店台卡、桌贴、海报" /></label>
           <label><span>二维码位置</span><el-input v-model="state.editShop.qrPosition" placeholder="如收银台、靠窗区、前台海报" /></label>
           <label><span>商家登录账号</span><el-input v-model="state.editShop.account" placeholder="商家后台登录账号" /></label>
-          <label><span>商家登录密码</span><el-input v-model="state.editShop.password" type="password" show-password placeholder="至少 8 位，含字母和数字；编辑时留空则不修改" /></label>
+          <label v-if="!state.editShop.id || isAdminAccount"><span>商家登录密码</span><el-input v-model="state.editShop.password" type="password" show-password placeholder="至少 8 位，含字母和数字；编辑时留空则不修改" /></label>
           <label><span>商家分成比例</span><el-input-number v-model="state.editShop.commissionRate" :min="0" :max="100" /><em>%</em></label>
           <label><span>结算周期</span><el-select v-model="state.editShop.settlementCycle" placeholder="选择结算周期"><el-option v-for="c in LXM_CONFIG.settlementCycles" :key="c" :label="c" :value="c" /></el-select></label>
           <label><span>合作状态</span><el-select v-model="state.editShop.status"><el-option label="合作中" value="合作中" /><el-option label="暂停合作" value="暂停合作" /></el-select></label>
@@ -920,9 +911,15 @@ window.LXM_VIEWS = {
           </div>
         </div>
         <div v-if="state.editContent.__key==='spots'" class="content-form-section">
-          <div class="content-form-section-head"><strong>点位资料</strong><span>地址、风格、标签与热度用于小程序打卡点详情页与首页排序展示。</span></div>
+          <div class="content-form-section-head"><strong>点位资料</strong><span>地址、风格、标签与热度用于小程序打卡点详情页与首页排序；经纬度用于探索地图标记，未填写时点位不显示图钉。</span></div>
           <div class="form-grid">
+            <label class="map-picker-field"><span>地图选点</span><div class="map-picker-field__row"><el-button plain type="primary" @click="openAmapPicker">高德地图选点</el-button><span class="map-picker-field__value">{{ amapPickerCoordinateText(state.editContent) }}</span></div></label>
+            <label><span>所属城市</span><el-select v-model="state.editContent.cityId" filterable placeholder="选择已开通城市"><el-option v-for="city in data.cities.filter(i=>!i.deleted && !i.isDeleted)" :key="city.id || city._id" :label="city.name" :value="city.id || city._id" /></el-select></label>
             <label><span>详细地址</span><el-input v-model="state.editContent.address" placeholder="如 长沙市天心区湘江中路" /></label>
+            <label><span>区域 / 商圈</span><el-input v-model="state.editContent.district" placeholder="如 天心区、解放西" /></label>
+            <label><span>纬度</span><el-input-number v-model="state.editContent.latitude" :min="-90" :max="90" :precision="6" :step="0.000001" controls-position="right" placeholder="如 28.195000" /></label>
+            <label><span>经度</span><el-input-number v-model="state.editContent.longitude" :min="-180" :max="180" :precision="6" :step="0.000001" controls-position="right" placeholder="如 112.950000" /></label>
+            <label><span>坐标系</span><el-input :model-value="amapCoordinateSystemText(state.editContent)" disabled /></label>
             <label><span>热度分</span><el-input-number v-model="state.editContent.hotScore" :min="0" :max="10" :step="0.1" /></label>
             <label><span>打卡人数</span><el-input-number v-model="state.editContent.checkinCount" :min="0" /></label>
             <label><span>风格标签</span><el-select v-model="state.editContent.styles" multiple filterable allow-create placeholder="如 国风/江景/夜景"><el-option v-for="t in tagOptions()" :key="t.id" :label="t.name" :value="t.name" /></el-select></label>
@@ -963,10 +960,13 @@ window.LXM_VIEWS = {
           </div>
         </div>
         <div v-if="state.editContent.__key==='cities'" class="content-form-section">
-          <div class="content-form-section-head"><strong>城市配置</strong><span>运营模式与上线状态决定小程序城市切换器是否对该城市开放（需配合小程序多城能力）。</span></div>
+          <div class="content-form-section-head"><strong>城市配置</strong><span>运营模式与上线状态决定小程序城市切换器是否开放；城市中心坐标用于该城市没有可定位点位时的探索地图视野。</span></div>
           <div class="form-grid">
             <label><span>运营模式</span><el-select v-model="state.editContent.mode" clearable placeholder="运营模式"><el-option label="直营" value="直营" /><el-option label="加盟" value="加盟" /></el-select></label>
             <label><span>上线状态</span><el-select v-model="state.editContent.status" clearable placeholder="上线状态"><el-option label="运营中" value="运营中" /><el-option label="筹备中" value="筹备中" /></el-select></label>
+            <label><span>城市中心纬度</span><el-input-number v-model="state.editContent.latitude" :min="-90" :max="90" :precision="6" :step="0.000001" controls-position="right" placeholder="探索地图中心" /></label>
+            <label><span>城市中心经度</span><el-input-number v-model="state.editContent.longitude" :min="-180" :max="180" :precision="6" :step="0.000001" controls-position="right" placeholder="探索地图中心" /></label>
+            <label><span>坐标系</span><el-select v-model="state.editContent.coordType"><el-option label="GCJ-02（微信地图）" value="gcj02" /><el-option label="WGS-84（GPS）" value="wgs84" /><el-option label="BD-09（百度地图）" value="bd09" /></el-select></label>
           </div>
           <el-input v-model="state.editContent.description" type="textarea" :rows="2" placeholder="城市简介（可选，用于小程序城市介绍与运营备注）" />
         </div>
@@ -1081,6 +1081,29 @@ window.LXM_VIEWS = {
         </div>
       </div>
       <template #footer><el-button @click="state.contentDialog=false">取消</el-button><el-button type="primary" @click="saveContent">保存</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="state.amapPicker.open" title="地图选点" width="820px" class="amap-picker-dialog" append-to-body destroy-on-close :close-on-click-modal="false" @closed="onAmapPickerClosed">
+      <div class="amap-picker-shell">
+        <div class="amap-picker-selection"><div class="amap-picker-selection__copy"><strong>{{ amapPickerCoordinateText() }}</strong><span>{{ amapPickerAddressText() }}</span></div><el-tag size="small" type="info" effect="plain">GCJ-02</el-tag></div>
+        <div class="amap-picker-search" role="search">
+          <el-input v-model="state.amapPicker.searchKeyword" clearable placeholder="搜索地点、地址或地标" :disabled="state.amapPicker.loading || !!state.amapPicker.error" @input="clearAmapPickerSearchResults" @keyup.enter="searchAmapPicker">
+            <template #append><el-button :loading="state.amapPicker.searching" :disabled="state.amapPicker.loading || !!state.amapPicker.error || !state.amapPicker.searchKeyword.trim()" @click="searchAmapPicker">搜索</el-button></template>
+          </el-input>
+        </div>
+        <div v-if="state.amapPicker.searchError" class="amap-picker-search-feedback" role="status" aria-live="polite">{{ state.amapPicker.searchError }}</div>
+        <div class="amap-picker-map-wrap">
+          <div v-if="state.amapPicker.searchResults.length" class="amap-picker-search-results" role="list" aria-label="地点搜索结果">
+            <button v-for="result in state.amapPicker.searchResults" :key="result.id" type="button" class="amap-picker-search-result" role="listitem" :title="result.name" @click="selectAmapPickerSearchResult(result)">
+              <strong>{{ result.name }}</strong>
+              <span>{{ amapPickerSearchResultText(result) }}</span>
+            </button>
+          </div>
+          <div id="lxm-amap-coordinate-picker" class="amap-picker-map" aria-label="高德地图坐标选择器"></div>
+          <div v-if="state.amapPicker.loading" class="amap-picker-overlay" role="status"><i class="amap-picker-spinner" aria-hidden="true"></i><span>地图加载中</span></div>
+          <div v-else-if="state.amapPicker.error" class="amap-picker-overlay amap-picker-overlay--error"><span>{{ state.amapPicker.error }}</span><el-button size="small" plain @click="retryAmapPicker">重试</el-button></div>
+        </div>
+      </div>
+      <template #footer><el-button @click="closeAmapPicker">取消</el-button><el-button type="primary" :disabled="state.amapPicker.loading || state.amapPicker.resolvingAddress || !!state.amapPicker.error || !state.amapPicker.selection" @click="applyAmapPickerCoordinate">确认填充</el-button></template>
     </el-dialog>
   </div>`
 };

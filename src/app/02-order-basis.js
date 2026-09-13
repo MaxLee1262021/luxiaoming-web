@@ -16,31 +16,60 @@
     statusDict
   } = ctx;
 
+const CONTENT_EDIT_ROUTES = new Set([
+  "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags",
+  "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "addonServices",
+  "miniDecor", "miniConfig", "guides", "stories"
+]);
+const MENU_ACTION_ROUTES = {
+  dashboard: ["dashboard"],
+  dashboardAll: ["dashboard"],
+  dashboardShop: ["dashboard"],
+  orderAll: ["orders"],
+  orderSelf: ["orders", "tasks"],
+  orderStatus: ["orders"],
+  orderEdit: ["orders"],
+  assign: ["orders"],
+  transfer: ["orders"],
+  cancelOrder: ["orders"],
+  dispatch: ["orders"],
+  financeReview: ["financeReview", "reconciliation"],
+  staff: ["staff"],
+  shop: ["shops"],
+  shopEdit: ["shops"],
+  shopCreate: ["shops"],
+  distributorEdit: ["shops", "distributors"],
+  shootUpdate: ["tasks"],
+  export: ["dashboard", "orders", "afterSales", "tasks", "shops", "financeReview", "reconciliation", "logs"],
+  permissionManage: ["permissions"]
+};
+const BUILTIN_ACTION_CAPS = {
+  super: new Set(["*"]),
+  service: new Set(["view", "dashboard", "orderEdit", "assign", "transfer", "cancelOrder", "export"]),
+  finance: new Set(["view", "dashboard", "financeReview", "export"]),
+  photo: new Set(["view", "shootUpdate"]),
+  merchant: new Set(["view", "dashboard", "export"]),
+  distributor: new Set(["view", "dashboard", "export"]),
+  content: new Set(["view", "contentEdit"]),
+  agent: new Set(["view", "dashboard", "export"])
+};
+function grantedRouteKeys() {
+  const allowed = new Set((roleProfile.value.menus || []).map(String));
+  return new Set((LXM_CONFIG.menus || [])
+    .filter((menu) => menu && allowed.has(String(menu.key)) && !["停用", "disabled", "inactive"].includes(String(menu.status || "").trim().toLowerCase()))
+    .map((menu) => String(menu.routeKey || menu.targetKey || menu.key)));
+}
 function can(action) {
-  if (roleProfile.value.actions.includes("*")) return true;
-  if (!roleProfile.value.actions.includes(action)) return false;
-  // Normalized permission sessions already contain the effective union of
-  // role grants and per-user additions. Do not reinterpret a user's optional
-  // additions as a restrictive allowlist in the browser.
-  if (window.LXM_AUTH?.getSession?.()?.permissionSource) return true;
-  const staff = currentStaff.value;
-  if (!staff || staff.role !== state.role) return true;
-  const custom = staff.permissionKeys || staff.permissions || [];
-  if (!custom.length || custom.includes("*") || custom.includes(action)) return true;
-  const actionPermissionMap = {
-    orderEdit: "orderStatus",
-    assign: "dispatch",
-    transfer: "dispatch",
-    cancelOrder: "orderStatus",
-    export: "dashboardShop",
-    financeReview: "financeReview",
-    shopEdit: "shop",
-    shopCreate: "shop",
-    distributorEdit: "shop",
-    contentEdit: "content",
-    shootUpdate: "orderStatus",
-  };
-  return custom.includes(actionPermissionMap[action]);
+  const routes = grantedRouteKeys();
+  if (!routes.size) return false;
+  if (action === "*") return state.role === "super";
+  const capability = action === "content" ? "contentEdit" : action;
+  const roleCaps = BUILTIN_ACTION_CAPS[state.role];
+  if (roleCaps && !roleCaps.has("*") && !roleCaps.has(capability)) return false;
+  if (capability === "view") return true;
+  if (capability === "contentEdit") return [...CONTENT_EDIT_ROUTES].some((route) => routes.has(route));
+  if (capability === "permissionManage") return state.role === "super" && routes.has("permissions");
+  return (MENU_ACTION_ROUTES[capability] || []).some((route) => routes.has(route));
 }
 function roleName(key) {
   return (LXM_CONFIG.roles[key] || {}).name || key;
@@ -581,7 +610,7 @@ function photographerDisplayName(id) {
   return id ? staffName(id) : "总部摄影";
 }
 function canEditOrder() {
-  return can("orderEdit") && ["super", "service"].includes(state.role);
+  return can("orderEdit");
 }
 function canViewOrderSource() {
   return !["photo", "merchant"].includes(state.role);
@@ -1043,6 +1072,9 @@ function canCompleteOrderPayment(order) {
     timelineText,
     addOrderTimeline,
     statusMeta,
+    isOrderCompletedStatus,
+    isOrderCancelledStatus,
+    isOrderTerminalStatus,
     cityName,
     agentName,
     distributorName,

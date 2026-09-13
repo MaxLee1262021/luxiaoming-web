@@ -1,159 +1,103 @@
-<div class="spot-manage-page">
-  <div class="spot-toolbar">
+<div class="lxm-page basic-content-table basic-content-table--spot">
+  <header class="lxm-page-head">
     <div>
-      <span class="eyebrow">内容资产</span>
-      <h3>打卡点设置</h3>
-      <p>打卡点是内容资产和商品售卖的根目录。这里维护点位资料、小程序可见、热门权重、下属拍摄风格、照片单品、照片套餐、短视频和定点周边。</p>
+      <span class="lxm-eyebrow">基础内容 · 第二步</span>
+      <h3 class="lxm-page-head__title">打卡点管理</h3>
+      <p class="lxm-page-head__desc">打卡点归属到城市，是拍摄风格、照片单品、套餐和短视频的共同挂载点。列表统一展示下游资产与删除保护状态。</p>
     </div>
-    <div class="spot-toolbar-actions">
-      <el-button v-if="can('contentEdit')" plain @click="batchSetSpotVisible(true)">批量展示</el-button>
-      <el-button v-if="can('contentEdit')" plain @click="batchSetSpotVisible(false)">批量隐藏</el-button>
+    <div class="lxm-page-head__actions">
+      <el-button plain v-if="can('contentEdit')" @click="batchSetSpotVisible(true, spotTableRows)">批量展示</el-button>
+      <el-button plain v-if="can('contentEdit')" @click="batchSetSpotVisible(false, spotTableRows)">批量隐藏</el-button>
+      <el-button plain @click="openContentLogs('打卡点设置')">操作日志</el-button>
       <el-button plain @click="openContentTrash">回收站</el-button>
       <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('spots')">新增打卡点</el-button>
     </div>
+  </header>
+
+  <div class="lxm-kpi-grid">
+    <div class="lxm-kpi"><span class="lxm-kpi__label">打卡点</span><strong class="lxm-kpi__value">{{ spotSummary.total }}</strong><span class="lxm-kpi__hint">当前筛选范围</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">小程序展示</span><strong class="lxm-kpi__value">{{ spotSummary.visible }}</strong><span class="lxm-kpi__hint">可在探索页露出</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">关联拍摄风格</span><strong class="lxm-kpi__value">{{ spotSummary.series }}</strong><span class="lxm-kpi__hint">按点位配置的分类</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">关联商品</span><strong class="lxm-kpi__value">{{ spotSummary.products }}</strong><span class="lxm-kpi__hint">套餐、短视频和周边</span></div>
   </div>
 
-  <div class="spot-filter-row">
-    <el-input v-model="state.filters.keyword" clearable placeholder="搜索点位名称、标签、简介" />
-    <el-select v-model="state.filters.contentStatus" clearable placeholder="点位状态">
+  <div class="lxm-toolbar">
+    <el-input v-model="state.filters.keyword" clearable placeholder="搜索点位名称、城市、标签或简介" />
+    <el-select v-model="spotCityFilter" clearable filterable placeholder="全部城市">
+      <el-option v-for="city in spotCityOptions" :key="city.id || city._id" :label="city.name" :value="city.id || city._id" />
+    </el-select>
+    <el-select v-model="state.filters.contentStatus" clearable placeholder="全部状态">
       <el-option label="启用" value="启用" />
       <el-option label="停用" value="停用" />
       <el-option label="草稿" value="草稿" />
     </el-select>
-    <el-button @click="clearContentFilters">重置</el-button>
+    <el-button plain @click="resetSpotFilters">重置</el-button>
   </div>
 
-  <div class="spot-overview-grid">
-    <div><span>打卡点</span><strong>{{ data.spots.filter(s=>!s.deleted).length }}</strong><em>内容资产根目录</em></div>
-    <div><span>照片单品</span><strong>{{ data.albums.filter(a=>!a.deleted).length }}</strong><em>按点位/拍摄风格沉淀素材</em></div>
-    <div><span>公开套餐</span><strong>{{ data.packages.filter(p=>!p.deleted).length }}</strong><em>拍照与短视频统一挂点</em></div>
-    <div><span>摄影周边</span><strong>{{ data.peripherals.filter(p=>!p.deleted).length }}</strong><em>定点专属或全城通用</em></div>
-  </div>
-
-  <div class="spot-layout">
-    <aside class="spot-tree-card">
-      <div class="spot-tree-head">
-        <strong>点位目录</strong>
-        <span>{{ spotRows.length }} 个打卡点</span>
+  <section class="lxm-table-card panel">
+    <div class="section-title-row compact">
+      <div>
+        <h3>打卡点清单</h3>
+        <p>点位删除会先校验拍摄风格、照片单品、商品和订单引用；有依赖时请先通过对应列表迁移或下架。</p>
       </div>
-      <button
-        v-for="spot in spotRows"
-        :key="spot.id"
-        class="spot-tree-item"
-        :class="{active:selectedSpot() && selectedSpot().id===spot.id}"
-        @click="selectSpot(spot.id)"
-      >
-        <img :src="spot.cover" />
-        <span>
-          <b>{{ spot.name }}</b>
-          <em>{{ (spot.tags && spot.tags.length) ? spot.tags.join(' / ') : (spot.tag || '未设置标签') }} · 热度 {{ spot.hotScore || 0 }}</em>
-          <small>拍摄风格 {{ spot.summary.series }} / 商品 {{ spot.summary.products }} / 订单 {{ spot.summary.orders }}</small>
-        </span>
-      </button>
-    </aside>
-
-    <main v-if="selectedSpot()" class="spot-detail-card">
-      <div class="spot-cover-panel">
-        <img :src="selectedSpot().cover" />
-        <div>
-          <el-tag :type="selectedSpot().status==='停用' || selectedSpot().isShow===false ? 'info' : 'success'">{{ selectedSpot().status || '启用' }}</el-tag>
-          <el-tag v-if="selectedSpot().hotScore >= 80" type="danger">热门</el-tag>
-        </div>
-      </div>
-
-      <div class="spot-detail-main">
-        <div class="section-title-row compact">
-          <div>
-            <h3>{{ selectedSpot().name }}</h3>
-            <p>{{ selectedSpot().intro || '暂无点位介绍' }}</p>
+      <el-tag type="info">{{ spotTableRows.length }} 个打卡点</el-tag>
+    </div>
+    <el-table :data="pagedList('spots', spotTableRows)" row-key="id" border stripe empty-text="暂无符合条件的打卡点，试试重置筛选或新增点位">
+      <el-table-column label="打卡点" min-width="250">
+        <template #default="{row}">
+          <div class="basic-content-media-cell">
+            <img v-if="row.cover || row.image" :src="row.cover || row.image" alt="" />
+            <span v-else class="basic-content-media-placeholder">点</span>
+            <div>
+              <strong>{{ row.name || '未命名打卡点' }}</strong>
+              <span>{{ row.address || row.intro || row.description || '未填写点位说明' }}</span>
+            </div>
           </div>
-          <div class="spot-title-actions">
-            <el-button size="small" plain v-if="can('contentEdit')" @click="openContent(selectedSpot())">编辑资料</el-button>
-            <el-button size="small" :type="selectedSpot().isShow===false ? 'success' : 'warning'" plain v-if="can('contentEdit')" @click="toggleSpotVisible(selectedSpot())">{{ selectedSpot().isShow===false ? '开启展示' : '关闭展示' }}</el-button>
+        </template>
+      </el-table-column>
+      <el-table-column label="所属城市" width="132">
+        <template #default="{row}"><span>{{ spotCityName(row) }}</span></template>
+      </el-table-column>
+      <el-table-column label="区域 / 坐标" min-width="170">
+        <template #default="{row}"><span class="basic-content-muted">{{ spotLocationText(row) }}</span></template>
+      </el-table-column>
+      <el-table-column label="内容标签" min-width="160">
+        <template #default="{row}">
+          <div class="basic-content-tag-list">
+            <el-tag v-for="tag in spotTags(row).slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
+            <span v-if="!spotTags(row).length" class="basic-content-muted">未设置</span>
           </div>
-        </div>
-
-        <div class="spot-info-grid">
-          <div><span>所属城市</span><strong>{{ cityName(selectedSpot().cityId) }}</strong></div>
-          <div><span>详细地址</span><strong>{{ selectedSpot().address || '-' }}</strong></div>
-          <div><span>热门标签</span><strong>{{ (selectedSpot().tags && selectedSpot().tags.length) ? selectedSpot().tags.join(' / ') : (selectedSpot().tag || '-') }}</strong></div>
-          <div><span>排序权重</span><strong>{{ selectedSpot().sort || 0 }}</strong></div>
-          <div><span>小程序可见</span><strong>{{ selectedSpot().isShow===false ? '隐藏' : '展示' }}</strong></div>
-          <div><span>热度分</span><strong>{{ selectedSpot().hotScore || 0 }}</strong></div>
-          <div><span>近30天成交额</span><strong>{{ money(spotDependencySummary(selectedSpot()).revenue) }}</strong></div>
-        </div>
-
-        <div class="spot-operation-strip">
-          <button v-if="can('contentEdit')" @click="openContentQuick('series', { spotId: selectedSpot().id })">新增拍摄风格</button>
-          <button v-if="can('contentEdit')" @click="openContentQuick('packages', { spotId: selectedSpot().id, type: 'photo' })">新增照片套餐</button>
-          <button v-if="can('contentEdit')" @click="openContentQuick('packages', { spotId: selectedSpot().id, type: 'video' })">新增短视频</button>
-          <button @click="switchMenu('shelfProducts')">查看货架</button>
-        </div>
-
-        <div class="spot-boundary-note">
-          <strong>点位运营边界</strong>
-          <span>点位只负责资料、展示、排序和关联资产；价格、上下架、主推与审核统一回到商品货架和套餐设置处理。</span>
-        </div>
-
-        <div class="spot-delete-guard" :class="{ok:spotDependencySummary(selectedSpot()).canDelete}">
-          <div>
-            <strong>{{ spotDependencySummary(selectedSpot()).canDelete ? '当前点位可删除' : '当前点位禁止直接删除' }}</strong>
-            <span>有关联拍摄风格、照片单品、在售商品或订单时，必须先解除依赖或下架商品，删除后进入回收站保留 30 天。</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="关联资产" min-width="196">
+        <template #default="{row}">
+          <div class="basic-content-link-list">
+            <el-button link type="primary" @click="goToSeries(row)">风格 {{ row.summary.series }}</el-button>
+            <el-button link type="primary" @click="goToAlbums(row)">照片 {{ row.summary.albums }}</el-button>
+            <el-button link type="primary" @click="goToShelf(row)">商品 {{ row.summary.products }}</el-button>
           </div>
-          <el-button size="small" type="danger" plain v-if="can('contentEdit')" @click="requestDeleteSpot(selectedSpot())">删除点位</el-button>
-        </div>
-      </div>
-    </main>
-
-    <aside v-if="selectedSpot()" class="spot-relation-panel">
-      <div class="relation-summary-grid">
-        <button @click="openSpotRelation('series')"><span>拍摄风格</span><strong>{{ spotDependencySummary(selectedSpot()).series }}</strong><em>查看</em></button>
-        <button @click="openSpotRelation('albums')"><span>照片单品</span><strong>{{ spotDependencySummary(selectedSpot()).albums }}</strong><em>筛选</em></button>
-        <button @click="openSpotRelation('photoPackages')"><span>照片套餐</span><strong>{{ spotDependencySummary(selectedSpot()).photoPackages }}</strong><em>筛选</em></button>
-        <button @click="openSpotRelation('videoPackages')"><span>短视频</span><strong>{{ spotDependencySummary(selectedSpot()).videoPackages }}</strong><em>筛选</em></button>
-        <button @click="openSpotRelation('peripherals')"><span>定点周边</span><strong>{{ spotDependencySummary(selectedSpot()).peripherals }}</strong><em>筛选</em></button>
-        <button @click="openSpotRelation('orders')"><span>关联订单</span><strong>{{ spotDependencySummary(selectedSpot()).orders }}</strong><em>追溯</em></button>
-      </div>
-
-      <section class="relation-block">
-        <div class="relation-head"><strong>下属拍摄风格</strong><button v-if="can('contentEdit')" @click="openContentQuick('series', { spotId: selectedSpot().id })">新增</button></div>
-        <div class="relation-list">
-          <button v-for="ser in seriesBySpot(selectedSpot().id)" :key="ser.id" @click="selectContentScope('series', ser.id)">
-            <span>{{ ser.name }}</span><em>{{ (ser.styles && ser.styles.length) ? ser.styles.join(' / ') : (ser.style || ser.tag || '风格未设置') }}</em>
-          </button>
-          <p v-if="!seriesBySpot(selectedSpot().id).length">暂无拍摄风格</p>
-        </div>
-      </section>
-
-      <section class="relation-block">
-        <div class="relation-head"><strong>绑定照片单品</strong><button @click="switchMenu('albums')">管理</button></div>
-        <div class="relation-list compact">
-           <button v-for="alb in albumsBySpot(selectedSpot().id).slice(0,5)" :key="alb.id" @click="can('contentEdit') ? openContent(alb) : previewContent(alb)">
-            <span>{{ alb.name }}</span><em>{{ money(alb.price || 0) }}</em>
-          </button>
-          <p v-if="!albumsBySpot(selectedSpot().id).length">暂无照片单品</p>
-        </div>
-      </section>
-
-      <section class="relation-block">
-        <div class="relation-head"><strong>拍照/短视频</strong><button @click="switchMenu('packages')">管理</button></div>
-        <div class="relation-list compact">
-           <button v-for="pkg in packagesBySpot(selectedSpot().id).slice(0,6)" :key="pkg.id" @click="can('contentEdit') ? openContent(pkg) : previewContent(pkg)">
-            <span>{{ pkg.name }}</span><em>{{ packageTypeText(pkg) }} · {{ money(pkg.specialPrice || pkg.price || 0) }}</em>
-          </button>
-          <p v-if="!packagesBySpot(selectedSpot().id).length">暂无套餐</p>
-        </div>
-      </section>
-
-      <section class="relation-block">
-        <div class="relation-head"><strong>周边商品</strong><button @click="switchMenu('peripherals')">管理</button></div>
-        <div class="relation-list compact">
-           <button v-for="item in peripheralsBySpot(selectedSpot().id).slice(0,4)" :key="item.id" @click="can('contentEdit') ? openContent(item) : previewContent(item)">
-            <span>{{ item.name }}</span><em>{{ money(item.price || 0) }}</em>
-          </button>
-          <p v-if="!peripheralsBySpot(selectedSpot().id).length">暂无周边</p>
-        </div>
-      </section>
-    </aside>
-  </div>
+        </template>
+      </el-table-column>
+      <el-table-column label="热度 / 排序" width="122" align="center">
+        <template #default="{row}"><div class="basic-content-number-cell"><strong>{{ row.hotScore || 0 }}</strong><span>排序 {{ row.sort || 0 }}</span></div></template>
+      </el-table-column>
+      <el-table-column label="展示状态" width="112">
+        <template #default="{row}"><el-tag :type="isSpotVisible(row) ? 'success' : 'info'">{{ spotStatusText(row) }}</el-tag></template>
+      </el-table-column>
+      <el-table-column label="操作" width="252" fixed="right">
+        <template #default="{row}">
+          <div class="basic-content-actions">
+            <el-button link type="primary" @click="openSpotRelation(row)">关系</el-button>
+            <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
+            <el-button link :type="isSpotVisible(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleSpotVisible(row)">{{ isSpotVisible(row) ? '隐藏' : '展示' }}</el-button>
+            <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteSpot(row)">删除</el-button>
+          </div>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="table-pager" v-if="spotTableRows.length">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="spotTableRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('spots').size" :current-page="pager('spots').page" @current-change="pager('spots').page = $event" @size-change="onListPageSizeChange('spots', $event)" />
+      <span class="pager-info">第 {{ Math.min(spotTableRows.length, (pager('spots').page - 1) * pager('spots').size + 1) }}–{{ Math.min(spotTableRows.length, pager('spots').page * pager('spots').size) }} 条 / 共 {{ spotTableRows.length }} 条</span>
+    </div>
+  </section>
 </div>

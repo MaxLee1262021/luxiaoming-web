@@ -51,7 +51,7 @@
     visibleReconciliationSettlementRows
   } = ctx;
 
-const activePageComponent = computed(() => window.LXM_PAGES?.componentNameFor(activeRouteKey.value) || "LxmPageDashboard");
+const activePageComponent = computed(() => activeRouteKey.value && window.LXM_PAGES?.componentNameFor(activeRouteKey.value));
 const activePageMeta = computed(() => window.LXM_PAGES?.pageFor(activeRouteKey.value) || {});
 const exportOptions = computed(() => {
   const all = [

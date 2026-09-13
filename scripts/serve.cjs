@@ -7,8 +7,8 @@ const root = path.resolve(__dirname, "..");
 const port = Number(process.env.PORT || 5192);
 const host = "127.0.0.1";
 
-// 统一使用 selectSource：开发期默认 json 自托管（数据在服务器本地文件），
-// 也可通过 DATA_MODE=mock 回到纯演示内存，或 DATA_MODE=mysql 连宝塔的 MySQL。
+// Runtime API data is always served from MySQL. JSON is limited to isolated
+// Node test fixtures by the source selector.
 const selected = require(path.join(root, "server/lib/selectSource.cjs"))();
 const { source, mode, status: sourceStatus } = selected;
 const { createAuthStore } = require(path.join(root, "server/lib/auth.cjs"));
@@ -26,6 +26,7 @@ const permissionStore = createPermissionStore({
 });
 const apiHandler = require(path.join(root, "server/lib/api.cjs"))(source, mode, { auth, permissionStore, sourceStatus });
 const staticHandler = require(path.join(root, "server/lib/static.cjs"))(root);
+const amapRuntime = require(path.join(root, "server/lib/amapRuntime.cjs")).createAmapRuntime();
 
 async function bootstrap() {
   if (process.argv.includes("--check-only")) {
@@ -38,15 +39,12 @@ async function bootstrap() {
     process.exit(0);
   }
 
-  if (process.env.SEED_DEMO_DATA === "true" && mode === "json" && sourceStatus && sourceStatus.ready !== false) {
-    const seed = require(path.join(root, "server/lib/seed.cjs"))(source);
-    await seed().catch((e) => console.error("[seed] 失败:", e && e.message));
-  }
-
   const server = http
     .createServer((req, res) => {
       const p = (req.url || "/").split("?")[0];
       if (p.startsWith("/api/")) return apiHandler(req, res, p);
+      if (amapRuntime.handlesRuntimeConfig(p)) return amapRuntime.handleRuntimeConfig(req, res);
+      if (amapRuntime.handlesProxy(p)) return amapRuntime.handleProxy(req, res);
       return staticHandler(req, res, p);
     })
     .listen(port, host, () => {

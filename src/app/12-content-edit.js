@@ -8,6 +8,7 @@
     ElMessage,
     activeMenu,
     albumName,
+    cityById,
     cityName,
     computed,
     contentKeys,
@@ -32,6 +33,295 @@
     state,
     switchMenu
   } = ctx;
+
+function contentCover(title, subtitle) {
+  return typeof LXM_SVG === "function" ? LXM_SVG(title, subtitle) : "";
+}
+
+const DEFAULT_AMAP_CENTER = { longitude: 112.938814, latitude: 28.228209, coordType: "gcj02" };
+let amapPickerController = null;
+let amapPickerRequest = 0;
+let amapPickerSearchRequest = 0;
+
+function coordinateNumber(value) {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function gcjCoordinate(value) {
+  if (!value || String(value.coordType || "gcj02").toLowerCase() !== "gcj02") return null;
+  const latitude = coordinateNumber(value.latitude);
+  const longitude = coordinateNumber(value.longitude);
+  if (latitude === null || longitude === null) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  return { latitude, longitude, coordType: "gcj02" };
+}
+
+function amapPickerCoordinateText(position = state.amapPicker && state.amapPicker.selection) {
+  const latitude = coordinateNumber(position && position.latitude);
+  const longitude = coordinateNumber(position && position.longitude);
+  if (latitude === null || longitude === null) return "尚未选择坐标";
+  const coordType = String(position && position.coordType || "gcj02").toUpperCase().replace("GCJ02", "GCJ-02").replace("WGS84", "WGS-84").replace("BD09", "BD-09");
+  return `经 ${longitude.toFixed(6)}，纬 ${latitude.toFixed(6)} · ${coordType}`;
+}
+
+function amapPickerAddressText() {
+  if (state.amapPicker.resolvingAddress) return "正在解析详细地址";
+  return String(state.amapPicker.address || "").trim() || "尚未解析详细地址";
+}
+
+function amapCoordinateSystemText(record = {}) {
+  const coordType = String(record.coordType || "gcj02").trim().toLowerCase();
+  if (coordType === "gcj02") return "GCJ-02（微信/高德地图）";
+  const name = coordType === "wgs84" ? "WGS-84" : coordType === "bd09" ? "BD-09" : coordType.toUpperCase();
+  return `历史坐标：${name}（请地图重新选点）`;
+}
+
+function destroyAmapPicker() {
+  if (!amapPickerController) return;
+  try { amapPickerController.destroy(); } catch (_) {}
+  amapPickerController = null;
+}
+
+function resetAmapPickerState() {
+  amapPickerSearchRequest += 1;
+  Object.assign(state.amapPicker, {
+    loading: false,
+    error: "",
+    selection: null,
+    address: "",
+    district: "",
+    resolvingAddress: false,
+    searchKeyword: "",
+    searching: false,
+    searchError: "",
+    searchResults: []
+  });
+}
+
+function amapPickerFallbackCenter() {
+  const source = state.editContent || {};
+  const city = cityById(source.cityId || source.city) || {};
+  return gcjCoordinate(city) || DEFAULT_AMAP_CENTER;
+}
+
+function amapPickerSearchCity() {
+  const source = state.editContent || {};
+  const city = cityById(source.cityId || source.city) || {};
+  return String(city.name || source.city || "").trim();
+}
+
+function amapPickerSearchResultText(place) {
+  const values = [place && place.address, place && place.district, place && place.city]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return [...new Set(values)].join(" · ") || "可定位地点";
+}
+
+function clearAmapPickerSearchResults() {
+  amapPickerSearchRequest += 1;
+  state.amapPicker.searching = false;
+  state.amapPicker.searchError = "";
+  state.amapPicker.searchResults = [];
+}
+
+async function searchAmapPicker() {
+  const keyword = String(state.amapPicker.searchKeyword || "").trim();
+  const controller = amapPickerController;
+  if (!keyword) {
+    clearAmapPickerSearchResults();
+    return;
+  }
+  if (!controller || typeof controller.searchPlaces !== "function") {
+    state.amapPicker.searchError = "地图尚未准备好，请稍后重试。";
+    return;
+  }
+
+  const request = ++amapPickerSearchRequest;
+  Object.assign(state.amapPicker, { searching: true, searchError: "", searchResults: [] });
+  try {
+    const results = await controller.searchPlaces(keyword);
+    if (request !== amapPickerSearchRequest || !state.amapPicker.open || controller !== amapPickerController) return;
+    const searchResults = Array.isArray(results) ? results : [];
+    Object.assign(state.amapPicker, {
+      searching: false,
+      searchResults,
+      searchError: searchResults.length ? "" : "未找到可定位的地点，请更换关键词或直接在地图上选点。"
+    });
+  } catch (error) {
+    if (request !== amapPickerSearchRequest || !state.amapPicker.open || controller !== amapPickerController) return;
+    Object.assign(state.amapPicker, {
+      searching: false,
+      searchResults: [],
+      searchError: (error && error.userMessage) || "地点搜索失败，请更换关键词或直接在地图上选点。"
+    });
+  }
+}
+
+function selectAmapPickerSearchResult(place) {
+  const controller = amapPickerController;
+  if (!controller || typeof controller.selectSearchResult !== "function") {
+    state.amapPicker.searchError = "地图尚未准备好，请稍后重试。";
+    return;
+  }
+  try {
+    controller.selectSearchResult(place);
+    Object.assign(state.amapPicker, {
+      searchKeyword: String(place && place.name || state.amapPicker.searchKeyword || "").trim(),
+      searchError: "",
+      searchResults: []
+    });
+  } catch (error) {
+    state.amapPicker.searchError = (error && error.userMessage) || "无法定位该地点，请直接在地图上选点。";
+  }
+}
+
+async function mountAmapPicker() {
+  const picker = window.LXM_AMAP_PICKER;
+  const request = ++amapPickerRequest;
+  destroyAmapPicker();
+  Object.assign(state.amapPicker, { loading: true, error: "" });
+
+  if (!picker || typeof picker.mount !== "function") {
+    state.amapPicker.loading = false;
+    state.amapPicker.error = "高德地图模块未加载，仍可手动填写经纬度。";
+    return;
+  }
+
+  const status = typeof picker.getStatus === "function" ? picker.getStatus() : {};
+  if (!status.enabled || !status.configured) {
+    state.amapPicker.loading = false;
+    const reason = window.LXM_AMAP_CONFIG && window.LXM_AMAP_CONFIG.reason;
+    state.amapPicker.error = reason === "AMAP_PROXY_UNCONFIGURED"
+      ? "高德地图安全代理未配置，仍可手动填写经纬度。"
+      : "未配置高德地图 Key，仍可手动填写经纬度。";
+    return;
+  }
+
+  await Vue.nextTick();
+  const container = document.getElementById("lxm-amap-coordinate-picker");
+  if (!container || !state.amapPicker.open || request !== amapPickerRequest) return;
+
+  try {
+    const current = gcjCoordinate(state.editContent);
+    const controller = await picker.mount(container, {
+      initialPosition: current,
+      fallbackCenter: amapPickerFallbackCenter(),
+      searchCity: amapPickerSearchCity(),
+      onPick(position) {
+        if (request !== amapPickerRequest || !state.amapPicker.open) return;
+        amapPickerSearchRequest += 1;
+        Object.assign(state.amapPicker, {
+          selection: position,
+          address: "",
+          district: "",
+          resolvingAddress: true,
+          searching: false,
+          searchError: "",
+          searchResults: []
+        });
+      },
+      onAddress(address) {
+        if (request !== amapPickerRequest || !state.amapPicker.open) return;
+        Object.assign(state.amapPicker, {
+          address: String(address && address.address || "").trim(),
+          district: String(address && address.district || "").trim(),
+          resolvingAddress: false
+        });
+      },
+      onAddressError() {
+        if (request !== amapPickerRequest || !state.amapPicker.open) return;
+        state.amapPicker.resolvingAddress = false;
+      }
+    });
+    if (request !== amapPickerRequest || !state.amapPicker.open) {
+      try { controller.destroy(); } catch (_) {}
+      return;
+    }
+    amapPickerController = controller;
+    state.amapPicker.selection = controller.getPosition() || current || null;
+    state.amapPicker.loading = false;
+    setTimeout(() => {
+      if (request === amapPickerRequest && amapPickerController) amapPickerController.resize();
+    }, 80);
+  } catch (error) {
+    if (request !== amapPickerRequest) return;
+    destroyAmapPicker();
+    state.amapPicker.loading = false;
+    state.amapPicker.error = (error && error.userMessage) || "高德地图加载失败，仍可手动填写经纬度。";
+  }
+}
+
+function openAmapPicker() {
+  if (!state.editContent || state.editContent.__key !== "spots") return;
+  Object.assign(state.amapPicker, {
+    open: true,
+    loading: false,
+    error: "",
+    selection: gcjCoordinate(state.editContent),
+    address: "",
+    district: "",
+    resolvingAddress: false,
+    searchKeyword: "",
+    searching: false,
+    searchError: "",
+    searchResults: []
+  });
+  mountAmapPicker();
+}
+
+function retryAmapPicker() {
+  if (!state.amapPicker.open) return;
+  mountAmapPicker();
+}
+
+function closeAmapPicker() {
+  amapPickerRequest += 1;
+  amapPickerSearchRequest += 1;
+  destroyAmapPicker();
+  state.amapPicker.open = false;
+}
+
+function onAmapPickerClosed() {
+  amapPickerRequest += 1;
+  destroyAmapPicker();
+  resetAmapPickerState();
+}
+
+function applyAmapPickerCoordinate() {
+  const position = gcjCoordinate(state.amapPicker.selection);
+  if (!position || !state.editContent) return ElMessage.warning("请先在地图上选择坐标");
+  Object.assign(state.editContent, position);
+  const address = String(state.amapPicker.address || "").trim();
+  const district = String(state.amapPicker.district || "").trim();
+  if (address) state.editContent.address = address;
+  if (district) state.editContent.district = district;
+  closeAmapPicker();
+  ElMessage.success(address ? "已填充地图坐标和详细地址" : "已填充高德地图坐标");
+}
+
+function normalizeMapCoordinates(record, label) {
+  const hasLatitude = record.latitude !== undefined && record.latitude !== null && String(record.latitude).trim() !== "";
+  const hasLongitude = record.longitude !== undefined && record.longitude !== null && String(record.longitude).trim() !== "";
+  if (hasLatitude !== hasLongitude) return label + "的经纬度需要同时填写";
+  if (!hasLatitude) {
+    record.latitude = null;
+    record.longitude = null;
+    record.coordType = String(record.coordType || "gcj02").toLowerCase();
+    return "";
+  }
+  const latitude = Number(record.latitude);
+  const longitude = Number(record.longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return label + "纬度需在 -90 到 90 之间";
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) return label + "经度需在 -180 到 180 之间";
+  const coordType = String(record.coordType || "gcj02").toLowerCase();
+  if (!["gcj02", "wgs84", "bd09"].includes(coordType)) return "请选择有效的坐标系";
+  record.latitude = latitude;
+  record.longitude = longitude;
+  record.coordType = coordType;
+  return "";
+}
 
 async function addTrash(key, source, previous, row) {
   if (await persistTrashRecord(row)) return true;
@@ -61,7 +351,7 @@ function openVideoSingle(row = null) {
   // 短视频统一存进 packages 集合（type=video + isVideoSingle），小程序读 packages 作为视频商品，无需另接。
   state.videoSingleForm = row
     ? { ...row, __key: "packages", title: row.title || row.name, name: row.name || row.title, tags: Array.isArray(row.tags) ? [...row.tags] : [] }
-    : { __key: "packages", id: `pkg_vs_${Date.now()}`, title: "", name: "", seriesId: (data.series[0] && data.series[0].id) || "", spotId: (data.spots[0] && data.spots[0].id) || "", cover: LXM_SVG("短视频", "封面"), videoUrl: "", previewVideoUrl: "", type: "video", productKind: "video_single", isVideoSingle: true, durationText: "", price: 0, status: "上架", isShow: true, isMainPush: false, tags: [], intro: "" };
+    : { __key: "packages", id: `pkg_vs_${Date.now()}`, title: "", name: "", seriesId: (data.series[0] && data.series[0].id) || "", spotId: (data.spots[0] && data.spots[0].id) || "", cover: contentCover("短视频", "封面"), videoUrl: "", previewVideoUrl: "", type: "video", productKind: "video_single", isVideoSingle: true, durationText: "", price: 0, status: "上架", isShow: true, isMainPush: false, tags: [], intro: "" };
   state.videoSingleDialog = true;
 }
 async function saveVideoSingle() {
@@ -112,15 +402,27 @@ async function toggleVideoSingleShelf(row) {
   ElMessage.success(`${source.title || source.name} 已${next ? "上架" : "下架"}`);
 }
 // ===== 拍摄风格：降级为分类词表管理（保留 seriesId 外键，去除内容实体属性）=====
+function normalizeSeriesSpotRelations(row) {
+  if (!row || typeof row !== "object") return row;
+  const ids = [
+    ...(Array.isArray(row.spotIds) ? row.spotIds : []),
+    row.spotId
+  ].filter(Boolean).map(String);
+  row.spotIds = [...new Set(ids)];
+  row.spotId = row.spotIds[0] || "";
+  return row;
+}
 function openSeries(row = null) {
   state.seriesForm = row
     ? { ...row }
-    : { id: `ser${Date.now()}`, name: "", style: "", intro: "", cover: LXM_SVG("拍摄风格", "分类封面"), spotId: (data.spots[0] && data.spots[0].id) || "", spotIds: [(data.spots[0] && data.spots[0].id) || ""], productType: "photo", isHot: false, status: "启用" };
+    : { id: `ser${Date.now()}`, name: "", style: "", intro: "", cover: contentCover("拍摄风格", "分类封面"), spotId: (data.spots[0] && data.spots[0].id) || "", spotIds: [(data.spots[0] && data.spots[0].id) || ""], productType: "photo", isHot: false, status: "启用" };
+  normalizeSeriesSpotRelations(state.seriesForm);
   state.seriesDialog = true;
 }
 async function saveSeries() {
   const form = state.seriesForm;
   if (!form || !form.name) return ElMessage.warning("请填写拍摄风格名称");
+  normalizeSeriesSpotRelations(form);
   const source = data.series.find((item) => item.id === form.id);
   const previous = source ? { ...source } : null;
   const target = source || { ...form };
@@ -139,10 +441,15 @@ async function saveSeries() {
 }
 async function requestDeleteSeries(row) {
   const refAlbums = data.albums.filter((a) => a.seriesId === row.id).length;
-  const refPackages = packagesBySeries(row.id).length;
-  const refVideos = (data.packages || []).filter((v) => v.isVideoSingle && v.seriesId === row.id).length;
+  const linkedPackageIds = new Set(Array.isArray(row.packageIds) ? row.packageIds.map(String) : []);
+  const relatedPackages = [...new Map([
+    ...packagesBySeries(row.id),
+    ...(data.packages || []).filter((item) => linkedPackageIds.has(String(item.id || item._id || "")))
+  ].map((item) => [String(item.id || item._id || ""), item])).values()];
+  const refPackages = relatedPackages.filter((item) => item.type !== "video").length;
+  const refVideos = relatedPackages.filter((item) => item.type === "video").length;
   if (refAlbums + refPackages + refVideos > 0) {
-    return ElMessage.warning(`该拍摄风格仍被引用：照片单品 ${refAlbums}、套餐 ${refPackages}、短视频 ${refVideos}，不能直接删除`);
+    return ElMessage.warning("该拍摄风格仍被引用：照片单品 " + refAlbums + "、套餐 " + refPackages + "、短视频 " + refVideos + "，不能直接删除");
   }
   const source = data.series.find((item) => item.id === row.id) || row;
   const previous = { ...source };
@@ -155,16 +462,21 @@ async function requestDeleteSeries(row) {
 }
 
 async function requestDeleteCity(row) {
-  const refShops = data.shops.filter((s) => sameCity(s, row)).length;
   const source = data.cities.find((item) => item.id === row.id) || row;
+  const refSpots = data.spots.filter((spot) => !spot.deleted && !spot.isDeleted && sameCity(spot, source)).length;
+  const refShops = data.shops.filter((shop) => !shop.deleted && !shop.isDeleted && sameCity(shop, source)).length;
+  if (refSpots || refShops) {
+    return ElMessage.warning("该城市仍有关联打卡点 " + refSpots + "、合作门店 " + refShops + "，请先迁移关联资料后再删除");
+  }
   const previous = { ...source };
   source.deleted = true;
   source.isDeleted = true;
   source.status = "筹备中";
+  source.visible = false;
   if (!(await persistContentMutation("cities", source, previous))) return;
   if (!(await addTrash("cities", source, previous, { id: `trash-city-${source.id}-${Date.now()}`, type: "城市", sourceKey: "cities", name: source.name, reason: "删除城市", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
   log("删除城市进入回收站", "城市管理", source.name);
-  ElMessage.success(refShops > 0 ? `城市已进入回收站（仍有 ${refShops} 个商家引用，恢复后自动归位）` : "城市已进入回收站，可由超管恢复");
+  ElMessage.success("城市已进入回收站，可由超管恢复");
 }
 
 function contentCreateLabel() {
@@ -202,6 +514,12 @@ function contentQuickActions() {
   ];
   return [{ label: contentCreateLabel(), action: () => openContentFromScope() }];
 }
+function contentRecordId(item) {
+  return String((item && (item.id || item._id)) || "");
+}
+function firstActiveContentId(list) {
+  return contentRecordId((list || []).find((item) => item && !item.deleted && !item.isDeleted));
+}
 function openContentFromScope() {
   if (state.active === "shelfProducts") return switchMenu("packages");
   if (state.active !== "spots") return openContent();
@@ -209,12 +527,16 @@ function openContentFromScope() {
   if (scope.type === "spot") return openContentQuick("series", { spotId: scope.id });
   if (scope.type === "video") return openContentQuick("packages", { spotId: scope.id, type: "video", keepInSpot: true });
   if (scope.type === "series") {
-    const ser = data.series.find((s) => s.id === scope.id) || {};
-    return openContentQuick("albums", { spotId: ser.spotId || (ser.spotIds || [])[0] || "spot1", seriesId: scope.id });
+    const ser = data.series.find((item) => contentRecordId(item) === String(scope.id)) || {};
+    return openContentQuick("albums", { spotId: ser.spotId || (ser.spotIds || [])[0] || firstActiveContentId(data.spots), seriesId: scope.id });
   }
   if (scope.type === "album") {
-    const alb = data.albums.find((a) => a.id === scope.id) || {};
-    return openContentQuick("samples", { spotId: alb.spotId || "spot1", seriesId: alb.seriesId || "ser1", albumId: scope.id });
+    const alb = data.albums.find((item) => contentRecordId(item) === String(scope.id)) || {};
+    return openContentQuick("samples", {
+      spotId: alb.spotId || firstActiveContentId(data.spots),
+      seriesId: alb.seriesId || firstActiveContentId(data.series),
+      albumId: scope.id
+    });
   }
   return openContentQuick("spots");
 }
@@ -222,22 +544,40 @@ function relationText(row) {
   return [spotName(row.spotId), seriesName(row.seriesId), albumName(row.albumId)].filter((v) => v && v !== "-").join(" / ") || "全局";
 }
 function openContent(row = null) {
-  const rowKey = row && data.cities.some((item) => item.id === row.id) ? "cities" : row && data.spots.some((item) => item.id === row.id) ? "spots" : row && data.series.some((item) => item.id === row.id) ? "series" : row && data.albums.some((item) => item.id === row.id) ? "albums" : row && data.samples.some((item) => item.id === row.id) ? "samples" : row && data.packages.some((item) => item.id === row.id) ? "packages" : row && data.peripherals.some((item) => item.id === row.id) ? "peripherals" : "";
+  const matchesRow = (list) => row && (list || []).some((item) => contentRecordId(item) && contentRecordId(item) === contentRecordId(row));
+  const defaultSpotId = firstActiveContentId(data.spots);
+  const defaultSeriesId = firstActiveContentId(data.series);
+  const defaultAlbumId = firstActiveContentId(data.albums);
+  const rowKey = matchesRow(data.cities) ? "cities" : matchesRow(data.spots) ? "spots" : matchesRow(data.series) ? "series" : matchesRow(data.albums) ? "albums" : matchesRow(data.samples) ? "samples" : matchesRow(data.packages) ? "packages" : matchesRow(data.peripherals) ? "peripherals" : "";
   const key = row?.__key || rowKey || (row && state.active === "spots" ? effectiveContentKey() : state.active === "videoProducts" ? "packages" : state.active);
   const defaults = {
-    spots: { name: "", cityId: "city1", tag: "推荐", tags: [], styles: [], address: "", description: "", hotScore: 8.5, checkinCount: 0, sort: 10, intro: "", status: "启用", isShow: true, image: "", cover: LXM_SVG("新打卡点", "后台上传预览") },
-    series: { name: "", spotId: "spot1", spotIds: ["spot1"], style: "清新", styles: ["清新"], tags: [], intro: "", productType: "photo", soldCount: 0, minPrice: 0, maxPrice: 0, packageIds: [], status: "启用", cover: LXM_SVG("新系", "拍摄风格封面") },
-    albums: { name: "", spotId: "spot1", seriesId: "ser1", price: 699, intro: "", photoCount: 0, shootingNotes: "", status: "启用", cover: LXM_SVG("新合", "照片单品") },
-    samples: { name: "", type: "photo", spotId: "spot1", seriesId: "ser1", albumId: "alb1", status: "启用", url: LXM_SVG("新样", "上传预览") },
-    packages: { name: "", type: "photo", spotId: "spot1", seriesId: "ser1", albumId: "alb1", originalPrice: 999, price: 699, specialPrice: 699, isMainPush: false, isShow: true, status: "上架", intro: "", description: "", serviceTags: ["精修9"], cover: LXM_SVG("新套", "套餐封面") },
+    spots: { name: "", cityId: "", tag: "推荐", tags: [], styles: [], address: "", district: "", latitude: null, longitude: null, coordType: "gcj02", description: "", hotScore: 8.5, checkinCount: 0, sort: 10, intro: "", status: "启用", isShow: true, image: "", cover: contentCover("新打卡点", "后台上传预览") },
+    series: { name: "", spotId: defaultSpotId, spotIds: defaultSpotId ? [defaultSpotId] : [], style: "清新", styles: ["清新"], tags: [], intro: "", productType: "photo", soldCount: 0, minPrice: 0, maxPrice: 0, packageIds: [], status: "启用", cover: contentCover("新系", "拍摄风格封面") },
+    albums: { name: "", spotId: defaultSpotId, seriesId: defaultSeriesId, price: 699, intro: "", photoCount: 0, shootingNotes: "", status: "启用", cover: contentCover("新合", "照片单品") },
+    samples: { name: "", type: "photo", spotId: defaultSpotId, seriesId: defaultSeriesId, albumId: defaultAlbumId, status: "启用", url: contentCover("新样", "上传预览") },
+    packages: { name: "", type: "photo", spotId: defaultSpotId, seriesId: defaultSeriesId, albumId: defaultAlbumId, originalPrice: 999, price: 699, specialPrice: 699, isMainPush: false, isShow: true, status: "上架", intro: "", description: "", serviceTags: ["精修9"], cover: contentCover("新套", "套餐封面") },
     addonServices: { name: "", category: "修图", price: 199, enabled: true, intro: "增值服务，仅客服处理订单时添加" },
-    peripherals: { name: "", category: "相册", price: 99, enabled: true, isShow: true, intro: "", specs: [], isNew: false, images: [], cover: LXM_SVG("新周", "摄影周边") },
-    guides: { name: "", title: "", description: "", targetPackageId: "", status: "草稿", tag: "攻略", isHot: false, readCount: 0, score: "4.9", spotId: "spot1", seriesId: "ser1", cover: LXM_SVG("新攻", "内容运营") },
-    stories: { name: "", title: "", subtitle: "", status: "草稿", tag: "故事", spotId: "spot1", cover: LXM_SVG("新故", "品牌故事") },
-    cities: { name: "", mode: "直营", status: "运营中" },
+    peripherals: { name: "", category: "相册", price: 99, enabled: true, isShow: true, intro: "", specs: [], isNew: false, images: [], cover: contentCover("新周", "摄影周边") },
+    guides: { name: "", title: "", description: "", targetPackageId: "", status: "草稿", tag: "攻略", isHot: false, readCount: 0, score: "4.9", spotId: defaultSpotId, seriesId: defaultSeriesId, cover: contentCover("新攻", "内容运营") },
+    stories: { name: "", title: "", subtitle: "", status: "草稿", tag: "故事", spotId: defaultSpotId, cover: contentCover("新故", "品牌故事") },
+    cities: { name: "", mode: "直营", status: "运营中", visible: true, latitude: null, longitude: null, coordType: "gcj02" },
   };
   const sourceRow = row?.__source || row;
   state.editContent = sourceRow ? { ...sourceRow, __key: key } : { ...(defaults[key] || {}), id: "", __key: key };
+  if (key === "spots") {
+    const city = cityById(state.editContent.cityId || state.editContent.city);
+    if (city && (city.id || city._id)) {
+      state.editContent.cityId = city.id || city._id;
+      state.editContent.city = city.name || state.editContent.city || "";
+    } else if (!sourceRow) {
+      const defaultCity = (data.cities || []).find((item) => item && !item.deleted && !item.isDeleted);
+      if (defaultCity) {
+        state.editContent.cityId = defaultCity.id || defaultCity._id || "";
+        state.editContent.city = defaultCity.name || "";
+      }
+    }
+  }
+  if (key === "series") normalizeSeriesSpotRelations(state.editContent);
   if (key === "packages") {
     if (!sourceRow && state.active === "videoProducts") state.editContent.type = "video";
     Object.assign(state.editContent, {
@@ -338,7 +678,22 @@ async function saveContent() {
   const target = contentList(key);
   const payload = { ...row };
   delete payload.__key;
-  if (key === "series" && payload.spotId && (!payload.spotIds || !payload.spotIds.length)) payload.spotIds = [payload.spotId];
+  if (key === "series") normalizeSeriesSpotRelations(payload);
+  if (key === "spots") {
+    const city = cityById(payload.cityId || payload.city);
+    if (city && (city.id || city._id)) {
+      payload.cityId = city.id || city._id;
+      payload.city = city.name || payload.city || "";
+    }
+    if (!payload.cityId) return ElMessage.warning("请选择所属城市");
+    payload.district = String(payload.district || "").trim();
+    const coordinateError = normalizeMapCoordinates(payload, "打卡点");
+    if (coordinateError) return ElMessage.warning(coordinateError);
+  }
+  if (key === "cities") {
+    const coordinateError = normalizeMapCoordinates(payload, "城市中心");
+    if (coordinateError) return ElMessage.warning(coordinateError);
+  }
   if (key === "packages") {
     payload.specialPrice = Number(payload.specialPrice || payload.price || 0);
     payload.serviceType = payload.type || "photo";
@@ -645,7 +1000,16 @@ function clearContentFilters() {
   state.contentScope = { type: "", id: "" };
 }
 async function uploadHomeMaterial() {
-  const sample = { id: `sample${Date.now()}`, name: "首页新轮播素", type: "photo", albumId: "alb1", seriesId: "ser1", spotId: "spot1", isShowcase: true, url: LXM_SVG("首页新素", "即时预览") };
+  const sample = {
+    id: `sample${Date.now()}`,
+    name: "首页新轮播素",
+    type: "photo",
+    albumId: firstActiveContentId(data.albums),
+    seriesId: firstActiveContentId(data.series),
+    spotId: firstActiveContentId(data.spots),
+    isShowcase: true,
+    url: contentCover("首页新素", "即时预览")
+  };
   data.samples.unshift(sample);
   if (!(await persistContentMutation("samples", sample))) {
     data.samples = data.samples.filter((item) => item !== sample);
@@ -847,6 +1211,18 @@ async function saveSiteConfig() {
     contentCreateLabel,
     contentQuickActions,
     openContentFromScope,
+    amapPickerCoordinateText,
+    amapPickerAddressText,
+    amapCoordinateSystemText,
+    amapPickerSearchResultText,
+    openAmapPicker,
+    retryAmapPicker,
+    clearAmapPickerSearchResults,
+    searchAmapPicker,
+    selectAmapPickerSearchResult,
+    closeAmapPicker,
+    onAmapPickerClosed,
+    applyAmapPickerCoordinate,
     relationText,
     openContent,
     openContentQuick,

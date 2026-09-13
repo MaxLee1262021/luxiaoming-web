@@ -2,7 +2,7 @@
   <div class="table-title">
     <div>
       <strong>我的拍摄任务</strong>
-      <p>摄影师只能处理分配给自己的任务；开始拍摄、标记完成、取消接单均按订单状态单向推进并写入时间线。</p>
+      <p>摄影师只能处理分配给自己的任务；开始拍摄、拍摄完成和线下选片确认均按订单流程写入时间线。</p>
     </div>
   </div>
   <el-table :data="pagedList('tasks', taskOrders)" stripe border max-height="calc(100vh - 420px)" empty-text="暂无待办拍摄任务，有新分配的拍摄会出现在这里" @row-click="(row)=>openOrder(row,{readonly:true})">
@@ -18,17 +18,27 @@
         <div v-if="afterSaleBadge(row)" class="after-sale-badge">{{ afterSaleBadge(row) }}</div>
       </template>
     </el-table-column>
-    <el-table-column fixed="right" label="操作" width="330">
+    <el-table-column fixed="right" label="操作" width="480">
       <template #default="{row}">
         <el-button link @click.stop="openOrder(row,{readonly:true})">查看</el-button>
-        <el-tooltip :content="taskActionDisabledReason(row,'start')" placement="top" :disabled="canStartTask(row)">
+        <el-tooltip content="仅已派单且归属当前摄影师的任务可以开始拍摄" placement="top" :disabled="canStartTask(row)">
           <span class="disabled-tip-wrap">
             <el-button link :disabled="!canStartTask(row)" @click.stop="updateTaskStatus(row,'shooting')">开始拍摄</el-button>
           </span>
         </el-tooltip>
-        <el-tooltip :content="taskActionDisabledReason(row,'complete')" placement="top" :disabled="canCompleteTask(row)">
+        <el-tooltip content="只有拍摄中的任务可以登记拍摄完成" placement="top" :disabled="canCompleteTask(row)">
           <span class="disabled-tip-wrap">
-            <el-button link :disabled="!canCompleteTask(row)" @click.stop="updateTaskStatus(row,'completed')">标记完成</el-button>
+            <el-button link :disabled="!canCompleteTask(row)" @click.stop="updateTaskStatus(row,'completed')">拍摄完成</el-button>
+          </span>
+        </el-tooltip>
+        <el-tooltip content="拍摄完成后，线下确认客户选片结果才可登记交付" placement="top" :disabled="canConfirmOfflineSelection(row)">
+          <span class="disabled-tip-wrap">
+            <el-button link type="warning" :disabled="!canConfirmOfflineSelection(row)" @click.stop="confirmOfflineSelection(row)">确认选片</el-button>
+          </span>
+        </el-tooltip>
+        <el-tooltip content="线下选片确认后可登记成片交付，交付记录后才开放尾款" placement="top" :disabled="canDeliverOrder(row)">
+          <span class="disabled-tip-wrap">
+            <el-button link type="success" :disabled="!canDeliverOrder(row)" @click.stop="deliverOrder(row)">登记交付</el-button>
           </span>
         </el-tooltip>
         <el-tooltip :content="taskActionDisabledReason(row,'reject')" placement="top" :disabled="canRejectTask(row)">

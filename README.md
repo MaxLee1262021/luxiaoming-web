@@ -56,6 +56,14 @@ npm run dev
 http://127.0.0.1:5192/
 ```
 
+## 高德地图选点
+
+打卡点编辑页的地图选点通过运行时配置加载，源码不包含地图凭据。部署时在环境变量或部署平台密钥管理中设置 `AMAP_WEB_JS_KEY` 与 `AMAP_SECURITY_JS_CODE`；服务端会在同源 `/_AMapService` 代理中追加安全密钥，浏览器仅能读取 Web JS Key 和代理地址。也可设置 `AMAP_SERVICE_HOST=https://admin.example.com/_AMapService` 使用已有 HTTPS 反向代理，但该代理必须在服务端追加安全密钥。
+
+高德控制台中应创建“Web端(JS API)”Key，并将后台实际访问域名加入域名白名单。请勿把 `AMAP_SECURITY_JS_CODE` 配置为浏览器端的 `securityJsCode`。
+
+选点弹窗支持按已选城市搜索地点、地址或地标；选择搜索结果后会定位地图，并与手动地图选点一样回填 GCJ-02 坐标、详细地址和区域。
+
 没有安装 npm 时，可以直接运行：
 
 ```powershell

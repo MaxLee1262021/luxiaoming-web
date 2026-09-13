@@ -3,6 +3,20 @@
 // separate and private order operations require a verified public session.
 const crypto = require("crypto");
 const { createAuthStore, parseBearer } = require("./auth.cjs");
+const {
+  WORKFLOW_STAGES,
+  roundMoney,
+  normalizeRatio,
+  depositDue,
+  finalDue,
+  hasConfirmedPayment,
+  normalizePaymentStatus,
+  canonicalStage,
+  customerStatusForStage,
+  diffFacts,
+  makePaymentId,
+  withOrderMutex,
+} = require("./orderWorkflow.cjs");
 
 const ALL_KEYS = [
   "cities", "agents", "distributors", "shops", "staff", "spots", "series",
@@ -24,6 +38,7 @@ function isOrderCancelledStatus(value) {
   return ["cancelled", "canceled", "terminated", "已取消", "已中止", "中止"].includes(String(value || "").trim().toLowerCase());
 }
 const PASSWORD_KEYS = new Set(["staff", "shops", "distributors", "agents"]);
+const BUILTIN_ADMIN_ACCOUNT = "admin";
 const CONTENT_KEYS = new Set([
   "cities", "spots", "series", "albums", "samples", "packages", "addonServices",
   "peripherals", "tagLibrary", "guides", "stories", "homeConfig", "siteConfig"
@@ -39,11 +54,12 @@ const PUBLIC_RPC_NAMES = new Set([
   "login", "bindPhone", "getHomeData", "getSpots", "getBookingData", "getSeriesList",
   "getSeriesDetail", "getPhotoCollection", "getPeripherals", "getGuides", "listGuides", "getGuide", "getMyOrders",
   "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "updateOrderStatus",
+  "createPayment", "createPaymentIntent", "getPaymentStatus",
   "submitAfterSale", "resolveMerchantCode", "getCities", "getPrivacyPolicy", "getSearchConfig",
-  "getBookingConfig", "getFootprintConfig", "getCorpConfig", "getVideoSingles"
+  "getBookingConfig", "getFootprintConfig", "getCorpConfig", "getVideoSingles", "getMyProfile"
 ]);
 const PUBLIC_PRIVATE_RPC = new Set([
-  "bindPhone", "getMyOrders", "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "updateOrderStatus", "submitAfterSale"
+  "bindPhone", "getMyProfile", "getMyOrders", "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "createPayment", "createPaymentIntent", "getPaymentStatus", "updateOrderStatus", "submitAfterSale"
 ]);
 const ADMIN_RPC_ACTIONS = { getDashboard: "dashboard", generateMerchantQR: "shopEdit" };
 
@@ -58,27 +74,21 @@ const ROLE_ACTIONS = {
   content: new Set(["view", "contentEdit"]),
   agent: new Set(["view", "dashboard", "export"])
 };
-const ACTION_PERMISSION_ALIAS = {
-  orderEdit: "orderStatus", assign: "dispatch", transfer: "dispatch", cancelOrder: "orderStatus",
-  financeReview: "financeReview", shopEdit: "shop", contentEdit: "content", shootUpdate: "orderStatus"
-};
-const DYNAMIC_PERMISSION_ALIASES = {
-  view: ["view", "read", "*.view", "system.view", "menu.view"],
-  dashboard: ["dashboard", "dashboard.view", "dashboardAll", "dashboardShop"],
-  orderEdit: ["orderEdit", "order.edit", "order.write", "orderStatus"],
-  assign: ["assign", "dispatch", "order.assign"],
-  transfer: ["transfer", "dispatch", "order.transfer"],
-  cancelOrder: ["cancelOrder", "orderStatus", "order.cancel"],
-  financeReview: ["financeReview", "finance.review", "finance.audit"],
-  staff: ["staff", "staff.manage"],
-  shopEdit: ["shopEdit", "shop", "shop.edit"],
-  contentEdit: ["contentEdit", "content", "content.edit"],
-  shootUpdate: ["shootUpdate", "order.shoot", "orderStatus"],
-  export: ["export", "report.export"],
-  permissionManage: ["permissionManage", "permission.manage", "authz.manage", "system.permission.manage"],
-};
 const RESERVED_DYNAMIC_ROLE_KEYS = new Set(Object.keys(ROLE_ALIASES));
-const AUTHORITY_PERMISSION_KEYS = new Set(DYNAMIC_PERMISSION_ALIASES.permissionManage);
+const CONTENT_ROUTE_KEYS = new Set([
+  "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags", "packages",
+  "videoSingles", "shelfProducts", "productAudit", "peripherals", "addonServices", "miniDecor", "miniConfig", "guides"
+]);
+const DEFAULT_ROLE_MENU_KEYS = Object.freeze({
+  super: ["dashboard", "orders", "afterSales", "tasks", "addonServices", "financeReview", "reconciliation", "staff", "distributors", "shops", "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags", "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "miniDecor", "miniConfig", "guides", "permissions", "logs", "trash"],
+  service: ["dashboard", "orders", "afterSales", "addonServices"],
+  finance: ["dashboard", "orders", "afterSales", "financeReview", "reconciliation"],
+  photo: ["tasks"],
+  merchant: ["dashboard", "orders"],
+  distributor: ["dashboard", "orders", "shops"],
+  agent: ["dashboard", "orders", "shops"],
+  content: ["contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags", "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "miniDecor", "miniConfig", "guides"]
+});
 // A permission menu can use its own identifier, but it must target a page the
 // bundled admin client can render. This supports real menu CRUD without
 // creating navigation entries that lead nowhere.
@@ -112,7 +122,7 @@ const ROLE_WRITE_KEYS = {
 const ORDER_SERVICE_FIELDS = new Set([
   "customer", "contactName", "phone", "contactPhone", "contactPhones", "wechat", "contactWechat",
   "extraPhones", "extraWechats", "products", "productItems", "items", "addons",
-  "appointmentAt", "time", "timePeriod", "timeSlot", "customerRemark", "internalNote", "assigneeId",
+  "appointmentAt", "appointmentLocation", "shootLocation", "location", "peopleCount", "time", "timePeriod", "timeSlot", "customerRemark", "internalNote", "assigneeId",
   "photographerId", "status", "customerStatus", "statusLogs", "followRecords", "sourceName", "sourceType",
   "sourceScene", "shopId", "distributorId", "afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId",
   "totalAmount", "price", "priceAdjustReason", "depositPaid", "finalPaid", "finalDiscountAmount", "finalDiscountReason",
@@ -126,19 +136,21 @@ const ORDER_FINANCE_FIELDS = new Set([
 ]);
 const ORDER_PHOTO_FIELDS = new Set(["status", "customerStatus", "statusLogs", "followRecords", "completedAt"]);
 const ORDER_MERCHANT_FIELDS = new Set(["customerRemark"]);
-const IMMUTABLE_ORDER_FIELDS = new Set(["id", "_id", "openid", "_openid", "createTime"]);
+const IMMUTABLE_ORDER_FIELDS = new Set(["id", "_id", "openid", "_openid", "createTime", "bookingIdempotencyKey"]);
 const ORDER_WORKFLOW_FIELDS = new Set([
-  "status", "customerStatus", "depositPaid", "finalPaid", "depositFinanceStatus", "finalFinanceStatus",
+  "status", "customerStatus", "workflowStage", "depositRatio", "depositDue", "finalDue", "depositPaid", "finalPaid", "depositFinanceStatus", "finalFinanceStatus",
   "depositPaidAt", "finalPaidAt", "paymentVerify", "financeStatus", "refundAmount", "refundConfirmed",
   "sourceType", "sourceName", "sourceScene", "sourceCodeId", "shopId", "distributorId", "riskBlocked",
   "riskFlag", "frozen", "freezeReason", "riskReason", "isDeleted", "deleted", "afterSaleStatus",
   "afterSaleReason", "afterSaleCreateTime", "afterSaleId", "settlementObservationReleased",
-  "settlementObservationReleasedAt", "settlementObservationReleasedBy"
+  "settlementObservationReleasedAt", "settlementObservationReleasedBy", "dispatchStatus", "dispatchRecord", "dispatchRecords",
+  "shootingStartedAt", "shootingCompletedAt", "shootingCompletedBy", "selectionStatus", "selectionConfirmedAt", "selectionConfirmedBy", "selectionNote",
+  "deliveryRecord", "deliveryMethod", "deliveredAt", "deliveredBy", "completedAt"
 ]);
 const ORDER_UPDATE_FIELDS = {
   service: new Set([
     "customer", "contactName", "phone", "contactPhone", "contactPhones", "extraPhones", "extraWechats", "wechat", "contactWechat",
-    "appointmentAt", "time", "timePeriod", "timeSlot", "customerRemark", "internalNote", "assigneeId",
+    "appointmentAt", "appointmentLocation", "shootLocation", "location", "peopleCount", "time", "timePeriod", "timeSlot", "customerRemark", "internalNote", "assigneeId",
     "photographerId", "priceAdjustReason", "totalAmount", "products", "productItems", "items", "addons", "finalDiscountAmount", "finalDiscountReason", "depositPaid", "finalPaid",
     "depositFinanceStatus", "finalFinanceStatus"
   ]),
@@ -150,6 +162,18 @@ const ORDER_SERVICE_LOCKED_FIELDS = new Set([
   "appointmentAt", "time", "timePeriod", "timeSlot", "customerRemark", "assigneeId", "photographerId",
   "totalAmount", "products", "productItems", "items", "addons", "finalDiscountAmount", "finalDiscountReason", "priceAdjustReason", "depositPaid", "finalPaid",
   "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt"
+]);
+// Payment facts are only changed by the dedicated `payment` action. Keeping
+// them out of generic update prevents service/finance UI paths from creating
+// a paid order without a payment record, idempotency key and audit timeline.
+const ORDER_PAYMENT_DIRECT_FIELDS = new Set([
+  "depositRatio", "depositDue", "finalDue", "depositPaid", "finalPaid", "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt",
+  "depositPaymentStatus", "finalPaymentStatus", "depositConfirmedAt", "depositConfirmedBy", "finalConfirmedAt", "finalConfirmedBy",
+  "paymentVerify", "paymentRecords"
+]);
+const ORDER_PRICE_OR_PRODUCT_FIELDS = new Set([
+  "totalAmount", "totalPrice", "price", "finalDiscountAmount", "finalDiscountReason", "priceAdjustReason",
+  "products", "productItems", "items", "addons"
 ]);
 
 function hashPassword(plain) {
@@ -210,49 +234,51 @@ function normalizeRole(role) {
   const key = String(role || "").trim().toLowerCase();
   return ROLE_ALIASES[key] || key;
 }
+function isBuiltinAdminAccount(subject) {
+  const account = subject && typeof subject === "object" ? subject.account : subject;
+  return String(account || "").trim().toLowerCase() === BUILTIN_ADMIN_ACCOUNT;
+}
 function dynamicRoleKey(role) {
   const raw = String(role || "").trim();
   const key = raw.toLowerCase();
   return raw === key && key && !RESERVED_DYNAMIC_ROLE_KEYS.has(key) ? key : "";
 }
-function effectiveDynamicPermissionKeys(role, source) {
-  const keys = [...new Set((Array.isArray(source) ? source : []).map(String).filter(Boolean))];
-  if (String(role || "").trim().toLowerCase() === "super") return keys;
-  return keys.filter((key) => key !== "*" && !AUTHORITY_PERMISSION_KEYS.has(key));
-}
-
 function roleActions(session) { return ROLE_ACTIONS[normalizeRole(session && session.role)] || new Set(); }
-function hasAction(session, action) {
-  const custom = Array.isArray(session && (session.permissionKeys || session.permissions))
-    ? (session.permissionKeys || session.permissions).filter(Boolean).map(String)
-    : [];
-  const dynamicConfigured = !!(session && (session.permissionSource === "mysql" || session.permissionSource === "json-authz" || session.permissionsConfigured === true && session.roleId));
-  if (dynamicConfigured) {
-    if (custom.includes("*")) return true;
-    const aliases = DYNAMIC_PERMISSION_ALIASES[action] || [action];
-    return aliases.some((key) => custom.includes(key));
-  }
-  const actions = roleActions(session);
-  if (actions.has("*")) return true;
-  if (!actions.has(action)) return false;
-  // Every role's baseline `view` capability remains available even when the
-  // staff record lists only extra mutable actions (legacy records omit view).
-  if (action === "view" || action === "dashboard") return true;
-  const legacyCustom = Array.isArray(session && session.permissions) ? session.permissions.filter(Boolean) : [];
-  if (session && session.permissionsConfigured === true && !legacyCustom.length) return false;
-  if (!legacyCustom.length || legacyCustom.includes("*")) return true;
-  return legacyCustom.includes(action) || (ACTION_PERMISSION_ALIAS[action] && legacyCustom.includes(ACTION_PERMISSION_ALIAS[action]));
-}
 function sessionHasMenu(session, candidate) {
   const target = String(candidate || "");
   const granted = Array.isArray(session && session.menuKeys) ? session.menuKeys.map(String) : [];
-  if (granted.includes(target)) return true;
   const definitions = Array.isArray(session && session.menuDefinitions) ? session.menuDefinitions : [];
+  // Runtime menu keys may be custom identifiers. Once definitions are
+  // available, authorize the registered route key rather than a coincidental
+  // menu identifier that happens to match another module.
+  if (!definitions.length) return granted.includes(target);
   return definitions.some((menu) => {
     const key = String(menu && (menu.key || menu.menuKey) || "");
     const routeKey = String(menu && (menu.routeKey || menu.targetKey || menu.key || menu.menuKey) || "");
     return granted.includes(key) && routeKey === target;
   });
+}
+function menuAllowsAction(session, action) {
+  const has = (...routes) => routes.some((route) => sessionHasMenu(session, route));
+  if (action === "view") return Array.isArray(session && session.menuKeys) && session.menuKeys.length > 0;
+  if (action === "dashboard") return has("dashboard");
+  if (["orderEdit", "assign", "transfer", "cancelOrder"].includes(action)) return has("orders");
+  if (action === "shootUpdate") return has("tasks");
+  if (action === "financeReview") return has("financeReview", "reconciliation");
+  if (action === "staff") return has("staff", "distributors", "agents");
+  if (action === "shopEdit") return has("shops");
+  if (action === "contentEdit") return [...CONTENT_ROUTE_KEYS].some((route) => has(route));
+  if (action === "export") return has("dashboard", "orders", "afterSales", "financeReview", "reconciliation", "tasks", "shops", "logs");
+  // Custom roles receive the least-privilege, self-scoped order capability
+  // from an order module rather than the former configurable action key.
+  if (action === "orderSelf") return has("orders", "afterSales", "tasks", "financeReview", "reconciliation");
+  if (action === "afterSalesManage") return has("afterSales");
+  return false;
+}
+function hasAction(session, action) {
+  const configured = roleActions(session);
+  if (configured.size && !configured.has("*") && !configured.has(action)) return false;
+  return menuAllowsAction(session, action);
 }
 function canReadKey(session, key) {
   if (!KEY_SET.has(key)) return false;
@@ -265,7 +291,7 @@ function canReadKey(session, key) {
   if (dynamicRole(session) && (!Array.isArray(session.menuKeys) || !session.menuKeys.length)) return false;
   if (Array.isArray(session.menuKeys) && session.menuKeys.length) {
     const aliases = {
-      afterSales: ["afterSales", "service"], financeSettings: ["financeSettings", "reconciliation"],
+      orders: ["orders", "afterSales", "tasks", "financeReview", "reconciliation"], afterSales: ["afterSales", "service", "financeReview", "reconciliation"], financeSettings: ["financeSettings", "reconciliation"],
       monthlyClosings: ["monthlyClosings", "reconciliation"], adjustmentRecords: ["adjustmentRecords", "reconciliation"],
       reconciliationTransfers: ["reconciliationTransfers", "reconciliation"], logs: ["logs", "permissions"],
       staff: ["staff", "permissions"], agents: ["agents", "permissions"], distributors: ["distributors", "permissions"],
@@ -285,14 +311,15 @@ function canWriteKey(session, key) {
   const role = normalizeRole(session.role);
   const action = FINANCE_KEYS.has(key) || (role === "finance" && ORDER_KEYS.has(key)) ? "financeReview"
     : role === "photo" && key === "orders" ? "shootUpdate"
-      : key === "staff" ? "staff"
+      : ["staff", "agents", "distributors"].includes(key) ? "staff"
         : key === "shops" || key === "merchantCodes" ? "shopEdit"
-        : key === "orders" || key === "afterSales" ? "orderEdit"
+        : key === "afterSales" && customDynamicRole(session) ? "afterSalesManage"
+          : key === "orders" || key === "afterSales" ? "orderEdit"
           : key === "logs" ? "view" : "contentEdit";
   return hasAction(session, action) && (!!(ROLE_WRITE_KEYS[role] || new Set()).has(key) || dynamicRole(session));
 }
 function dynamicRole(session) {
-  return !!(session && (session.permissionSource === "mysql" || session.permissionSource === "json-authz" || session.roleId));
+  return !!(session && session.roleId);
 }
 function customDynamicRole(session) {
   const role = normalizeRole(session && session.role);
@@ -300,12 +327,26 @@ function customDynamicRole(session) {
 }
 function customReadAllowed(session, key) {
   if (!customDynamicRole(session)) return true;
-  if (["orders", "afterSales"].includes(key)) return hasAction(session, "orderAll") || hasAction(session, "orderSelf");
+  if (["orders", "afterSales"].includes(key)) return hasAction(session, "orderSelf");
   if (FINANCE_KEYS.has(key)) return hasAction(session, "financeReview");
-  if (CONTENT_KEYS.has(key)) return hasAction(session, "contentEdit") || hasAction(session, "content");
-  if (key === "staff") return hasAction(session, "staff");
+  if (CONTENT_KEYS.has(key)) return hasAction(session, "contentEdit");
+  if (["staff", "agents", "distributors"].includes(key)) return hasAction(session, "staff");
   if (["shops", "merchantCodes", "scans"].includes(key)) return hasAction(session, "shopEdit");
   return false;
+}
+function customOrderActionCapability(session, action) {
+  if (!customDynamicRole(session)) return "";
+  const serviceActions = new Set(["accept", "assign", "reschedule", "start", "shootcomplete", "selectionconfirm", "payment", "deliver", "complete", "cancel", "note", "update"]);
+  const photoActions = new Set(["unassign", "start", "shootcomplete", "selectionconfirm", "deliver", "update"]);
+  if (sessionHasMenu(session, "orders") && serviceActions.has(action) && hasAction(session, "orderEdit")) return "orderEdit";
+  if (sessionHasMenu(session, "tasks") && photoActions.has(action) && hasAction(session, "shootUpdate")) return "shootUpdate";
+  return "";
+}
+function customAfterSaleActionCapability(session, action) {
+  if (!customDynamicRole(session)) return "";
+  if (action === "review" && hasAction(session, "financeReview")) return "financeReview";
+  if (["open", "follow", "complete"].includes(action) && hasAction(session, "afterSalesManage")) return "afterSalesManage";
+  return "";
 }
 
 function getRowId(row) { return String((row && (row.id || row._id)) || ""); }
@@ -361,7 +402,7 @@ const PHONE_FIELDS = ["phone", "contactPhone", "customerPhone", "customer_phone"
 const PHONE_LIST_FIELDS = ["contactPhones", "extraPhones", "phones"];
 const WECHAT_FIELDS = ["wechat", "contactWechat", "customerWechat", "customer_wechat", "extraWechats", "wechats"];
 const IDENTITY_FIELDS = ["openid", "_openid", "customerOpenid", "customer_openid", "userOpenid", "user_openid"];
-const INTERNAL_FIELDS = ["internalNote", "paymentRecords", "source", "sourceCodeId", "sourceScene", "statusLogs", "followRecords"];
+const INTERNAL_FIELDS = ["internalNote", "paymentRecords", "source", "sourceCodeId", "sourceScene", "statusLogs", "followRecords", "bookingIdempotencyKey"];
 const CONFIG_SENSITIVE_KEY = /(?:password|secret|token|private.?key|webhook|mch.?key|api.?key|credential|authorization|openid|unionid|internal|private|audit|phone|mobile|telephone|wechat|customer)/i;
 const CONFIG_SECRET_KEY = /(?:password|secret|token|private.?key|webhook|mch.?key|api.?key|credential|authorization|openid|unionid|internal|private|audit|phone|mobile|telephone|wechat|customer)/i;
 const CONFIG_CREDENTIAL_KEY = /^(?:corp.?id|app.?id|secret|token|private.?key|webhook|mch.?key|api.?key|credential|authorization)$/i;
@@ -446,16 +487,22 @@ function containsConfigSensitive(value, seen = new WeakSet()) {
 async function filterRows(source, session, key, value) {
   const rows = Array.isArray(value) ? value : (value && typeof value === "object" ? Object.values(value) : []);
   const role = normalizeRole(session.role);
-  // Custom roles receive no implicit headquarters scope. Their explicitly
-  // granted action keys decide both the module and the row set.
+  // Custom roles receive no implicit headquarters scope. Their authorized
+  // menu module determines both the available capability and row set.
   if (customDynamicRole(session)) {
-    if (["orders", "afterSales"].includes(key)) {
-      if (hasAction(session, "orderAll")) return rows;
+    if (key === "orders") {
       if (hasAction(session, "orderSelf")) return rows.filter((row) => row && [row.createdById, row.assigneeId, row.photographerId, row.staffId].some((id) => String(id || "") === String(session.subjectId || "")));
       return [];
     }
+    if (key === "afterSales") {
+      if (!hasAction(session, "orderSelf")) return [];
+      const orders = await source.list("orders");
+      const ownedOrderIds = new Set((Array.isArray(orders) ? orders : []).filter((row) => row && [row.createdById, row.assigneeId, row.photographerId, row.staffId].some((id) => String(id || "") === String(session.subjectId || ""))).map(getRowId));
+      return rows.filter((row) => ownedOrderIds.has(String(row && row.orderId || "")));
+    }
     if (FINANCE_KEYS.has(key)) return hasAction(session, "financeReview") ? rows : [];
-    if (CONTENT_KEYS.has(key)) return (hasAction(session, "contentEdit") || hasAction(session, "content")) ? rows : [];
+    if (CONTENT_KEYS.has(key)) return hasAction(session, "contentEdit") ? rows : [];
+    if (["staff", "agents", "distributors"].includes(key)) return hasAction(session, "staff") ? rows : [];
     if (["shops", "merchantCodes", "scans"].includes(key)) return hasAction(session, "shopEdit") ? rows : [];
     return [];
   }
@@ -519,6 +566,16 @@ function redactRow(key, row, session) {
   let out = stripPassword(key, row);
   if (!out || typeof out !== "object") return out;
   const role = normalizeRole(session.role);
+  if (PASSWORD_KEYS.has(key)) {
+    out = { ...out };
+    delete out.permissions;
+    delete out.permissionKeys;
+    if (out.extra && typeof out.extra === "object" && !Array.isArray(out.extra)) {
+      out.extra = { ...out.extra };
+      delete out.extra.permissions;
+      delete out.extra.permissionKeys;
+    }
+  }
   if (key === "orders") {
     out = { ...out };
     if (["merchant", "distributor", "agent"].includes(role)) {
@@ -547,7 +604,7 @@ function redactRow(key, row, session) {
 function safeErrorStatus(error) {
   if (!error) return 500;
   if (["AUTH_STORE_UNAVAILABLE", "DATA_SOURCE_UNAVAILABLE", "DATA_SOURCE_CONFIG_INVALID", "DATA_SOURCE_INVALID"].includes(error.code)) return 503;
-  if (error.code === "DATA_TOO_LARGE") return 400;
+  if (["DATA_TOO_LARGE", "MENU_DEPTH_INVALID"].includes(error.code)) return 400;
   if (["DUPLICATE_RECORD", "ER_DUP_ENTRY"].includes(error.code)) return 409;
   if (/^(?:ER_|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|ECONNRESET|EACCES|EROFS|ENOSPC)/i.test(String(error.code || ""))) return 503;
   if (error.code === "REQUEST_TOO_LARGE") return 413;
@@ -616,6 +673,56 @@ module.exports = function createApi(source, mode, options = {}) {
     if (!permissionInit) permissionInit = Promise.resolve().then(() => typeof permissionStore.init === "function" ? permissionStore.init() : permissionStore).catch((error) => { permissionInit = null; throw error; });
     return permissionInit;
   }
+  function sessionMenuDefinitions(rows, menuKeys) {
+    const granted = new Set((Array.isArray(menuKeys) ? menuKeys : []).map(String));
+    const allRows = Array.isArray(rows) ? rows : [];
+    const byKey = new Map(allRows.map((menu) => [String(menu && (menu.menuKey || menu.key || menu.id) || ""), menu]).filter(([key]) => key));
+    const parentKeyOf = (menu) => {
+      const meta = menu && menu.meta && typeof menu.meta === "object" ? menu.meta : {};
+      if (menu && Object.prototype.hasOwnProperty.call(menu, "parentKey")) return String(menu.parentKey || "");
+      if (menu && Object.prototype.hasOwnProperty.call(menu, "parentId")) return String(menu.parentId || "");
+      return String(meta.parentKey || meta.parentId || "");
+    };
+    const definitionKeys = new Set(granted);
+    const containers = new Set();
+    for (const key of granted) {
+      const seen = new Set();
+      let current = byKey.get(key);
+      let depth = 0;
+      while (current) {
+        const currentKey = String(current.menuKey || current.key || current.id || "");
+        const parentKey = parentKeyOf(current);
+        if (!parentKey || seen.has(currentKey) || depth >= 1) break;
+        seen.add(currentKey);
+        const parent = byKey.get(parentKey);
+        if (!parent || permissionStatus(parent.status) === "disabled") break;
+        definitionKeys.add(parentKey);
+        if (!granted.has(parentKey)) containers.add(parentKey);
+        current = parent;
+        depth += 1;
+      }
+    }
+    return allRows.map((menu) => {
+      const meta = menu && menu.meta && typeof menu.meta === "object" ? menu.meta : {};
+      const key = String(menu && (menu.menuKey || menu.key || menu.id) || "");
+      const parentKey = parentKeyOf(menu) || null;
+      return {
+        key,
+        label: String(menu && (menu.name || menu.label || menu.menuKey || menu.key) || ""),
+        parentKey,
+        group: String(meta.group || menu && menu.group || ""),
+        path: String(menu && menu.path || ""),
+        icon: String(menu && menu.icon || ""),
+        routeKey: String(meta.routeKey || meta.targetKey || menu && (menu.routeKey || menu.targetKey || menu.menuKey || menu.key || menu.id) || ""),
+        sort: Number(menu && (menu.sortNo ?? menu.sort) || 0),
+        status: permissionStatus(menu && menu.status),
+        containerOnly: containers.has(key)
+      };
+    }).filter((menu) => menu.key && definitionKeys.has(menu.key) && menu.status !== "disabled");
+  }
+  function legacyMenuKeys(role) {
+    return (DEFAULT_ROLE_MENU_KEYS[normalizeRole(role)] || []).slice();
+  }
   async function refreshAdminSession(session, token) {
     if (!session || session.kind !== "admin") return session;
     if (permissionStore && session.authzUserId) {
@@ -630,23 +737,16 @@ module.exports = function createApi(source, mode, options = {}) {
       const extra = user.extra && typeof user.extra === "object" ? user.extra : {};
       const subjectType = extra.subjectType || (extra.legacyKey === "shops" ? "merchant" : extra.legacyKey === "distributors" ? "distributor" : extra.legacyKey === "agents" ? "agent" : "staff");
       const subjectId = String(extra.subjectId || extra.legacyId || session.subjectId || user.id);
-      const menuDefinitions = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
+      const menuKeys = Array.isArray(policy.menuKeys) ? policy.menuKeys.map(String) : [];
+      const menuRows = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
+      const { permissionKeys, permissions, permissionsConfigured, permissionSource, actions, ...baseSession } = session;
       return {
-        ...session,
+        ...baseSession,
         role,
         roleName: policy.role && policy.role.name ? policy.role.name : (session.roleName || role),
         roleId: policy.role && policy.role.id ? policy.role.id : user.roleId,
-        menuKeys: Array.isArray(policy.menuKeys) ? policy.menuKeys.map(String) : [],
-        menuDefinitions: (Array.isArray(menuDefinitions) ? menuDefinitions : []).map((menu) => ({
-          key: String(menu.menuKey || menu.key || menu.id || ""), label: String(menu.name || menu.label || menu.menuKey || menu.key || ""),
-          group: String((menu.meta && menu.meta.group) || menu.group || ""), path: String(menu.path || ""), icon: String(menu.icon || ""),
-          routeKey: String((menu.meta && (menu.meta.routeKey || menu.meta.targetKey)) || menu.routeKey || menu.targetKey || menu.menuKey || menu.key || menu.id || ""),
-          sort: Number(menu.sortNo ?? menu.sort ?? 0), status: permissionStatus(menu.status)
-        })).filter((menu) => menu.key),
-        permissionKeys: effectiveDynamicPermissionKeys(role, policy.permissionKeys),
-        permissions: effectiveDynamicPermissionKeys(role, policy.permissionKeys),
-        permissionsConfigured: true,
-        permissionSource: permissionStore.backend === "mysql" ? "mysql" : "json-authz",
+        menuKeys,
+        menuDefinitions: sessionMenuDefinitions(menuRows, menuKeys),
         authzUpdatedAt: userVersion,
         subjectType,
         subjectId,
@@ -657,24 +757,25 @@ module.exports = function createApi(source, mode, options = {}) {
         agentId: subjectType === "agent" ? subjectId : String(extra.agentId || session.agentId || ""),
       };
     }
+    // Runtime MySQL sessions are always backed by the normalized auth tables.
+    // Do not revive a legacy business-record session after the service moves
+    // to MySQL-only authorization.
+    if (mode === "mysql") return null;
     const key = session.subjectType === "merchant" ? "shops" : session.subjectType === "distributor" ? "distributors" : session.subjectType === "agent" ? "agents" : "staff";
     const current = await source.get(key, session.subjectId);
     if (!current || current.isDeleted || current.deleted || isDisabledStatus(current.status)) return null;
     const role = session.subjectType === "merchant" ? "merchant" : normalizeRole(current.role || session.role);
     if (!ROLE_ACTIONS[role]) return null;
-    // Password changes and permission edits invalidate older browser sessions
-    // on their next request without requiring a session index in Redis.
+    // Credential changes invalidate older browser sessions on their next
+    // request without requiring a session index in Redis.
     if (session.credentialDigest && session.credentialDigest !== credentialDigest(current.password)) return null;
-    const permissionsConfigured = Array.isArray(current.permissionKeys) || Array.isArray(current.permissions);
-    const permissions = Array.isArray(current.permissionKeys)
-      ? current.permissionKeys
-      : (Array.isArray(current.permissions) ? current.permissions : (Array.isArray(session.permissions) ? session.permissions : []));
+    const { permissionKeys, permissions, permissionsConfigured, permissionSource, actions, ...baseSession } = session;
     const subjectId = String(current.id || current._id || session.subjectId);
     return {
-      ...session,
+      ...baseSession,
       role,
-      permissions,
-      permissionsConfigured,
+      menuKeys: legacyMenuKeys(role),
+      menuDefinitions: [],
       account: current.account || session.account,
       subjectId,
       shopId: session.subjectType === "merchant" ? String(current.id || current._id || current.shopId || "") : String(current.shopId || session.shopId || ""),
@@ -807,18 +908,6 @@ module.exports = function createApi(source, mode, options = {}) {
   function forbidden(res, session, pathname, detail = "当前角色无权访问") {
     auditDenied(session, pathname, detail); json(res, 403, { error: detail });
   }
-  function dynamicActionKeys(permissionKeys = []) {
-    const keys = new Set((Array.isArray(permissionKeys) ? permissionKeys : []).map(String));
-    if (keys.has("*")) return ["*"];
-    const output = new Set(keys);
-    // Keep the client-visible action list in lockstep with server enforcement.
-    // A grant such as `dispatch` therefore exposes both `assign` and
-    // `transfer`, which are authorized by the same server-side alias set.
-    Object.entries(DYNAMIC_PERMISSION_ALIASES).forEach(([action, candidates]) => {
-      if (candidates.some((candidate) => keys.has(candidate))) output.add(action);
-    });
-    return [...output];
-  }
   function authzSubject(user, policy) {
     const extra = user && user.extra && typeof user.extra === "object" ? user.extra : {};
     const roleKey = dynamicRoleKey(policy && policy.role && (policy.role.roleKey || policy.role.code));
@@ -846,21 +935,14 @@ module.exports = function createApi(source, mode, options = {}) {
     const policy = await permissionStore.getPolicyForUser(user);
     const subject = authzSubject(user, policy);
     if (!policy || !policy.role || !subject.roleKey || isDisabledStatus(policy.role.status)) return json(res, 403, { ok: false, error: "该账号绑定的角色不存在或已停用" });
-    const permissionKeys = effectiveDynamicPermissionKeys(subject.roleKey, policy.permissionKeys);
     const menuKeys = Array.isArray(policy.menuKeys) ? [...new Set(policy.menuKeys.map(String))] : [];
-    const menuDefinitions = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
+    const menuRows = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
     const sessionPayload = {
       kind: "admin", authzUserId: String(user.id), authzUpdatedAt: authzVersion(user.updatedAt), subjectType: subject.subjectType,
       subjectId: subject.subjectId, account: user.account, name: user.name, role: subject.roleKey,
       roleName: policy.role && policy.role.name ? policy.role.name : subject.roleKey,
-      roleId: policy.role && policy.role.id ? policy.role.id : user.roleId, menuKeys, permissionKeys,
-      menuDefinitions: (Array.isArray(menuDefinitions) ? menuDefinitions : []).map((menu) => ({
-        key: String(menu.menuKey || menu.key || menu.id || ""), label: String(menu.name || menu.label || menu.menuKey || menu.key || ""),
-        group: String((menu.meta && menu.meta.group) || menu.group || ""), path: String(menu.path || ""), icon: String(menu.icon || ""),
-        routeKey: String((menu.meta && (menu.meta.routeKey || menu.meta.targetKey)) || menu.routeKey || menu.targetKey || menu.menuKey || menu.key || menu.id || ""),
-        sort: Number(menu.sortNo ?? menu.sort ?? 0), status: permissionStatus(menu.status)
-      })).filter((menu) => menu.key),
-      permissions: permissionKeys, permissionsConfigured: true, permissionSource: permissionStore.backend === "mysql" ? "mysql" : "json-authz",
+      roleId: policy.role && policy.role.id ? policy.role.id : user.roleId, menuKeys,
+      menuDefinitions: sessionMenuDefinitions(menuRows, menuKeys),
       shopId: subject.subjectType === "merchant" ? String(subject.extra.shopId || subject.subjectId) : String(subject.extra.shopId || ""),
       shopCode: String(subject.extra.shopCode || ""), distributorId: subject.subjectType === "distributor" ? subject.subjectId : String(subject.extra.distributorId || ""),
       agentId: subject.subjectType === "agent" ? subject.subjectId : String(subject.extra.agentId || "")
@@ -870,8 +952,7 @@ module.exports = function createApi(source, mode, options = {}) {
     return json(res, 200, {
       ok: true, role: sessionPayload.role, roleName: sessionPayload.roleName, roleId: sessionPayload.roleId || "", account: user.account, name: user.name || account,
       staffId: sessionPayload.subjectId, shopId: sessionPayload.shopId, distributorId: sessionPayload.distributorId, agentId: sessionPayload.agentId,
-      menus: menuKeys, menuKeys, menuDefinitions: sessionPayload.menuDefinitions, permissions: permissionKeys, permissionKeys, actions: dynamicActionKeys(permissionKeys),
-      permissionsConfigured: true, permissionSource: sessionPayload.permissionSource,
+      menus: menuKeys, menuKeys, menuDefinitions: sessionPayload.menuDefinitions,
       token: session.token, expiresAt: session.expiresAt, expiresIn: Math.floor(session.ttlMs / 1000)
     });
   }
@@ -925,10 +1006,10 @@ module.exports = function createApi(source, mode, options = {}) {
           if (saved) candidate.password = migrated;
         } catch (_) {}
       }
+      const menuKeys = legacyMenuKeys(role);
       const sessionPayload = {
         kind: "admin", subjectType: matched.subjectType, subjectId, account, role,
-        permissions: Array.isArray(candidate.permissionKeys) ? candidate.permissionKeys : (Array.isArray(candidate.permissions) ? candidate.permissions : []),
-        permissionsConfigured: Array.isArray(candidate.permissionKeys) || Array.isArray(candidate.permissions),
+        menuKeys, menuDefinitions: [],
         credentialDigest: credentialDigest(candidate.password),
         shopId: matched.subjectType === "merchant" ? String(candidate.id || candidate._id || candidate.shopId || "") : String(candidate.shopId || ""),
         shopCode: matched.subjectType === "merchant" ? String(candidate.shopId || "") : "",
@@ -945,8 +1026,9 @@ module.exports = function createApi(source, mode, options = {}) {
         shopId: sessionPayload.shopId || "",
         distributorId: sessionPayload.distributorId || "",
         agentId: sessionPayload.agentId || "",
-        permissions: Array.isArray(sessionPayload.permissions) ? sessionPayload.permissions : [],
-        actions: [...roleActions(sessionPayload)],
+        menus: menuKeys,
+        menuKeys,
+        menuDefinitions: [],
         token: session.token,
         expiresAt: session.expiresAt,
         expiresIn: Math.floor(session.ttlMs / 1000),
@@ -1235,10 +1317,9 @@ module.exports = function createApi(source, mode, options = {}) {
       .reduce((sum, ticket) => sum + Number(ticket.refundAmount || ticket.amount || 0), 0) : 0);
   }
   function permissionAdminAllowed(session) {
-    // Keep the authority-of-authority boundary explicit. Role grants can
-    // mint further privileges, so only the system super administrator may
-    // change menus, roles, or login accounts.
-    return normalizeRole(session && session.role) === "super" && hasAction(session, "view");
+    // Keep the authority-of-authority boundary explicit. A fresh deployment
+    // has no menu records yet, so management cannot itself depend on a menu.
+    return normalizeRole(session && session.role) === "super";
   }
   function permissionStatus(value, fallback = "active") {
     const text = String(value || "").trim().toLowerCase();
@@ -1246,29 +1327,45 @@ module.exports = function createApi(source, mode, options = {}) {
     return text === "" ? fallback : "active";
   }
   function permissionStatusLabel(value) { return permissionStatus(value) === "disabled" ? "停用" : "启用"; }
+  function permissionParentKey(row) {
+    if (row && Object.prototype.hasOwnProperty.call(row, "parentKey")) return String(row.parentKey || "");
+    if (row && Object.prototype.hasOwnProperty.call(row, "parentId")) return String(row.parentId || "");
+    const meta = row && row.meta && typeof row.meta === "object" ? row.meta : {};
+    return String(meta.parentKey || meta.parentId || "");
+  }
   function permissionMenuOutput(row = {}) {
     const meta = row.meta && typeof row.meta === "object" ? row.meta : {};
     const key = String(row.menuKey || row.key || row.id || "");
     const routeKey = String(row.routeKey || row.targetKey || meta.routeKey || meta.targetKey || key);
+    const parentKey = permissionParentKey(row);
     return {
       ...row, id: String(row.id || key), key, menuKey: key, label: row.label || row.name || key, name: row.name || row.label || key,
-      parentKey: row.parentKey || row.parentId || meta.parentKey || "", parentId: row.parentId || row.parentKey || meta.parentKey || "",
+      parentKey, parentId: parentKey,
       group: row.group || meta.group || "", path: row.path || `/${key}`, icon: row.icon || meta.icon || "", sort: Number(row.sort ?? row.sortNo ?? meta.sort ?? 0), sortNo: Number(row.sortNo ?? row.sort ?? meta.sort ?? 0),
-      routeKey, targetKey: routeKey, type: row.type || meta.type || "menu", status: permissionStatusLabel(row.status), enabled: permissionStatus(row.status) !== "disabled", meta
+      routeKey, targetKey: routeKey, type: "menu", status: permissionStatusLabel(row.status), enabled: permissionStatus(row.status) !== "disabled", meta
     };
   }
   async function permissionMenus() {
     const rows = permissionStore && typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
-    return (Array.isArray(rows) ? rows : []).map(permissionMenuOutput).sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key));
+    const mapped = (Array.isArray(rows) ? rows : []).map(permissionMenuOutput);
+    const byIdentity = new Map(mapped.flatMap((menu) => [[String(menu.key), menu], [String(menu.id), menu]]));
+    return mapped.map((menu) => {
+      const parent = byIdentity.get(permissionParentKey(menu));
+      const parentKey = parent ? String(parent.key) : permissionParentKey(menu);
+      return { ...menu, parentKey, parentId: parentKey };
+    }).sort((a, b) => a.sort - b.sort || a.key.localeCompare(b.key));
   }
   async function permissionRoles() {
     const rows = permissionStore && typeof permissionStore.listRoles === "function" ? await permissionStore.listRoles() : [];
+    const activeMenuKeys = (await permissionMenus()).filter((menu) => menu.enabled !== false).map((menu) => String(menu.key));
     const output = [];
     for (const row of Array.isArray(rows) ? rows : []) {
       const id = String(row.id || "");
-      const grants = permissionStore && typeof permissionStore.getRoleGrants === "function" ? await permissionStore.getRoleGrants(id) : { menuKeys: [], permissionKeys: [] };
       const key = String(row.roleKey || row.code || row.key || id);
-      output.push({ ...row, id, key, roleKey: key, name: row.name || key, status: permissionStatusLabel(row.status), menus: [...new Set((grants.menuKeys || []).map(String))], menuKeys: [...new Set((grants.menuKeys || []).map(String))], actions: [...new Set((grants.permissionKeys || []).map(String))], permissionKeys: [...new Set((grants.permissionKeys || []).map(String))] });
+      const grants = key === "super"
+        ? { menuKeys: activeMenuKeys }
+        : (permissionStore && typeof permissionStore.getRoleGrants === "function" ? await permissionStore.getRoleGrants(id) : { menuKeys: [] });
+      output.push({ ...row, id, key, roleKey: key, name: row.name || key, status: permissionStatusLabel(row.status), menus: [...new Set((grants.menuKeys || []).map(String))], menuKeys: [...new Set((grants.menuKeys || []).map(String))] });
     }
     return output;
   }
@@ -1279,28 +1376,17 @@ module.exports = function createApi(source, mode, options = {}) {
     return (Array.isArray(rows) ? rows : []).map((row) => {
       const role = roleMap.get(String(row.roleId || row.role || ""));
       const roleKey = role ? role.roleKey : String(row.role || row.roleId || "");
-      const extra = row.extra && typeof row.extra === "object" ? row.extra : {};
-      return { ...row, id: String(row.id || row._id || ""), name: row.name || row.displayName || row.account, role: roleKey, roleId: role ? role.id : row.roleId, roleName: role ? role.name : roleKey, status: permissionStatusLabel(row.status), permissionKeys: Array.isArray(row.permissionKeys) ? row.permissionKeys : (Array.isArray(extra.permissionKeys) ? extra.permissionKeys : []) };
+      return { ...row, id: String(row.id || row._id || ""), name: row.name || row.displayName || row.account, role: roleKey, roleId: role ? role.id : row.roleId, roleName: role ? role.name : roleKey, status: permissionStatusLabel(row.status) };
     });
   }
-  async function validateRoleGrants(roleKey, sourceMenus, sourcePermissions) {
-    const canonicalRoleKey = dynamicRoleKey(roleKey);
+  async function validateRoleMenuGrants(roleKey, sourceMenus) {
     const menuKeys = [...new Set((Array.isArray(sourceMenus) ? sourceMenus : []).map(String).filter(Boolean))];
-    const permissionKeys = [...new Set((Array.isArray(sourcePermissions) ? sourcePermissions : []).map(String).filter(Boolean))];
-    if (!canonicalRoleKey) return { ok: false, status: 400, error: "角色标识必须为小写且不能使用系统保留别名" };
-    if (canonicalRoleKey === "super" && !permissionKeys.includes("*")) return { ok: false, status: 409, error: "超级管理员必须保留全部权限" };
-    if (canonicalRoleKey !== "super" && permissionKeys.some((key) => key === "*" || AUTHORITY_PERMISSION_KEYS.has(key))) return { ok: false, status: 403, error: "只有超级管理员可以授予权限管理能力" };
+    if (String(roleKey || "").trim().toLowerCase() !== "super" && menuKeys.includes("permissions")) {
+      return { ok: false, status: 403, error: "只有系统管理员可以获得权限管理菜单" };
+    }
     const validMenus = new Set((await permissionMenus()).filter((menu) => menu.enabled !== false).map((menu) => String(menu.key)));
     if (menuKeys.some((key) => !validMenus.has(key))) return { ok: false, status: 400, error: "授权菜单不存在或已停用" };
-    return { ok: true, menuKeys, permissionKeys };
-  }
-  function validateDirectPermissionGrants(roleKey, sourcePermissions) {
-    const permissionKeys = [...new Set((Array.isArray(sourcePermissions) ? sourcePermissions : []).map(String).filter(Boolean))];
-    if (String(roleKey || "").trim().toLowerCase() !== "super"
-      && permissionKeys.some((key) => key === "*" || AUTHORITY_PERMISSION_KEYS.has(key))) {
-      return { ok: false, status: 403, error: "非超级管理员不能获得全部权限或权限管理能力" };
-    }
-    return { ok: true, permissionKeys };
+    return { ok: true, menuKeys };
   }
   async function permissionUserContext(userId) {
     const user = await permissionStore.getUser(userId);
@@ -1317,6 +1403,10 @@ module.exports = function createApi(source, mode, options = {}) {
     const { user, role, roles } = context;
     if (String(user.id) === String(session.authzUserId || "") || String(user.account) === String(session.account)) {
       json(res, 409, { error: deletingOrDisabling ? "不能删除或停用当前登录账号" : "不能修改当前登录账号状态" });
+      return false;
+    }
+    if (deletingOrDisabling && isBuiltinAdminAccount(user)) {
+      json(res, 409, { error: "不能删除或停用内置 admin 账号" });
       return false;
     }
     if (deletingOrDisabling && role && role.roleKey === "super") {
@@ -1363,7 +1453,7 @@ module.exports = function createApi(source, mode, options = {}) {
     return { ok: true, id: userId };
   }
   async function permissionRoute(req, res, parts, session, pathname) {
-    if (!permissionStore || permissionStore.backend !== "mysql") return json(res, 503, { error: "权限数据必须由 MySQL 服务提供" });
+    if (!permissionStore || permissionStore.backend !== "mysql") return json(res, 503, { error: "权限服务暂不可用" });
     if (!permissionAdminAllowed(session)) return forbidden(res, session, pathname, "只有权限管理员可以配置菜单、角色和人员");
     try { await initPermissions(); } catch (_) { return json(res, 503, { error: "权限数据服务暂不可用" }); }
     const resource = String(parts[1] || "").toLowerCase();
@@ -1371,15 +1461,13 @@ module.exports = function createApi(source, mode, options = {}) {
     const action = String(parts[3] || "").toLowerCase();
     if (req.method === "GET") {
       if (!resource) {
-        const snapshot = await permissionStore.snapshot();
-        const permissions = [...new Set((Array.isArray(snapshot.rolePermissions) ? snapshot.rolePermissions : []).map((row) => String(row.permissionKey || row.permission_key || "")).filter(Boolean))].sort();
-        return json(res, 200, { menus: await permissionMenus(), roles: await permissionRoles(), users: await permissionUsers(), permissions });
+        return json(res, 200, { menus: await permissionMenus(), roles: await permissionRoles(), users: await permissionUsers() });
       }
       if (resource === "menus") return json(res, 200, await permissionMenus());
       if (resource === "roles") {
         if (idPart && action === "grants") {
           const roles = await permissionRoles(); const row = roles.find((item) => item.id === idPart || item.roleKey === idPart);
-          return row ? json(res, 200, { roleId: row.id, menuKeys: row.menuKeys, permissionKeys: row.permissionKeys }) : json(res, 404, { error: "角色不存在" });
+          return row ? json(res, 200, { roleId: row.id, menuKeys: row.menuKeys }) : json(res, 404, { error: "角色不存在" });
         }
         return json(res, 200, await permissionRoles());
       }
@@ -1406,7 +1494,7 @@ module.exports = function createApi(source, mode, options = {}) {
         const menuKey = String(current.menuKey || current.key || idPart);
         const roles = await permissionRoles();
         if (roles.some((role) => (role.menus || []).map(String).includes(menuKey))) return json(res, 409, { error: "菜单仍被角色授权，不能删除" });
-        if ((await permissionMenus()).some((menu) => String(menu.parentKey || menu.parentId || "") === menuKey)) return json(res, 409, { error: "菜单仍包含下级菜单，不能删除" });
+        if ((await permissionMenus()).some((menu) => permissionParentKey(menu) === menuKey)) return json(res, 409, { error: "菜单仍包含下级菜单，不能删除" });
         const ok = await permissionStore.deleteMenu(idPart);
         if (ok) await auditMutation(session, "删除权限菜单", "authz_menus", idPart, "权限中心删除菜单");
         return json(res, ok ? 200 : 404, { ok });
@@ -1434,21 +1522,37 @@ module.exports = function createApi(source, mode, options = {}) {
       const currentMeta = current && current.meta && typeof current.meta === "object" ? current.meta : {};
       const routeKey = String(body.routeKey || body.targetKey || currentMeta.routeKey || currentMeta.targetKey || (current && (current.routeKey || current.targetKey)) || key).trim();
       if (!ROUTE_MENU_KEYS.has(routeKey)) return json(res, 400, { error: "目标页面必须是已注册后台页面" });
-      const parentKey = String(body.parentKey || body.parentId || (current && (current.parentKey || current.parentId)) || "").slice(0, 128) || null;
-      if (parentKey) {
-        const menus = await permissionMenus();
-        const byKey = new Map(menus.map((menu) => [String(menu.key), menu]));
-        if (!byKey.has(parentKey)) return json(res, 400, { error: "上级菜单不存在" });
+       const parentKeySpecified = Object.prototype.hasOwnProperty.call(body, "parentKey");
+       const parentIdSpecified = Object.prototype.hasOwnProperty.call(body, "parentId");
+       const currentParentKey = current ? permissionParentKey(current) : "";
+       const parentValue = parentKeySpecified ? body.parentKey : parentIdSpecified ? body.parentId : currentParentKey;
+       const requestedParentKey = String(parentValue || "").slice(0, 128) || null;
+       const menus = requestedParentKey ? await permissionMenus() : [];
+       const parentRecord = requestedParentKey && menus.find((menu) => String(menu.key) === requestedParentKey || String(menu.id) === requestedParentKey);
+       const parentKey = parentRecord ? String(parentRecord.key) : requestedParentKey;
+       if (parentKey) {
+         const byKey = new Map(menus.map((menu) => [String(menu.key), menu]));
+        const parent = byKey.get(parentKey);
+        if (!parent) return json(res, 400, { error: "上级菜单不存在" });
+        if (parent.enabled === false) return json(res, 400, { error: "上级菜单已停用" });
+        if (permissionParentKey(parent)) return json(res, 400, { error: "菜单最多支持两级" });
+         const currentKey = String(current && (current.menuKey || current.key) || key);
+        if (menus.some((menu) => permissionParentKey(menu) === currentKey)) {
+          return json(res, 400, { error: "含有下级菜单的菜单不能再设置上级菜单" });
+        }
         const seen = new Set([key]);
         let cursor = parentKey;
         while (cursor) {
           if (seen.has(cursor)) return json(res, 400, { error: "菜单层级不能形成循环" });
           seen.add(cursor);
           const row = byKey.get(cursor);
-          cursor = row && row.parentKey ? String(row.parentKey) : "";
+          cursor = permissionParentKey(row);
         }
       }
-      const payload = { id: idPart || body.id || `menu_${key}`, menuKey: key, key, name: name.slice(0, 128), path: String(body.path || (current && current.path) || `/${routeKey}`).slice(0, 255), icon: String(body.icon || (current && current.icon) || "").slice(0, 64), parentKey, sortNo: Math.max(0, Math.min(9999, Number(body.sortNo ?? body.sort ?? (current && (current.sortNo ?? current.sort)) ?? 0) || 0)), status: body.status === undefined ? permissionStatus(current && current.status) : permissionStatus(body.status), meta: { ...currentMeta, group: String(body.group ?? currentMeta.group ?? (current && current.group) ?? "").slice(0, 64), type: String(body.type ?? currentMeta.type ?? (current && current.type) ?? "menu").slice(0, 24), routeKey } };
+      const payload = { id: idPart || body.id || `menu_${key}`, menuKey: key, key, name: name.slice(0, 128), path: String(body.path || (current && current.path) || `/${routeKey}`).slice(0, 255), icon: String(body.icon || (current && current.icon) || "").slice(0, 64), parentKey, sortNo: Math.max(0, Math.min(9999, Number(body.sortNo ?? body.sort ?? (current && (current.sortNo ?? current.sort)) ?? 0) || 0)), status: body.status === undefined ? permissionStatus(current && current.status) : permissionStatus(body.status), meta: { ...currentMeta, group: String(body.group ?? currentMeta.group ?? (current && current.group) ?? "").slice(0, 64), type: "menu", routeKey } };
+      if (payload.status === "disabled" && (await permissionMenus()).some((menu) => String(menu.parentKey || menu.parentId || "") === key && menu.enabled !== false)) {
+        return json(res, 409, { error: "请先停用下级菜单" });
+      }
       const saved = idPart ? await permissionStore.updateMenu(idPart, payload) : await permissionStore.createMenu(payload);
       if (!saved) return json(res, 404, { error: "菜单不存在" });
       await auditMutation(session, idPart ? "更新权限菜单" : "新增权限菜单", "authz_menus", saved.id || payload.id, "权限中心菜单配置");
@@ -1458,25 +1562,28 @@ module.exports = function createApi(source, mode, options = {}) {
       if (action === "grants" && idPart) {
         const roles = await permissionRoles(); const current = roles.find((item) => item.id === idPart || item.roleKey === idPart);
         if (!current) return json(res, 404, { error: "角色不存在" });
-        const grants = await validateRoleGrants(current.roleKey, Array.isArray(body.menuKeys) ? body.menuKeys : body.menus, Array.isArray(body.permissionKeys) ? body.permissionKeys : body.actions);
+        if (current.roleKey === "super") return json(res, 403, { error: "系统管理员权限由系统维护" });
+        const grants = await validateRoleMenuGrants(current.roleKey, Array.isArray(body.menuKeys) ? body.menuKeys : body.menus);
         if (!grants.ok) return json(res, grants.status, { error: grants.error });
         const saved = await permissionStore.setRoleGrants(current.id, grants);
-        await auditMutation(session, "更新角色授权", "authz_roles", current.id, "权限中心角色菜单与操作权限变更");
-        return json(res, 200, { roleId: current.id, menuKeys: grants.menuKeys, permissionKeys: grants.permissionKeys, ...saved });
+        await auditMutation(session, "更新角色授权", "authz_roles", current.id, "权限中心角色菜单变更");
+        return json(res, 200, { roleId: current.id, menuKeys: grants.menuKeys, ...saved });
       }
       const currentRole = idPart ? (await permissionRoles()).find((item) => item.id === idPart || item.roleKey === idPart) : null;
       const key = String(body.key || body.roleKey || body.code || (currentRole && (currentRole.roleKey || currentRole.key)) || "").trim();
       const name = String(body.name || (currentRole && currentRole.name) || "").trim();
-      if (!/^[A-Za-z][A-Za-z0-9_.-]{1,63}$/.test(key) || !name) return json(res, 400, { error: "角色标识或名称无效" });
-      if (!dynamicRoleKey(key)) return json(res, 400, { error: "角色标识必须为小写且不能使用系统保留别名" });
+        if (!/^[A-Za-z][A-Za-z0-9_.-]{1,63}$/.test(key) || !name) return json(res, 400, { error: "角色标识或名称无效" });
+        if (!dynamicRoleKey(key)) return json(res, 400, { error: "角色标识必须为小写且不能使用系统保留别名" });
+        if (key === "super") return json(res, 409, { error: "系统管理员角色由系统维护" });
+      if (currentRole && currentRole.roleKey === "super") return json(res, 403, { error: "系统管理员权限由系统维护" });
       const payload = { id: idPart || body.id || `role_${key}`, roleKey: key, key, name: name.slice(0, 128), description: String(body.description ?? (currentRole && currentRole.description) ?? "").slice(0, 500), status: body.status === undefined ? permissionStatus(currentRole && currentRole.status) : permissionStatus(body.status) };
       if (currentRole && currentRole.roleKey === "super" && key !== "super") return json(res, 409, { error: "系统超级管理员角色不允许修改标识" });
       if (currentRole && currentRole.roleKey === "super" && payload.status === "disabled") {
         const activeSupers = (await permissionStore.listUsers()).filter((user) => String(user.roleId || "") === String(currentRole.id) && !isDisabledStatus(user.status));
         if (activeSupers.length <= 1) return json(res, 409, { error: "至少保留一个启用中的超级管理员" });
       }
-      const grantsProvided = Array.isArray(body.menuKeys) || Array.isArray(body.menus) || Array.isArray(body.permissionKeys) || Array.isArray(body.actions);
-      const grants = grantsProvided ? await validateRoleGrants(key, body.menuKeys || body.menus, body.permissionKeys || body.actions) : null;
+      const grantsProvided = Array.isArray(body.menuKeys) || Array.isArray(body.menus);
+      const grants = grantsProvided ? await validateRoleMenuGrants(key, body.menuKeys || body.menus) : null;
       if (grants && !grants.ok) return json(res, grants.status, { error: grants.error });
       const resolvedRoleId = currentRole && currentRole.id ? currentRole.id : idPart;
       const saved = idPart ? await permissionStore.updateRole(resolvedRoleId, payload) : await permissionStore.createRole(payload);
@@ -1497,7 +1604,9 @@ module.exports = function createApi(source, mode, options = {}) {
     }
     if (resource === "users" || resource === "staff") {
       const existingUser = idPart ? await permissionStore.getUser(idPart) : null;
-      const existingExtra = existingUser && existingUser.extra && typeof existingUser.extra === "object" ? existingUser.extra : {};
+      const existingExtra = existingUser && existingUser.extra && typeof existingUser.extra === "object" ? { ...existingUser.extra } : {};
+      delete existingExtra.permissions;
+      delete existingExtra.permissionKeys;
       const account = String(body.account || body.username || (existingUser && existingUser.account) || "").trim();
       const name = String(body.name || body.displayName || (existingUser && (existingUser.name || existingUser.displayName)) || account).trim();
       const roles = await permissionRoles();
@@ -1509,17 +1618,21 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!dynamicRoleKey(role.roleKey)) return json(res, 409, { error: "绑定角色无效，请先修正角色配置" });
       if (role.roleKey === "super" && normalizeRole(session.role) !== "super") return json(res, 403, { error: "只有超级管理员可以绑定超级管理员角色" });
       const password = body.password === undefined ? "" : String(body.password);
+      const passwordProvided = ["password", "passwordHash", "password_hash"].some((key) => body[key] !== undefined && String(body[key]) !== "");
+      if (idPart && passwordProvided && !isBuiltinAdminAccount(session)) return forbidden(res, session, pathname, "仅 admin 账号可以修改人员密码");
       if (!idPart && !password) return json(res, 400, { error: "新增人员必须设置密码" });
       if (password && (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password))) return json(res, 400, { error: "密码至少 8 位且同时包含字母和数字" });
       const userId = idPart || String(body.id || `staff_${crypto.randomBytes(8).toString("hex")}`);
-      const requestedPermissions = Array.isArray(body.permissionKeys) ? body.permissionKeys : Array.isArray(body.permissions) ? body.permissions : (Array.isArray(existingUser && existingUser.permissionKeys) ? existingUser.permissionKeys : (Array.isArray(existingExtra.permissionKeys) ? existingExtra.permissionKeys : []));
-      const directGrants = validateDirectPermissionGrants(role.roleKey, requestedPermissions);
-      if (!directGrants.ok) return json(res, directGrants.status, { error: directGrants.error });
       const inferredSubjectType = existingExtra.subjectType || (existingExtra.legacyKey === "shops" ? "merchant" : existingExtra.legacyKey === "distributors" ? "distributor" : existingExtra.legacyKey === "agents" ? "agent" : "staff");
       const inferredLegacyKey = existingExtra.legacyKey || (inferredSubjectType === "merchant" ? "shops" : inferredSubjectType === "distributor" ? "distributors" : inferredSubjectType === "agent" ? "agents" : "staff");
-      const extra = { ...existingExtra, ...(body.extra && typeof body.extra === "object" ? body.extra : {}), permissionKeys: directGrants.permissionKeys, subjectType: String(body.subjectType || inferredSubjectType), subjectId: String(body.subjectId || existingExtra.subjectId || userId), legacyKey: inferredLegacyKey, legacyId: String(existingExtra.legacyId || userId), distributorId: String(body.distributorId ?? existingExtra.distributorId ?? ""), agentId: String(body.agentId ?? existingExtra.agentId ?? ""), shopId: String(body.shopId ?? existingExtra.shopId ?? "") };
-      const payload = { id: userId, account, name, displayName: name, roleId: role.id, role: role.roleKey, status: body.status === undefined ? permissionStatus(existingUser && existingUser.status) : permissionStatus(body.status), phone: String(body.phone ?? (existingUser && existingUser.phone) ?? "").slice(0, 64), email: String(body.email ?? (existingUser && existingUser.email) ?? "").slice(0, 255), extra, permissionKeys: directGrants.permissionKeys };
+      const extra = { ...existingExtra, ...(body.extra && typeof body.extra === "object" ? body.extra : {}), subjectType: String(body.subjectType || inferredSubjectType), subjectId: String(body.subjectId || existingExtra.subjectId || userId), legacyKey: inferredLegacyKey, legacyId: String(existingExtra.legacyId || userId), distributorId: String(body.distributorId ?? existingExtra.distributorId ?? ""), agentId: String(body.agentId ?? existingExtra.agentId ?? ""), shopId: String(body.shopId ?? existingExtra.shopId ?? "") };
+      delete extra.permissions;
+      delete extra.permissionKeys;
+      const payload = { id: userId, account, name, displayName: name, roleId: role.id, role: role.roleKey, status: body.status === undefined ? permissionStatus(existingUser && existingUser.status) : permissionStatus(body.status), phone: String(body.phone ?? (existingUser && existingUser.phone) ?? "").slice(0, 64), email: String(body.email ?? (existingUser && existingUser.email) ?? "").slice(0, 255), extra };
       const superRole = roles.find((item) => item.roleKey === "super");
+      if (existingUser && isBuiltinAdminAccount(existingUser) && (role.roleKey !== "super" || payload.status === "disabled")) {
+        return json(res, 409, { error: "内置 admin 账号必须保持启用的系统管理员角色" });
+      }
       const existingIsSuper = !!(existingUser && ((superRole && String(existingUser.roleId || "") === String(superRole.id)) || String(existingUser.role || "") === "super"));
       if (existingIsSuper && (role.roleKey !== "super" || payload.status === "disabled")) {
         const activeSupers = (await permissionStore.listUsers()).filter((user) => {
@@ -1537,7 +1650,7 @@ module.exports = function createApi(source, mode, options = {}) {
       // Subject identity is authorization metadata and belongs only to
       // lxm_auth_users. The business projection retains its operational
       // scope fields without duplicating auth-only values into generic leaves.
-      const legacy = { id: userId, name, account, role: role.roleKey, status: payload.status, phone: payload.phone, email: payload.email, permissionKeys: payload.permissionKeys, permissions: payload.permissionKeys, shopId: extra.shopId, distributorId: extra.distributorId, agentId: extra.agentId };
+      const legacy = { id: userId, name, account, role: role.roleKey, status: payload.status, phone: payload.phone, email: payload.email, shopId: extra.shopId, distributorId: extra.distributorId, agentId: extra.agentId };
       try {
         const legacyKey = String(extra.legacyKey || "staff");
         const legacyId = String(extra.legacyId || userId);
@@ -1553,7 +1666,7 @@ module.exports = function createApi(source, mode, options = {}) {
         return json(res, 503, { error: "人员资料已回滚，业务数据服务暂不可用，请稍后重试" });
       }
       await auditMutation(session, idPart ? "更新权限人员" : "新增权限人员", "authz_users", saved.id || userId, "权限中心人员账号配置");
-      return json(res, idPart ? 200 : 201, { ...saved, role: role.roleKey, roleName: role.name, status: permissionStatusLabel(saved.status), permissionKeys: payload.permissionKeys });
+      return json(res, idPart ? 200 : 201, { ...saved, role: role.roleKey, roleName: role.name, status: permissionStatusLabel(saved.status) });
     }
     return json(res, 404, { error: "权限资源不存在" });
   }
@@ -1630,6 +1743,8 @@ module.exports = function createApi(source, mode, options = {}) {
     let permissionCredential = "";
     if (PASSWORD_KEYS.has(key)) {
       if (normalizeRole(session.role) !== "super") return forbidden(res, session, pathname, "只有系统超管可以管理账号");
+      const passwordProvided = ["password", "passwordHash", "password_hash"].some((field) => body[field] !== undefined && String(body[field]) !== "");
+      if (method === "PUT" && passwordProvided && !isBuiltinAdminAccount(session)) return forbidden(res, session, pathname, "仅 admin 账号可以修改人员密码");
       const policyErr = passwordPolicyError(key, body); if (policyErr) return json(res, 400, { error: policyErr });
       sanitizePasswordBody(key, body);
       if (permissionStore && permissionStore.required && method === "POST" && !body.password) return json(res, 400, { error: "新增账号必须设置登录密码" });
@@ -1639,10 +1754,8 @@ module.exports = function createApi(source, mode, options = {}) {
         delete body.passwordHash;
         delete body.password_hash;
       }
-      if (Array.isArray(body.permissionKeys)) {
-        body.permissions = [...new Set(body.permissionKeys.map(String))];
-        delete body.permissionKeys;
-      }
+      delete body.permissionKeys;
+      delete body.permissions;
     }
     if (key === "siteConfig" && normalizeRole(session.role) === "content" && containsConfigSensitive(body)) {
       return forbidden(res, session, pathname, "内容运营不能修改集成凭据");
@@ -1786,19 +1899,74 @@ module.exports = function createApi(source, mode, options = {}) {
       delete body._openid;
       body.createdBy = session.account;
       body.createdById = session.subjectId;
-      body.createTime = body.createTime || new Date().toISOString();
-      if (normalizeRole(session.role) !== "super") {
-        body.status = "new";
-        body.customerStatus = "预约待确认";
-        body.depositPaid = 0;
-        body.finalPaid = 0;
-        body.depositFinanceStatus = "";
-        body.finalFinanceStatus = "";
+      const now = new Date().toISOString();
+      const role = normalizeRole(session.role);
+      const total = roundMoney(body.totalAmount ?? body.totalPrice ?? body.price ?? 0);
+      const discount = roundMoney(body.finalDiscountAmount);
+      if (discount > total) return json(res, 400, { error: "优惠金额不能超过订单总价" });
+      const manualItems = Array.isArray(body.products) ? body.products
+        : Array.isArray(body.productItems) ? body.productItems : Array.isArray(body.items) ? body.items : [];
+      let productRatio = 0.3;
+      if (manualItems.length) {
+        try {
+          const [packages, albums, peripherals, addons] = await Promise.all([
+            source.list("packages"), source.list("albums"), source.list("peripherals"), source.list("addonServices")
+          ]);
+          const groups = { package: packages || [], album: albums || [], peripheral: peripherals || [], addon: addons || [] };
+          const resolveProduct = (item) => {
+            const type = String(item && (item.productType || item.type) || "").trim().toLowerCase();
+            const id = String(item && (item.packageId || item.albumId || item.peripheralId || item.addonId || item.productId || item.id) || "");
+            if (!id) return null;
+            const ordered = /peripheral|addon|accessor/.test(type) ? ["peripheral", "addon"]
+              : /album|sample|photo_album/.test(type) ? ["album"]
+                : /package|photo|video/.test(type) ? ["package"] : ["package", "album", "peripheral", "addon"];
+            for (const group of ordered) {
+              const row = (groups[group] || []).find((candidate) => getRowId(candidate) === id);
+              if (row) return row;
+            }
+            return null;
+          };
+          const selected = manualItems.map(resolveProduct).find(Boolean);
+          const configured = selected && (selected.depositRatio ?? selected.depositRate ?? selected.depositPercent ?? selected.depositPercentage);
+          if (configured !== undefined && configured !== null && configured !== "") productRatio = normalizeRatio(configured);
+        } catch (_) { return json(res, 503, { error: "商品定金配置暂不可用" }); }
+      }
+      const explicitOverride = role === "super" && body.depositPolicyOverride === true;
+      const suppliedRatio = explicitOverride ? (body.depositRatio ?? body.depositRate ?? body.depositPercent) : productRatio;
+      const ratio = suppliedRatio === undefined || suppliedRatio === null || suppliedRatio === "" ? 0.3 : normalizeRatio(suppliedRatio);
+      const suppliedDeposit = explicitOverride && body.depositDue !== undefined && body.depositDue !== null && body.depositDue !== "" ? Number(body.depositDue) : null;
+      delete body.depositPolicyOverride;
+      if (suppliedDeposit !== null && (!Number.isFinite(suppliedDeposit) || suppliedDeposit < 0)) return json(res, 400, { error: "定金应收金额无效" });
+      const due = roundMoney(suppliedDeposit === null ? total * ratio : suppliedDeposit);
+      if (due > Math.max(total - discount, 0)) return json(res, 409, { error: "定金应收不能超过订单应收" });
+      // Manual creation is always an unpaid booking. Even super users must use
+      // dedicated actions for payment, dispatch, delivery and completion.
+      ["workflowStage", "paymentRecords", "depositPaid", "finalPaid", "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt", "photographerId", "dispatchStatus", "dispatchRecord", "dispatchRecords", "selectionStatus", "selectionConfirmedAt", "deliveryRecord", "deliveredAt", "completedAt", "afterSaleStatus", "afterSaleId", "isDeleted", "deleted"].forEach((field) => { delete body[field]; });
+      body.totalAmount = total;
+      body.totalPrice = total;
+      body.price = total;
+      body.depositRatio = total > 0 ? normalizeRatio(due / total) : ratio;
+      body.depositDue = due;
+      body.finalDue = roundMoney(Math.max(total - due - discount, 0));
+      body.depositPaid = 0;
+      body.finalPaid = 0;
+      body.depositFinanceStatus = "";
+      body.finalFinanceStatus = "";
+      body.status = "new";
+      body.customerStatus = customerStatusForStage(due > 0 ? WORKFLOW_STAGES.AWAITING_DEPOSIT : WORKFLOW_STAGES.AWAITING_DISPATCH);
+      body.workflowStage = due > 0 ? WORKFLOW_STAGES.AWAITING_DEPOSIT : WORKFLOW_STAGES.AWAITING_DISPATCH;
+      body.dispatchStatus = "pending";
+      body.depositRefundable = true;
+      body.selectionStatus = "not_started";
+      body.paymentRecords = [{ id: makePaymentId("deposit"), phase: "deposit", amount: due, status: due > 0 ? "not_created" : "not_required", attempt: 0, createdAt: now, updatedAt: now }];
+      body.statusLogs = [{ type: "后台手工建单", action: "创建订单", operator: session.account, operatorId: session.subjectId, createTime: now }];
+      body.followRecords = [...(Array.isArray(body.followRecords) ? body.followRecords : []), { type: "后台手工建单", action: "创建订单", operator: session.account, operatorId: session.subjectId, createTime: now }];
+      body.createTime = body.createTime || now;
+      body.createdAt = body.createdAt || now;
+      if (role !== "super") {
         delete body.source;
         delete body.sourceCodeId;
         delete body.distributorId;
-        delete body.afterSaleStatus;
-        delete body.afterSaleId;
       }
     }
     if (method === "PUT") {
@@ -1931,6 +2099,10 @@ module.exports = function createApi(source, mode, options = {}) {
   }
 
   async function orderActionRoute(req, res, parts, session, pathname) {
+    const orderId = parts && parts[1] ? decodePart(parts[1]) : "order";
+    return withOrderMutex(`order:${orderId}`, async () => orderActionRouteUnlocked(req, res, parts, session, pathname));
+  }
+  async function orderActionRouteUnlocked(req, res, parts, session, pathname) {
     if (req.method !== "POST") return json(res, 405, { error: "请使用 POST" });
     const orderId = decodePart(parts[1]);
     if (!orderId) return json(res, 400, { error: "缺少订单 id" });
@@ -1948,6 +2120,9 @@ module.exports = function createApi(source, mode, options = {}) {
       unassign: ["super", "photo"],
       reschedule: ["super", "service"],
       start: ["super", "service", "photo"],
+      shootcomplete: ["super", "service", "photo"],
+      selectionconfirm: ["super", "service", "photo"],
+      payment: ["super", "service", "finance"],
       deliver: ["super", "service", "photo"],
       complete: ["super", "service"],
       cancel: ["super", "service"],
@@ -1955,11 +2130,12 @@ module.exports = function createApi(source, mode, options = {}) {
       note: ["super", "service"],
       update: ["super", "service", "finance", "photo"],
     };
-    if (!actionRoles[action] || !actionRoles[action].includes(role)) return forbidden(res, session, pathname, "当前角色不能执行该订单操作");
-    const actionPermission = role === "super" ? "*" : ["photo"].includes(role) ? "shootUpdate" : ["finance"].includes(role) ? "financeReview" : "orderEdit";
+    const customCapability = customOrderActionCapability(session, action);
+    if ((!actionRoles[action] || !actionRoles[action].includes(role)) && !customCapability) return forbidden(res, session, pathname, "当前角色不能执行该订单操作");
+    const actionPermission = customCapability || (role === "super" ? "*" : ["photo"].includes(role) ? "shootUpdate" : ["finance"].includes(role) ? "financeReview" : "orderEdit");
     if (actionPermission !== "*" && !hasAction(session, actionPermission)) return forbidden(res, session, pathname, "当前账号未授予该订单操作权限");
 
-    if (["accept", "assign", "unassign", "reschedule", "start", "deliver", "complete", "cancel"].includes(action)) {
+    if (["accept", "assign", "unassign", "reschedule", "start", "shootcomplete", "selectionconfirm", "payment", "deliver", "complete", "cancel"].includes(action)) {
       let activeTickets;
       try {
         activeTickets = (await source.list("afterSales")).filter((ticket) => ticket && String(ticket.orderId || "") === String(orderId) && !isAfterSaleTerminalStatus(ticket.status));
@@ -1971,10 +2147,11 @@ module.exports = function createApi(source, mode, options = {}) {
 
     const now = new Date().toISOString();
     const beforeStatus = String(current.status || "new");
+    const currentStage = canonicalStage(current);
     const patch = {};
     let label = "";
     const reason = String(body.reason || body.note || "").trim();
-    const requireReason = ["accept", "assign", "unassign", "reschedule", "start", "deliver", "complete", "cancel", "restore", "note", "update"].includes(action);
+    const requireReason = ["accept", "assign", "unassign", "reschedule", "start", "shootcomplete", "selectionconfirm", "payment", "deliver", "complete", "cancel", "restore", "note", "update"].includes(action);
     if (requireReason && reason.length < 2) return json(res, 400, { error: "请填写操作原因" });
     const canTransition = (allowedFrom, next) => {
       if (!allowedFrom.includes(beforeStatus)) return false;
@@ -1989,12 +2166,22 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.customerStatus = "预约待确认";
       patch.isDeleted = false;
       patch.deleted = false;
+      patch.workflowStage = depositDue(current) > 0 ? WORKFLOW_STAGES.AWAITING_DEPOSIT : WORKFLOW_STAGES.AWAITING_DISPATCH;
       label = "恢复订单";
     } else if (action === "accept") {
       if (!canTransition(["new", "pending"], "confirmed")) return json(res, 409, { error: "订单当前状态不能接单" });
       if (role === "service" && !current.assigneeId) patch.assigneeId = session.subjectId;
+      // A contact/accept action may happen before the customer pays; keep the
+      // durable stage in awaiting_deposit so it cannot be mistaken for a
+      // dispatch-ready order.
+      if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) {
+        patch.status = "contacted";
+        patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.AWAITING_DEPOSIT);
+      }
       label = "客服接单";
     } else if (action === "assign") {
+      if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "订金到账确认后才能派单" });
+      if (![WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能派单" });
       const photographerId = String(body.photographerId || "").trim();
       if (!photographerId) return json(res, 400, { error: "请选择摄影师" });
       const staffRows = await source.list("staff");
@@ -2002,18 +2189,41 @@ module.exports = function createApi(source, mode, options = {}) {
         staff && String(staff.id || staff._id) === photographerId && normalizeRole(staff.role) === "photo" && isActiveStatusForScope(staff)
       );
       if (!photographer) return json(res, 400, { error: "摄影师账号不存在或已停用" });
-      if (!canTransition(["new", "pending", "confirmed"], "confirmed")) return json(res, 409, { error: "订单当前状态不能派单" });
+      const appointmentAt = String(body.appointmentAt || current.appointmentAt || current.date || "").trim();
+      const appointmentLocation = String(body.appointmentLocation || body.shootLocation || body.location || current.appointmentLocation || current.shootLocation || current.location || "").trim();
+      const peopleCount = Number(body.peopleCount ?? current.peopleCount ?? current.participantCount ?? 0);
+      if (!appointmentAt || !appointmentLocation || !Number.isInteger(peopleCount) || peopleCount < 1) return json(res, 400, { error: "派单必须填写确认时间、地点和人数" });
       patch.photographerId = photographerId;
+      patch.appointmentAt = appointmentAt;
+      patch.appointmentLocation = appointmentLocation;
+      patch.shootLocation = appointmentLocation;
+      patch.peopleCount = peopleCount;
+      if (body.timePeriod || body.time) { patch.timePeriod = String(body.timePeriod || body.time).trim(); patch.time = patch.timePeriod; }
+      patch.dispatchStatus = "assigned";
+      patch.dispatchRecord = {
+        id: makePaymentId("dispatch"), type: current.photographerId ? "reassign" : "assign",
+        previous: { photographerId: current.photographerId || "", appointmentAt: current.appointmentAt || "", appointmentLocation: current.appointmentLocation || current.shootLocation || "", peopleCount: Number(current.peopleCount || 0) || null },
+        next: { photographerId, appointmentAt, appointmentLocation, peopleCount }, reason, operator: session.account, operatorId: session.subjectId, createTime: now,
+      };
+      patch.dispatchRecords = [...(Array.isArray(current.dispatchRecords) ? current.dispatchRecords : []), patch.dispatchRecord];
+      patch.status = "assigned";
+      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.AWAITING_SHOOT);
       label = "安排摄影师";
     } else if (action === "unassign") {
       if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能取消自己的拍摄任务");
-      if (!["confirmed", "shooting"].includes(beforeStatus)) return json(res, 409, { error: "订单当前状态不能取消接单" });
+      if (currentStage !== WORKFLOW_STAGES.AWAITING_SHOOT) return json(res, 409, { error: "订单当前状态不能取消接单" });
       patch.photographerId = "";
+      patch.dispatchStatus = "pending_reassignment";
+      patch.dispatchRecords = [...(Array.isArray(current.dispatchRecords) ? current.dispatchRecords : []), {
+        id: makePaymentId("dispatch"), type: "unassign", previous: { photographerId: current.photographerId || "" }, next: { photographerId: "" }, reason,
+        operator: session.account, operatorId: session.subjectId, createTime: now,
+      }];
+      patch.dispatchRecord = null;
       patch.status = "confirmed";
-      patch.customerStatus = "confirmed";
+      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.AWAITING_DISPATCH);
       label = "摄影师取消接单";
     } else if (action === "reschedule") {
-      if (!canTransition(["new", "pending", "confirmed"], beforeStatus)) return json(res, 409, { error: "订单当前状态不能改期" });
+      if (!["new", "pending", "contacted", "deposit_pending", "deposit_paid", "confirmed", "assigned"].includes(beforeStatus)) return json(res, 409, { error: "订单当前状态不能改期" });
       const appointmentAt = String(body.appointmentAt || "").trim();
       if (!appointmentAt) return json(res, 400, { error: "请选择新的拍摄时间" });
       patch.appointmentAt = appointmentAt;
@@ -2021,22 +2231,136 @@ module.exports = function createApi(source, mode, options = {}) {
       label = "改期拍摄";
     } else if (action === "start") {
       if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能开始自己的拍摄任务");
-      if (!canTransition(["confirmed", "assigned"], "shooting")) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
+      if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "订金到账确认后才能开始拍摄" });
+      if (!current.photographerId || ![WORKFLOW_STAGES.AWAITING_SHOOT].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
+      patch.status = "shooting";
+      patch.shootingStartedAt = current.shootingStartedAt || now;
+      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.SHOOTING);
       label = "开始拍摄";
+    } else if (action === "shootcomplete") {
+      if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能完成自己的拍摄任务");
+      if (currentStage !== WORKFLOW_STAGES.SHOOTING || !current.shootingStartedAt) return json(res, 409, { error: "只有已开始拍摄的任务可以标记拍摄完成" });
+      patch.status = "final_pending";
+      patch.shootingCompletedAt = now;
+      patch.shootingCompletedBy = session.account;
+      patch.selectionStatus = "pending";
+      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.SELECTION_PENDING);
+      label = "拍摄完成";
+    } else if (action === "selectionconfirm") {
+      if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能确认自己的线下选片");
+      if (currentStage !== WORKFLOW_STAGES.SELECTION_PENDING || !current.shootingCompletedAt) return json(res, 409, { error: "拍摄完成后才能登记线下选片确认" });
+      patch.selectionStatus = "confirmed";
+      patch.selectionConfirmedAt = now;
+      patch.selectionConfirmedBy = session.account;
+      patch.selectionNote = reason;
+      patch.status = "final_pending";
+      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT);
+      const finalAmount = finalDue(current);
+      const paymentRows = Array.isArray(current.paymentRecords) ? current.paymentRecords : [];
+      if (finalAmount > 0 && !paymentRows.some((record) => String(record && record.phase || "") === "final")) {
+        patch.paymentRecords = [...paymentRows, { id: makePaymentId("final"), phase: "final", amount: finalAmount, status: "not_created", attempt: 0, createdAt: now, updatedAt: now }];
+      }
+      label = "线下选片确认";
+    } else if (action === "payment") {
+      const phase = String(body.phase || body.paymentPhase || "").trim().toLowerCase();
+      if (!["deposit", "final"].includes(phase)) return json(res, 400, { error: "支付阶段必须是 deposit 或 final" });
+      const paymentStatus = normalizePaymentStatus(body.paymentStatus || body.status || (role === "finance" ? "confirmed" : "pending"));
+      if (!["pending", "confirmed", "failed"].includes(paymentStatus)) return json(res, 400, { error: "支付状态无效" });
+      if (role === "service" && paymentStatus !== "pending") return forbidden(res, session, pathname, "客服只能登记待财务审核的收款");
+      if (paymentStatus === "confirmed" && !["super", "finance"].includes(role)) return forbidden(res, session, pathname, "只有财务或超管可以确认到账");
+      if (phase === "deposit" && ![WORKFLOW_STAGES.AWAITING_DEPOSIT, WORKFLOW_STAGES.AWAITING_DISPATCH].includes(currentStage)) return json(res, 409, { error: "订单进入派单或履约后不能登记订金" });
+      if (phase === "final" && ![WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED, WORKFLOW_STAGES.PAID].includes(currentStage)) return json(res, 409, { error: "线下选片确认后才能登记尾款" });
+      const due = phase === "deposit" ? depositDue(current) : finalDue(current);
+      if (due <= 0) return json(res, 409, { error: "该支付阶段无需收款" });
+      const amount = roundMoney(body.amount ?? body.paidAmount ?? due);
+      if (Math.abs(amount - due) > 0.009) return json(res, 409, { error: "收款金额必须与订单应收金额一致" });
+      const externalTransactionId = String(body.externalTransactionId || body.transactionId || "").trim().slice(0, 160);
+      const generatedKey = `admin-${orderId}-${phase}-${Math.max(1, (Array.isArray(current.paymentRecords) ? current.paymentRecords : []).filter((record) => String(record && record.phase || "") === phase).length)}`;
+      const idempotencyKey = String(body.idempotencyKey || body.requestId || externalTransactionId || generatedKey).trim().slice(0, 128);
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/.test(idempotencyKey)) return json(res, 400, { error: "支付操作必须提供有效的支付幂等标识" });
+      const records = Array.isArray(current.paymentRecords) ? current.paymentRecords : [];
+      const usesKey = (record, key) => String(record && record.idempotencyKey || "") === key || String(record && record.confirmationIdempotencyKey || "") === key;
+      const allOrders = await source.list("orders");
+      const conflict = (Array.isArray(allOrders) ? allOrders : []).some((candidate) => {
+        if (!candidate || getRowId(candidate) === String(orderId)) return false;
+        return (Array.isArray(candidate.paymentRecords) ? candidate.paymentRecords : []).some((record) => usesKey(record, idempotencyKey)
+          || (externalTransactionId && String(record && record.externalTransactionId || "") === externalTransactionId));
+      });
+      if (conflict) return json(res, 409, { error: "支付幂等标识已用于其他订单" });
+      let duplicate = records.find((record) => usesKey(record, idempotencyKey)
+        || (externalTransactionId && String(record && record.externalTransactionId || "") === externalTransactionId));
+      const paidField = phase === "deposit" ? "depositPaid" : "finalPaid";
+      const statusField = phase === "deposit" ? "depositFinanceStatus" : "finalFinanceStatus";
+      const timeField = phase === "deposit" ? "depositPaidAt" : "finalPaidAt";
+      if (!duplicate) {
+        const activePending = records.find((record) => String(record && record.phase || "") === phase && normalizePaymentStatus(record.status) === "pending");
+        const placeholder = records.find((record) => String(record && record.phase || "") === phase
+          && normalizePaymentStatus(record.status) === "not_created" && !String(record.idempotencyKey || ""));
+        if (placeholder) duplicate = placeholder;
+        else if (activePending && paymentStatus === "pending") duplicate = activePending;
+        else if (activePending && paymentStatus !== "pending" && !externalTransactionId) return json(res, 409, { error: "该支付阶段已有待审支付，请提供外部流水号确认" });
+        else if (activePending && paymentStatus !== "pending") duplicate = activePending;
+      }
+      if (hasConfirmedPayment(current, phase) && (!duplicate || normalizePaymentStatus(duplicate.status) !== "confirmed")) return json(res, 409, { error: "该支付阶段已确认到账，不能变更其他支付尝试" });
+      if (duplicate) {
+        if (String(duplicate.phase || "") !== phase || Math.abs(roundMoney(duplicate.amount) - amount) > 0.009) return json(res, 409, { error: "支付幂等标识已对应其他支付" });
+        const duplicateStatus = normalizePaymentStatus(duplicate.status);
+        const needsAdminRegistration = paymentStatus === "pending" && ["service", "super"].includes(role) && !duplicate.adminRegisteredAt;
+        if (duplicateStatus === paymentStatus && !needsAdminRegistration) {
+          return json(res, 200, { ok: true, idempotent: true, auditRecorded: true, data: redactRow("orders", current, session) });
+        }
+        if (!["pending", "not_created"].includes(duplicateStatus)) return json(res, 409, { error: "支付幂等标识已完成，不能变更支付状态" });
+        const duplicateId = getRowId(duplicate);
+        duplicate = {
+          ...duplicate, status: paymentStatus, amount, externalTransactionId: externalTransactionId || duplicate.externalTransactionId || "",
+          idempotencyKey: duplicate.idempotencyKey || idempotencyKey, confirmationIdempotencyKey: idempotencyKey !== String(duplicate.idempotencyKey || "") ? idempotencyKey : duplicate.confirmationIdempotencyKey || "",
+          operator: session.account, operatorId: session.subjectId,
+          adminRegisteredAt: paymentStatus === "pending" && ["service", "super"].includes(role) ? duplicate.adminRegisteredAt || now : duplicate.adminRegisteredAt,
+          updatedAt: now,
+        };
+        patch.paymentRecords = records.map((record) => getRowId(record) === duplicateId ? duplicate : record);
+      } else {
+        duplicate = { id: makePaymentId(phase), phase, amount, status: paymentStatus, attempt: records.filter((record) => String(record && record.phase || "") === phase).length + 1, externalTransactionId, idempotencyKey, operator: session.account, operatorId: session.subjectId, adminRegisteredAt: paymentStatus === "pending" && ["service", "super"].includes(role) ? now : undefined, createdAt: now, updatedAt: now };
+        patch.paymentRecords = [...records, duplicate];
+      }
+      patch[paidField] = paymentStatus === "failed" ? 0 : amount;
+      patch[statusField] = paymentStatus === "confirmed" ? "已审" : paymentStatus === "failed" ? "已驳" : "待审";
+      patch[timeField] = now;
+      patch[phase + "PaymentStatus"] = paymentStatus;
+      if (paymentStatus === "confirmed") {
+        patch[phase + "ConfirmedAt"] = now;
+        patch[phase + "ConfirmedBy"] = session.account;
+        patch.status = phase === "deposit" ? "deposit_paid"
+          : (current.deliveryRecord || current.deliveredAt || beforeStatus === "delivered" ? "delivered" : "paid");
+      } else if (paymentStatus === "failed") {
+        patch.status = phase === "deposit" ? "new" : "final_pending";
+      }
+      label = phase === "deposit" ? (paymentStatus === "confirmed" ? "订金到账确认" : "登记订金收款") : (paymentStatus === "confirmed" ? "尾款到账确认" : "登记尾款收款");
     } else if (action === "deliver") {
       if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能交付自己的拍摄任务");
-      if (!canTransition(["shooting", "retouching", "editing"], "delivered")) return json(res, 409, { error: "订单当前状态不能标记交付" });
-      if (Number(current.finalPaid || 0) > 0 && !financeApproved(current.finalFinanceStatus)) return json(res, 409, { error: "尾款尚未完成财务审核，不能标记交付" });
+      if (![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.SELECTION_PENDING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.PAID, WORKFLOW_STAGES.DELIVERED].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能标记交付" });
+      if (!["confirmed", "已确认"].includes(String(current.selectionStatus || "").toLowerCase()) && !current.selectionConfirmedAt && currentStage !== WORKFLOW_STAGES.PAID) return json(res, 409, { error: "线下选片确认后才能交付" });
+      const deliveryMethod = String(body.deliveryMethod || body.deliveryType || body.method || "企业微信").trim();
+      patch.deliveryRecord = { method: deliveryMethod, deliveredAt: now, deliveredBy: session.account, deliveredById: session.subjectId, note: reason };
+      patch.deliveryMethod = deliveryMethod;
+      patch.deliveredAt = now;
+      patch.deliveredBy = session.account;
       patch.deliveryNote = reason;
+      patch.status = "delivered";
+      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.DELIVERED);
       label = "标记成片交付";
     } else if (action === "complete") {
-      if (!canTransition(["delivered", "shooting", "editing", "final_pending"], "completed")) return json(res, 409, { error: "订单当前状态不能完成" });
-      if (Number(current.depositPaid || 0) > 0 && !financeApproved(current.depositFinanceStatus)) return json(res, 409, { error: "定金尚未完成财务审核，不能完成订单" });
-      if (Number(current.finalPaid || 0) > 0 && !financeApproved(current.finalFinanceStatus)) return json(res, 409, { error: "尾款尚未完成财务审核，不能完成订单" });
+      if (currentStage !== WORKFLOW_STAGES.DELIVERED || !current.deliveryRecord && !current.deliveredAt) return json(res, 409, { error: "交付记录完成后才能完成订单" });
+      if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "定金到账确认后才能完成订单" });
+      if (finalDue(current) > 0 && !hasConfirmedPayment(current, "final")) return json(res, 409, { error: "尾款到账确认后才能完成订单" });
+      patch.status = "completed";
+      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.COMPLETED);
       patch.completedAt = now;
       label = "完成订单";
     } else if (action === "cancel") {
       if (isOrderCompletedStatus(beforeStatus) || isOrderCancelledStatus(beforeStatus)) return json(res, 409, { error: "订单当前状态不能取消" });
+      if ([WORKFLOW_STAGES.AWAITING_SHOOT, WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.SELECTION_PENDING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.PAID, WORKFLOW_STAGES.DELIVERED].includes(currentStage)
+        || current.depositRefundable === false || current.dispatchRecord) return json(res, 409, { error: "派单或履约开始后不能取消订单" });
       try {
         const activeTickets = (await source.list("afterSales")).filter((ticket) => ticket && String(ticket.orderId || "") === String(orderId) && !isAfterSaleTerminalStatus(ticket.status));
         if (activeTickets.length) return json(res, 409, { error: "订单存在处理中售后，不能取消" });
@@ -2052,9 +2376,18 @@ module.exports = function createApi(source, mode, options = {}) {
     } else if (action === "update") {
       const requested = body.fields && typeof body.fields === "object" && !Array.isArray(body.fields) ? body.fields : {};
       if (Object.keys(requested).some((field) => IMMUTABLE_ORDER_FIELDS.has(field))) return json(res, 400, { error: "订单标识字段不可修改" });
+      if (Object.keys(requested).some((field) => ORDER_PAYMENT_DIRECT_FIELDS.has(field))) return json(res, 409, { error: "收款及财务状态必须通过支付核对操作更新" });
       const allowed = role === "super" ? new Set([...ORDER_SERVICE_FIELDS, ...ORDER_WORKFLOW_FIELDS]) : (ORDER_UPDATE_FIELDS[role] || new Set());
       const rejected = Object.keys(requested).filter((key) => !allowed.has(key));
       if (rejected.length) return forbidden(res, session, pathname, "当前角色不能直接更新订单流程字段，请使用专用操作");
+      const changesPriceOrProducts = Object.keys(requested).some((field) => ORDER_PRICE_OR_PRODUCT_FIELDS.has(field));
+      const changesProductRows = ["products", "productItems", "items", "addons"].some((field) => Object.prototype.hasOwnProperty.call(requested, field));
+      const suppliesTotal = ["totalAmount", "totalPrice", "price"].some((field) => Object.prototype.hasOwnProperty.call(requested, field));
+      if (changesProductRows && !suppliesTotal) return json(res, 400, { error: "调整商品或加购时必须同时提交订单总价" });
+      const finalIntentExists = (Array.isArray(current.paymentRecords) ? current.paymentRecords : []).some((record) => record
+        && String(record.phase || "") === "final"
+        && (normalizePaymentStatus(record.status) === "confirmed" || record.idempotencyKey || record.provider || record.externalTransactionId));
+      if (changesPriceOrProducts && finalIntentExists) return json(res, 409, { error: "尾款支付单已创建或确认，不能再调整订单金额或商品" });
       if (role === "service" && Object.keys(requested).some((field) => ORDER_SERVICE_LOCKED_FIELDS.has(field))) {
         let activeTickets = [];
         try {
@@ -2068,6 +2401,30 @@ module.exports = function createApi(source, mode, options = {}) {
         }
       }
       for (const [key, value] of Object.entries(requested)) patch[key] = value;
+      if (changesPriceOrProducts) {
+        const rawTotal = requested.totalAmount ?? requested.totalPrice ?? requested.price ?? current.totalAmount ?? current.totalPrice ?? current.price ?? 0;
+        const rawDiscount = requested.finalDiscountAmount ?? current.finalDiscountAmount ?? 0;
+        const total = Number(rawTotal);
+        const discount = Number(rawDiscount);
+        if (!Number.isFinite(total) || total < 0 || !Number.isFinite(discount) || discount < 0 || discount > total) {
+          return json(res, 400, { error: "订单金额或优惠金额无效" });
+        }
+        const immutableDepositDue = depositDue(current);
+        if (immutableDepositDue > total - discount) return json(res, 409, { error: "调整后订单应收不能低于既有定金应收" });
+        patch.totalAmount = roundMoney(total);
+        patch.totalPrice = roundMoney(total);
+        patch.price = roundMoney(total);
+        patch.finalDiscountAmount = roundMoney(discount);
+        patch.finalDue = roundMoney(Math.max(total - immutableDepositDue - discount, 0));
+        // Selection creates a no-intent placeholder. Keep it synchronized with
+        // the latest price until a real customer/admin payment request exists.
+        const records = Array.isArray(current.paymentRecords) ? current.paymentRecords : [];
+        const nextRecords = records.map((record) => String(record && record.phase || "") === "final"
+          && normalizePaymentStatus(record.status) === "not_created" && !record.idempotencyKey && !record.provider && !record.externalTransactionId
+          ? { ...record, amount: patch.finalDue, updatedAt: now }
+          : record);
+        if (JSON.stringify(nextRecords) !== JSON.stringify(records)) patch.paymentRecords = nextRecords;
+      }
       if (role !== "super") {
         if (Object.prototype.hasOwnProperty.call(requested, "status") && String(requested.status) !== beforeStatus) return json(res, 409, { error: "订单状态必须通过专用操作接口变更" });
         if (Object.prototype.hasOwnProperty.call(requested, "customerStatus") && String(requested.customerStatus) !== String(current.customerStatus || "")) return json(res, 409, { error: "客人状态必须由订单流程自动计算" });
@@ -2142,7 +2499,14 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!Object.keys(patch).length) return json(res, 400, { error: "没有可更新的订单字段" });
       label = "更新订单信息";
     }
-    const timeline = { type: "后台订单操作", action: `${label}${reason ? `：${reason}` : ""}`, operator: session.account, operatorId: session.subjectId, from: beforeStatus, to: patch.status || beforeStatus, createTime: now };
+    const afterDraft = { ...current, ...patch };
+    patch.workflowStage = canonicalStage(afterDraft);
+    // Keep the service status and the customer-facing stage in sync. The
+    // projection also derives this value, but persisting it makes admin lists
+    // and normalized MySQL rows immediately queryable.
+    if (action !== "note" || !current.customerStatus) patch.customerStatus = customerStatusForStage(patch.workflowStage);
+    const changes = diffFacts(current, { ...current, ...patch });
+    const timeline = { type: "后台订单操作", action: `${label}${reason ? `：${reason}` : ""}`, operator: session.account, operatorId: session.subjectId, from: beforeStatus, to: patch.status || beforeStatus, workflowStage: patch.workflowStage, reason, changes, createTime: now };
     patch.statusLogs = [...(Array.isArray(current.statusLogs) ? current.statusLogs : []), timeline];
     patch.followRecords = [...(Array.isArray(current.followRecords) ? current.followRecords : []), timeline];
     patch.updateTime = now;
@@ -2180,7 +2544,8 @@ module.exports = function createApi(source, mode, options = {}) {
     if ((current.isDeleted || current.deleted) && action !== "restore") return json(res, 404, { error: "订单不存在" });
     const role = normalizeRole(session.role);
     if (!["open", "follow", "complete", "review"].includes(action)) return json(res, 400, { error: "售后操作无效" });
-    if (action === "review" ? !["super", "finance"].includes(role) : !["super", "service"].includes(role)) {
+    const customCapability = customAfterSaleActionCapability(session, action);
+    if ((action === "review" ? !["super", "finance"].includes(role) : !["super", "service"].includes(role)) && !customCapability) {
       return forbidden(res, session, pathname, "当前角色不能执行该售后操作");
     }
     const reason = String(body.reason || body.note || "").trim();
@@ -2380,14 +2745,9 @@ module.exports = function createApi(source, mode, options = {}) {
           shopId: session.shopId || "",
           distributorId: session.distributorId || "",
           agentId: session.agentId || "",
-          permissions: Array.isArray(session.permissions) ? session.permissions : [],
-          permissionKeys: Array.isArray(session.permissionKeys) ? session.permissionKeys : (Array.isArray(session.permissions) ? session.permissions : []),
-          actions: dynamicActionKeys(Array.isArray(session.permissionKeys) ? session.permissionKeys : session.permissions),
           menus: Array.isArray(session.menuKeys) ? session.menuKeys : [],
           menuKeys: Array.isArray(session.menuKeys) ? session.menuKeys : [],
           menuDefinitions: Array.isArray(session.menuDefinitions) ? session.menuDefinitions : [],
-          permissionsConfigured: session.permissionsConfigured === true,
-          permissionSource: session.permissionSource || "",
           expiresAt: session.expiresAt,
         });
       }

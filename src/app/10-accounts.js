@@ -36,6 +36,7 @@ function isRemoteSession() {
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
 }
+const isAdminAccount = computed(() => String(state.currentAccount || "").trim().toLowerCase() === "admin");
 
 const staffRows = computed(() => {
   let list = data.staff;
@@ -46,37 +47,15 @@ const staffRows = computed(() => {
 });
 const distributorRows = computed(() => visibleDistributors.value.filter((d) => (!state.filters.cityId || sameCity(d, state.filters.cityId)) && (!state.filters.agentId || d.agentId === state.filters.agentId) && (!state.filters.keyword || JSON.stringify(d).includes(state.filters.keyword))));
 function permissionText(row) {
-  const custom = (row.permissionKeys || []).map((key) => (LXM_CONFIG.permissionMatrix.find((p) => p.key === key) || {}).name).filter(Boolean);
-  if (custom.length) return custom.join("");
-  if (row.role === "super") return "全平台数据、人员、渠道、内容、日志、回收站";
-  if (row.role === "agent") return "仅自己代理城市，可看城市数据、管理分销员和商家";
-  if (row.role === "distributor") return "仅自己拓展商家，可录入商家和查看收益";
-  if (row.role === "service") return "处理订单、联系客人、接单、派单、取消订单";
-  if (row.role === "finance") return "查看经营看板、订单只读、售后记录和月度对账；可导出财务权限内报表";
-  if (row.role === "photo") return "仅查看本人任务，不能看商家来源和完整联系方式";
-  if (row.role === "content") return "维护打卡点、拍摄风格、照片单品、素材、套餐、周边、首页";
-  return "商家账号只看自己门店扫码、订单、成交和收益";
-}
-function defaultPermissionKeys(role) {
-  return LXM_CONFIG.permissionMatrix.filter((p) => !!p[role]).map((p) => p.key);
-}
-function applyRoleDefaultPermissions() {
-  if (!state.editStaff) return;
-  state.editStaff.permissionKeys = defaultPermissionKeys(state.editStaff.role);
-  if (state.editStaff.role === "photo") {
-    state.editStaff.commissionRate = Number(state.editStaff.commissionRate || 20);
-    state.editStaff.settlementCycle = state.editStaff.settlementCycle || "月结";
-  }
-  ElMessage.success("已套用该角色默认权限，可继续手动微调");
+  const keys = LXM_CONFIG.roles?.[row.role]?.menus || [];
+  const labels = keys.map((key) => (LXM_CONFIG.menus || []).find((menu) => menu.key === key)?.label || key);
+  return labels.length ? labels.join("、") : "请在权限管理中为角色配置菜单";
 }
 function openStaff(row = null) {
   // 编辑时密码栏置空（留空=不改）；新增时不再预置弱口令 "123456"，必须手动设置强密码。
-  const base = row ? { ...row, password: "" } : { id: "", name: "", account: "", password: "", phone: "", role: "service", status: "启用", cityId: "city1", city: "长沙", agentId: "", distributorId: "", shopId: "", permissions: [] };
-  base.permissionKeys = Array.isArray(base.permissionKeys)
-    ? base.permissionKeys.slice()
-    : Array.isArray(base.permissions) && base.permissions.length
-      ? base.permissions.slice()
-      : defaultPermissionKeys(base.role);
+  const base = row ? { ...row, password: "" } : { id: "", name: "", account: "", password: "", phone: "", role: "service", status: "启用", cityId: "city1", city: "长沙", agentId: "", distributorId: "", shopId: "" };
+  delete base.permissionKeys;
+  delete base.permissions;
   if (base.role === "photo") {
     base.commissionRate = Number(base.commissionRate || 20);
     base.settlementCycle = base.settlementCycle || "月结";
@@ -87,11 +66,14 @@ function openStaff(row = null) {
 async function saveStaff() {
   const row = state.editStaff;
   if (!row.name || !row.account) return ElMessage.warning("请填写姓名和账号");
+  if (row.id && !isAdminAccount.value) delete row.password;
   // 密码规则：新增必填强密码；编辑填了才校验（留空=不修改）。
   const pwdError = accountPasswordError(row.password);
   if (!row.id && pwdError) return ElMessage.warning(pwdError);
   if (row.id && row.password && pwdError) return ElMessage.warning(pwdError);
   if (!row.password) delete row.password;
+  delete row.permissionKeys;
+  delete row.permissions;
   row.city = cityName(row.cityId);
   if (row.role === "photo") {
     row.commissionRate = Number(row.commissionRate || 20);
@@ -101,6 +83,8 @@ async function saveStaff() {
   const previous = row.id ? { ...(data.staff.find((s) => s.id === row.id) || {}) } : null;
   if (row.id) { saved = data.staff.find((s) => s.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `st${Date.now()}` }; data.staff.unshift(saved); }
+  delete saved.permissionKeys;
+  delete saved.permissions;
   const synced = await persistAccountToCloud("staff", saved);
   if (!synced && isRemoteSession()) {
     if (previous) Object.assign(saved, previous);
@@ -112,6 +96,7 @@ async function saveStaff() {
   ElMessage.success("人员账号已保存");
 }
 async function resetPassword(row) {
+  if (!isAdminAccount.value) return ElMessage.warning("仅 admin 账号可以修改人员密码");
   const tempPwd = generateTempPassword();
   try {
     await ElMessageBox.confirm(`将「${row.name}」的密码重置为随机临时密码（重置后仅显示一次，请转达对方尽快登录修改）。确认重置吗？`, "重置密码", { type: "warning", confirmButtonText: "确认重置", cancelButtonText: "取消" });
@@ -177,6 +162,7 @@ function openDistributor(row = null) {
 async function saveDistributor() {
   const row = state.editDistributor;
   if (!row.name || !row.agentId) return ElMessage.warning("请填写分销员名称和所属代");
+  if (row.id && !isAdminAccount.value) delete row.password;
   const pwdError = accountPasswordError(row.password);
   if (!row.id && pwdError) return ElMessage.warning(pwdError);
   if (row.id && row.password && pwdError) return ElMessage.warning(pwdError);
@@ -210,6 +196,7 @@ async function saveShop() {
   if (!canManageShopBinding()) return ElMessage.warning("分销员没有新增、编辑或绑定商家的权");
   const row = state.editShop;
   if (!row.name || !row.account) return ElMessage.warning("请填写商家名称和登录账号");
+  if (row.id && !isAdminAccount.value) delete row.password;
   const pwdError = accountPasswordError(row.password);
   if (!row.id && pwdError) return ElMessage.warning(pwdError);
   if (row.id && row.password && pwdError) return ElMessage.warning(pwdError);
@@ -321,9 +308,8 @@ function shopQrUrl(row) {
   return {
     staffRows,
     distributorRows,
+    isAdminAccount,
     permissionText,
-    defaultPermissionKeys,
-    applyRoleDefaultPermissions,
     openStaff,
     saveStaff,
     resetPassword,

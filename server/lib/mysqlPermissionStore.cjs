@@ -17,7 +17,7 @@ const TABLES = Object.freeze({
   userAttributes: "lxm_auth_user_attributes"
 });
 const DISABLED = new Set(["disabled", "停用", "禁用", "inactive"]);
-const SENSITIVE = /password|token|secret|private.?key|authorization/i;
+const SENSITIVE = /password|token|secret|private.?key|authorization|^permissions$|^permissionKeys$/i;
 const UNSAFE_ATTRIBUTE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function id(prefix) { return `${prefix}_${crypto.randomBytes(8).toString("hex")}`; }
@@ -65,7 +65,7 @@ function safeUser(user) {
     }
     return out;
   };
-  const { password, passwordHash, password_hash, ...rest } = user;
+  const { password, passwordHash, password_hash, permissions, permissionKeys, ...rest } = user;
   return clone(scrub(rest));
 }
 
@@ -136,6 +136,13 @@ function normalizeUser(input = {}) {
   out.account = String(out.account || out.username || "").trim();
   out.name = String(out.name || out.displayName || out.account).trim();
   out.role = String(out.role || "service").trim().toLowerCase();
+  delete out.permissions;
+  delete out.permissionKeys;
+  if (out.extra && typeof out.extra === "object" && !Array.isArray(out.extra)) {
+    out.extra = { ...out.extra };
+    delete out.extra.permissions;
+    delete out.extra.permissionKeys;
+  }
   out.status = out.status || "active";
   return out;
 }
@@ -224,9 +231,12 @@ module.exports = function createMysqlPermissionStore(options = {}) {
       for (const row of rows) {
         const extra = parseObject(row.extra);
         await execute(pool, `UPDATE ${TABLES.users} SET legacy_key=?,legacy_id=?,subject_type=?,subject_id=?,shop_id=?,distributor_id=?,agent_id=? WHERE id=?`, [extra.legacyKey || null, extra.legacyId || null, extra.subjectType || null, extra.subjectId || null, extra.shopId || null, extra.distributorId || null, extra.agentId || null, row.id]);
-        const permissionKeys = Array.isArray(extra.permissionKeys) ? extra.permissionKeys : Array.isArray(extra.permissions) ? extra.permissions : [];
-        await execute(pool, `DELETE FROM ${TABLES.userPermissions} WHERE user_id=?`, [row.id]);
-        for (const permission of new Set(permissionKeys.map(String).filter(Boolean))) await execute(pool, `INSERT INTO ${TABLES.userPermissions} (user_id,permission_key) VALUES (?,?) ON DUPLICATE KEY UPDATE permission_key=VALUES(permission_key)`, [row.id, permission]);
+        // Preserve legacy action rows while removing the old payload column.
+        // Runtime authorization never reads these rows again.
+        const legacyPermissions = Array.isArray(extra.permissionKeys) ? extra.permissionKeys : Array.isArray(extra.permissions) ? extra.permissions : [];
+        for (const permission of new Set(legacyPermissions.map(String).filter(Boolean))) {
+          await execute(pool, `INSERT INTO ${TABLES.userPermissions} (user_id,permission_key) VALUES (?,?) ON DUPLICATE KEY UPDATE permission_key=VALUES(permission_key)`, [row.id, permission]);
+        }
         const known = new Set(["legacyKey", "legacyId", "subjectType", "subjectId", "shopId", "distributorId", "agentId", "permissionKeys", "permissions"]);
         const attrs = [];
         for (const [key, value] of Object.entries(extra)) if (!known.has(key)) flatten(value, key, attrs);
@@ -277,7 +287,7 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     if (row.meta_label != null) meta.label = row.meta_label;
     const custom = hydrateAttributes(await query(pool, `SELECT attribute_key path,ordinal,value_type,value_text,value_number,value_bool FROM ${TABLES.menuAttributes} WHERE menu_id=? ORDER BY attribute_key,ordinal`, [row.id]));
     if (custom.meta && typeof custom.meta === "object") Object.assign(meta, custom.meta);
-    return { id: row.id, menuKey: row.menu_key, parentKey: row.parent_key, name: row.name, path: row.path, icon: row.icon, sortNo: Number(row.sort_no || 0), status: row.status, meta, createdAt: row.created_at, updatedAt: row.updated_at };
+    return { id: row.id, menuKey: row.menu_key, parentKey: row.parent_key, parentId: row.parent_key, name: row.name, path: row.path, icon: row.icon, sortNo: Number(row.sort_no || 0), status: row.status, meta, createdAt: row.created_at, updatedAt: row.updated_at };
   }
   async function listMenus() { const rows = await menuRows(); const output = []; for (const row of rows) output.push(await menuDocument(row)); return output; }
   async function getMenu(entityId) { const rows = await query(pool, `SELECT id,menu_key,parent_key,name,path,icon,sort_no,status,meta_group,meta_type,meta_label,created_at,updated_at FROM ${TABLES.menus} WHERE id=?`, [entityId]); return menuDocument(rows[0]); }
@@ -285,11 +295,31 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     const current = entityId ? await getMenu(entityId) : null;
     if (entityId && !current) return null;
     const data = { ...(current || {}), ...(input || {}) }; const idv = String(entityId || data.id || data._id || id("menu")); const meta = data.meta && typeof data.meta === "object" ? data.meta : {};
-    const values = [idv, String(data.menuKey || data.key || data.path || idv), data.parentKey || data.parentId || null, String(data.name || data.label || ""), String(data.path || ""), data.icon || null, Number(data.sortNo ?? data.sort ?? 0) || 0, data.status || "active", meta.group || null, meta.type || null, meta.label || null];
+    const parentKeySpecified = Object.prototype.hasOwnProperty.call(input, "parentKey");
+    const parentIdSpecified = Object.prototype.hasOwnProperty.call(input, "parentId");
+    const currentParentKey = current && Object.prototype.hasOwnProperty.call(current, "parentKey") ? current.parentKey : current && current.parentId;
+    const parentValue = parentKeySpecified ? input.parentKey : parentIdSpecified ? input.parentId : currentParentKey;
+    const values = [idv, String(data.menuKey || data.key || data.path || idv), parentValue || null, String(data.name || data.label || ""), String(data.path || ""), data.icon || null, Number(data.sortNo ?? data.sort ?? 0) || 0, data.status || "active", meta.group || null, meta.type || null, meta.label || null];
     const extra = Object.fromEntries(Object.entries(meta).filter(([key]) => !["group", "type", "label"].includes(key)));
     const attributes = [];
     flatten(extra, "meta", attributes);
     await withTransaction(async (conn) => {
+      const parentKey = values[2] ? String(values[2]) : "";
+      if (parentKey) {
+        const currentKey = String(current && current.menuKey || values[1]);
+        if (parentKey === currentKey) {
+          throw Object.assign(new Error("菜单层级不能形成循环"), { code: "MENU_DEPTH_INVALID" });
+        }
+        const parents = await query(conn, `SELECT id,menu_key,parent_key,status FROM ${TABLES.menus} WHERE menu_key=? OR id=? FOR UPDATE`, [parentKey, parentKey]);
+        const parent = parents[0];
+        if (!parent || parent.parent_key || DISABLED.has(String(parent.status || "").toLowerCase())) {
+          throw Object.assign(new Error("菜单最多支持两级"), { code: "MENU_DEPTH_INVALID" });
+        }
+        values[2] = parent.menu_key;
+        if (current && (await query(conn, `SELECT 1 FROM ${TABLES.menus} WHERE parent_key=? LIMIT 1 FOR UPDATE`, [currentKey])).length) {
+          throw Object.assign(new Error("含有下级菜单的菜单不能再设置上级菜单"), { code: "MENU_DEPTH_INVALID" });
+        }
+      }
       if (current) {
         await execute(conn, `UPDATE ${TABLES.menus} SET menu_key=?,parent_key=?,name=?,path=?,icon=?,sort_no=?,status=?,meta_group=?,meta_type=?,meta_label=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?`, [...values.slice(1), idv]);
       } else {
@@ -318,16 +348,15 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   async function getRole(entityId) { const rows = await query(pool, `SELECT id,role_key roleKey,name,status,description,created_at createdAt,updated_at updatedAt FROM ${TABLES.roles} WHERE id=?`, [entityId]); return rows[0] || null; }
   async function createRole(input = {}) { const idv = input.id || input._id || id("role"); await execute(pool, `INSERT INTO ${TABLES.roles} (id,role_key,name,status,description) VALUES (?,?,?,?,?)`, [idv, input.roleKey || input.code || idv, input.name || input.label || "", input.status || "active", input.description || null]); return getRole(idv); }
   async function updateRole(entityId, input = {}) { const current = await getRole(entityId); if (!current) return null; const data = { ...current, ...(input || {}) }; await execute(pool, `UPDATE ${TABLES.roles} SET role_key=?,name=?,status=?,description=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?`, [data.roleKey || data.code, data.name || data.label || "", data.status || "active", data.description || null, entityId]); return getRole(entityId); }
-  async function deleteRole(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [entityId]); await execute(conn, `DELETE FROM ${TABLES.rolePermissions} WHERE role_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.roles} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
+  async function deleteRole(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.roles} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
 
   async function userAttributes(userId) { return query(pool, `SELECT attribute_key path,ordinal,value_type,value_text,value_number,value_bool FROM ${TABLES.userAttributes} WHERE user_id=? ORDER BY attribute_key,ordinal`, [userId]); }
-  async function userPermissions(userId) { return query(pool, `SELECT permission_key FROM ${TABLES.userPermissions} WHERE user_id=? ORDER BY permission_key`, [userId]); }
   async function userDocument(row, includePassword = false) {
     if (!row) return null;
     const extra = hydrateAttributes(await userAttributes(row.id));
-    const permissions = (await userPermissions(row.id)).map((item) => String(item.permission_key));
-    if (permissions.length) extra.permissionKeys = permissions;
-    const result = { id: row.id, account: row.account, name: row.display_name, roleId: row.role_id, status: row.status, phone: row.phone || "", email: row.email || "", extra, permissionKeys: permissions, createdAt: row.created_at, updatedAt: row.updated_at };
+    delete extra.permissions;
+    delete extra.permissionKeys;
+    const result = { id: row.id, account: row.account, name: row.display_name, roleId: row.role_id, status: row.status, phone: row.phone || "", email: row.email || "", extra, createdAt: row.created_at, updatedAt: row.updated_at };
     if (row.legacy_key) extra.legacyKey = row.legacy_key;
     if (row.legacy_id) extra.legacyId = row.legacy_id;
     if (row.subject_type) extra.subjectType = row.subject_type;
@@ -349,17 +378,16 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     const current = currentDocument ? {
       account: currentDocument.account, name: currentDocument.name, roleId: currentDocument.roleId,
       status: currentDocument.status, phone: currentDocument.phone, email: currentDocument.email,
-      extra: currentDocument.extra, permissionKeys: currentDocument.permissionKeys
+      extra: currentDocument.extra
     } : {};
     const data = normalizeUser({ ...current, ...input });
     const idv = String(entityId || data.id || data._id || id("usr"));
     const extra = data.extra && typeof data.extra === "object" ? data.extra : {};
-    const permissionKeys = [...new Set((data.permissionKeys || data.permissions || extra.permissionKeys || []).map(String).filter(Boolean))];
     const supplied = data.passwordHash || data.password_hash || data.password;
     const passwordHash = supplied ? (String(supplied).startsWith("lxm1$") ? String(supplied) : hashPassword(supplied)) : (existing && existing.password_hash) || hashPassword(crypto.randomBytes(18).toString("hex"));
     const roleId = String(data.roleId || data.role || "service");
     const values = [idv, data.account, data.name, passwordHash, roleId, data.status || "active", data.phone || null, data.email || null, extra.legacyKey || null, extra.legacyId || null, extra.subjectType || null, extra.subjectId || null, extra.shopId || null, extra.distributorId || null, extra.agentId || null];
-    const known = new Set(["permissionKeys", "legacyKey", "legacyId", "subjectType", "subjectId", "shopId", "distributorId", "agentId"]);
+    const known = new Set(["permissions", "permissionKeys", "legacyKey", "legacyId", "subjectType", "subjectId", "shopId", "distributorId", "agentId"]);
     const attrs = [];
     for (const [key, value] of Object.entries(extra)) if (!known.has(key)) flatten(value, key, attrs);
     await withTransaction(async (conn) => {
@@ -368,8 +396,6 @@ module.exports = function createMysqlPermissionStore(options = {}) {
       } else {
         await execute(conn, `INSERT INTO ${TABLES.users} (id,account,display_name,password_hash,role_id,status,phone,email,legacy_key,legacy_id,subject_type,subject_id,shop_id,distributor_id,agent_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, values);
       }
-      await execute(conn, `DELETE FROM ${TABLES.userPermissions} WHERE user_id=?`, [idv]);
-      for (const key of permissionKeys) await execute(conn, `INSERT INTO ${TABLES.userPermissions} (user_id,permission_key) VALUES (?,?)`, [idv, key]);
       await execute(conn, `DELETE FROM ${TABLES.userAttributes} WHERE user_id=?`, [idv]);
       for (const row of attrs) await execute(conn, `INSERT INTO ${TABLES.userAttributes} (user_id,attribute_key,ordinal,value_type,value_text,value_number,value_bool) VALUES (?,?,?,?,?,?,?)`, [idv, row.path, row.ordinal, row.value_type, row.value_text, row.value_number, row.value_bool]);
     });
@@ -377,13 +403,15 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   }
   async function createUser(input) { try { return await writeUser(input); } catch (error) { if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("账号已存在"), { code: "DUPLICATE_RECORD" }); throw error; } }
   async function updateUser(entityId, input) { try { return await writeUser(input, entityId); } catch (error) { if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("账号已存在"), { code: "DUPLICATE_RECORD" }); throw error; } }
-  async function deleteUser(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.userPermissions} WHERE user_id=?`, [entityId]); await execute(conn, `DELETE FROM ${TABLES.userAttributes} WHERE user_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.users} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
+  async function deleteUser(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.userAttributes} WHERE user_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.users} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
   async function authenticate(account, password, options = {}) { const rows = await query(pool, `SELECT * FROM ${TABLES.users} WHERE account=? LIMIT 1`, [String(account).trim()]); const row = rows[0]; const verifier = typeof options.verifyPassword === "function" ? options.verifyPassword : verifyPassword; if (!row || DISABLED.has(String(row.status).toLowerCase()) || !verifier(row.password_hash, password)) return null; return userDocument(row); }
   async function setRoleMenus(roleId, menuIds) { return withTransaction(async (conn) => { const keys = [...new Set((menuIds || []).map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [roleId]); for (const key of keys) await execute(conn, `INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`, [roleId, key]); return { roleId, menuKeys: keys }; }); }
   async function getRoleMenus(roleId) { const rows = await query(pool, `SELECT menu_key FROM ${TABLES.roleMenus} WHERE role_id=? ORDER BY menu_key`, [roleId]); return { roleId, menuKeys: rows.map((row) => row.menu_key), menuIds: rows.map((row) => row.menu_key) }; }
-  async function setRolePermissions(roleId, permissions) { return withTransaction(async (conn) => { const keys = [...new Set((permissions || []).map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.rolePermissions} WHERE role_id=?`, [roleId]); for (const key of keys) await execute(conn, `INSERT INTO ${TABLES.rolePermissions} (role_id,permission_key) VALUES (?,?)`, [roleId, key]); return { roleId, permissions: keys, permissionKeys: keys }; }); }
-  async function getRolePermissions(roleId) { const rows = await query(pool, `SELECT permission_key FROM ${TABLES.rolePermissions} WHERE role_id=? ORDER BY permission_key`, [roleId]); return { roleId, permissions: rows.map((row) => row.permission_key), permissionKeys: rows.map((row) => row.permission_key) }; }
-  async function setRoleGrantsAtomic(roleId, menuKeys = [], permissionKeys = []) { return withTransaction(async (conn) => { const menus = [...new Set(menuKeys.map(String).filter(Boolean))]; const permissions = [...new Set(permissionKeys.map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [roleId]); for (const key of menus) await execute(conn, `INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`, [roleId, key]); await execute(conn, `DELETE FROM ${TABLES.rolePermissions} WHERE role_id=?`, [roleId]); for (const key of permissions) await execute(conn, `INSERT INTO ${TABLES.rolePermissions} (role_id,permission_key) VALUES (?,?)`, [roleId, key]); return { roleId, menuKeys: menus, permissionKeys: permissions }; }); }
+  // Keep historic action rows intact, but do not use or modify them in the
+  // live menu-authorized policy.
+  async function setRolePermissions(roleId) { return { roleId }; }
+  async function getRolePermissions(roleId) { return { roleId }; }
+  async function setRoleGrantsAtomic(roleId, menuKeys = []) { return withTransaction(async (conn) => { const menus = [...new Set(menuKeys.map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [roleId]); for (const key of menus) await execute(conn, `INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`, [roleId, key]); return { roleId, menuKeys: menus }; }); }
   async function health() {
     try {
       if (autoMigrate) await ensureSchema();
@@ -412,7 +440,7 @@ module.exports = function createMysqlPermissionStore(options = {}) {
       return { backend: "mysql", configured: true, ready, persistent: true, tables: count, normalized: missing.length === 0, ...(missing.length ? { error: "schema_incomplete", missing } : {}) };
     } catch (error) { return { backend: "mysql", configured: true, ready: false, persistent: true, error: error.code || "unavailable" }; }
   }
-  async function snapshot() { return { menus: await listMenus(), roles: await listRoles(), roleMenus: await query(pool, `SELECT role_id roleId,menu_key menuKey FROM ${TABLES.roleMenus}`), rolePermissions: await query(pool, `SELECT role_id roleId,permission_key permissionKey FROM ${TABLES.rolePermissions}`), users: await listUsers() }; }
+  async function snapshot() { return { menus: await listMenus(), roles: await listRoles(), roleMenus: await query(pool, `SELECT role_id roleId,menu_key menuKey FROM ${TABLES.roleMenus}`), users: await listUsers() }; }
 
   return { mode: "mysql", backend: "mysql", required: true, tables: TABLES, ensureSchema, listMenus, getMenu, createMenu, updateMenu, deleteMenu: async (entityId) => { const result = await execute(pool, `DELETE FROM ${TABLES.menus} WHERE id=?`, [entityId]); await execute(pool, `DELETE FROM ${TABLES.menuAttributes} WHERE menu_id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }, listRoles, getRole, createRole, updateRole, deleteRole, listUsers, getUser, getUserState, createUser, updateUser, deleteUser, setRoleMenus, getRoleMenus, setRolePermissions, getRolePermissions, setRoleGrantsAtomic, authenticate, health, snapshot, async close() { closed = true; if (typeof pool.end === "function") await pool.end(); } };
 };
