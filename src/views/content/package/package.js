@@ -206,6 +206,7 @@ window.LXM_PAGES.register({
       return persistContentMutation("packages", record, previous);
     }
     async function saveForm() {
+      if (saving.value || !window.LXM_UPLOAD.ready()) return;
       const source = form.value;
       if (!source) return;
       if (!String(source.name || "").trim()) return notify("warning", "请填写套餐名称");
@@ -278,6 +279,7 @@ window.LXM_PAGES.register({
       loading, keyword, spotFilter, visibilityFilter, dialogVisible, saving, form,
       tableRows, summary, canEdit, packageSpotNames, packageAlbumName, statusText,
       priceText, openCreate, openEdit, closeDialog, saveForm,
+      uploadPackageCover: () => ctx.contentFile(form.value, "cover", "packages"),
       toggleVisible, toggleMainPush, refreshPackages, resetFilters
     };
   }

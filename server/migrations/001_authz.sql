@@ -596,6 +596,7 @@ CREATE TABLE IF NOT EXISTS `lxm_orders` (
   `createdAt` VARCHAR(64) NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_order_booking_idempotency` (`bookingIdempotencyKey`),
+  UNIQUE KEY `uq_order_number` (`orderNo`),
   KEY `idx_updated_at` (`updatedAt`),
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
@@ -1489,4 +1490,41 @@ CREATE TABLE IF NOT EXISTS `lxm_auth_users` (
   KEY idx_auth_user_role (role_id),
   KEY idx_auth_user_status (status),
   KEY idx_auth_user_subject (subject_type, subject_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- OSS internal file registry. Not exposed by generic collection APIs.
+CREATE TABLE IF NOT EXISTS `lxm_mediaFiles` (
+  `id` VARCHAR(128) NOT NULL,
+  `purpose` VARCHAR(64) NULL,
+  `status` VARCHAR(64) NULL,
+  `visibility` VARCHAR(64) NULL,
+  `ownerKind` VARCHAR(64) NULL,
+  `ownerId` VARCHAR(128) NULL,
+  `collection` VARCHAR(128) NULL,
+  `recordId` VARCHAR(128) NULL,
+  `orderId` VARCHAR(128) NULL,
+  `bucket` VARCHAR(128) NULL,
+  `region` VARCHAR(128) NULL,
+  `extension` VARCHAR(128) NULL,
+  `etag` VARCHAR(128) NULL,
+  `sha256` VARCHAR(128) NULL,
+  `migrationRunId` VARCHAR(128) NULL,
+  `name` VARCHAR(255) NULL,
+  `mimeType` VARCHAR(255) NULL,
+  `rejection` VARCHAR(255) NULL,
+  `objectKey` TEXT NULL,
+  `size` INT NULL,
+  `createTime` VARCHAR(64) NULL,
+  `expiresAt` VARCHAR(64) NULL,
+  `completedAt` VARCHAR(64) NULL,
+  `boundAt` VARCHAR(64) NULL,
+  `deletedAt` VARCHAR(64) NULL,
+  `deleted` TINYINT(1) NULL,
+  `isDeleted` TINYINT(1) NULL,
+  `createdAt` VARCHAR(64) NULL,
+  `updatedAt` VARCHAR(64) NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_updated_at` (`updatedAt`),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

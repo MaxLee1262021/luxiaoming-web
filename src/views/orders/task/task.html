@@ -2,10 +2,10 @@
   <div class="table-title">
     <div>
       <strong>我的拍摄任务</strong>
-      <p>摄影师只能处理分配给自己的任务；开始拍摄、拍摄完成和线下选片确认均按订单流程写入时间线。</p>
+      <p>摄影师须先接受本人任务，才能开始和完成拍摄；无法履约必须说明原因并退回客服重新派单。</p>
     </div>
   </div>
-  <el-table :data="pagedList('tasks', taskOrders)" stripe border max-height="calc(100vh - 420px)" empty-text="暂无待办拍摄任务，有新分配的拍摄会出现在这里" @row-click="(row)=>openOrder(row,{readonly:true})">
+  <el-table :data="pagedList('tasks', taskOrders)" stripe border empty-text="暂无待办拍摄任务，有新分配的拍摄会出现在这里" @row-click="(row)=>openOrder(row,{readonly:true})">
     <el-table-column prop="orderNo" label="订单号" width="140" />
     <el-table-column prop="customer" label="客户" width="120" />
     <el-table-column prop="appointmentAt" label="预约时间" width="170" />
@@ -21,7 +21,12 @@
     <el-table-column fixed="right" label="操作" width="480">
       <template #default="{row}">
         <el-button link @click.stop="openOrder(row,{readonly:true})">查看</el-button>
-        <el-tooltip content="仅已派单且归属当前摄影师的任务可以开始拍摄" placement="top" :disabled="canStartTask(row)">
+        <el-tooltip content="仅本人待接受的任务可以确认接受" placement="top" :disabled="canAcceptTask(row)">
+          <span class="disabled-tip-wrap">
+            <el-button link type="primary" :disabled="!canAcceptTask(row)" @click.stop="acceptTask(row)">接受任务</el-button>
+          </span>
+        </el-tooltip>
+        <el-tooltip content="仅本人已接受的任务可以开始拍摄" placement="top" :disabled="canStartTask(row)">
           <span class="disabled-tip-wrap">
             <el-button link :disabled="!canStartTask(row)" @click.stop="updateTaskStatus(row,'shooting')">开始拍摄</el-button>
           </span>
@@ -38,12 +43,12 @@
         </el-tooltip>
         <el-tooltip content="线下选片确认后可登记成片交付，交付记录后才开放尾款" placement="top" :disabled="canDeliverOrder(row)">
           <span class="disabled-tip-wrap">
-            <el-button link type="success" :disabled="!canDeliverOrder(row)" @click.stop="deliverOrder(row)">登记交付</el-button>
+            <el-button v-if="canUploadDelivery(row)" link :disabled="uploadBusy" @click.stop="uploadDelivery(row)">上传成片</el-button><el-button v-if="canDeliverOrder(row)" link type="success" :disabled="uploadBusy" @click.stop="deliverOrder(row)">发布交付</el-button>
           </span>
         </el-tooltip>
-        <el-tooltip :content="taskActionDisabledReason(row,'reject')" placement="top" :disabled="canRejectTask(row)">
+        <el-tooltip content="仅本人未开拍的任务可标记无法履约，且必须说明原因" placement="top" :disabled="canRejectTask(row)">
           <span class="disabled-tip-wrap">
-            <el-button link type="warning" :disabled="!canRejectTask(row)" @click.stop="rejectTask(row)">取消接单</el-button>
+            <el-button link type="warning" :disabled="!canRejectTask(row)" @click.stop="rejectTask(row)">无法履约</el-button>
           </span>
         </el-tooltip>
       </template>

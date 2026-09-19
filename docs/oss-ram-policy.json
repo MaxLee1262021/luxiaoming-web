@@ -1,0 +1,15 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["oss:GetBucketInfo", "oss:GetBucketCors", "oss:GetBucketLocation"],
+      "Resource": ["acs:oss:*:*:luxiaoming"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["oss:PutObject", "oss:GetObject", "oss:GetObjectAcl", "oss:PutObjectAcl", "oss:DeleteObject"],
+      "Resource": ["acs:oss:*:*:luxiaoming/luxiaoming/prod/*"]
+    }
+  ]
+}

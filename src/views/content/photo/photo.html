@@ -28,9 +28,9 @@
   <div class="lxm-cards" v-if="data.samples.length">
     <article v-for="item in data.samples.filter(s =>
         (!state.filters.keyword || (s.name||'').toLowerCase().includes(state.filters.keyword.toLowerCase())) &&
-        (!state.filters.contentSpotId || !item.spotId ||
-          item.spotId === state.filters.contentSpotId ||
-          (item.spotIds && item.spotIds.includes(state.filters.contentSpotId))
+        (!state.filters.contentSpotId || !s.spotId ||
+          s.spotId === state.filters.contentSpotId ||
+          (s.spotIds && s.spotIds.includes(state.filters.contentSpotId))
         )
       )" :key="item.id" class="lxm-card">
       <div class="lxm-card__cover">

@@ -343,24 +343,27 @@ async function toggleAlbumMaterialUse(album) {
 }
 async function uploadAlbumSample(album, type = "photo") {
   if (!album) return;
+  window.LXM_UPLOAD.pick({ purpose: "content", collection: "samples", imagesOnly: type !== "video", videoOnly: type === "video", multiple: true, async onUploaded(file) {
   const sample = {
-    id: `sample${Date.now()}`,
-    name: type === "video" ? "新视频样" : "新图片样",
+    id: `sample_${file.fileId || file.id}`,
+    name: file.name,
     type,
     spotId: album.spotId || "",
     seriesId: album.seriesId || "",
     albumId: album.id,
     status: "启用",
     isShowcase: true,
-    url: LXM_SVG(type === "video" ? "视频样片" : "图片样片", "后台上传预览"),
+    url: file.url,
+    cover: type === "video" ? "/images/placeholder.png" : file.url,
   };
   data.samples.unshift(sample);
   if (!(await persistMutation("samples", sample))) {
     data.samples = data.samples.filter((item) => item !== sample);
-    return;
+    throw new Error("样片资料保存失败，请重试");
   }
   log(type === "video" ? "上传视频样片" : "上传图片样片", album.name, sample.name);
   ElMessage.success(`${sample.name} 已加"${album.name}`);
+  } });
 }
 async function requestDeleteAlbum(album) {
   const summary = albumDependencySummary(album);

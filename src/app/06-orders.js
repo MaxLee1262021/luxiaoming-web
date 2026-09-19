@@ -114,27 +114,14 @@ function batchCancelOrders() {
   }).catch(() => {});
 }
 function canBatchAcceptOrder(order) {
-  return !!order && canEditOrder() && !state.orderReadonly && !isOrderAfterSaleLocked(order) && ["pending", "new"].includes(order.status);
+  // Service confirmation creates an immutable commercial snapshot. It requires
+  // per-order time, location, people count, service content and pricing, so it
+  // must never be bypassed by a bulk "accept" operation.
+  return false;
 }
 function batchAcceptOrders() {
-  const rows = selectedOrders.value.filter(canBatchAcceptOrder);
-  if (!canEditOrder()) return ElMessage.error("当前角色无权批量接单");
-  if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订");
-  if (!rows.length) return ElMessage.warning("已选订单中没有可批量接单的待确认订");
-  ElMessageBox.confirm(`确认批量接单 ${rows.length} 个待确认订单？`, "批量接单", { type: "warning", confirmButtonText: "确认接单", cancelButtonText: "取消" }).then(async () => {
-    let changed = 0;
-    for (const order of rows) {
-      try {
-        await persistOrderAction(order, "accept", { reason: "批量接单" });
-        changed += 1;
-      } catch (_) {}
-    }
-    if (changed) {
-      log("批量接单", "订单管理", `${changed} 个待确认订单已接单`);
-      state.selectedOrderIds = [];
-      ElMessage.success(`已批量接单 ${changed} 单`);
-    }
-  }).catch(() => {});
+  if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订单");
+  ElMessage.info("服务确认需要逐单核对时间、地点、人数、服务内容与报价，请从订单详情完成确认");
 }
 function openBatchNoteDialog() {
   if (!canEditOrder()) return ElMessage.error("当前角色无权批量备注");
@@ -289,6 +276,7 @@ function openAfterSaleSubmit(order = state.currentOrder) {
   if (!order) return;
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单已有售后处理中，请先完成当前售后处理，避免重复提交");
   state.afterSaleForm = {
+    attachmentFileIds: [], attachmentFiles: [],
     type: "退款申请",
     reason: "",
     refundAmount: Math.max(0, Number(order.depositPaid || 0) + Number(order.finalPaid || 0)),
@@ -308,6 +296,7 @@ async function submitAfterSale() {
     type: form.type,
     customer: order.customer,
     reason: form.reason.trim(),
+    attachmentFileIds: (form.attachmentFileIds || []).slice(),
     status: "待处",
     customerVisibleStatus: "已提",
     submitSource: "后台提交",
@@ -341,6 +330,9 @@ function openAfterSaleProcess(row) {
   const order = data.orders.find((item) => item.id === row.orderId);
   if (order) openOrder(order, { mode: "afterSale" });
   state.afterSaleProcessForm = {
+    attachmentFileIds: (row.internalAttachmentFileIds || []).slice(),
+    existingAttachmentFileIds: (row.internalAttachmentFileIds || []).slice(),
+    attachmentFiles: (row.internalAttachments || []).slice(),
     action: "售后跟进",
     note: "",
     refundAmount: Number(row.refundAmount || row.amount || 0),
@@ -351,6 +343,9 @@ function completeAfterSale(row) {
   if (isAfterSaleProcessReadonly(row)) return ElMessage.warning("该售后已处理完成，不能重复修");
   state.currentAfterSale = row;
   state.afterSaleProcessForm = {
+    attachmentFileIds: (row.internalAttachmentFileIds || []).slice(),
+    existingAttachmentFileIds: (row.internalAttachmentFileIds || []).slice(),
+    attachmentFiles: (row.internalAttachments || []).slice(),
     action: "处理完成",
     note: "售后问题已处理完",
     refundAmount: Number(row.refundAmount || row.amount || 0),
@@ -441,10 +436,14 @@ async function saveAfterSaleProcess(complete = false, confirmed = false) {
         refundAmount,
         refundConfirmed: !!form.refundConfirmed,
         reason: form.note.trim(),
+        attachmentFileIds: (form.attachmentFileIds || []).slice(),
       });
       const serverTicket = saved && (saved.ticket || saved);
       if (!serverTicket || serverTicket.error) throw new Error(serverTicket && serverTicket.error ? serverTicket.error : "售后工单保存失败");
       Object.assign(source, serverTicket);
+      form.attachmentFileIds = (source.internalAttachmentFileIds || []).slice();
+      form.existingAttachmentFileIds = form.attachmentFileIds.slice();
+      form.attachmentFiles = (source.internalAttachments || []).slice();
       if (saved && saved.order) Object.assign(order, saved.order);
     } catch (error) {
       Object.assign(source, beforeSource);

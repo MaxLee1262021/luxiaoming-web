@@ -342,80 +342,166 @@
     return value;
   }
 
-  let loadPromise = null;
-  async function loadAdminData(data, state) {
-    if (!hasSession()) return { skipped: true, reason: "unauthenticated" };
-    if (loadPromise) return loadPromise;
-    const all = (cfg.dataKeys || []).concat(cfg.stateKeys || [], cfg.docKeys || []);
-    loadPromise = (async () => {
-      let allowedKeys = null;
-      try {
-        allowedKeys = await availableDataKeys();
-      } catch (error) {
-        if (error && error.status === 401) return { ok: false, status: 401 };
-        // Older servers may not expose /meta/keys. Retain the per-key guard
-        // below for backwards compatibility, while current servers avoid
-        // requests for collections the session is not allowed to read.
-      }
-      for (const key of all) {
-        if (allowedKeys && !allowedKeys.has(key)) continue;
-        try {
-          if (key === "homeConfig") {
-            const doc = await getDoc("homeConfig", "homeStats");
-            const config = doc && doc.editorConfig && typeof doc.editorConfig === "object" ? doc.editorConfig : doc;
-            if (config && typeof config === "object" && state && state.homeConfig !== undefined) state.homeConfig = config;
-            continue;
-          }
-          if (key === "siteConfig") {
-            const doc = await getDoc("siteConfig", "global");
-            if (doc && state && state.siteConfig !== undefined) state.siteConfig = doc;
-            continue;
-          }
-          if (key === "financeSettings") {
-            const doc = await getDoc("financeSettings", "global");
-            if (doc && data && data.financeSettings !== undefined) data.financeSettings = { ...(data.financeSettings || {}), ...doc };
-            else if (data && data.financeSettings !== undefined) {
-              try {
-                const legacy = normalizeIds(await getColl(key));
-                const rows = Array.isArray(legacy) ? legacy : [];
-                const merged = rows.reduce((memo, row) => {
-                  if (!row || typeof row !== "object") return memo;
-                  const id = String(row.id || row._id || "");
-                  const valueKeys = Object.keys(row).filter((key) => !["id", "_id"].includes(key));
-                  if (valueKeys.length === 1 && valueKeys[0] === "value") memo[id] = row.value;
-                  else Object.assign(memo, row);
-                  return memo;
-                }, {});
-                data.financeSettings = { ...(data.financeSettings || {}), ...merged };
-              } catch (_) { /* retain initialized defaults */ }
-            }
-            continue;
-          }
-          const value = normalizeIds(await getColl(key));
-          if (value === undefined || value === null) continue;
-          // 服务端已经剥离 password；这里再次防御，避免未来适配器误下发凭据。
-          const safe = ["staff", "shops", "distributors", "agents"].includes(key) && Array.isArray(value)
-            ? value.map(({ password, ...rest }) => rest)
-            : value;
-          if ((cfg.stateKeys || []).includes(key)) {
-            if (state && state[key] !== undefined) state[key] = safe;
-          } else if (data && data[key] !== undefined) {
-            data[key] = safe;
-          }
-        } catch (error) {
-          // 401/403 时不回退到演示数据，避免权限边界被本地默认值掩盖。
-          if (error && (error.status === 401 || error.status === 403)) {
-            if (error.status === 401) return { ok: false, status: 401 };
-            continue;
-          }
-          // 网络/单集合故障只保留当前已成功数据，不把未认证或旧 mock 冒充真实数据。
-          if (window.console && console.warn) console.warn(`[cloud] 加载 ${key} 失败，未覆盖当前数据`, error && error.message ? error.message : error);
-        }
-      }
-      return { ok: true };
-    })().finally(() => { loadPromise = null; });
-    return loadPromise;
+  const knownDataKeys = new Set((cfg.dataKeys || []).concat(cfg.stateKeys || [], cfg.docKeys || []));
+  const stateDataKeys = new Set((cfg.stateKeys || []).concat(cfg.docKeys || []));
+  const menuData = cfg.menuData && typeof cfg.menuData === "object" ? cfg.menuData : {};
+  const routeAliases = { videoProducts: "videoSingles" };
+  const allowedKeyCache = { value: null, promise: null };
+  const menuLoadChains = new Map();
+  const keyRequestVersion = new Map();
+  const keyRequestSequence = new Map();
+  let loadEpoch = 0;
+
+  function normalizeMenuKey(value) {
+    const raw = String(value || "").trim();
+    return routeAliases[raw] || raw;
   }
 
-  window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, orderAction, afterSaleAction, merchantCodes, merchantCodeStats, generateMerchantCode, loadAdminData, mode: () => window.LXM_CLOUD_MODE };
+  function menuKeysFor(menuKey) {
+    const key = normalizeMenuKey(menuKey);
+    const configured = Array.isArray(menuData[key]) ? menuData[key] : [];
+    return [...new Set(configured.map((item) => String(item || "").trim()).filter((item) => knownDataKeys.has(item)))];
+  }
+
+  async function permittedKeys() {
+    if (allowedKeyCache.value) return allowedKeyCache.value;
+    if (!allowedKeyCache.promise) {
+      allowedKeyCache.promise = availableDataKeys()
+        .then((keys) => {
+          allowedKeyCache.value = keys;
+          return keys;
+        })
+        .catch((error) => {
+          allowedKeyCache.promise = null;
+          throw error;
+        });
+    }
+    return allowedKeyCache.promise;
+  }
+
+  function clearMenuLoadState() {
+    loadEpoch += 1;
+    allowedKeyCache.value = null;
+    allowedKeyCache.promise = null;
+    menuLoadChains.clear();
+    keyRequestVersion.clear();
+    keyRequestSequence.clear();
+  }
+
+  function safeCollectionValue(key, value) {
+    const normalized = normalizeIds(value);
+    if (["staff", "shops", "distributors", "agents"].includes(key) && Array.isArray(normalized)) {
+      return normalized.map(({ password, ...rest }) => rest);
+    }
+    return normalized;
+  }
+
+  function applyLoadedValue(key, value, data, state, version) {
+    if (keyRequestVersion.get(key) !== version || value === undefined || value === null) return false;
+    if (stateDataKeys.has(key)) {
+      if (state && Object.prototype.hasOwnProperty.call(state, key)) state[key] = value;
+    } else if (data && Object.prototype.hasOwnProperty.call(data, key)) {
+      data[key] = value;
+    }
+    return true;
+  }
+
+  async function loadFinanceSettings(data, version) {
+    const doc = await getDoc("financeSettings", "global");
+    if (doc && data && Object.prototype.hasOwnProperty.call(data, "financeSettings")) {
+      applyLoadedValue("financeSettings", { ...(data.financeSettings || {}), ...doc }, data, null, version);
+      return true;
+    }
+    if (!data || !Object.prototype.hasOwnProperty.call(data, "financeSettings")) return false;
+    // Retain support for pre-normalized servers where this singleton was a collection.
+    const legacy = safeCollectionValue("financeSettings", await getColl("financeSettings"));
+    const rows = Array.isArray(legacy) ? legacy : [];
+    const merged = rows.reduce((memo, row) => {
+      if (!row || typeof row !== "object") return memo;
+      const id = String(row.id || row._id || "");
+      const valueKeys = Object.keys(row).filter((name) => !["id", "_id"].includes(name));
+      if (valueKeys.length === 1 && valueKeys[0] === "value") memo[id] = row.value;
+      else Object.assign(memo, row);
+      return memo;
+    }, {});
+    return applyLoadedValue("financeSettings", { ...(data.financeSettings || {}), ...merged }, data, null, version);
+  }
+
+  async function loadDataKey(key, data, state) {
+    const sequence = (keyRequestSequence.get(key) || 0) + 1;
+    keyRequestSequence.set(key, sequence);
+    const version = `${loadEpoch}:${sequence}`;
+    keyRequestVersion.set(key, version);
+    try {
+      if (key === "homeConfig") {
+        const doc = await getDoc("homeConfig", "homeStats");
+        const config = doc && doc.editorConfig && typeof doc.editorConfig === "object" ? doc.editorConfig : doc;
+        return { key, loaded: applyLoadedValue(key, config, data, state, version) };
+      }
+      if (key === "siteConfig") {
+        const doc = await getDoc("siteConfig", "global");
+        return { key, loaded: applyLoadedValue(key, doc, data, state, version) };
+      }
+      if (key === "financeSettings") return { key, loaded: await loadFinanceSettings(data, version) };
+      const value = safeCollectionValue(key, await getColl(key));
+      return { key, loaded: applyLoadedValue(key, value, data, state, version) };
+    } catch (error) {
+      // 401/403 never falls back to local fixture data. A failed request leaves
+      // only prior server data in place, preventing an authorization boundary
+      // from being hidden by bundled demo records.
+      if (error && error.status === 401) return { key, error, status: 401 };
+      if (error && error.status === 403) return { key, skipped: true, status: 403 };
+      if (window.console && console.warn) console.warn(`[cloud] 加载 ${key} 失败，未覆盖当前数据`, error && error.message ? error.message : error);
+      return { key, error };
+    }
+  }
+
+  async function loadMenuData(menuKey, data, state, options = {}) {
+    if (!hasSession()) return { skipped: true, reason: "unauthenticated" };
+    const routeKey = normalizeMenuKey(menuKey || (state && state.active));
+    const keys = menuKeysFor(routeKey);
+    if (!keys.length) return { ok: true, routeKey, loaded: [], skipped: [] };
+
+    // Queue repeated visits to the same menu instead of collapsing them into a
+    // stale cache hit. Every menu activation performs a new related-data read.
+    const previous = menuLoadChains.get(routeKey) || Promise.resolve();
+    const task = previous.catch(() => {}).then(async () => {
+      let allowedKeys = null;
+      try {
+        allowedKeys = await permittedKeys();
+      } catch (error) {
+        if (error && error.status === 401) return { ok: false, status: 401, routeKey };
+        // A legacy server may not expose /meta/keys. The collection-level
+        // authorization guard below remains the source of truth in that case.
+      }
+      const requested = allowedKeys ? keys.filter((key) => allowedKeys.has(key)) : keys;
+      const skipped = allowedKeys ? keys.filter((key) => !allowedKeys.has(key)) : [];
+      const results = await Promise.all(requested.map((key) => loadDataKey(key, data, state)));
+      const unauthorized = results.find((result) => result && result.status === 401);
+      if (unauthorized) return { ok: false, status: 401, routeKey, loaded: results.filter((result) => result.loaded).map((result) => result.key), skipped };
+      return {
+        ok: true,
+        routeKey,
+        loaded: results.filter((result) => result && result.loaded).map((result) => result.key),
+        skipped: [...skipped, ...results.filter((result) => result && result.skipped).map((result) => result.key)],
+        failed: results.filter((result) => result && result.error && !result.status).map((result) => result.key)
+      };
+    });
+    menuLoadChains.set(routeKey, task);
+    task.then(
+      () => { if (menuLoadChains.get(routeKey) === task) menuLoadChains.delete(routeKey); },
+      () => { if (menuLoadChains.get(routeKey) === task) menuLoadChains.delete(routeKey); }
+    );
+    return task;
+  }
+
+  // Compatibility alias for older callers. It now loads only the requested
+  // menu (or the active route) and never expands to every known collection.
+  function loadAdminData(data, state, menuKey, options) {
+    return loadMenuData(menuKey || (state && state.active), data, state, options);
+  }
+
+  window.addEventListener("lxm-auth-changed", () => clearMenuLoadState());
+
+  window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, orderAction, afterSaleAction, merchantCodes, merchantCodeStats, generateMerchantCode, loadMenuData, loadAdminData, clearMenuLoadState, menuKeysFor, mode: () => window.LXM_CLOUD_MODE };
 })();

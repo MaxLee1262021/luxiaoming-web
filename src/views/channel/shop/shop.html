@@ -19,7 +19,7 @@
   </div>
 
   <div class="table-card">
-    <el-table :data="pagedList('shops', scopedShops)" stripe border max-height="calc(100vh - 360px)" empty-text="暂无商家，点击右上角新增">
+    <el-table :data="pagedList('shops', scopedShops)" stripe border empty-text="暂无商家，点击右上角新增">
       <el-table-column prop="name" label="商家名称" min-width="140" />
       <el-table-column prop="contact" label="联系人" width="110" />
       <el-table-column prop="phone" label="联系电话" width="130" />

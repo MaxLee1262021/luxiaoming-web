@@ -13,6 +13,7 @@
 // normalized writes.
 
 const crypto = require("crypto");
+const { isDeepStrictEqual } = require("util");
 const schema = require("./mysqlSchema.cjs");
 
 const {
@@ -32,6 +33,10 @@ const {
 function bool(value) { return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true"; }
 function now() { return new Date(); }
 function generatedId(key) { return `${String(key).slice(0, 2)}_${crypto.randomBytes(8).toString("hex")}`; }
+function metadataValue(row, name) {
+  if (!row || typeof row !== "object") return undefined;
+  return row[name] ?? row[String(name).toUpperCase()];
+}
 
 function relationColumnNames(definition) {
   return definition.columns.map((column) => String(column).trim().split(/\s+/, 1)[0]);
@@ -185,6 +190,12 @@ module.exports = function createMysqlSource(cfg = {}) {
   let ensurePromise = null;
   let schemaReady = false;
   let closed = false;
+  const configuredHealthCacheMs = Number(cfg.healthCacheMs ?? process.env.DB_HEALTH_CACHE_MS ?? 5000);
+  const healthCacheMs = Number.isFinite(configuredHealthCacheMs)
+    ? Math.min(Math.max(configuredHealthCacheMs, 0), 60000)
+    : 5000;
+  let latestReadyHealth = null;
+  let healthInFlight = null;
 
   async function query(conn, sql, params = []) {
     const [rows] = await conn.query(sql, params);
@@ -210,7 +221,7 @@ module.exports = function createMysqlSource(cfg = {}) {
 
   async function inspectTable(conn, table) {
     const rows = await query(conn, "SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=? ORDER BY ordinal_position", [table]);
-    return new Set(rows.map((row) => String(row.column_name || row.COLUMN_NAME || "" )).filter(Boolean));
+    return new Set(rows.map((row) => String(metadataValue(row, "column_name") || "")).filter(Boolean));
   }
 
   async function ensureIndexes(conn) {
@@ -219,15 +230,28 @@ module.exports = function createMysqlSource(cfg = {}) {
       const columns = await inspectTable(conn, table);
       if (!columns.size) continue;
       const indexes = await query(conn, "SELECT index_name,column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=?", [table]);
-      if (!indexes.some((row) => String(row.column_name).toLowerCase() === "updatedat")) {
-        const name = indexes.some((row) => String(row.index_name).toLowerCase() === "idx_updated_at") ? "idx_updated_at_normalized" : "idx_updated_at";
+      if (!indexes.some((row) => String(metadataValue(row, "column_name") || "").toLowerCase() === "updatedat")) {
+        const name = indexes.some((row) => String(metadataValue(row, "index_name") || "").toLowerCase() === "idx_updated_at") ? "idx_updated_at_normalized" : "idx_updated_at";
         await execute(conn, `ALTER TABLE \`${table}\` ADD KEY \`${name}\` (\`updatedAt\`)`);
       }
     }
     const users = await inspectTable(conn, "lxm_auth_users");
     if (users.size) {
       const indexes = await query(conn, "SELECT index_name,column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lxm_auth_users'");
-      if (!indexes.some((row) => ["subject_type", "subject_id"].includes(String(row.column_name).toLowerCase()))) await execute(conn, "ALTER TABLE `lxm_auth_users` ADD KEY `idx_auth_user_subject` (subject_type,subject_id)");
+      if (!indexes.some((row) => ["subject_type", "subject_id"].includes(String(metadataValue(row, "column_name") || "").toLowerCase()))) await execute(conn, "ALTER TABLE `lxm_auth_users` ADD KEY `idx_auth_user_subject` (subject_type,subject_id)");
+    }
+    // User-facing order numbers are lookup identifiers. Refuse to start if an
+    // old database contains ambiguous values rather than silently returning
+    // the first matching order from an application-level scan.
+    const orderColumns = await inspectTable(conn, "lxm_orders");
+    if (orderColumns.has("orderNo")) {
+      await execute(conn, "UPDATE `lxm_orders` SET `orderNo`=NULL WHERE `orderNo`=''");
+      const duplicates = await query(conn, "SELECT `orderNo` AS value_text,COUNT(*) AS count FROM `lxm_orders` WHERE `orderNo` IS NOT NULL GROUP BY `orderNo` HAVING COUNT(*)>1 LIMIT 1");
+      if (duplicates.length) {
+        const error = new Error("订单号存在重复记录，不能安全启用订单查询"); error.code = "SCHEMA_INCOMPLETE"; throw error;
+      }
+      const indexes = await query(conn, "SELECT index_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lxm_orders' AND index_name='uq_order_number'");
+      if (!indexes.length) await execute(conn, "ALTER TABLE `lxm_orders` ADD UNIQUE KEY `uq_order_number` (`orderNo`)");
     }
   }
 
@@ -430,8 +454,8 @@ module.exports = function createMysqlSource(cfg = {}) {
     return parsed;
   }
 
-  async function relationRows(key, id) {
-    const output = { [COLLECTION_VALUES_TABLE]: await query(pool, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id=? ORDER BY path,ordinal`, [key, id]) };
+  async function relationRows(key, id, conn = pool) {
+    const output = { [COLLECTION_VALUES_TABLE]: await query(conn, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id=? ORDER BY path,ordinal`, [key, id]) };
     for (const relationName of RELATION_BY_KEY[key] || []) {
       const relation = RELATIONS[relationName];
       const parent = relationParent(relationName);
@@ -439,7 +463,7 @@ module.exports = function createMysqlSource(cfg = {}) {
       if (relationName === "account_permissions") continue;
       else {
         const orderBy = relationOrderColumns(relation).map((name) => `\`${name}\``).join(",");
-        output[relationName] = await query(pool, `SELECT * FROM \`${relation.table}\` WHERE ${parent.columns[0]}=? ORDER BY ${orderBy}`, [id]);
+        output[relationName] = await query(conn, `SELECT * FROM \`${relation.table}\` WHERE ${parent.columns[0]}=? ORDER BY ${orderBy}`, [id]);
       }
     }
     return output;
@@ -528,13 +552,18 @@ module.exports = function createMysqlSource(cfg = {}) {
 
   async function update(key, id, patch = {}) {
     assertKey(key); await ensure();
-    const current = await readOne(key, id); if (!current) return null;
-    const normalizedPatch = schema.normalizeDocumentAliases(key, patch && typeof patch === "object" ? patch : {});
-    const next = { ...current, ...normalizedPatch, id: String(id), _id: String(id) };
     const stateItem = state.get(key);
     if (stateItem && stateItem.legacy) { const error = new Error("旧版数据表只读，请先执行规范化迁移"); error.code = "SCHEMA_LEGACY"; throw error; }
-    await withTransaction((conn) => writeRecord(conn, key, String(id), next, tableFor(key), true));
-    return readOne(key, String(id));
+    const changed = await withTransaction(async conn => {
+      const rows = await query(conn, `SELECT * FROM \`${tableFor(key)}\` WHERE id=? FOR UPDATE`, [String(id)]);
+      if (!rows.length) return false;
+      const current = hydrateDocument(key, rows[0], await relationRows(key, String(id), conn));
+      const normalizedPatch = schema.normalizeDocumentAliases(key, patch && typeof patch === "object" ? patch : {});
+      const next = { ...current, ...normalizedPatch, id: String(id), _id: String(id) };
+      await writeRecord(conn, key, String(id), next, tableFor(key), true);
+      return true;
+    });
+    return changed ? readOne(key, String(id)) : null;
   }
 
   async function upsert(key, id, patch = {}) {
@@ -542,6 +571,24 @@ module.exports = function createMysqlSource(cfg = {}) {
     const current = await readOne(key, id);
     if (current) return update(key, id, patch);
     return create(key, { ...(patch || {}), id: String(id), _id: String(id) });
+  }
+
+  // Migration and file state changes compare under a row lock. Reading a
+  // document before starting this transaction could overwrite a user's edit.
+  async function compareAndUpdate(key, id, expected, patch) {
+    assertKey(key); await ensure();
+    const stateItem = state.get(key);
+    if (stateItem && (stateItem.legacy || stateItem.missing)) throw Object.assign(new Error("数据结构尚未就绪"), { code: "SCHEMA_MISSING" });
+    const changed = await withTransaction(async conn => {
+      const rows = await query(conn, `SELECT * FROM \`${tableFor(key)}\` WHERE id=? FOR UPDATE`, [String(id)]);
+      if (!rows.length) return false;
+      const current = hydrateDocument(key, rows[0], await relationRows(key, String(id), conn));
+      if (!Object.entries(expected || {}).every(([field, value]) => isDeepStrictEqual(current[field], value))) return false;
+      const normalized = schema.normalizeDocumentAliases(key, patch || {});
+      await writeRecord(conn, key, String(id), { ...current, ...normalized, id: String(id) }, tableFor(key), true);
+      return true;
+    });
+    return changed ? readOne(key, String(id)) : null;
   }
 
   async function remove(key, id) {
@@ -557,7 +604,7 @@ module.exports = function createMysqlSource(cfg = {}) {
     return affected > 0;
   }
 
-  async function health() {
+  async function collectHealth() {
     try {
       await ensure();
       const names = ALL_KEYS.map((key) => tableFor(key));
@@ -577,7 +624,7 @@ module.exports = function createMysqlSource(cfg = {}) {
         if (key === "logs" && (columns.has("snapshot") || !columns.has("snapshotText"))) incomplete.push(`${tableFor(key)}.snapshot`);
         for (const column of schema.definition(key).columns) if (!columns.has(column.name)) incomplete.push(`${tableFor(key)}.${column.name}`);
         const indexes = await query(pool, "SELECT column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=?", [tableFor(key)]);
-        if (!indexes.some((row) => String(row.column_name).toLowerCase() === "updatedat")) incomplete.push(`${tableFor(key)}.idx_updated_at`);
+        if (!indexes.some((row) => String(metadataValue(row, "column_name") || "").toLowerCase() === "updatedat")) incomplete.push(`${tableFor(key)}.idx_updated_at`);
       }
       const financeLeaves = await query(pool, "SELECT COUNT(*) AS count FROM `lxm_collection_values` WHERE collection_name=?", ["financeSettings"]);
       if (Number(financeLeaves[0] && financeLeaves[0].count || 0) > 0) incomplete.push("lxm_collection_values.financeSettings");
@@ -597,6 +644,19 @@ module.exports = function createMysqlSource(cfg = {}) {
     } catch (error) { return { backend: "mysql", configured: true, ready: false, persistent: true, error: error && error.code || "unavailable" }; }
   }
 
+  async function health() {
+    const timestamp = Date.now();
+    if (latestReadyHealth && timestamp - latestReadyHealth.checkedAt < healthCacheMs) return latestReadyHealth.value;
+    if (healthInFlight) return healthInFlight;
+    healthInFlight = collectHealth()
+      .then((value) => {
+        if (value && value.ready) latestReadyHealth = { checkedAt: Date.now(), value };
+        return value;
+      })
+      .finally(() => { healthInFlight = null; });
+    return healthInFlight;
+  }
+
   return {
     mode: "mysql",
     backend: "mysql",
@@ -606,6 +666,7 @@ module.exports = function createMysqlSource(cfg = {}) {
     get: readOne,
     create,
     update,
+    compareAndUpdate,
     upsert,
     remove,
     async object(key) { const rows = await readMany(key); return Object.fromEntries(rows.map((row) => [String(row.id || row._id), row])); },

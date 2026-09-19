@@ -235,7 +235,23 @@ async function persistOrderAction(order, action, payload = {}) {
       order.photographerId = payload.photographerId;
       if (["pending", "new"].includes(order.status)) { order.status = "confirmed"; order.customerStatus = "confirmed"; }
     }
-    if (action === "accept") { order.status = "confirmed"; order.customerStatus = "confirmed"; }
+    if (action === "accept") {
+      Object.assign(order, {
+        appointmentAt: payload.appointmentAt || order.appointmentAt || "",
+        timePeriod: payload.timePeriod || order.timePeriod || "",
+        appointmentLocation: payload.appointmentLocation || order.appointmentLocation || "",
+        peopleCount: payload.peopleCount || order.peopleCount || 1,
+        serviceNote: payload.serviceContent || order.serviceNote || "",
+        totalAmount: payload.totalAmount === undefined ? order.totalAmount : payload.totalAmount,
+        depositRatio: payload.depositRatio === undefined ? order.depositRatio : payload.depositRatio,
+        finalDiscountAmount: payload.finalDiscountAmount === undefined ? order.finalDiscountAmount : payload.finalDiscountAmount,
+        priceAdjustReason: payload.priceAdjustReason || order.priceAdjustReason || "",
+        serviceConfirmedAt: LXMFormat.nowText(),
+        status: "confirmed",
+        customerStatus: "confirmed",
+        workflowStage: "awaiting_deposit"
+      });
+    }
     if (action === "start") { order.status = "shooting"; order.customerStatus = "shooting"; }
     if (action === "deliver") { order.status = "delivered"; order.customerStatus = "done"; }
     if (action === "complete") { order.status = "completed"; order.customerStatus = "done"; }
@@ -258,7 +274,7 @@ async function persistOrderAction(order, action, payload = {}) {
 function statusMeta(value) {
   return statusDict.find((s) => s.value === value) || statusDict[0];
 }
-const COMPLETED_ORDER_STATUSES = new Set(["completed", "done", "delivered", "已完成", "已交付", "已完"]);
+const COMPLETED_ORDER_STATUSES = new Set(["completed", "done", "已完成", "已完"]);
 const CANCELLED_ORDER_STATUSES = new Set(["cancelled", "canceled", "terminated", "已取消", "已中止", "中止"]);
 function orderStatusValue(value) { return value && typeof value === "object" ? value.status : value; }
 function isOrderCompletedStatus(value) { return COMPLETED_ORDER_STATUSES.has(String(orderStatusValue(value) || "").trim().toLowerCase()); }

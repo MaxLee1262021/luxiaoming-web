@@ -35,7 +35,7 @@
   } = ctx;
 
 function contentCover(title, subtitle) {
-  return typeof LXM_SVG === "function" ? LXM_SVG(title, subtitle) : "";
+  return "/images/placeholder.png";
 }
 
 const DEFAULT_AMAP_CENTER = { longitude: 112.938814, latitude: 28.228209, coordType: "gcj02" };
@@ -671,6 +671,7 @@ function addIncludedItem() {
   state.editContent.includedItems.push({ type: "album", name: "", price: 0, target: { page: "photoCollection" } });
 }
 async function saveContent() {
+  if (!window.LXM_UPLOAD.ready()) return;
   const row = state.editContent;
   if (!row) return;
   if (!row.name && !row.title) return ElMessage.warning("请填写名称或标题");
@@ -854,7 +855,7 @@ async function persistContentMutation(key, source, previous = null) {
       saved = await window.LXM_CLOUD.update(key, id, payload);
     } catch (error) {
       if (!error || error.status !== 404) throw error;
-      saved = await window.LXM_CLOUD.create(key, payload);
+      saved = await window.LXM_CLOUD.create(key, { ...payload, id });
     }
     if (!saved || saved.error) throw new Error((saved && saved.error) || "内容保存失败");
     Object.assign(source, saved);
@@ -892,30 +893,23 @@ function uploadContentCover(event) {
   const input = event && event.target;
   const file = input && input.files && input.files[0];
   if (!file) return;
-  if (!/^image\//.test(file.type)) { ElMessage.warning("请选择图片文件"); if (input) input.value = ""; return; }
-  if (file.size > 2 * 1024 * 1024) { ElMessage.warning("图片需小于 2MB"); if (input) input.value = ""; return; }
-  const reader = new FileReader();
-  reader.onload = () => {
-    const dataUrl = reader.result;
-    const encodedSize = typeof dataUrl === "string" ? (typeof TextEncoder === "function" ? new TextEncoder().encode(dataUrl).length : dataUrl.length) : 0;
-    if (encodedSize > 60000) {
-      ElMessage.warning("图片编码超过数据库字段上限，请压缩图片或填写可访问的图片地址");
-      return;
+  const target = state.editContent;
+  if (!target) return;
+  window.LXM_UPLOAD.upload(file, { purpose: "content", collection: target.__key, recordId: target.id || undefined, imagesOnly: true,
+    onUploaded(result) {
+      target.cover = result.url;
+      if (target.__key === "samples" && target.type !== "video") target.url = result.url;
+      ElMessage.success("图片已上传，保存后生效");
     }
-    if (!state.editContent) return;
-    state.editContent.cover = dataUrl;
-    if (state.editContent.__key === "samples") state.editContent.url = dataUrl;
-    ElMessage.success("封面已加载，保存后生效");
-  };
-  reader.onerror = () => ElMessage.error("图片读取失败");
-  reader.readAsDataURL(file);
+  });
   if (input) input.value = "";
 }
 function applyCoverUrl(event) {
   const value = (event && event.target ? event.target.value : event || "").trim();
   if (!state.editContent) return;
+  if (window.LXM_UPLOAD.temporary(value)) return ElMessage.warning("本地图片请使用上传按钮");
   state.editContent.cover = value;
-  if (state.editContent.__key === "samples") state.editContent.url = value;
+  if (state.editContent.__key === "samples" && state.editContent.type !== "video") state.editContent.url = value;
 }
 async function toggleShelf(row) {
   if (!row?.__source) return;
@@ -1000,25 +994,28 @@ function clearContentFilters() {
   state.contentScope = { type: "", id: "" };
 }
 async function uploadHomeMaterial() {
+  window.LXM_UPLOAD.pick({ purpose: "content", collection: "samples", imagesOnly: true, multiple: true, async onUploaded(file) {
   const sample = {
-    id: `sample${Date.now()}`,
-    name: "首页新轮播素",
+    id: `sample_${file.fileId || file.id}`,
+    name: file.name,
     type: "photo",
     albumId: firstActiveContentId(data.albums),
     seriesId: firstActiveContentId(data.series),
     spotId: firstActiveContentId(data.spots),
     isShowcase: true,
-    url: contentCover("首页新素", "即时预览")
+    url: file.url,
+    cover: file.url
   };
-  data.samples.unshift(sample);
+  if (!data.samples.some((item) => item.id === sample.id)) data.samples.unshift(sample);
   if (!(await persistContentMutation("samples", sample))) {
     data.samples = data.samples.filter((item) => item !== sample);
-    return;
+    throw new Error("样片资料保存失败，请重试");
   }
-  state.homeConfig.carouselIds = [sample.id, ...(state.homeConfig.carouselIds || [])].slice(0, 6);
-  if (isServerConnected()) await saveHomeConfig();
+  state.homeConfig.carouselIds = [sample.id, ...(state.homeConfig.carouselIds || []).filter((id) => id !== sample.id)].slice(0, 6);
+  if (isServerConnected()) await saveHomeConfig(true);
   log("上传首页素材", "首页配置", sample.name);
-  ElMessage.success("演示版已添加一张首页轮播素材");
+  ElMessage.success("首页轮播素材已上传");
+  } });
 }
 function toggleHomeModule(key) {
   const list = state.homeConfig.enabledModules || (state.homeConfig.enabledModules = []);
@@ -1150,7 +1147,8 @@ function exportHomeConfigJson() {
   log("导出小程序首页配置", "首页配置", state.homeConfig.activity);
   ElMessage.success("已导出小程序首页配置 JSON");
 }
-async function saveHomeConfig() {
+async function saveHomeConfig(fromUpload = false) {
+  if (fromUpload !== true && !window.LXM_UPLOAD.ready()) return;
   log("保存首页装修配置", "小程序装修", state.homeConfig.activity);
   const payload = buildMiniProgramHomeConfig();
   // 把后台编辑器模型一并存进文档：小程序只读顶部字段，自动忽略 editorConfig，
@@ -1167,7 +1165,8 @@ async function saveHomeConfig() {
     ElMessage.success("小程序首页装修" + tip);
   } catch (e) {
     // 纯静态演示（npm run dev 无 /api 服务）时，本地快照仍会保留编辑内容，刷新不丢
-    ElMessage.warning("已保存到本地，连接服务端后可同步到小程序：" + (e && e.message ? e.message : e));
+    if (fromUpload === true) throw e;
+    ElMessage.error("保存失败，请重试：" + (e && e.message ? e.message : e));
   }
 }
 // 小程序全局配置保存：把约拍定价 / 预约须知 / 隐私政策 / 企微 / 搜索热词 / 足迹章册 写入 config/global

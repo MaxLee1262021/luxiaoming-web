@@ -26,10 +26,10 @@
   <div class="lxm-toolbar">
     <el-input v-model="state.filters.keyword" clearable placeholder="搜索短视频名称 / 标签" />
     <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
-      <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+      <el-option v-for="s in (data.spots || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
     </el-select>
     <el-select v-model="state.filters.contentSeriesId" clearable filterable placeholder="拍摄风格">
-      <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+      <el-option v-for="s in (data.series || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
     </el-select>
     <el-select v-model="state.filters.contentStatus" clearable placeholder="状态">
       <el-option label="上架" value="上架" />
@@ -47,7 +47,7 @@
         <span>{{ listSource.length }} 项</span>
       </div>
       <div class="vse-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
-        <button v-for="item in listSource" v-if="item" :key="item.id||item._id" class="vse-list-item" :class="{active: isSelected(item), off: videoSingleStatus(item)==='下架'}" @click="selectVideoSingle(item)">
+        <button v-for="item in listSource" :key="item.id||item._id" class="vse-list-item" :class="{active: isSelected(item), off: videoSingleStatus(item)==='下架'}" @click="selectVideoSingle(item)">
           <span class="vli-cover">
             <img v-if="item.cover" :src="item.cover" />
             <i v-else>&#9654;</i>
@@ -83,23 +83,23 @@
         <div class="vf-row">
           <label class="vf-field"><span>拍摄风格</span>
             <el-select v-model="selectedVideoSingle.seriesId" filterable placeholder="选择风格" :disabled="!can('contentEdit')">
-              <el-option v-for="s in (data.series || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+              <el-option v-for="s in (data.series || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
           <label class="vf-field"><span>关联打卡点</span>
             <el-select v-model="selectedVideoSingle.spotId" filterable placeholder="选择打卡点" :disabled="!can('contentEdit')">
-              <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+              <el-option v-for="s in (data.spots || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
             </el-select>
           </label>
         </div>
         <label class="vf-field"><span>视频文件 / 链接</span>
-          <el-input v-model="selectedVideoSingle.videoUrl" placeholder="粘贴视频 URL（如 https://...mp4），或下方选择本地文件预览" :disabled="!can('contentEdit')" />
+          <el-input v-model="selectedVideoSingle.videoUrl" @change="validateMediaUrl(selectedVideoSingle,'videoUrl')" placeholder="粘贴视频 URL，或选择 MP4 上传" :disabled="!can('contentEdit')" />
           <span class="vf-upload">
-            <input type="file" accept="video/*" @change="onVideoFilePick" :disabled="!can('contentEdit')" />
-            <span class="vf-upload__hint">选择文件仅在本机会话内预览；正式上传需后端配置对象存储 / 上传接口（当前与全站一致用 URL 落库）。</span>
+            <input type="file" accept="video/mp4" @change="onVideoFilePick" :disabled="!can('contentEdit')" />
+            <span class="vf-upload__hint">MP4 最大 500 MiB。上传成功后保存；右下角可查看进度和重试。</span>
           </span>
         </label>
-        <label class="vf-field"><span>封面图</span><el-input v-model="selectedVideoSingle.cover" placeholder="封面图 URL（留空将用占位图）" :disabled="!can('contentEdit')" /></label>
+        <label class="vf-field"><span>封面图 <el-button link @click="uploadVideoCover" :disabled="!can('contentEdit')">上传图片</el-button></span><el-input v-model="selectedVideoSingle.cover" @change="validateMediaUrl(selectedVideoSingle,'cover')" placeholder="封面图 URL（留空将用占位图）" :disabled="!can('contentEdit')" /></label>
         <div class="vf-row">
           <label class="vf-field"><span>时长</span><el-input v-model="selectedVideoSingle.durationText" placeholder="如 60秒" :disabled="!can('contentEdit')" /></label>
           <label class="vf-field"><span>价格（元）</span><el-input-number v-model="selectedVideoSingle.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
@@ -119,7 +119,7 @@
         </div>
         <label class="vf-field"><span>标签</span>
           <el-select v-model="selectedVideoSingle.tags" multiple filterable allow-create default-first-option placeholder="输入或选择标签" :disabled="!can('contentEdit')">
-            <el-option v-for="t in (data.tagLibrary || []).filter(Boolean)" v-if="t" :key="t.id" :label="t.name" :value="t.name" />
+            <el-option v-for="t in (data.tagLibrary || []).filter(Boolean)" :key="t.id" :label="t.name" :value="t.name" />
           </el-select>
         </label>
         <el-button v-if="can('contentEdit')" :type="videoSingleStatus(selectedVideoSingle)==='下架' ? 'success' : 'warning'" plain @click="toggleVideoSingleShelf(selectedVideoSingle)">

@@ -22,7 +22,7 @@
   </div>
 
   <div class="table-card">
-    <el-table :data="pagedList('staff', staffRows)" stripe border max-height="calc(100vh - 360px)" empty-text="暂无人员账号，点击右上角新增">
+    <el-table :data="pagedList('staff', staffRows)" stripe border empty-text="暂无人员账号，点击右上角新增">
       <el-table-column prop="name" label="姓名" min-width="120" />
       <el-table-column prop="account" label="登录账号" width="130" />
       <el-table-column label="角色" width="110">

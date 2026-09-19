@@ -23,6 +23,10 @@ const UNSAFE_ATTRIBUTE_KEYS = new Set(["__proto__", "constructor", "prototype"])
 function id(prefix) { return `${prefix}_${crypto.randomBytes(8).toString("hex")}`; }
 function now() { return new Date(); }
 function clone(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
+function metadataValue(row, name) {
+  if (!row || typeof row !== "object") return undefined;
+  return row[name] ?? row[String(name).toUpperCase()];
+}
 function parseObject(value) {
   if (value == null) return {};
   if (typeof value === "object") {
@@ -187,7 +191,7 @@ module.exports = function createMysqlPermissionStore(options = {}) {
 
   async function columnsFor(table) {
     const rows = await query(pool, "SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=?", [table]);
-    return new Set(rows.map((row) => String(row.column_name || row.COLUMN_NAME || "")).filter(Boolean));
+    return new Set(rows.map((row) => String(metadataValue(row, "column_name") || "")).filter(Boolean));
   }
   async function addColumn(table, columns, name, type) {
     if (columns.has(name)) return;
@@ -264,7 +268,7 @@ module.exports = function createMysqlPermissionStore(options = {}) {
       }
     }
     const userIndexes = await query(pool, "SELECT column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=?", [TABLES.users]);
-    if (!userIndexes.some((row) => ["subject_type", "subject_id"].includes(String(row.column_name).toLowerCase()))) await execute(pool, `ALTER TABLE ${TABLES.users} ADD KEY idx_auth_user_subject (subject_type,subject_id)`);
+    if (!userIndexes.some((row) => ["subject_type", "subject_id"].includes(String(metadataValue(row, "column_name") || "").toLowerCase()))) await execute(pool, `ALTER TABLE ${TABLES.users} ADD KEY idx_auth_user_subject (subject_type,subject_id)`);
   }
 
   async function ensureSchema() {
@@ -429,10 +433,10 @@ module.exports = function createMysqlPermissionStore(options = {}) {
         for (const forbidden of ["meta", "extra"]) if (columns.has(forbidden)) missing.push(`${table}.${forbidden}`);
       }
       const subjectIndexes = await query(pool, "SELECT column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=?", [TABLES.users]);
-      if (!subjectIndexes.some((row) => ["subject_type", "subject_id"].includes(String(row.column_name).toLowerCase()))) missing.push(`${TABLES.users}.idx_auth_user_subject`);
+      if (!subjectIndexes.some((row) => ["subject_type", "subject_id"].includes(String(metadataValue(row, "column_name") || "").toLowerCase()))) missing.push(`${TABLES.users}.idx_auth_user_subject`);
       const identityIndexes = await query(pool, "SELECT table_name,index_name,non_unique,column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name IN (?,?,?)", [TABLES.menus, TABLES.roles, TABLES.users]);
-      const hasUniqueIdentity = (table, column) => identityIndexes.some((row) => String(row.table_name) === table
-        && Number(row.non_unique) === 0 && String(row.column_name).toLowerCase() === column);
+      const hasUniqueIdentity = (table, column) => identityIndexes.some((row) => String(metadataValue(row, "table_name") || "") === table
+        && Number(metadataValue(row, "non_unique")) === 0 && String(metadataValue(row, "column_name") || "").toLowerCase() === column);
       if (!hasUniqueIdentity(TABLES.menus, "menu_key")) missing.push(`${TABLES.menus}.uq_auth_menu_key`);
       if (!hasUniqueIdentity(TABLES.roles, "role_key")) missing.push(`${TABLES.roles}.uq_auth_role_key`);
       if (!hasUniqueIdentity(TABLES.users, "account")) missing.push(`${TABLES.users}.uq_auth_user_account`);

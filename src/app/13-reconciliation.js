@@ -412,6 +412,8 @@ function openAdjustmentDialog(row = null) {
     targetName: row?.targetName || "",
     note: row?.note || "",
     attachment: row?.attachment || "",
+    attachmentFileIds: (row?.attachmentFileIds || []).slice(),
+    attachmentFiles: (row?.attachments || []).slice(),
   };
   state.adjustmentDialog = true;
 }
@@ -434,6 +436,7 @@ async function submitAdjustmentRecord() {
     offsetStatus: "优先抵扣下一期待结算",
     note: form.note,
     attachment: form.attachment || "线下凭证待补",
+    attachmentFileIds: (form.attachmentFileIds || []).slice(),
   };
   try { Object.assign(record, await saveReconciliationRecord("adjustmentRecords", record, "create") || {}); }
   catch (error) { return ElMessage.error((error && error.message) || "冲正记录保存失败，请稍后重试"); }

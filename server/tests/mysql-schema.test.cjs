@@ -94,6 +94,67 @@ test("sparse order workflow details remain typed leaves instead of widening MySQ
   }
 });
 
+test("confirmation, task, cancellation and refund extensions stay in typed leaves", () => {
+  const orderInput = {
+    id: "order-new-sparse-workflow",
+    taskStatus: "pending_acceptance",
+    serviceConfirmedAt: "2026-09-19T10:00:00.000Z",
+    serviceConfirmedBy: "service-1",
+    serviceConfirmReason: "确认旅拍安排",
+    serviceContent: "双人旅拍服务",
+    taskAcceptedAt: "2026-09-19T10:05:00.000Z",
+    taskAcceptedBy: "photo-1",
+    customerCancelIdempotencyKey: "cancel-test-0001",
+    cancelledAt: "2026-09-19T10:06:00.000Z",
+    cancelledBy: "customer-1",
+    cancelReason: "测试取消",
+    confirmationSnapshot: { appointmentAt: "2026-12-20", peopleCount: 2, totalAmount: 100 }
+  };
+  const order = schema.splitDocument("orders", orderInput);
+  for (const field of Object.keys(orderInput).filter((field) => !["id", "confirmationSnapshot"].includes(field))) {
+    assert.equal(Object.prototype.hasOwnProperty.call(order.columns, field), false, `${field} must not widen lxm_orders`);
+    assert.ok(order.attributes.some((row) => row.path === field), `${field} must be a typed leaf`);
+  }
+  assert.ok(order.attributes.some((row) => row.path === "confirmationSnapshot.appointmentAt"));
+  const restoredOrder = schema.hydrateDocument("orders", { id: order.id, ...order.columns }, { collection_values: order.attributes, ...order.relations });
+  assert.equal(restoredOrder.taskStatus, "pending_acceptance");
+  assert.deepEqual(restoredOrder.confirmationSnapshot, orderInput.confirmationSnapshot);
+
+  const afterSaleInput = {
+    id: "after-sale-new-sparse-workflow",
+    refundStatus: "manual_refunded",
+    refundTransactionId: "manual-ref-0001",
+    refundMethod: "manual",
+    refundConfirmedAt: "2026-09-19T11:00:00.000Z",
+    refundConfirmedBy: "finance-1"
+  };
+  const afterSale = schema.splitDocument("afterSales", afterSaleInput);
+  for (const field of Object.keys(afterSaleInput).filter((field) => field !== "id")) {
+    assert.equal(Object.prototype.hasOwnProperty.call(afterSale.columns, field), false, `${field} must not widen lxm_afterSales`);
+    assert.ok(afterSale.attributes.some((row) => row.path === field), `${field} must be a typed leaf`);
+  }
+  const restoredAfterSale = schema.hydrateDocument("afterSales", { id: afterSale.id, ...afterSale.columns }, { collection_values: afterSale.attributes, ...afterSale.relations });
+  assert.equal(restoredAfterSale.refundTransactionId, "manual-ref-0001");
+
+  const legacyOrder = schema.hydrateDocument("orders", {
+    id: "legacy-partial-column", taskStatus: "legacy-assigned", serviceConfirmedAt: "legacy-time"
+  }, {
+    collection_values: [
+      { path: "taskStatus", value_type: "string", value_text: "pending_acceptance" },
+      { path: "serviceConfirmedAt", value_type: "string", value_text: "attribute-time" }
+    ]
+  });
+  assert.equal(legacyOrder.taskStatus, "pending_acceptance", "typed leaves override a partially added legacy column");
+  assert.equal(legacyOrder.serviceConfirmedAt, "attribute-time");
+
+  for (const sql of [migration, normalizedMigration]) {
+    const orderDdl = sql.match(/CREATE TABLE IF NOT EXISTS `lxm_orders`[\s\S]*?\) ENGINE=InnoDB[^;]*;/i);
+    const afterSaleDdl = sql.match(/CREATE TABLE IF NOT EXISTS `lxm_afterSales`[\s\S]*?\) ENGINE=InnoDB[^;]*;/i);
+    assert.doesNotMatch(orderDdl[0], /`(?:taskStatus|serviceConfirmedAt|serviceConfirmedBy|serviceConfirmReason|serviceContent|taskAcceptedAt|taskAcceptedBy|customerCancelIdempotencyKey|cancelledAt|cancelledBy|cancelReason)`/i);
+    assert.doesNotMatch(afterSaleDdl[0], /`(?:refundStatus|refundTransactionId|refundMethod|refundConfirmedAt|refundConfirmedBy)`/i);
+  }
+});
+
 test("city and spot map fields round-trip through normalized storage", () => {
   const city = schema.splitDocument("cities", {
     id: "city-map",

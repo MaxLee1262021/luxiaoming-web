@@ -42,7 +42,7 @@
         <p>只展示当前登录角色有权限查看和导出的核对对象。</p>
       </div>
     </div>
-    <el-table :data="reconciliationFocus.rows" height="320" stripe empty-text="当前角色暂无可核对数据">
+    <el-table :data="reconciliationFocus.rows" stripe empty-text="当前角色暂无可核对数据">
       <el-table-column prop="typeName" label="对象类型" width="100" />
       <el-table-column prop="name" label="对象名称" min-width="130" />
       <el-table-column prop="totalOrders" label="关联订单" width="90" align="center" />
@@ -60,7 +60,7 @@
         <p>商家、分销员、摄影师只显示自己的分账核对；财务和超管可确认结算批次。</p>
       </div>
     </div>
-    <el-table :data="pagedList('reconSettlement', visibleReconciliationSettlementRows)" height="320" stripe empty-text="当前角色暂无分账核对数据">
+    <el-table :data="pagedList('reconSettlement', visibleReconciliationSettlementRows)" stripe empty-text="当前角色暂无分账核对数据">
       <el-table-column prop="typeName" label="对象类型" width="100" />
       <el-table-column prop="name" label="对象名称" min-width="130" />
       <el-table-column prop="orders" label="可分订单" width="90" align="center" />
@@ -83,7 +83,7 @@
         <p>角色只能看到自己的已结算记录，财务和超管可查看全部记录。</p>
       </div>
     </div>
-    <el-table :data="pagedList('reconTransfer', reconciliationTransferRows)" height="240" stripe empty-text="暂无结算确认记录">
+    <el-table :data="pagedList('reconTransfer', reconciliationTransferRows)" stripe empty-text="暂无结算确认记录">
       <el-table-column prop="time" label="确认时间" width="150" />
       <el-table-column prop="period" label="结算范围" width="190" />
       <el-table-column prop="objectType" label="对象类型" width="100" />

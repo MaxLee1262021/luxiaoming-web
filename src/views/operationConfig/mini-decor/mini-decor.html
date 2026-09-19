@@ -94,8 +94,8 @@
             </div>
           </div>
           <div class="eb-fields">
-            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
-            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" @change="validateMediaUrl(b,'url')" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" @change="validateMediaUrl(b,'cover')" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /><el-button link @click="uploadHomeBannerMedia(bi, 'cover')" :disabled="!can('contentEdit')">上传封面</el-button></label>
             <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在 Banner 上的文案" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>生效时间</span><el-date-picker v-model="b.effectiveTime" type="datetime" placeholder="留空=立即生效" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" style="width:100%" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>跳转类型</span>
@@ -132,8 +132,8 @@
             </div>
           </div>
           <div class="eb-fields">
-            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
-            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" @change="validateMediaUrl(b,'url')" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" @change="validateMediaUrl(b,'cover')" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /><el-button link @click="uploadExploreBannerMedia(bi, 'cover')" :disabled="!can('contentEdit')">上传封面</el-button></label>
             <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在轮播上的文案" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>跳转类型</span>
               <el-select v-model="b.targetType" placeholder="选择跳转" :disabled="!can('contentEdit')">

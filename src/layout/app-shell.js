@@ -1,6 +1,33 @@
 window.LXM_VIEWS = {
   app: `
   <div>
+
+    <section v-if="state.authed && uploadJobs.length" class="lxm-upload-jobs" aria-label="文件上传进度" aria-live="polite">
+      <strong>文件上传</strong>
+      <div v-for="job in uploadJobs" :key="job.id" class="lxm-upload-job">
+        <span :title="job.name">{{ job.name }}</span>
+        <el-progress :percentage="job.progress" :status="job.status==='failed' ? 'exception' : job.status==='done' ? 'success' : undefined" />
+        <small v-if="job.error">{{ job.error }}</small>
+        <el-button v-if="job.status==='failed'" link @click="retryUpload(job.id)">重试</el-button>
+        <el-button v-if="job.status==='failed' || job.status==='done'" link @click="dismissUpload(job.id)">{{ job.status==='done' ? '关闭' : '取消此上传' }}</el-button>
+      </div>
+    </section>
+    <el-dialog v-model="storedFilePreview.open" :title="storedFilePreview.name || '文件预览'" width="900px" :close-on-click-modal="false" @close="closeStoredFilePreview" destroy-on-close>
+      <div v-if="storedFilePreview.loading" role="status">正在获取文件…</div>
+      <el-alert v-else-if="storedFilePreview.error" :title="storedFilePreview.error" type="error" :closable="false" />
+      <video v-else-if="storedFilePreview.url && storedFilePreview.type==='video'" :src="storedFilePreview.url" controls playsinline class="lxm-private-preview" @error="storedFilePreview.error='视频加载失败，请关闭后重新打开'" />
+      <img v-else-if="storedFilePreview.url" :src="storedFilePreview.url" :alt="storedFilePreview.name" class="lxm-private-preview" @error="storedFilePreview.error='图片加载失败，请关闭后重新打开'" />
+    </el-dialog>
+    <el-dialog v-model="deliveryDialog.open" title="发布成片" width="680px" class="order-flow-dialog" :close-on-click-modal="false">
+      <p>草稿仅内部可见。客服确认后，客户可在本单查看和下载所选成片。</p>
+      <el-checkbox-group v-model="deliveryDialog.selected">
+        <div v-for="file in deliveryFiles(deliveryDialog.order)" :key="file.id" class="lxm-file-row">
+          <el-checkbox :label="file.id">{{ file.name }}</el-checkbox><el-button link @click="openStoredFile(file)">预览</el-button>
+        </div>
+      </el-checkbox-group>
+      <el-empty v-if="!deliveryFiles(deliveryDialog.order).length" description="暂无成片草稿，可先上传或登记企业微信交付" />
+      <template #footer><el-button :disabled="deliveryDialog.publishing" @click="deliveryDialog.open=false">取消</el-button><el-button :disabled="uploadBusy || deliveryDialog.publishing" @click="publishDelivery(true)">登记企业微信交付</el-button><el-button type="primary" :loading="deliveryDialog.publishing" :disabled="uploadBusy || !deliveryDialog.selected.length" @click="publishDelivery(false)">发布所选成片</el-button></template>
+    </el-dialog>
     <lxm-page-login v-if="!state.authed && !state.authChecking" />
     <div v-else-if="!state.authed && state.authChecking" class="auth-loading" role="status" aria-live="polite">
       <div class="auth-loading-mark">鹿</div>
@@ -60,7 +87,7 @@ window.LXM_VIEWS = {
           <div class="top-actions">
             <el-date-picker v-model="state.filters.dateRange" type="daterange" size="small" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" style="width:250px" />
 
-            <el-select v-if="!['merchant','photo'].includes(state.role)" v-model="state.filters.shopId" clearable filterable size="small" placeholder="全商家" style="width:150px"><el-option v-for="s in scopedShops" :key="s.id" :label="s.name" :value="s.id" /></el-select>
+            <el-select v-if="!['merchant','photo'].includes(state.role) && data.shops.length" v-model="state.filters.shopId" clearable filterable size="small" placeholder="全商家" style="width:150px"><el-option v-for="s in scopedShops" :key="s.id" :label="s.name" :value="s.id" /></el-select>
             <el-popover placement="bottom-end" width="360" trigger="click">
               <template #reference>
                 <el-badge :value="messageRows.length" :hidden="!messageRows.length">
@@ -193,6 +220,17 @@ window.LXM_VIEWS = {
           </div>
 
           <div class="order-section">
+            <div class="section-title-row"><h3>成片与交付</h3><el-button v-if="canUploadDelivery(state.currentOrder)" :disabled="uploadBusy" @click="uploadDelivery(state.currentOrder)">上传成片草稿</el-button></div>
+            <p class="muted">拍摄完成后上传；草稿仅内部可见，客服发布后客户可查看下载。图片最大 50 MiB，MP4 最大 500 MiB。</p>
+            <div v-for="file in deliveryFiles(state.currentOrder)" :key="file.id" class="lxm-file-row">
+              <span>{{ file.name }}</span><el-tag size="small">草稿</el-tag><el-button link @click="openStoredFile(file)">预览</el-button>
+              <el-button v-if="canUploadDelivery(state.currentOrder)" link type="danger" :disabled="uploadBusy" @click="removeDeliveryFile(state.currentOrder,file.id)">移除</el-button>
+            </div>
+            <div v-for="file in deliveryFiles(state.currentOrder,false)" :key="file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-tag size="small" type="success">已发布</el-tag><el-button link @click="openStoredFile(file)">查看</el-button><el-button link @click="openStoredFile(file,true)">下载</el-button></div>
+            <el-button v-if="canDeliverOrder(state.currentOrder) && !state.orderReadonly" type="primary" :disabled="uploadBusy" @click="deliverOrder(state.currentOrder)">确认发布或登记交付</el-button>
+          </div>
+
+          <div class="order-section">
             <div class="section-title-row"><h3>操作时间线</h3><span class="muted">仅后台可见，按时间记录客服处理、收定金、派单、交付和收尾款</span></div>
             <div class="after-sale-status-panel">
               <template v-if="orderAfterSales(state.currentOrder).length">
@@ -260,7 +298,7 @@ window.LXM_VIEWS = {
                   </template>
                 </div>
                 <div class="flow-action-row">
-                  <el-button v-if="canAcceptOrder(state.currentOrder)" size="small" type="primary" plain @click="acceptOrder(state.currentOrder)">接单并联系</el-button>
+                  <el-button v-if="canAcceptOrder(state.currentOrder)" size="small" type="primary" plain @click="openServiceConfirmationDialog(state.currentOrder)">确认服务并发起定金</el-button>
                   <el-button v-if="canDispatchOrder(state.currentOrder)" size="small" type="primary" @click="openDispatchDialog(state.currentOrder)">确认安排并派单</el-button>
                   <el-button v-if="canStartTask(state.currentOrder)" size="small" type="primary" plain @click="startShooting(state.currentOrder)">开始拍摄</el-button>
                   <el-button v-if="canCompleteTask(state.currentOrder)" size="small" type="warning" plain @click="completeShooting(state.currentOrder)">标记拍摄完成</el-button>
@@ -354,6 +392,8 @@ window.LXM_VIEWS = {
                   <div class="process-field-head"><label>跟进说明</label><span>必填</span></div>
                   <el-input v-model="state.afterSaleProcessForm.note" type="textarea" :rows="6" :disabled="isAfterSaleProcessReadonly(state.currentAfterSale)" placeholder="请输入本次处理记录，例如：已与客人协商一致，改期至7月5日下午。" />
                 </div>
+<div v-if="state.currentAfterSale.attachments && state.currentAfterSale.attachments.length" class="lxm-attachment-box"><strong>客户提交的凭证</strong><div v-for="file in state.currentAfterSale.attachments" :key="file.fileId || file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-button link @click="openStoredFile(file)">查看</el-button></div></div>
+<div class="lxm-attachment-box"><strong>内部处理凭证</strong><el-button :disabled="uploadBusy || isAfterSaleProcessReadonly(state.currentAfterSale)" @click="uploadAfterSaleAttachment(true)">上传凭证</el-button><small>凭证支持 JPG、PNG、WebP，最大 20 MiB</small><div v-for="file in attachmentFiles(state.afterSaleProcessForm)" :key="file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-button link @click="openStoredFile(file)">查看</el-button><el-button link type="danger" :disabled="uploadBusy || file.saved || isAfterSaleProcessReadonly(state.currentAfterSale)" @click="removeAttachment(state.afterSaleProcessForm,file.id)">移除</el-button></div></div>
                 <div class="after-sale-process-footer">
                   <div class="refund-input-wrap">
                     <label>退款金额</label>
@@ -431,17 +471,18 @@ window.LXM_VIEWS = {
       </div>
     </el-drawer>
 
-    <el-dialog :close-on-click-modal="false" v-model="state.afterSaleSubmitDialog" title="提交售后" width="620px">
+    <el-dialog :close-on-click-modal="false" v-model="state.afterSaleSubmitDialog" title="提交售后" width="620px" class="order-flow-dialog">
       <div class="form-grid single">
         <el-form-item label="售后类型"><el-select v-model="state.afterSaleForm.type"><el-option label="退款申请" value="退款申请" /><el-option label="协商退款" value="协商退款" /><el-option label="改期" value="改期" /><el-option label="投诉反馈" value="投诉反馈" /><el-option label="补发成片" value="补发成片" /><el-option label="补拍" value="补拍" /><el-option label="其他问题" value="其他问题" /></el-select></el-form-item>
         <el-form-item v-if="state.afterSaleForm.type.includes('退款')" label="申请退款金额"><el-input-number v-model="state.afterSaleForm.refundAmount" :min="0" /></el-form-item>
+        <el-form-item label="售后凭证"><div class="lxm-attachment-box"><el-button :disabled="uploadBusy || false" @click="uploadAfterSaleAttachment(false)">上传凭证</el-button><small>凭证支持 JPG、PNG、WebP，最大 20 MiB</small><div v-for="file in attachmentFiles(state.afterSaleForm)" :key="file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-button link @click="openStoredFile(file)">查看</el-button><el-button link type="danger" :disabled="uploadBusy || false" @click="removeAttachment(state.afterSaleForm,file.id)">移除</el-button></div></div></el-form-item>
         <el-form-item label="售后原因"><el-input v-model="state.afterSaleForm.reason" type="textarea" :rows="4" placeholder="填写客人诉求、沟通情况、是否涉及退款或改期。" /></el-form-item>
       </div>
       <div class="note-box"><b>处理规则</b><p>客服或客人在前端提交后，订单都会进入后台售后服务；无退款可不填金额，有退款金额的售后完成后进入财务审核，并同步影响经营看板、各角色数据与月度对账。</p></div>
       <template #footer><el-button @click="state.afterSaleSubmitDialog=false">取消</el-button><el-button type="primary" @click="submitAfterSale">确定提交</el-button></template>
     </el-dialog>
 
-    <el-dialog :close-on-click-modal="false" v-model="state.completeOrderDialog" title="订单完成核对" width="620px">
+    <el-dialog :close-on-click-modal="false" v-model="state.completeOrderDialog" title="订单完成核对" width="620px" class="order-flow-dialog">
       <div v-if="state.currentOrder" class="complete-check">
         <div class="note-box warning"><b>完成前核对</b><p>订单完成前请确认成片已交付，且定金与尾款均已由财务确认到账。未确认的收款或缺少交付记录不能完成订单。</p></div>
         <div class="detail-grid compact">
@@ -462,7 +503,7 @@ window.LXM_VIEWS = {
       </template>
     </el-dialog>
 
-    <el-dialog :close-on-click-modal="false" v-model="state.addonDialog" title="订单加购商品" width="1120px">
+    <el-dialog :close-on-click-modal="false" v-model="state.addonDialog" title="订单加购商品" width="1120px" class="order-flow-dialog">
       <div class="addon-dialog-layout">
         <aside class="addon-filter-side">
           <div class="addon-filter-title"><strong>加购类型</strong><span>仅用于客服订单内部加购</span></div>
@@ -580,7 +621,7 @@ window.LXM_VIEWS = {
       </el-table>
       <template #footer><el-button @click="state.reconciliationDialog=false">关闭</el-button></template>
     </el-dialog>
-    <el-dialog :close-on-click-modal="false" v-model="state.manualOrderDialog" title="创建订单" width="860px" class="manual-order-dialog">
+    <el-dialog :close-on-click-modal="false" v-model="state.manualOrderDialog" title="创建订单" width="860px" class="manual-order-dialog order-flow-dialog">
       <div class="dialog-note">客服先完整录入客户、来源、商品和预约信息，点击确定创建后才生成正式订单并绑定当前客服。</div>
       <div class="form-grid labeled-form">
         <label><span>客户姓名</span><el-input v-model="state.manualOrderForm.customer" placeholder="请输入客户姓名" /></label>
@@ -592,7 +633,7 @@ window.LXM_VIEWS = {
         <label class="wide"><span>下单商品</span><el-select v-model="state.manualOrderForm.productId" filterable placeholder="选择套餐、短视频、增值服务或周边"><el-option v-for="p in manualOrderProducts" :key="p.productType + '-' + p.id" :label="p.name + ' / ' + money(p.specialPrice || p.price || 0)" :value="p.id" /></el-select></label>
         <label><span>拍摄时间</span><el-date-picker v-model="state.manualOrderForm.appointmentAt" type="datetime" value-format="YYYY-MM-DD HH:mm" format="YYYY-MM-DD HH:mm" placeholder="选择拍摄时间" /></label>
         <label><span>预约时段</span><el-select v-model="state.manualOrderForm.timePeriod"><el-option label="上午" value="上午" /><el-option label="下午" value="下午" /><el-option label="晚上" value="晚上" /><el-option label="待客服确认" value="待客服确认" /></el-select></label>
-        <div class="dialog-note wide">订单创建后默认进入待付订金。请在订单详情通过“登记订金”创建核对记录，财务确认到账后才能派单。</div>
+        <div class="dialog-note wide">订单创建后进入待确认服务。客服需逐单确认时间、地点、人数、服务内容、报价和订金比例后，系统才创建订金应收。</div>
         <label class="wide"><span>内部备注</span><el-input v-model="state.manualOrderForm.internalNote" type="textarea" :rows="3" placeholder="仅后台可见，例如沟通重点、服装需求、特殊行程" /></label>
       </div>
       <template #footer>
@@ -600,7 +641,26 @@ window.LXM_VIEWS = {
         <el-button type="primary" @click="confirmCreateManualOrder">确定创建</el-button>
       </template>
     </el-dialog>
-    <el-dialog :close-on-click-modal="false" v-model="state.dispatchDialog" title="安排摄影师" width="620px">
+    <el-dialog :close-on-click-modal="false" v-model="state.confirmationDialog" title="确认服务并创建订金应收" width="760px" class="order-flow-dialog">
+      <div class="dialog-note">确认后将固化本单服务与金额快照。后续商品或订金规则变更不会回算本订单；如修改原订单金额，必须填写调价原因。</div>
+      <div class="form-grid labeled-form">
+        <label><span>确认拍摄时间</span><el-date-picker v-model="state.confirmationForm.appointmentAt" type="datetime" value-format="YYYY-MM-DD HH:mm" format="YYYY-MM-DD HH:mm" placeholder="选择确认拍摄时间" /></label>
+        <label><span>确认拍摄时段</span><el-select v-model="state.confirmationForm.timePeriod" placeholder="请选择时段"><el-option label="上午" value="上午" /><el-option label="下午" value="下午" /><el-option label="晚上" value="晚上" /></el-select></label>
+        <label><span>确认拍摄地点</span><el-input v-model="state.confirmationForm.appointmentLocation" placeholder="填写实际集合或拍摄地点" /></label>
+        <label><span>参与人数</span><el-input-number v-model="state.confirmationForm.peopleCount" :min="1" :max="20" /></label>
+        <label><span>确认总价</span><el-input-number v-model="state.confirmationForm.totalAmount" :min="0" :precision="2" :step="50" /></label>
+        <label><span>订金比例</span><el-input-number v-model="state.confirmationForm.depositRatioPercent" :min="0" :max="100" :precision="2" :step="5" /><small class="form-tip">百分比，例如 30 代表 30%</small></label>
+        <label><span>尾款优惠</span><el-input-number v-model="state.confirmationForm.finalDiscountAmount" :min="0" :precision="2" :max="Math.max(Number(state.confirmationForm.totalAmount || 0), 0)" /><small class="form-tip">无优惠填 0</small></label>
+        <label><span>调价原因</span><el-input v-model="state.confirmationForm.priceAdjustReason" placeholder="与原订单金额不一致时必填" /></label>
+        <label class="wide"><span>确认服务内容</span><el-input v-model="state.confirmationForm.serviceContent" type="textarea" :rows="3" placeholder="例如套餐内容、拍摄需求、妆造/交付约定" /></label>
+        <label class="wide"><span>确认说明</span><el-input v-model="state.confirmationForm.reason" type="textarea" :rows="2" placeholder="必填，说明与客户确认的内容" /></label>
+      </div>
+      <template #footer>
+        <el-button @click="state.confirmationDialog=false">取消</el-button>
+        <el-button type="primary" @click="confirmServiceConfirmation">确认服务并创建订金应收</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog :close-on-click-modal="false" v-model="state.dispatchDialog" title="安排摄影师" width="620px" class="order-flow-dialog">
       <div class="form-grid labeled-form single">
         <label><span>摄影师</span><el-select v-model="state.dispatchForm.photographerId" filterable placeholder="请选择摄影师"><el-option v-for="s in photographers" :key="s.id" :label="s.name" :value="s.id" /></el-select></label>
         <label><span>确认拍摄时间</span><el-date-picker v-model="state.dispatchForm.appointmentAt" type="datetime" value-format="YYYY-MM-DD HH:mm" format="YYYY-MM-DD HH:mm" placeholder="选择确认拍摄时间" /></label>
@@ -614,7 +674,7 @@ window.LXM_VIEWS = {
         <el-button type="primary" @click="confirmDispatchPhotographer">确认安排</el-button>
       </template>
     </el-dialog>
-    <el-dialog :close-on-click-modal="false" v-model="state.transferDialog" title="订单转派/交接" width="620px">
+    <el-dialog :close-on-click-modal="false" v-model="state.transferDialog" title="订单转派/交接" width="620px" class="order-flow-dialog">
       <div class="dialog-note">用于客服请假、离职、服务中途交接或总部改派。转派完成后会写入订单时间线和操作日志。</div>
       <div class="form-grid labeled-form single">
         <label>
@@ -639,7 +699,7 @@ window.LXM_VIEWS = {
         <el-button type="primary" @click="confirmTransferOrder">确认转派</el-button>
       </template>
     </el-dialog>
-    <el-dialog :close-on-click-modal="false" v-model="state.batchNoteDialog" title="批量备注" width="620px">
+    <el-dialog :close-on-click-modal="false" v-model="state.batchNoteDialog" title="批量备注" width="620px" class="order-flow-dialog">
       <div class="dialog-note">批量备注会写入订单内部备注和操作时间线；售后锁定、已完成、已取消订单会自动跳过。</div>
       <div class="form-grid labeled-form single">
         <label><span>备注内容</span><el-input v-model="state.batchNoteText" type="textarea" :rows="4" placeholder="例如：客服A请假，本批订单先由客服B接手跟进。" /></label>
@@ -649,7 +709,7 @@ window.LXM_VIEWS = {
         <el-button type="primary" @click="confirmBatchNote">确认添加备注</el-button>
       </template>
     </el-dialog>
-    <el-dialog :close-on-click-modal="false" v-model="state.exceptionDialog" title="超管异常处理" width="860px">
+    <el-dialog :close-on-click-modal="false" v-model="state.exceptionDialog" title="超管异常处理" width="860px" class="order-flow-dialog">
       <div v-if="state.currentOrder" class="dialog-note danger">仅用于总部兜底处理异常订单。状态回退、来源归属修正、强制改派、风控/财务锁定解除都会写入订单时间线和操作日志。</div>
       <div v-if="state.currentOrder" class="exception-dialog-grid">
         <label><span>后台订单状态</span><el-select v-model="state.exceptionForm.status"><el-option v-for="s in statusDict" :key="s.value" :label="s.label" :value="s.value" /></el-select></label>
@@ -667,7 +727,7 @@ window.LXM_VIEWS = {
         <el-button type="danger" @click="confirmOrderException">确认异常处理并留痕</el-button>
       </template>
     </el-dialog>
-    <el-dialog :close-on-click-modal="false" v-model="state.rescheduleDialog" title="改期拍摄" width="620px">
+    <el-dialog :close-on-click-modal="false" v-model="state.rescheduleDialog" title="改期拍摄" width="620px" class="order-flow-dialog">
       <div class="form-grid labeled-form single">
         <label><span>新拍摄时间</span><el-date-picker v-model="state.rescheduleForm.appointmentAt" type="datetime" value-format="YYYY-MM-DD HH:mm" format="YYYY-MM-DD HH:mm" placeholder="选择新的拍摄时间" /></label>
         <label><span>新预约时段</span><el-select v-model="state.rescheduleForm.timePeriod"><el-option label="上午" value="上午" /><el-option label="下午" value="下午" /><el-option label="晚上" value="晚上" /><el-option label="待客服确认" value="待客服确认" /></el-select></label>
@@ -720,7 +780,8 @@ window.LXM_VIEWS = {
         <label><span>冲正金额</span><el-input-number v-model="state.adjustmentForm.amount" :min="0" :step="10" /></label>
         <label><span>扣减主体</span><el-select v-model="state.adjustmentForm.targetType"><el-option label="商家" value="商家" /><el-option label="分销员" value="分销员" /><el-option label="摄影师" value="摄影师" /><el-option label="总部" value="总部" /></el-select></label>
         <label><span>主体名称</span><el-input v-model="state.adjustmentForm.targetName" placeholder="填写被扣减或调账的主体名称" /></label>
-        <label><span>凭证附件</span><el-input v-model="state.adjustmentForm.attachment" placeholder="填写附件名或线下凭证编号" /></label>
+        <div class="wide"><div class="lxm-attachment-box"><el-button :disabled="uploadBusy || false" @click="uploadFinanceAttachment">上传凭证</el-button><small>凭证支持 JPG、PNG、WebP，最大 20 MiB</small><div v-for="file in attachmentFiles(state.adjustmentForm)" :key="file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-button link @click="openStoredFile(file)">查看</el-button><el-button link type="danger" :disabled="uploadBusy || false" @click="removeAttachment(state.adjustmentForm,file.id)">移除</el-button></div></div></div>
+        <label><span>线下凭证编号</span><el-input v-model="state.adjustmentForm.attachment" placeholder="填写附件名或线下凭证编号" /></label>
         <label class="wide"><span>备注说明</span><el-input v-model="state.adjustmentForm.note" type="textarea" :rows="4" placeholder="说明退款、冲正或人工调账原因，便于后续审计追溯" /></label>
       </div>
       <template #footer>
@@ -729,7 +790,7 @@ window.LXM_VIEWS = {
       </template>
     </el-dialog>
     <el-dialog :close-on-click-modal="false" v-model="state.imagePreview" title="样片放大预览" width="860px"><img class="zoom-img" :src="state.zoomUrl" /></el-dialog>
-    <el-dialog :close-on-click-modal="false" v-model="state.timelineDialog" title="操作时间线" width="620px">
+    <el-dialog :close-on-click-modal="false" v-model="state.timelineDialog" title="操作时间线" width="620px" class="order-flow-dialog">
       <div v-if="state.currentOrder" class="timeline-dialog-list">
         <div class="timeline-filter-tabs">
           <button :class="{active:!state.timelineCategoryFilter}" @click="state.timelineCategoryFilter=''">全部</button>
@@ -991,8 +1052,8 @@ window.LXM_VIEWS = {
             <label v-if="state.editContent.type!=='video'"><span>拍摄时长(分钟)</span><el-input-number v-model="state.editContent.duration" :min="0" /></label>
             <label v-if="state.editContent.type!=='video'"><span>精修张数</span><el-input-number v-model="state.editContent.retouchCount" :min="0" /></label>
             <label v-if="state.editContent.type==='video'" class="full-width"><span>产品形态</span><el-select v-model="state.editContent.productKind" clearable placeholder="短视频（统一为单品）"><el-option label="短视频" value="video_single" /></el-select></label>
-            <label v-if="state.editContent.type==='video' && state.editContent.productKind==='video_single'"><span>视频地址</span><el-input v-model="state.editContent.videoUrl" placeholder="视频播放地址 URL" /></label>
-            <label v-if="state.editContent.type==='video' && state.editContent.productKind==='video_single'"><span>预览地址</span><el-input v-model="state.editContent.previewVideoUrl" placeholder="预览视频地址 URL" /></label>
+            <label v-if="state.editContent.type==='video' && state.editContent.productKind==='video_single'"><span>视频地址 <el-button link :disabled="uploadBusy" @click="contentFile(state.editContent,'videoUrl','packages',true)">上传 MP4</el-button></span><el-input v-model="state.editContent.videoUrl" @change="validateMediaUrl(state.editContent,'videoUrl')" placeholder="视频播放地址 URL" /></label>
+            <label v-if="state.editContent.type==='video' && state.editContent.productKind==='video_single'"><span>预览地址 <el-button link :disabled="uploadBusy" @click="contentFile(state.editContent,'previewVideoUrl','packages',true)">上传 MP4</el-button></span><el-input v-model="state.editContent.previewVideoUrl" @change="validateMediaUrl(state.editContent,'previewVideoUrl')" placeholder="预览视频地址 URL" /></label>
             <label v-if="state.editContent.type==='video'"><span>视频时长(秒)</span><el-input-number v-model="state.editContent.videoDuration" :min="0" /></label>
             <label v-if="state.editContent.type==='video'"><span>成片条数</span><el-input-number v-model="state.editContent.finishedVideoCount" :min="0" /></label>
             <label v-if="state.editContent.type==='video'" class="switch-line"><span>支持航拍</span><el-switch v-model="state.editContent.hasAerial" /></label>
@@ -1065,17 +1126,22 @@ window.LXM_VIEWS = {
           </div>
         </div>
         <div class="content-form-section">
-          <div class="content-form-section-head"><strong>详情与素材</strong><span>说明文案和封面统一放在底部；封面支持本地上传或图片链接，保存后立即生效（演示环境仅存于本地预览）。</span></div>
+          <div class="content-form-section-head"><strong>详情与素材</strong><span>说明文案和封面统一放在底部；封面与素材上传完成后保存，也可继续使用已有图片链接。</span></div>
           <el-input v-model="state.editContent[['packages','guides'].includes(state.editContent.__key) ? 'description' : 'intro']" type="textarea" :rows="3" :placeholder="['packages','guides'].includes(state.editContent.__key) ? '详情说明（写入小程序 description 字段）' : '简介/详情说明'" />
+          <div v-if="state.editContent.__key==='samples'" class="lxm-attachment-box">
+            <label>素材类型 <el-select v-model="state.editContent.type"><el-option label="图片" value="photo" /><el-option label="视频" value="video" /></el-select></label>
+            <div v-if="state.editContent.type==='video'"><el-input v-model="state.editContent.url" @change="validateMediaUrl(state.editContent,'url')" placeholder="MP4 视频地址" /><el-button :disabled="uploadBusy" @click="contentFile(state.editContent,'url','samples',true)">上传 MP4</el-button><video v-if="state.editContent.url" :src="state.editContent.url" controls style="max-width:100%;max-height:220px"></video></div>
+          </div>
+          <div v-if="state.editContent.__key==='peripherals'" class="lxm-attachment-box"><el-button :disabled="uploadBusy" @click="contentFile(state.editContent,'images','peripherals',false,true)">上传商品详情图片</el-button><div v-for="(url,index) in state.editContent.images || []" :key="index" class="lxm-file-row"><img :src="url" width="64" /><el-button link @click="state.editContent.images.splice(index,1)">移除</el-button></div></div>
           <div class="upload-block">
             <div class="upload-thumb">
               <img v-if="state.editContent.cover || state.editContent.url" :src="state.editContent.cover || state.editContent.url" />
               <div v-else class="upload-empty">暂无封面</div>
             </div>
             <div class="upload-actions">
-              <label class="upload-btn">选择本地图片<input type="file" accept="image/*" hidden @change="uploadContentCover" /></label>
+              <label class="upload-btn">选择本地图片<input type="file" accept="image/jpeg,image/png,image/webp" hidden :disabled="uploadBusy" @change="uploadContentCover" /></label>
               <el-input size="small" placeholder="或粘贴图片链接 URL" :model-value="(state.editContent.cover || state.editContent.url || '')" @input="applyCoverUrl" />
-              <p class="upload-tip">支持本地图片（≤2MB）或图片链接；封面仅本地预览，正式环境接入对象存储后自动上传。</p>
+              <p class="upload-tip">支持 JPG、PNG、WebP，图片最大 20 MiB。上传进度和失败重试见右下角。</p>
             </div>
           </div>
         </div>

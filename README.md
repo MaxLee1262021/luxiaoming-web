@@ -56,6 +56,20 @@ npm run dev
 http://127.0.0.1:5192/
 ```
 
+## OSS 文件上传与迁移
+
+后台素材、头像、售后凭证、成片和财务图片附件统一使用阿里云 OSS。配置字段已加入 `.env.example`；使用单私有 Bucket，公开内容保存稳定的 `/api/media/:fileId` 地址，私有文件按登录身份与订单归属换取临时读取地址。参数、RAM 权限、跨域、微信域名、上传限制及迁移操作见 [OSS 接入与迁移](docs/OSS接入与迁移.md)。
+
+```sh
+npm run oss:check
+npm run migrate:files -- --schema
+npm run migrate:files -- --inventory
+```
+
+截至 2026-09-17，已新增文件表且数据库健康检查通过；真实 OSS 已通过 V4 上传、私有 ACL、签名读取、匿名拒绝、防覆盖和自动清理验证。已盘点的 40 个历史引用均为 SVG 演示占位，未迁移为真实文件，也未修改其业务字段。
+
+Linux 包默认不含 `.env`，使用 `npm run package:linux` 生成新的 `20260917-oss` 包；已有同名输出会报错，可用 `-- --name 新包名` 指定名称。确需携带本机配置时显式追加 `--include-env`。详见 [Linux 部署说明](deploy/linux/README.md)。
+
 ## 高德地图选点
 
 打卡点编辑页的地图选点通过运行时配置加载，源码不包含地图凭据。部署时在环境变量或部署平台密钥管理中设置 `AMAP_WEB_JS_KEY` 与 `AMAP_SECURITY_JS_CODE`；服务端会在同源 `/_AMapService` 代理中追加安全密钥，浏览器仅能读取 Web JS Key 和代理地址。也可设置 `AMAP_SERVICE_HOST=https://admin.example.com/_AMapService` 使用已有 HTTPS 反向代理，但该代理必须在服务端追加安全密钥。
@@ -85,6 +99,12 @@ node scripts/serve.cjs
 - 静态 HTTP 服务只发布前端资源，原始 demo fixture、`server/data`、`.env` 和项目元数据不会被直接读取；直接打开 `index.html` 才会加载本地 demo fixture。
 - JSON 账号明文迁移可运行 `npm run migrate:passwords`（自动生成 600 权限备份）；财务参数使用 `financeSettings/global` 单文档。
 - 支付、提现、佣金结算等资金动作不在本演示版直接执行。
+
+## 订单验收基线
+
+订单流程按 A 级人工收款辅助版运行：预约先进入“待客服联系确认”，客服通过 `accept` 操作保存确认服务快照后才开放定金；成片发布后才开放尾款。财务确认到账必须填写外部流水号或人工核对编号，售后处理中会冻结普通履约推进。
+
+本地验收可临时设置 `TEST_PAYMENT_ENABLED=true`（或 `PAYMENT_MODE=test`）启用公开 RPC `testPayment`。该开关默认关闭，仅订单本人可对当前允许阶段执行；记录会明确使用 `provider=test_payment` 和 `test:` 流水号，绝不会唤起或伪装为微信支付。不要在生产环境启用该开关。
 
 ## 后续重点
 

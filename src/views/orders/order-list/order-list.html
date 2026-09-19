@@ -44,7 +44,7 @@
               <div><span>待收尾款</span><strong>{{ money(sumOrders(scopedOrders,'due')) }}</strong></div>
             </div>
             <div class="table-card">
-                <el-table :data="scopedOrders.slice((state.orderPage-1)*state.orderPageSize, state.orderPage*state.orderPageSize)" stripe border max-height="calc(100vh - 420px)" empty-text="暂无符合条件的订单，试试调整筛选或点击重置" @row-click="(row)=>openOrder(row,{readonly:!canEditOrder() || !canOpenOrderForEdit(row)})" @selection-change="onOrderSelection">
+                <el-table :data="scopedOrders.slice((state.orderPage-1)*state.orderPageSize, state.orderPage*state.orderPageSize)" stripe border empty-text="暂无符合条件的订单，试试调整筛选或点击重置" @row-click="(row)=>openOrder(row,{readonly:!canEditOrder() || !canOpenOrderForEdit(row)})" @selection-change="onOrderSelection">
                   <el-table-column type="selection" width="46" />
                   <el-table-column label="客户" min-width="150"><template #default="{row}"><button class="table-link" :data-order-open="row.id" @click.stop="openOrder(row,{readonly:!canEditOrder() || !canOpenOrderForEdit(row)})">{{ row.orderNo }}</button><strong>{{ row.customer }}</strong><div class="muted">{{ visiblePhone(row) }}</div></template></el-table-column>
                 <el-table-column label="状态/售后" width="130"><template #default="{row}"><span class="status-dot" :style="{background:orderWorkflowStatusMeta(row).color}"></span>{{ orderWorkflowStatusLabel(row) }}<div v-if="afterSaleBadge(row)" class="after-sale-badge">{{ afterSaleBadge(row) }}</div></template></el-table-column>

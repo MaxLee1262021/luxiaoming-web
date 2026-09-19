@@ -45,7 +45,7 @@
       </div>
       <el-tag>{{ financeReviewOrderRows.length }} 个订单</el-tag>
     </div>
-    <el-table :data="pagedList('financeReview', financeReviewOrderRows)" stripe height="450" empty-text="暂无待审核订单，全部处理完时这里会是空的">
+    <el-table :data="pagedList('financeReview', financeReviewOrderRows)" stripe empty-text="暂无待审核订单，全部处理完时这里会是空的">
       <el-table-column prop="createdAt" label="最近提交" width="150" />
       <el-table-column label="订单/客户" min-width="180">
         <template #default="{row}">
@@ -87,7 +87,7 @@
       </div>
       <el-tag type="info">{{ financeReviewRecordRows.length }} 条记录</el-tag>
     </div>
-    <el-table :data="pagedList('financeReviewRecords', financeReviewRecordRows)" stripe height="260" empty-text="暂无审核记录，通过或驳回的审核会留痕在这里">
+    <el-table :data="pagedList('financeReviewRecords', financeReviewRecordRows)" stripe empty-text="暂无审核记录，通过或驳回的审核会留痕在这里">
       <el-table-column prop="createdAt" label="提交时间" width="150" />
       <el-table-column prop="type" label="审核类型" width="110" />
       <el-table-column label="订单/客户" min-width="180">

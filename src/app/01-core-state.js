@@ -14,6 +14,9 @@ const state = reactive({
   cloudMode: "checking",
   loading: false,
   saving: false,
+  dataLoading: false,
+  menuDataLoadingKey: "",
+  menuDataRequestId: 0,
   login: { account: "", password: "" },
   loginRole: "",
   currentAccount: "",
@@ -104,6 +107,19 @@ const state = reactive({
   orderReadonly: false,
   orderWorkMode: "service",
   currentOrder: null,
+  confirmationDialog: false,
+  confirmationForm: {
+    appointmentAt: "",
+    timePeriod: "",
+    appointmentLocation: "",
+    peopleCount: 1,
+    serviceContent: "",
+    totalAmount: 0,
+    depositRatioPercent: 0,
+    finalDiscountAmount: 0,
+    priceAdjustReason: "",
+    reason: ""
+  },
   dispatchDialog: false,
   dispatchForm: {
     photographerId: "",
@@ -245,10 +261,6 @@ const data = reactive({
 // 把 mode 同步进响应式 state，使徽标实时反映「已连真实库 / 演示模式」，避免运营误以为改动没保存。
 window.addEventListener("lxm-cloud-mode", (e) => { state.cloudMode = e.detail || "mock"; });
 setTimeout(() => { if (!state.cloudMode || state.cloudMode === "checking") state.cloudMode = window.LXM_CLOUD_MODE || "mock"; }, 1000);
-if (window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData) {
-  window.LXM_CLOUD.loadAdminData(data, state);
-}
-
 // ===== 演示模式本地持久化（无云密钥也能完整体验管理流程）=====
 // 仅演示模式生效；接真实云后由 /api 接管，本地存储自动让位。
 const LXM_STORAGE_KEY = "lxm_admin_local_v1";

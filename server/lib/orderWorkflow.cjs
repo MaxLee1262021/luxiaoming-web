@@ -5,11 +5,13 @@
 // is the stable customer-facing lifecycle used by new clients.
 
 const WORKFLOW_STAGES = Object.freeze({
+  AWAITING_CONFIRMATION: "awaiting_confirmation",
   AWAITING_DEPOSIT: "awaiting_deposit",
   AWAITING_DISPATCH: "awaiting_dispatch",
   AWAITING_SHOOT: "awaiting_shoot",
   SHOOTING: "shooting",
   SELECTION_PENDING: "selection_pending",
+  AWAITING_DELIVERY: "awaiting_delivery",
   AWAITING_FINAL_PAYMENT: "awaiting_final_payment",
   PAID: "paid",
   DELIVERED: "delivered",
@@ -124,11 +126,50 @@ function hasConfirmedPayment(order = {}, phase) {
   return recordsFor(order).some((record) => String(record && record.phase || "") === phase
     && normalizePaymentStatus(record.status) === "confirmed" && roundMoney(record.amount) >= due);
 }
+function isServiceConfirmed(order = {}) {
+  const snapshot = order.confirmationSnapshot;
+  if (!order.serviceConfirmedAt || !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
+  return !!(
+    String(snapshot.appointmentAt || "").trim()
+    && String(snapshot.timePeriod || snapshot.time || "").trim()
+    && String(snapshot.appointmentLocation || "").trim()
+    && Number.isInteger(Number(snapshot.peopleCount)) && Number(snapshot.peopleCount) > 0
+    && String(snapshot.serviceContent || "").trim()
+    && Number.isFinite(Number(snapshot.totalAmount)) && Number(snapshot.totalAmount) >= 0
+    && Number.isFinite(Number(snapshot.depositRatio))
+    && Number.isFinite(Number(snapshot.depositDue)) && Number(snapshot.depositDue) >= 0
+    && Number.isFinite(Number(snapshot.finalDue)) && Number(snapshot.finalDue) >= 0
+  );
+}
+function hasDeliveryRecord(order = {}) {
+  return !!(order && (order.deliveryRecord || order.deliveredAt));
+}
+function hasActiveAfterSale(order = {}) {
+  const status = String(order.afterSaleStatus || "").trim().toLowerCase();
+  if (!status) return false;
+  return !["completed", "closed", "done", "已完", "已完成", "已结案", "已结束"].includes(status);
+}
+function hasPaymentIntent(order = {}, phase = "") {
+  return recordsFor(order).some((record) => (!phase || String(record && record.phase || "") === phase)
+    && !!(record && (record.idempotencyKey || record.confirmationIdempotencyKey || record.provider || record.externalTransactionId)));
+}
+function customerCancellation(order = {}) {
+  const stage = canonicalStage(order);
+  if (stage === WORKFLOW_STAGES.CANCELLED) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "订单已取消" };
+  if (stage === WORKFLOW_STAGES.COMPLETED) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "已完成订单需通过售后处理" };
+  if (hasActiveAfterSale(order)) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "订单存在处理中售后" };
+  if (isServiceConfirmed(order)) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "客服联系确认后请通过售后申请处理" };
+  if (hasPaymentIntent(order) || hasConfirmedPayment(order, "deposit") || Number(order.depositPaid || 0) > 0) {
+    return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "已创建或确认订金支付，请通过售后申请处理" };
+  }
+  if (stage !== WORKFLOW_STAGES.AWAITING_CONFIRMATION) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "当前订单不支持自助取消" };
+  return { canCancel: true, rule: "before_service_confirmation_and_payment_intent", reason: "" };
+}
 function canonicalStage(order = {}) {
   const status = String(order.status || "").trim().toLowerCase();
   if (CANCELLED_STATUSES.has(status) || order.isDeleted || order.deleted) return WORKFLOW_STAGES.CANCELLED;
   if (COMPLETED_STATUSES.has(status)) return WORKFLOW_STAGES.COMPLETED;
-  if (DELIVERED_STATUSES.has(status) || order.deliveryRecord || order.deliveredAt) {
+  if (DELIVERED_STATUSES.has(status) || hasDeliveryRecord(order)) {
     // Delivery can precede the final payment. Keep the persisted delivery
     // record visible while exposing the actionable customer stage as final
     // payment until finance confirms the balance.
@@ -138,20 +179,24 @@ function canonicalStage(order = {}) {
   const selectionConfirmed = String(order.selectionStatus || "").toLowerCase() === "confirmed" || !!order.selectionConfirmedAt;
   if ((["paid", "final_paid"].includes(status) && hasConfirmedPayment(order, "final"))
     || (selectionConfirmed && hasConfirmedPayment(order, "final"))) return WORKFLOW_STAGES.PAID;
-  if (selectionConfirmed) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
+  if (selectionConfirmed) return WORKFLOW_STAGES.AWAITING_DELIVERY;
   if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return WORKFLOW_STAGES.SELECTION_PENDING;
   if (status === "shooting" || order.shootingStartedAt) return WORKFLOW_STAGES.SHOOTING;
   if (order.dispatchRecord || order.dispatchStatus === "assigned" || order.photographerId || status === "assigned") return WORKFLOW_STAGES.AWAITING_SHOOT;
-  if (hasConfirmedPayment(order, "deposit") || depositDue(order) <= 0 || ["deposit_paid", "confirmed"].includes(status)) return WORKFLOW_STAGES.AWAITING_DISPATCH;
+  if (hasConfirmedPayment(order, "deposit")) return WORKFLOW_STAGES.AWAITING_DISPATCH;
+  if (!isServiceConfirmed(order)) return WORKFLOW_STAGES.AWAITING_CONFIRMATION;
+  if (depositDue(order) <= 0) return WORKFLOW_STAGES.AWAITING_DISPATCH;
   return WORKFLOW_STAGES.AWAITING_DEPOSIT;
 }
 function customerStatusForStage(stage) {
   return {
+    [WORKFLOW_STAGES.AWAITING_CONFIRMATION]: "待客服联系确认",
     [WORKFLOW_STAGES.AWAITING_DEPOSIT]: "待支付订金",
     [WORKFLOW_STAGES.AWAITING_DISPATCH]: "待安排摄影师",
     [WORKFLOW_STAGES.AWAITING_SHOOT]: "已安排待拍摄",
     [WORKFLOW_STAGES.SHOOTING]: "拍摄中",
     [WORKFLOW_STAGES.SELECTION_PENDING]: "待线下选片确认",
+    [WORKFLOW_STAGES.AWAITING_DELIVERY]: "待发布成片",
     [WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT]: "待支付尾款",
     [WORKFLOW_STAGES.PAID]: "已支付待交付",
     [WORKFLOW_STAGES.DELIVERED]: "已交付",
@@ -181,14 +226,32 @@ function publicDeliveryRecord(value, fallback = {}) {
   }
   return out;
 }
+function privateFileId(value) {
+  return typeof value === "string" ? (value.match(/^oss-file:(file_[a-f0-9]{32,48})$/) || [])[1] || "" : "";
+}
+function privateFileIds(value, output = new Set()) {
+  if (typeof value === "string") {
+    const id = privateFileId(value); if (id) output.add(id);
+  } else if (Array.isArray(value)) value.forEach((item) => privateFileIds(item, output));
+  else if (value && typeof value === "object") Object.values(value).forEach((item) => privateFileIds(item, output));
+  return [...output];
+}
 function publicDeliveryFiles(value) {
   if (!Array.isArray(value)) return [];
-  const fields = ["id", "_id", "name", "title", "url", "downloadUrl", "cover", "type", "mediaType", "size", "duration"];
+  const fields = ["id", "_id", "fileId", "name", "title", "url", "downloadUrl", "cover", "type", "mediaType", "size", "duration"];
   return value.map((item) => {
-    if (typeof item === "string") return item;
+    if (typeof item === "string") {
+      const fileId = privateFileId(item);
+      return fileId ? { id: fileId, fileId } : item.startsWith("oss-file:") ? null : item;
+    }
     if (!item || typeof item !== "object" || Array.isArray(item)) return null;
     const out = {};
-    fields.forEach((field) => { if (item[field] !== undefined && (typeof item[field] !== "object" || item[field] === null)) out[field] = item[field]; });
+    fields.forEach((field) => {
+      if (typeof item[field] === "string" && item[field].startsWith("oss-file:")) return;
+      if (item[field] !== undefined && (typeof item[field] !== "object" || item[field] === null)) out[field] = item[field];
+    });
+    const fileId = privateFileId(item.fileId) || privateFileId(item.url) || privateFileId(item.downloadUrl) || privateFileId(item.fileID);
+    if (fileId) { out.id = fileId; out.fileId = fileId; delete out.url; delete out.downloadUrl; }
     return out;
   }).filter(Boolean);
 }
@@ -241,6 +304,11 @@ function publicOrderProjection(order = {}, options = {}) {
   const activePaymentStatus = paymentPhase === "deposit" ? depositPaymentStatus : paymentPhase === "final" ? finalPaymentStatus : "none";
   const items = Array.isArray(order.productItems) ? order.productItems : (Array.isArray(order.items) ? order.items : []);
   const snapshot = order.packageSnapshot && typeof order.packageSnapshot === "object" ? order.packageSnapshot : {};
+  const cancellation = customerCancellation(order);
+  const afterSaleActive = hasActiveAfterSale(order);
+  const deliveryPublished = hasDeliveryRecord(order);
+  const canPayDeposit = stage === WORKFLOW_STAGES.AWAITING_DEPOSIT && !afterSaleActive && !hasConfirmedPayment(order, "deposit") && depositDue(order) > 0;
+  const canPayFinal = stage === WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT && deliveryPublished && !afterSaleActive && !hasConfirmedPayment(order, "final") && finalDue(order) > 0;
   const output = {
     _id: idOf(order),
     orderNo: String(order.orderNo || ""),
@@ -250,6 +318,7 @@ function publicOrderProjection(order = {}, options = {}) {
     customerStatus: customerStatusForStage(stage),
     packageName: textValue(order.packageName, textValue(snapshot.name, textValue(snapshot.packageName, "预约项目"))),
     packagePrice: total,
+    totalAmount: total,
     productItems: items.map(safeItem),
     spotName: textValue(order.spotName),
     seriesName: textValue(order.seriesName),
@@ -274,6 +343,17 @@ function publicOrderProjection(order = {}, options = {}) {
     paymentPendingAmount: roundMoney(pendingDeposit + pendingFinal),
     depositPaymentStatus,
     finalPaymentStatus,
+    serviceConfirmed: isServiceConfirmed(order),
+    serviceConfirmedAt: textValue(order.serviceConfirmedAt),
+    deliveryPublished,
+    canPayDeposit,
+    canPayFinal,
+    canPay: canPayDeposit || canPayFinal,
+    canCancel: cancellation.canCancel,
+    cancelRule: cancellation.rule,
+    cancelReason: cancellation.reason,
+    canAfterSale: !afterSaleActive && stage !== WORKFLOW_STAGES.CANCELLED,
+    afterSaleActive,
     selectionStatus: textValue(order.selectionStatus, order.selectionConfirmedAt ? "confirmed" : "pending"),
     dispatchStatus: textValue(order.dispatchStatus, order.photographerId ? "assigned" : "pending"),
     statusTimeline: publicStatusTimeline(order.statusLogs),
@@ -282,10 +362,10 @@ function publicOrderProjection(order = {}, options = {}) {
     appointmentLocation: textValue(order.appointmentLocation, textValue(order.shootLocation, textValue(order.location))),
     peopleCount: Number(order.peopleCount || order.participantCount || 0) || undefined,
     timePeriod: textValue(order.timePeriod, textValue(order.time)),
-    deliverFiles: [WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED, WORKFLOW_STAGES.COMPLETED].includes(stage) && (order.deliveryRecord || order.deliveredAt)
+    deliverFiles: [WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED, WORKFLOW_STAGES.COMPLETED].includes(stage) && deliveryPublished
       ? publicDeliveryFiles(order.deliverFiles || order.photos) : [],
   };
-  if ([WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED, WORKFLOW_STAGES.COMPLETED].includes(stage) && (order.deliveryRecord || order.deliveredAt)) output.deliveryRecord = publicDeliveryRecord(order.deliveryRecord, { method: textValue(order.deliveryMethod), deliveredAt: textValue(order.deliveredAt), note: textValue(order.deliveryNote) });
+  if ([WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED, WORKFLOW_STAGES.COMPLETED].includes(stage) && deliveryPublished) output.deliveryRecord = publicDeliveryRecord(order.deliveryRecord, { method: textValue(order.deliveryMethod), deliveredAt: textValue(order.deliveredAt), note: textValue(order.deliveryNote) });
   if (options.detail) output.createdAt = order.createTime || order.createdAt || "";
   return output;
 }
@@ -293,8 +373,10 @@ function publicOrderProjection(order = {}, options = {}) {
 const AUDIT_FIELDS = [
   "status", "workflowStage", "totalAmount", "totalPrice", "price", "depositRatio", "finalDiscountAmount", "finalDiscountReason", "priceAdjustReason",
   "depositDue", "depositPaid", "depositFinanceStatus", "finalDue", "finalPaid", "finalFinanceStatus", "photographerId", "assigneeId",
-  "appointmentAt", "timePeriod", "time", "appointmentLocation", "peopleCount", "dispatchStatus", "selectionStatus", "shootingStartedAt", "shootingCompletedAt",
+  "appointmentAt", "timePeriod", "time", "appointmentLocation", "peopleCount", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "selectionStatus", "shootingStartedAt", "shootingCompletedAt",
   "selectionConfirmedAt", "selectionConfirmedBy", "selectionNote", "deliveryMethod", "deliveredAt", "deliveredBy", "deliveryNote", "deliveryRecord",
+  "serviceConfirmedAt", "serviceConfirmedBy", "serviceConfirmReason", "serviceContent", "confirmationSnapshot", "customerCancelIdempotencyKey", "cancelledAt", "cancelledBy",
+  "deliveryDraftFileIds", "deliverFiles",
   "dispatchRecord", "dispatchRecords", "paymentRecords", "sourceType", "sourceName", "sourceScene", "shopId", "distributorId", "riskBlocked", "riskFlag", "frozen",
   "freezeReason", "riskReason", "settlementObservationReleased", "settlementObservationReleasedAt", "settlementObservationReleasedBy",
 ];
@@ -343,10 +425,17 @@ module.exports = {
   recordsFor,
   latestPayment,
   hasConfirmedPayment,
+  isServiceConfirmed,
+  hasDeliveryRecord,
+  hasActiveAfterSale,
+  hasPaymentIntent,
+  customerCancellation,
   normalizePaymentStatus,
   canonicalStage,
   customerStatusForStage,
   publicDeliveryRecord,
+  privateFileId,
+  privateFileIds,
   publicDeliveryFiles,
   publicStatusTimeline,
   publicOrderProjection,

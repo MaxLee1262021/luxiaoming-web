@@ -1298,12 +1298,12 @@ async function runSmoke(options = {}) {
         assert.equal(bypass.status, 403, "generic after-sale PUT must be rejected");
       });
 
-      await check(report, "public payment placeholder and admin delivery-to-final workflow persist end to end", async () => {
+      await check(report, "confirmed booking, payment placeholder and delivery-to-final workflow persist end to end", async () => {
         assert.ok(publicToken, "public login token is required");
         const suffix = crypto.randomBytes(5).toString("hex");
         const booking = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
           method: "POST", headers: authHeaders(publicToken), body: { data: {
-            name: "Workflow User", phone: "13800000000", items: [{ packageId: "smoke-package" }],
+            name: "Workflow User", phone: "13800000000", date: "2099-02-01", time: "10:00", items: [{ packageId: "smoke-package" }],
             idempotencyKey: `workflow-booking-${suffix}`,
           } },
         });
@@ -1316,37 +1316,52 @@ async function runSmoke(options = {}) {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
         });
         assert.equal(initial.status, 200);
-        assert.equal(initial.body && initial.body.data && initial.body.data.workflowStage, "awaiting_deposit");
+        assert.equal(initial.body && initial.body.data && initial.body.data.workflowStage, "awaiting_confirmation");
         assert.equal(Number(initial.body && initial.body.data && initial.body.data.depositDue), 30, "default deposit must be 30 percent");
-        assert.equal(initial.body && initial.body.data && initial.body.data.paymentStatus, "not_created");
+        assert.equal(initial.body && initial.body.data && initial.body.data.paymentPhase, "");
 
         const depositIntentKey = `workflow-deposit-intent-${suffix}`;
+        const blockedBeforeConfirmation = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
+          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
+        });
+        assert.equal(blockedBeforeConfirmation.status, 200);
+        assert.equal(blockedBeforeConfirmation.body && blockedBeforeConfirmation.body.success, false, "deposit must wait for the service confirmation snapshot");
+
+        const serviceToken = await login(server.baseUrl, fixture.accounts.service);
+        const financeToken = await login(server.baseUrl, fixture.accounts.finance);
+        const photoToken = await login(server.baseUrl, fixture.accounts.photo);
+        const actionPath = `/api/orders/${encodeURIComponent(orderId)}/action`;
+        const accept = await requestJson(server.baseUrl, actionPath, {
+          method: "POST", headers: authHeaders(serviceToken), body: {
+            action: "accept", reason: "workflow confirm service snapshot", appointmentAt: "2099-02-01", timePeriod: "10:00",
+            appointmentLocation: "Smoke Studio", peopleCount: 2, serviceContent: "Synthetic travel photo service",
+            totalAmount: 100, depositRatio: 0.3, priceAdjustReason: "workflow confirmed price",
+          },
+        });
+        assert.equal(accept.status, 200, `service confirmation must persist the pricing and schedule snapshot: ${JSON.stringify(accept.body)}`);
+        assert.equal(accept.body && accept.body.data && accept.body.data.workflowStage, "awaiting_deposit");
+
         const depositIntent = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
         });
-        assert.equal(depositIntent.status, 200);
+        assert.equal(depositIntent.status, 200, `deposit intent: ${JSON.stringify(depositIntent.body)}`);
         assert.equal(depositIntent.body && depositIntent.body.success, true);
         assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.provider, "wechat_pay_placeholder");
         assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.invokeWeChatPay, false);
         const duplicateIntent = await requestJson(server.baseUrl, "/api/rpc/createPaymentIntent", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
         });
-        assert.equal(duplicateIntent.status, 200);
+        assert.equal(duplicateIntent.status, 200, `duplicate deposit intent: ${JSON.stringify(duplicateIntent.body)}`);
         assert.equal(duplicateIntent.body && duplicateIntent.body.data && duplicateIntent.body.data.idempotent, true);
-
-        const serviceToken = await login(server.baseUrl, fixture.accounts.service);
-        const financeToken = await login(server.baseUrl, fixture.accounts.finance);
-        const photoToken = await login(server.baseUrl, fixture.accounts.photo);
-        const actionPath = `/api/orders/${encodeURIComponent(orderId)}/action`;
         const assignBeforeDeposit = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(serviceToken), body: { action: "assign", photographerId: "smoke-photo", appointmentAt: "2099-02-01 10:00", appointmentLocation: "Smoke Studio", peopleCount: 2, reason: "workflow before deposit" },
+          method: "POST", headers: authHeaders(serviceToken), body: { action: "assign", photographerId: "smoke-photo", appointmentAt: "2099-02-01", timePeriod: "10:00", appointmentLocation: "Smoke Studio", peopleCount: 2, reason: "workflow before deposit" },
         });
         assert.equal(assignBeforeDeposit.status, 409, "dispatch must wait for deposit confirmation");
 
         const registerDeposit = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(serviceToken), body: { action: "payment", phase: "deposit", paymentStatus: "pending", amount: 30, idempotencyKey: `workflow-deposit-register-${suffix}`, reason: "workflow register deposit" },
         });
-        assert.equal(registerDeposit.status, 200, "service must register the public payment placeholder for finance review");
+        assert.equal(registerDeposit.status, 200, `service must register the public payment placeholder for finance review: ${JSON.stringify(registerDeposit.body)}`);
         const registeredOrder = await requestJson(server.baseUrl, `/api/collection/orders/${encodeURIComponent(orderId)}`, { headers: authHeaders(superToken) });
         assert.equal(registeredOrder.status, 200);
         assert.equal(Number(registeredOrder.body.depositPaid), 30);
@@ -1355,22 +1370,28 @@ async function runSmoke(options = {}) {
         const confirmDeposit = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(financeToken), body: { action: "payment", phase: "deposit", paymentStatus: "confirmed", amount: 30, idempotencyKey: `workflow-deposit-confirm-${suffix}`, externalTransactionId: `workflow-deposit-tx-${suffix}`, reason: "workflow confirm deposit" },
         });
-        assert.equal(confirmDeposit.status, 200);
+        assert.equal(confirmDeposit.status, 200, `finance deposit confirmation: ${JSON.stringify(confirmDeposit.body)}`);
         const assigned = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(serviceToken), body: { action: "assign", photographerId: "smoke-photo", appointmentAt: "2099-02-01 10:00", appointmentLocation: "Smoke Studio", peopleCount: 2, reason: "workflow assign photographer" },
+          method: "POST", headers: authHeaders(serviceToken), body: { action: "assign", photographerId: "smoke-photo", appointmentAt: "2099-02-01", timePeriod: "10:00", appointmentLocation: "Smoke Studio", peopleCount: 2, reason: "workflow assign photographer" },
         });
-        assert.equal(assigned.status, 200);
+        assert.equal(assigned.status, 200, `dispatch after deposit: ${JSON.stringify(assigned.body)}`);
         assert.equal(assigned.body && assigned.body.data && assigned.body.data.dispatchRecord && assigned.body.data.dispatchRecord.next && assigned.body.data.dispatchRecord.next.peopleCount, 2);
         assert.equal((assigned.body && assigned.body.data && assigned.body.data.appointmentLocation), "Smoke Studio");
 
+        const taskAccepted = await requestJson(server.baseUrl, actionPath, {
+          method: "POST", headers: authHeaders(photoToken), body: { action: "taskaccept", reason: "workflow photographer accepts task" },
+        });
+        assert.equal(taskAccepted.status, 200, `photographer task acceptance: ${JSON.stringify(taskAccepted.body)}`);
+        assert.equal(taskAccepted.body && taskAccepted.body.data && taskAccepted.body.data.taskStatus, "accepted");
+
         for (const [action, reason] of [["start", "workflow start shooting"], ["shootComplete", "workflow complete shooting"], ["selectionConfirm", "workflow selection confirm"]]) {
           const response = await requestJson(server.baseUrl, actionPath, { method: "POST", headers: authHeaders(photoToken), body: { action, reason } });
-          assert.equal(response.status, 200, `${action} must succeed for assigned photographer`);
+          assert.equal(response.status, 200, `${action} must succeed for assigned photographer: ${JSON.stringify(response.body)}`);
         }
         const delivered = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(serviceToken), body: { action: "deliver", deliveryMethod: "enterprise_wechat", reason: "workflow delivery" },
         });
-        assert.equal(delivered.status, 200, "delivery precedes final payment in the selected workflow");
+        assert.equal(delivered.status, 200, `delivery precedes final payment in the selected workflow: ${JSON.stringify(delivered.body)}`);
 
         const beforeFinal = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
@@ -1383,16 +1404,16 @@ async function runSmoke(options = {}) {
         const finalIntent = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", amount: 70, idempotencyKey: `workflow-final-intent-${suffix}` } },
         });
-        assert.equal(finalIntent.status, 200);
+        assert.equal(finalIntent.status, 200, `final intent: ${JSON.stringify(finalIntent.body)}`);
         assert.equal(finalIntent.body && finalIntent.body.data && finalIntent.body.data.invokeWeChatPay, false);
         const confirmFinal = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(financeToken), body: { action: "payment", phase: "final", paymentStatus: "confirmed", amount: 70, idempotencyKey: `workflow-final-confirm-${suffix}`, externalTransactionId: `workflow-final-tx-${suffix}`, reason: "workflow confirm final" },
         });
-        assert.equal(confirmFinal.status, 200);
+        assert.equal(confirmFinal.status, 200, `finance final confirmation: ${JSON.stringify(confirmFinal.body)}`);
         const complete = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(serviceToken), body: { action: "complete", reason: "workflow complete order" },
         });
-        assert.equal(complete.status, 200);
+        assert.equal(complete.status, 200, `complete order: ${JSON.stringify(complete.body)}`);
 
         const finalDetail = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },

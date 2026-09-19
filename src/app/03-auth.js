@@ -53,6 +53,10 @@
   }
 
   function clearRuntimeData() {
+    state.menuDataRequestId = (state.menuDataRequestId || 0) + 1;
+    state.dataLoading = false;
+    state.menuDataLoadingKey = "";
+    window.LXM_CLOUD?.clearMenuLoadState?.();
     RUNTIME_DATA_KEYS.forEach((key) => {
       if (Array.isArray(data[key])) data[key] = [];
       else if (data[key] && typeof data[key] === "object") data[key] = {};
@@ -299,17 +303,37 @@ function applyLogin(raw, options = {}) {
   log("登录", "后台", `${session.name || session.account || "账号"} 登录`);
 }
 
-async function loadAuthenticatedData() {
-  if (state.authSource === "demo" || !window.LXM_CLOUD?.loadAdminData || !window.LXM_AUTH?.hasSession()) return;
+function menuRouteKey(menuKey = state.active) {
+  const key = String(menuKey || state.active || "");
+  const menu = (LXM_CONFIG.menus || []).find((item) => item && item.key === key);
+  return String((menu && (menu.routeKey || menu.targetKey)) || key);
+}
+
+async function loadAuthenticatedData(menuKey = state.active, options = {}) {
+  if (state.authSource === "demo" || !window.LXM_CLOUD?.loadMenuData || !window.LXM_AUTH?.hasSession()) return;
+  const routeKey = menuRouteKey(menuKey);
+  const requestId = (state.menuDataRequestId || 0) + 1;
+  state.menuDataRequestId = requestId;
   state.dataLoading = true;
+  state.menuDataLoadingKey = routeKey;
   try {
-    const result = await window.LXM_CLOUD.loadAdminData(data, state);
-    if (result && result.status === 401) handleAuthExpired();
+    const result = await window.LXM_CLOUD.loadMenuData(routeKey, data, state, { force: options.force === true });
+    if (result && result.status === 401) {
+      handleAuthExpired();
+      return result;
+    }
+    if (result && result.failed && result.failed.length) state.authNotice = `菜单数据部分加载失败：${result.failed.join("、")}`;
+    else if (state.authNotice && state.menuDataLoadingKey === routeKey) state.authNotice = "";
+    return result;
   } catch (error) {
     if (error && error.status === 401) handleAuthExpired();
-    else state.authNotice = "部分管理数据载入失败，请刷新后重试";
+    else state.authNotice = "菜单数据载入失败，请切换菜单后重试";
+    return { ok: false, routeKey, error };
   } finally {
-    state.dataLoading = false;
+    if (state.menuDataRequestId === requestId) {
+      state.dataLoading = false;
+      state.menuDataLoadingKey = "";
+    }
   }
 }
 
@@ -508,7 +532,7 @@ function logout() {
   Promise.resolve(pending).catch(() => {});
   ElMessage.success("已退出登录");
 }
-function switchMenu(key, options = {}) {
+async function switchMenu(key, options = {}) {
   if (key === "videoProducts") key = "videoSingles";
   if (!isEnabledMenu(key)) {
     ElMessage.warning("当前角色无权访问该页");
@@ -528,14 +552,16 @@ function switchMenu(key, options = {}) {
   }
   state.active = key;
   state.mobileMenuOpen = false;
+  return loadAuthenticatedData(routeKey, { force: true });
 }
-function switchRole(key) {
+async function switchRole(key) {
   if (!canPreviewRoles.value) {
     ElMessage.warning("只有总部超管可以切换预览其他角色后台");
     return;
   }
   if (!LXM_CONFIG.roles[key]) return;
   applyRoleConfig(key, (key === state.loginRole && serverRoleOverrides[key]) || roleDefaults[key] || {});
+  clearRuntimeData();
   state.role = key;
   state.previewRole = key;
   state.currentStaffId = roleProfile.value.staffId || state.currentStaffId;
@@ -547,6 +573,7 @@ function switchRole(key) {
   state.active = defaultActiveMenu();
   state.mobileMenuOpen = false;
   log("切换角色", roleName(key), "超级管理员预览角色后");
+  return loadAuthenticatedData(state.active, { force: true });
 }
 
 window.addEventListener("lxm-auth-expired", () => handleAuthExpired(false));
@@ -562,6 +589,7 @@ restoreSession();
     login,
     applyLogin,
     loadAuthenticatedData,
+    menuRouteKey,
     restoreSession,
     openChangePwd,
     passwordStrength,

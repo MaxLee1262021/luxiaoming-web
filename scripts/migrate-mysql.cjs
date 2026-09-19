@@ -22,6 +22,10 @@ const args = new Set(process.argv.slice(2));
 const mode = args.has("--rollback") ? "rollback" : args.has("--apply") ? "apply" : "dry-run";
 const importFixture = args.has("--import-fixture");
 const env = (name, fallback = "") => String(process.env[name] ?? fallback).trim();
+function metadataValue(row, name) {
+  if (!row || typeof row !== "object") return undefined;
+  return row[name] ?? row[String(name).toUpperCase()];
+}
 
 function usage() {
   process.stdout.write([
@@ -228,7 +232,7 @@ async function writeNormalized(conn, key, id, document, duplicate = true) {
 
 async function tableColumns(conn, table) {
   const rows = await query(conn, "SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=?", [table]);
-  return new Set(rows.map((row) => String(row.column_name)));
+  return new Set(rows.map((row) => String(metadataValue(row, "column_name") || "")).filter(Boolean));
 }
 async function tableExists(conn, table) {
   const rows = await query(conn, "SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=? LIMIT 1", [table]);
@@ -298,14 +302,14 @@ async function ensureNormalizedIndexes(conn) {
     const table = schema.tableName(key);
     if (!(await tableExists(conn, table))) continue;
     const rows = await query(conn, "SELECT index_name,column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=?", [table]);
-    if (!rows.some((row) => String(row.column_name).toLowerCase() === "updatedat")) {
-      const name = rows.some((row) => String(row.index_name).toLowerCase() === "idx_updated_at") ? "idx_updated_at_normalized" : "idx_updated_at";
+    if (!rows.some((row) => String(metadataValue(row, "column_name") || "").toLowerCase() === "updatedat")) {
+      const name = rows.some((row) => String(metadataValue(row, "index_name") || "").toLowerCase() === "idx_updated_at") ? "idx_updated_at_normalized" : "idx_updated_at";
       await execute(conn, `ALTER TABLE ${quote(table)} ADD KEY ${quote(name)} (${quote("updatedAt")})`);
     }
   }
   if (await tableExists(conn, "lxm_auth_users")) {
     const rows = await query(conn, "SELECT index_name,column_name,seq_in_index FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='lxm_auth_users'");
-    const subject = rows.filter((row) => String(row.column_name).toLowerCase() === "subject_type" || String(row.column_name).toLowerCase() === "subject_id");
+    const subject = rows.filter((row) => String(metadataValue(row, "column_name") || "").toLowerCase() === "subject_type" || String(metadataValue(row, "column_name") || "").toLowerCase() === "subject_id");
     if (!subject.length) await execute(conn, "ALTER TABLE lxm_auth_users ADD KEY idx_auth_user_subject (subject_type,subject_id)");
   }
   // These identities make booking retries and payment callbacks durable across
@@ -322,6 +326,7 @@ async function ensureNormalizedIndexes(conn) {
     if (!indexes.length) await execute(conn, `ALTER TABLE ${quote(table)} ADD UNIQUE KEY ${quote(indexName)} (${quote(column)})`);
   }
   await uniqueIdentity("lxm_orders", "bookingIdempotencyKey", "uq_order_booking_idempotency");
+  await uniqueIdentity("lxm_orders", "orderNo", "uq_order_number");
   for (const [column, indexName] of [
     ["payment_id", "uq_order_payment_id"],
     ["idempotency_key", "uq_order_payment_idempotency"],

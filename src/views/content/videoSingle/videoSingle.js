@@ -22,7 +22,7 @@ window.LXM_PAGES.register({
 
     const listSource = Vue.computed(() => {
       if (remoteOn.value && remoteVideoSingles.value) return remoteVideoSingles.value;
-      return ctx.videoSingleRows || [];
+      return Vue.unref(ctx.videoSingleRows) || [];
     });
 
     const selectedVideoSingle = Vue.computed(() => {
@@ -65,6 +65,8 @@ window.LXM_PAGES.register({
     }
 
     async function saveSelectedVideoSingle() {
+      return window.LXM_UPLOAD.single("video-single-save", async () => {
+      if (!window.LXM_UPLOAD.ready()) return;
       const s = selectedVideoSingle.value;
       if (!s) return;
       if (!s.title && !s.name) { tip("请填写短视频名称"); return; }
@@ -73,34 +75,31 @@ window.LXM_PAGES.register({
       s.type = "video";
       s.isVideoSingle = true;
       s.productKind = "video_single";
-      if (serverConnected() && [s.videoUrl, s.cover].some((value) => typeof value === "string" && value.startsWith("blob:"))) {
-        tip("本地视频仅用于预览，请填写可访问的视频地址后再保存");
-        return;
-      }
       if (serverConnected() && typeof ctx.persistContentMutation === "function") {
         const ok = await ctx.persistContentMutation("packages", s, { ...s });
         if (ok) tip("已写入真实后端");
         return;
       }
       if (remoteOn.value) {
-        LXM_API.saveDoc("packages", s)
+        return LXM_API.saveDoc("packages", s)
           .then(() => tip("已写入真实后端"))
           .catch((e) => tip("写入失败：" + e.message));
       } else {
         tip("已保存到本地（当前为演示数据模式，切换数据源后才写入服务端）");
       }
+      });
     }
 
     function onVideoFilePick(e) {
       const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      const url = URL.createObjectURL(file);
-      const s = selectedVideoSingle.value;
-      if (s) {
-        s.videoUrl = url;
-        if (!s.cover) s.cover = url;
-      }
+      const target = selectedVideoSingle.value;
+      e.target.value = '';
+      if (!file || !target) return;
+      window.LXM_UPLOAD.upload(file, { purpose: 'content', collection: 'packages', recordId: target.id || target._id, videoOnly: true,
+        onUploaded(result) { target.videoUrl = result.url; }
+      });
     }
+    function uploadVideoCover() { ctx.contentFile(selectedVideoSingle.value, 'cover', 'packages'); }
 
     return {
       selectedVideoSingleId,
@@ -119,7 +118,7 @@ window.LXM_PAGES.register({
       refreshFromServer,
       toggleRemote,
       saveSelectedVideoSingle,
-      onVideoFilePick
+      onVideoFilePick, uploadVideoCover
     };
   }
 });

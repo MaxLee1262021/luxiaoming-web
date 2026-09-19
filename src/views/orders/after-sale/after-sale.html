@@ -34,7 +34,7 @@
       <p>售后处理中会锁定订单完结、取消、转派和金额修改；有退款时需先确认金额，再进入财务审核。</p>
     </div>
   </div>
-  <el-table :data="pagedList('afterSaleActive', activeAfterSaleRows)" stripe border height="390" empty-text="暂无处理中的售后，客人发起的退款/改期会出现在这里">
+  <el-table :data="pagedList('afterSaleActive', activeAfterSaleRows)" stripe border empty-text="暂无处理中的售后，客人发起的退款/改期会出现在这里">
     <el-table-column prop="createdAt" label="提交时间" width="150" />
     <el-table-column prop="type" label="类型" width="100" />
     <el-table-column label="订单/客户" min-width="180">
@@ -89,7 +89,7 @@
       <p>已完成售后处理的订单记录，只读留痕，便于后续查询。</p>
     </div>
   </div>
-  <el-table :data="pagedList('afterSaleRecords', afterSaleRecordRows)" stripe border height="260" empty-text="暂无已完成的售后记录">
+  <el-table :data="pagedList('afterSaleRecords', afterSaleRecordRows)" stripe border empty-text="暂无已完成的售后记录">
     <el-table-column prop="updatedAt" label="完成时间" width="150" />
     <el-table-column prop="type" label="类型" width="100" />
     <el-table-column label="订单/客户" min-width="180">

@@ -30,7 +30,7 @@
   <div class="ppl-filter-row">
     <el-input v-model="state.filters.keyword" clearable placeholder="搜索周边名称、规格、说明" />
     <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
-      <el-option v-for="s in (data.spots || []).filter(Boolean)" v-if="s" :key="s.id" :label="s.name" :value="s.id" />
+      <el-option v-for="s in (data.spots || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
     </el-select>
     <el-select v-model="state.filters.contentStatus" clearable placeholder="状态">
       <el-option label="上架" value="上架" />
@@ -47,7 +47,7 @@
         <span>{{ listSource.length }} 项</span>
       </div>
       <div class="ppl-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
-        <button v-for="item in listSource" v-if="item" :key="item.id||item._id" class="ppl-list-item" :class="{active: isSelected(item), off: productStatus(item)==='下架'}" @click="selectPeripheral(item)">
+        <button v-for="item in listSource" :key="item.id||item._id" class="ppl-list-item" :class="{active: isSelected(item), off: productStatus(item)==='下架'}" @click="selectPeripheral(item)">
           <span class="pli-cover"><img v-if="item.cover" :src="item.cover" /><i v-else>周</i></span>
           <span class="pli-main">
             <strong>{{ item.name }}</strong>

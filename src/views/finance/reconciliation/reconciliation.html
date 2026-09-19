@@ -246,7 +246,7 @@
           <el-button size="small" type="primary" plain @click="batchConfirmSettlement">批量确认结算</el-button>
           <el-button size="small" type="warning" plain @click="batchSealSettlement">批量封存账单</el-button>
         </div>
-        <el-table :data="pagedList('reconSettlement', visibleReconciliationSettlementRows)" height="430" stripe @selection-change="onReconciliationSelectionChange">
+        <el-table :data="pagedList('reconSettlement', visibleReconciliationSettlementRows)" stripe @selection-change="onReconciliationSelectionChange">
           <el-table-column v-if="canUseHeadquarterReconciliation" type="selection" width="44" />
           <el-table-column fixed prop="typeName" label="主体类型" width="105" />
           <el-table-column fixed prop="name" label="结算主体" min-width="150" />
@@ -272,7 +272,7 @@
           <strong>暂无核对对象</strong>
           <span>当前角色或筛选范围下没有可查看对象。总部财务可按商家、分销员、摄影师、客服继续筛选核对。</span>
         </div>
-        <el-table :data="reconciliationFocus.rows" height="430" stripe empty-text="当前角色暂无可核对数据">
+        <el-table :data="reconciliationFocus.rows" stripe empty-text="当前角色暂无可核对数据">
           <el-table-column fixed prop="typeName" label="对象类型" width="105" />
           <el-table-column fixed prop="name" label="对象名称" min-width="150" />
           <el-table-column prop="totalOrders" label="关联订单" width="90" align="center" />
@@ -292,7 +292,7 @@
           <strong>暂无暂缓订单</strong>
           <span>当前范围内订单均未触发静置期、收款审核、退款审核、售后未结案等暂缓原因。</span>
         </div>
-        <el-table :data="pagedList('reconHold', reconciliationHoldRows)" height="430" stripe empty-text="暂无暂缓订单">
+        <el-table :data="pagedList('reconHold', reconciliationHoldRows)" stripe empty-text="暂无暂缓订单">
           <el-table-column fixed prop="orderNo" label="订单号" width="130" />
           <el-table-column prop="customer" label="客户" width="100" />
           <el-table-column label="订单来源" width="130"><template #default="{row}">{{ orderSourceTypeText(row) }}</template></el-table-column>
@@ -317,7 +317,7 @@
           <strong>暂无结算确认记录</strong>
           <span>确认结算后会生成批次台账，记录实结分成金额、结算范围、凭证号、操作人和关联订单。</span>
         </div>
-        <el-table :data="pagedList('reconTransfer', reconciliationTransferRows)" height="430" stripe empty-text="暂无结算确认记录">
+        <el-table :data="pagedList('reconTransfer', reconciliationTransferRows)" stripe empty-text="暂无结算确认记录">
           <el-table-column fixed prop="time" label="确认时间" width="150" />
           <el-table-column prop="period" label="结算范围" width="190" />
           <el-table-column prop="settlementCycle" label="周期" width="80" />
@@ -342,7 +342,7 @@
           <strong>暂无客服业绩</strong>
           <span>客服只展示经手订单、成交净额和待跟进压力，不展示商家、摄影师、分销员分成金额。</span>
         </div>
-        <el-table :data="servicePerformanceRows" height="430" stripe>
+        <el-table :data="servicePerformanceRows" stripe>
           <el-table-column fixed prop="name" label="客服" width="120" />
           <el-table-column prop="totalOrders" label="经手订单" width="100" />
           <el-table-column label="经手成交" width="130" align="right"><template #default="{row}">{{ money(row.performanceAmount) }}</template></el-table-column>
@@ -366,7 +366,7 @@
           <strong>暂无冲正记录</strong>
           <span>封存后退款、人工调账、红字冲正会进入这里，默认优先抵扣对应主体下一期待结算金额。</span>
         </div>
-        <el-table :data="pagedList('reconAdjustments', adjustmentRecordRows)" height="430" stripe empty-text="暂无退款冲正记录">
+        <el-table :data="pagedList('reconAdjustments', adjustmentRecordRows)" stripe empty-text="暂无退款冲正记录">
           <el-table-column fixed label="关联订单号" width="130"><template #default="{row}"><el-button link type="primary" @click="openAdjustmentOrder(row)">{{ row.orderNo }}</el-button></template></el-table-column>
           <el-table-column prop="time" label="发生时间" width="150" />
           <el-table-column prop="type" label="冲正类型" width="110" />
@@ -377,7 +377,7 @@
           <el-table-column prop="approvalStatus" label="审批状态" width="110" />
           <el-table-column label="抵扣状态" width="160"><template #default="{row}">{{ row.offsetStatus || '优先抵扣下一期待结算' }}</template></el-table-column>
           <el-table-column prop="note" label="备注" min-width="220" />
-          <el-table-column prop="attachment" label="凭证附件" width="150" />
+          <el-table-column label="凭证附件" min-width="160"><template #default="{row}"><span>{{ row.attachment }}</span><el-button v-for="fileId in row.attachmentFileIds || []" :key="fileId" link @click="openStoredFile(fileId)">查看文件</el-button></template></el-table-column>
           <el-table-column fixed="right" label="操作" width="120"><template #default="{row}"><el-button v-if="state.role==='super' && row.approvalStatus!=='已审批'" link type="primary" @click="approveAdjustmentRecord(row)">审批</el-button><el-button link @click="openAdjustmentDialog(row)">复制发起</el-button></template></el-table-column>
         </el-table>
         <div class="table-pager" v-if="adjustmentRecordRows.length > 0">

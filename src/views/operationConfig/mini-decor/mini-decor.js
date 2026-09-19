@@ -168,37 +168,16 @@ window.LXM_PAGES.register({
     }
 
     function pickBannerMedia(collection, index, mediaType) {
-      const list = (state.homeConfig && state.homeConfig[collection]) || [];
-      const banner = list[index];
-      if (!banner || typeof document === "undefined") return;
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = mediaType === "video" ? "video/*" : "image/*";
-      input.onchange = () => {
-        const file = input.files && input.files[0];
-        if (!file) return;
-        // Main-table media columns are TEXT; reject data URLs that cannot fit
-        // instead of persisting a value that MySQL will truncate or reject.
-        if (typeof FileReader === "undefined") {
-          notify("warning", "当前浏览器不支持本地素材读取，请填写 URL");
-          return;
+      const banner = state.homeConfig?.[collection]?.[index];
+      if (!banner || !can('contentEdit')) return;
+      window.LXM_UPLOAD.pick({ purpose: 'content', collection: 'homeConfig', recordId: 'homeStats',
+        imagesOnly: mediaType !== 'video', videoOnly: mediaType === 'video',
+        onUploaded(file) {
+          if (mediaType === 'cover') { banner.cover = file.url; return; }
+          banner.type = mediaType; banner.mediaType = mediaType; banner.url = file.url;
+          if (mediaType === 'image') banner.cover = file.url;
         }
-        const reader = new FileReader();
-        reader.onload = () => {
-          const url = String(reader.result || "");
-          if (url.length > 60000) {
-            notify("warning", "素材编码后过大，请填写可访问的对象存储 URL");
-            return;
-          }
-          banner.type = mediaType;
-          banner.mediaType = mediaType;
-          banner.url = url;
-          if (mediaType === "image") banner.cover = url;
-        };
-        reader.onerror = () => notify("error", "素材读取失败，请改用 URL");
-        reader.readAsDataURL(file);
-      };
-      input.click();
+      });
     }
 
     function uploadHomeBannerMedia(index, mediaType) {

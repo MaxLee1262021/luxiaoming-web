@@ -71,7 +71,7 @@
       <el-tag type="info">当前 {{ operationLogRows.length }} 条</el-tag>
     </div>
 
-    <el-table :data="pagedList('logs', operationLogRows)" max-height="calc(100vh - 420px)" border stripe empty-text="暂无符合条件的日志，试试调整筛选条件">
+    <el-table :data="pagedList('logs', operationLogRows)" border stripe empty-text="暂无符合条件的日志，试试调整筛选条件">
       <el-table-column prop="time" label="时间" width="165" fixed="left" />
       <el-table-column prop="user" label="操作人" width="120" />
       <el-table-column label="模块" width="120">

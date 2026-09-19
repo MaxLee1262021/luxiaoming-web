@@ -51,33 +51,53 @@ function publicIdentity(openid = "customer-openid") {
   return { identity: { kind: "public", openid } };
 }
 
-test("consult booking snapshots a default deposit without a date/time and payment intent is idempotent", async () => {
+test("booking remains awaiting service confirmation until its snapshot opens an idempotent deposit intent", async () => {
   const source = makeSource();
   const booking = await rpc(source, "createBooking", {
     data: {
       name: "测试用户", phone: "13800000000", items: [{ packageId: "package-1" }],
+      date: "2026-12-20", timePeriod: "上午",
       idempotencyKey: "booking-test-0001",
     },
   }, publicIdentity());
   assert.equal(booking.success, true);
   const order = await source.get("orders", booking.orderId);
-  assert.equal(order.date, "");
-  assert.equal(order.time, "");
+  assert.equal(order.date, "2026-12-20");
+  assert.equal(order.time, "上午");
   assert.equal(order.depositRatio, 0.3);
   assert.equal(order.depositDue, 30);
   assert.equal(order.finalDue, 70);
-  assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
-  assert.equal(order.paymentRecords[0].status, "not_created");
+  assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_CONFIRMATION);
+  assert.deepEqual(order.paymentRecords, []);
   assert.equal(order.customer, "测试用户");
   assert.equal(order.products[0].packageId, "package-1");
 
   const repeatedBooking = await rpc(source, "createBooking", {
-    data: { name: "测试用户", phone: "13800000000", items: [{ packageId: "package-1" }], idempotencyKey: "booking-test-0001" },
+    data: { name: "测试用户", phone: "13800000000", date: "2026-12-20", timePeriod: "上午", items: [{ packageId: "package-1" }], idempotencyKey: "booking-test-0001" },
   }, publicIdentity());
   assert.equal(repeatedBooking.success, true);
   assert.equal(repeatedBooking.idempotent, true);
   assert.equal(repeatedBooking.orderId, booking.orderId);
 
+  const blockedBeforeConfirmation = await rpc(source, "createPayment", {
+    data: { orderId: booking.orderId, phase: "deposit", amount: 30, idempotencyKey: "payment-before-confirmation-0001" },
+  }, publicIdentity());
+  assert.equal(blockedBeforeConfirmation.success, false);
+
+  source.collections.orders[booking.orderId] = {
+    ...source.collections.orders[booking.orderId],
+    status: "confirmed",
+    serviceConfirmedAt: "2026-09-18T00:00:00.000Z",
+    appointmentAt: "2026-12-20",
+    appointmentLocation: "测试地点",
+    peopleCount: 2,
+    serviceContent: "测试服务说明",
+    confirmationSnapshot: {
+      appointmentAt: "2026-12-20", timePeriod: "上午", appointmentLocation: "测试地点", peopleCount: 2,
+      serviceContent: "测试服务说明", totalAmount: 100, depositRatio: 0.3, depositDue: 30, finalDue: 70,
+    },
+    paymentRecords: [{ id: "deposit-placeholder", phase: "deposit", amount: 30, status: "not_created" }],
+  };
   const beforeIntent = await rpc(source, "getPaymentStatus", { data: { orderId: booking.orderId, phase: "deposit" } }, publicIdentity());
   assert.equal(beforeIntent.success, true);
   assert.equal(beforeIntent.data.status, "not_created");
@@ -155,7 +175,7 @@ test("booking rejects a peripheral-only cart even when the client bypasses its f
   const source = makeSource();
   source.collections.peripherals["peripheral-1"] = { id: "peripheral-1", name: "定制相册", price: 50, status: "已上架" };
   const result = await rpc(source, "createBooking", {
-    data: { name: "测试用户", phone: "13800000000", items: [{ peripheralId: "peripheral-1" }], idempotencyKey: "booking-test-0003" },
+    data: { name: "测试用户", phone: "13800000000", date: "2026-12-20", timePeriod: "上午", items: [{ peripheralId: "peripheral-1" }], idempotencyKey: "booking-test-0003" },
   }, publicIdentity());
   assert.equal(result.success, false);
   assert.equal(result.error, "影像周边需搭配拍摄项目一起预约");
@@ -164,20 +184,27 @@ test("booking rejects a peripheral-only cart even when the client bypasses its f
 test("customer order filters and counts use non-overlapping canonical workflow stages", async () => {
   const source = makeSource();
   source.collections.orders = {
-    deposit: { id: "deposit", openid: "customer-openid", status: "new", totalAmount: 100, depositDue: 30, finalDue: 70 },
-    dispatch: { id: "dispatch", openid: "customer-openid", status: "deposit_paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70 },
+    pending: { id: "pending", openid: "customer-openid", status: "new", totalAmount: 100, depositDue: 30, finalDue: 70 },
+    deposit: {
+      id: "deposit", openid: "customer-openid", status: "confirmed", totalAmount: 100, depositDue: 30, finalDue: 70,
+      serviceConfirmedAt: "2026-09-18T00:00:00.000Z", confirmationSnapshot: { appointmentAt: "2026-12-20", timePeriod: "上午", appointmentLocation: "测试地点", peopleCount: 2, serviceContent: "测试服务", totalAmount: 100, depositRatio: 0.3, depositDue: 30, finalDue: 70 },
+    },
+    dispatch: {
+      id: "dispatch", openid: "customer-openid", status: "deposit_paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70,
+      serviceConfirmedAt: "2026-09-18T00:00:00.000Z", confirmationSnapshot: { appointmentAt: "2026-12-20", timePeriod: "上午", appointmentLocation: "测试地点", peopleCount: 2, serviceContent: "测试服务", totalAmount: 100, depositRatio: 0.3, depositDue: 30, finalDue: 70 },
+    },
     final: { id: "final", openid: "customer-openid", status: "delivered", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-12T10:00:00.000Z" },
     completed: { id: "completed", openid: "customer-openid", status: "completed", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", deliveryRecord: { method: "wechat" } },
   };
-  for (const [status, expected] of [["deposit", "deposit"], ["pending", "dispatch"], ["final", "final"], ["completed", "completed"]]) {
+  for (const [status, expected] of [["pending", "pending"], ["deposit", "deposit"], ["confirmed", "dispatch"], ["final", "final"], ["completed", "completed"]]) {
     const result = await rpc(source, "getMyOrders", { data: { status, page: 1, pageSize: 20 } }, publicIdentity());
     assert.deepEqual(result.data.map((row) => row.id), [expected]);
   }
   const counts = await rpc(source, "getOrderStatusCount", { data: {} }, publicIdentity());
-  assert.deepEqual(counts.data, { pending: 1, deposit: 1, confirmed: 0, shooting: 0, editing: 0, final: 1, paid: 0, completed: 1, canceled: 0 });
+  assert.deepEqual(counts.data, { pending: 1, deposit: 1, confirmed: 1, shooting: 0, editing: 0, final: 1, paid: 0, completed: 1, canceled: 0 });
 });
 
-test("manual order creation cannot bypass the product-backed deposit stage", async () => {
+test("manual order creation cannot bypass the confirmation-first product-backed deposit stage", async () => {
   const source = makeSource();
   source.collections.packages["package-1"].depositRatio = 50;
   const auth = {
@@ -199,15 +226,15 @@ test("manual order creation cannot bypass the product-backed deposit stage", asy
     assert.equal(response.status, 201);
     const body = await response.json();
     assert.equal(body.status, "new");
-    assert.equal(body.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
+    assert.equal(body.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_CONFIRMATION);
     assert.equal(body.depositDue, 50, "manual orders use the selected product's server-side deposit ratio");
     assert.equal(body.finalDue, 50);
     assert.equal(body.depositPaid, 0);
-    assert.equal(body.paymentRecords[0].status, "not_created");
+    assert.equal(body.paymentRecords.some((record) => record.status === "confirmed"), false);
 
     const adjust = await fetch(`http://127.0.0.1:${address.port}/api/orders/${encodeURIComponent(body.id)}/action`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer admin-token" },
-      body: JSON.stringify({ action: "update", reason: "调整报价", fields: { totalAmount: 130, finalDiscountAmount: 10 } }),
+      body: JSON.stringify({ action: "update", reason: "调整报价", fields: { totalAmount: 130, finalDiscountAmount: 10, priceAdjustReason: "测试确认报价调整" } }),
     });
     assert.equal(adjust.status, 200);
     const adjusted = await adjust.json();

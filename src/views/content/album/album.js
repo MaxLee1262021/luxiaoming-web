@@ -26,7 +26,7 @@ window.LXM_PAGES.register({
 
     const listSource = Vue.computed(() => {
       if (remoteOn.value && remoteAlbums.value) return remoteAlbums.value;
-      return ctx.albumRows || [];
+      return Vue.unref(ctx.albumRows) || [];
     });
 
     const selectedAlbum = Vue.computed(() => {

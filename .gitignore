@@ -15,6 +15,7 @@ Thumbs.db
 *.pid
 coverage/
 .uploads/
+.codex-tmp/
 
 # 环境变量（含云密钥，切勿提交；.env.example 是模板可提交）
 .env

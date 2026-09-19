@@ -6,13 +6,14 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { isDeepStrictEqual } = require("util");
 
 const ALL_KEYS = [
   "cities", "agents", "distributors", "shops", "staff", "spots", "series",
   "albums", "samples", "packages", "addonServices", "peripherals", "tagLibrary",
   "guides", "stories", "scans", "orders", "afterSales", "reconciliationTransfers",
   "financeSettings", "monthlyClosings", "adjustmentRecords", "homeConfig", "logs", "trash",
-  "merchantCodes", "siteConfig", "userProfiles", "config"
+  "merchantCodes", "siteConfig", "userProfiles", "config", "mediaFiles"
 ];
 const KEY_SET = new Set(ALL_KEYS);
 
@@ -131,6 +132,12 @@ function makeJson(cfg) {
     async update(key, id, patch) {
       const c = col(key);
       if (!c[id]) return null;
+      c[id] = { ...c[id], ...patch, id, _id: id };
+      persist(); return clone(c[id]);
+    },
+    async compareAndUpdate(key, id, expected, patch) {
+      const c = col(key);
+      if (!c[id] || !Object.entries(expected || {}).every(([field, value]) => isDeepStrictEqual(c[id][field], value))) return null;
       c[id] = { ...c[id], ...patch, id, _id: id };
       persist(); return clone(c[id]);
     },

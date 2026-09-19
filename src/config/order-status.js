@@ -2,6 +2,7 @@
 const ORDER_FLOW = [
   "new",
   "contacted",
+  "confirmed",
   "deposit_pending",
   "deposit_paid",
   "assigned",
@@ -14,6 +15,7 @@ const ORDER_FLOW = [
 const statusMap = {
   new: { text: "待联系", customer: "预约已提交，等待客服确认", className: "pending" },
   contacted: { text: "已联系", customer: "客服已联系，等待确认定金", className: "contacted" },
+  confirmed: { text: "已确认服务", customer: "服务已确认，等待支付定金", className: "contacted" },
   deposit_pending: { text: "待定金", customer: "待支付定金", className: "deposit" },
   deposit_paid: { text: "已付定金", customer: "定金已确认，等待安排摄影师", className: "paid" },
   assigned: { text: "已派单", customer: "摄影师已安排，等待拍摄", className: "assigned" },

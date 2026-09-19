@@ -11,7 +11,7 @@ const ALL_KEYS = Object.freeze([
   "albums", "samples", "packages", "addonServices", "peripherals", "tagLibrary",
   "guides", "stories", "scans", "orders", "afterSales", "reconciliationTransfers",
   "financeSettings", "monthlyClosings", "adjustmentRecords", "homeConfig", "logs", "trash",
-  "merchantCodes", "siteConfig", "userProfiles", "config"
+  "merchantCodes", "siteConfig", "userProfiles", "config", "mediaFiles"
 ]);
 
 const KEY_SET = new Set(ALL_KEYS);
@@ -40,6 +40,20 @@ const S = {
   updated: "DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"
 };
 
+// These workflow facts are intentionally stored in lxm_collection_values. The
+// orders table is already close to the MySQL row-size limit, so sparse audit
+// and fulfillment extensions must not widen its physical row. The legacy list
+// preserves reads if an interrupted migration added one of these columns.
+const LEGACY_SPARSE_COLUMNS = Object.freeze({
+  orders: Object.freeze([
+    "taskStatus", "serviceConfirmedAt", "serviceConfirmedBy", "serviceConfirmReason", "serviceContent",
+    "taskAcceptedAt", "taskAcceptedBy", "customerCancelIdempotencyKey", "cancelledAt", "cancelledBy", "cancelReason"
+  ]),
+  afterSales: Object.freeze([
+    "refundStatus", "refundTransactionId", "refundMethod", "refundConfirmedAt", "refundConfirmedBy"
+  ])
+});
+
 function columns(names, type = S.short) {
   return names.map((name) => ({ name, type }));
 }
@@ -57,12 +71,20 @@ function withBase(list, options = {}) {
     if (seen.has(item.name)) return false;
     seen.add(item.name);
     return true;
-  }) };
+  }), indexes: Array.isArray(options.indexes) ? options.indexes.slice() : [] };
 }
 
 // Column names intentionally follow the public document keys. This avoids a
 // lossy alias layer for existing callers; internal audit columns use snake case.
 const COLLECTIONS = {
+  // Internal registry: deliberately absent from api.cjs ALL_KEYS / generic CRUD.
+  mediaFiles: withBase([
+    ...columns(["purpose", "status", "visibility", "ownerKind"], S.status),
+    ...columns(["ownerId", "collection", "recordId", "orderId", "bucket", "region", "extension", "etag", "sha256", "migrationRunId"], S.key),
+    ...columns(["name", "mimeType", "rejection"], S.short),
+    { name: "objectKey", type: S.text }, { name: "size", type: S.integer },
+    ...columns(["createTime", "expiresAt", "completedAt", "boundAt", "deletedAt"], S.time),
+  ]),
   cities: withBase([
     { name: "name", type: S.short }, { name: "mode", type: S.short }, { name: "status", type: S.short },
     { name: "code", type: S.short }, { name: "cityId", type: S.short }, { name: "description", type: S.text },
@@ -231,7 +253,7 @@ const COLLECTIONS = {
     { name: "settlementObservationReleased", type: S.bool }, { name: "settlementObservationReleasedAt", type: S.time },
     { name: "settlementObservationReleasedBy", type: S.short }, { name: "createdBy", type: S.short }, { name: "createdById", type: S.short },
     { name: "createTime", type: S.time }, { name: "updateTime", type: S.time }, { name: "updatedAt", type: S.time }
-  ]),
+  ], { indexes: ["UNIQUE KEY uq_order_number (orderNo)"] }),
   afterSales: withBase([
     { name: "orderId", type: S.short }, { name: "orderNo", type: S.short }, { name: "openid", type: S.short },
     { name: "type", type: S.short }, { name: "customer", type: S.text }, { name: "packageName", type: S.short },
@@ -655,7 +677,7 @@ function schemaStatements() {
   for (const key of ALL_KEYS) {
     const def = definition(key);
     const cols = def.columns.map((item) => `${quoteIdentifier(item.name)} ${item.type}`);
-    cols.push("PRIMARY KEY (`id`)", "KEY `idx_updated_at` (`updatedAt`)");
+    cols.push("PRIMARY KEY (`id`)", "KEY `idx_updated_at` (`updatedAt`)", ...(def.indexes || []));
     statements.push(`CREATE TABLE IF NOT EXISTS ${quoteIdentifier(def.table || tableName(key))} (\n  ${cols.join(",\n  ")},\n  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),\n  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
   }
   for (const relation of Object.values(RELATIONS)) {
@@ -1249,6 +1271,13 @@ function hydrateAttributeRows(output, rows) {
   for (const row of (Array.isArray(rows) ? rows : [])) setPath(output, row.path, attributeValue(row));
   return output;
 }
+function hydrateLegacySparseColumns(key, row, output) {
+  for (const field of LEGACY_SPARSE_COLUMNS[key] || []) {
+    if (Object.prototype.hasOwnProperty.call(output, field) || row[field] === undefined || row[field] === null) continue;
+    output[field] = row[field];
+  }
+  return output;
+}
 function compactObject(value) {
   if (Array.isArray(value)) return value.map(compactObject);
   if (!value || typeof value !== "object") return value;
@@ -1268,6 +1297,9 @@ function hydrateDocument(key, row, relationRows = {}) {
     else if (/(?:INT|DECIMAL)/i.test(item.type)) output[item.name] = value == null ? value : Number(value);
     else output[item.name] = value;
   }
+  // Attributes are applied below and deliberately override a stale column from
+  // an interrupted wide-row migration.
+  hydrateLegacySparseColumns(key, row, output);
   if (Object.prototype.hasOwnProperty.call(output, "deleted") || Object.prototype.hasOwnProperty.call(output, "isDeleted")) {
     const deleted = output.deleted === true || output.isDeleted === true;
     output.deleted = deleted;
@@ -1512,6 +1544,7 @@ module.exports = {
   AUTH_ATTRIBUTE_TABLES,
   AUTH_NORMALIZED,
   AUTH_CORE,
+  LEGACY_SPARSE_COLUMNS,
   authCoreStatements,
   SENSITIVE_FIELDS,
   isSensitiveField,
@@ -1527,6 +1560,7 @@ module.exports = {
   normalizeDocumentAliases,
   materializeRelations,
   hydrateDocument,
+  hydrateLegacySparseColumns,
   flattenLeaves,
   hydrateAttributeRows,
   COLLECTION_VALUES_TABLE,

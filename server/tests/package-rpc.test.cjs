@@ -67,3 +67,16 @@ test("套餐公共 RPC 投影统一主推、详情和多点位字段", async () 
   assert.ok(collection.data.featuredPackages.some((item) => item._id === "pkg-main"));
   assert.ok(collection.data.spotPackages.some((item) => item._id === "pkg-multi"));
 });
+
+test("photo and image sample labels both remain visible in photo package details", async () => {
+  const source = makeSource();
+  const list = source.list.bind(source);
+  source.list = async (key) => key === "samples" ? [
+    { id: "uploaded-photo", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "photo", url: "/api/media/file_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", isShow: true },
+    { id: "legacy-image", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "image", url: "https://images.invalid/legacy.png", isShow: true },
+    { id: "video-sample", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "video", url: "https://images.invalid/video.mp4", isShow: true },
+  ] : list(key);
+  const detail = await rpc(source, "getSeriesDetail", { data: { seriesId: "series-1", packageId: "pkg-main", spotId: "spot-1" } });
+  assert.equal(detail.success, true);
+  assert.deepEqual(detail.data.photos.map((photo) => photo.id || photo._id).sort(), ["legacy-image", "uploaded-photo"]);
+});

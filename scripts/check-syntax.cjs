@@ -5,7 +5,13 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
-const targets = [
+function scriptsIn(relative) {
+  return fs.readdirSync(path.join(root, relative), { withFileTypes: true }).flatMap(entry => {
+    const file = path.join(relative, entry.name);
+    return entry.isDirectory() ? scriptsIn(file) : /\.(?:js|cjs)$/.test(entry.name) ? [file] : [];
+  });
+}
+const targets = [...new Set([
   "src/app.js",
   "src/router/index.js",
   "src/layout/app-shell.js",
@@ -15,11 +21,15 @@ const targets = [
   "server/lib/api.cjs",
   "server/lib/rpc.cjs",
   "server/lib/orderWorkflow.cjs",
+  ...scriptsIn("server/lib"),
+  ...scriptsIn("src/api"),
+  ...scriptsIn("src/views"),
+  ...fs.readdirSync(path.join(root, "scripts")).filter(name => name.endsWith(".cjs")).map(name => path.join("scripts", name)),
   ...fs.readdirSync(path.join(root, "src", "app"))
     .filter((name) => name.endsWith(".js"))
     .sort()
     .map((name) => path.join("src", "app", name)),
-];
+])];
 
 for (const target of targets) {
   const absolute = path.join(root, target);
