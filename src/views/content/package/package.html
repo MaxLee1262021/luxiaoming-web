@@ -62,6 +62,9 @@
           <div class="package-price"><b>{{ priceText(row).price }}</b><del v-if="priceText(row).original">{{ priceText(row).original }}</del></div>
         </template>
       </el-table-column>
+      <el-table-column label="订金比例" width="110" align="right">
+        <template #default="{ row }"><span class="table-muted">{{ Number(row.depositRatio || 0) }}%</span></template>
+      </el-table-column>
       <el-table-column label="小程序展示" width="116" align="center">
         <template #default="{ row }"><el-tag :type="statusText(row) === '已上架' ? 'success' : 'info'" effect="light">{{ statusText(row) }}</el-tag></template>
       </el-table-column>
@@ -88,6 +91,7 @@
         <label class="package-form-field package-form-field--wide"><span>套餐名称</span><el-input v-model="form.name" maxlength="50" show-word-limit placeholder="例如：长沙夜景双人旅拍套餐" /></label>
         <label class="package-form-field"><span>售价（元）</span><el-input-number v-model="form.price" :min="0" :step="50" controls-position="right" /></label>
         <label class="package-form-field"><span>原价（元）</span><el-input-number v-model="form.originalPrice" :min="0" :step="50" controls-position="right" /></label>
+        <label class="package-form-field"><span>订金比例（%）</span><el-input-number v-model="form.depositRatio" :min="0" :max="100" :step="5" controls-position="right" /></label>
         <label class="package-form-field package-form-field--wide"><span>封面图 <el-button link @click="uploadPackageCover">上传图片</el-button></span><el-input v-model="form.cover" @change="validateMediaUrl(form,'cover')" placeholder="填写可访问的图片地址，留空使用默认占位图" /></label>
         <label class="package-form-field package-form-field--wide"><span>适用打卡点</span><el-select v-model="form.spotIds" multiple filterable placeholder="不选择表示全城通用"><el-option v-for="spot in (data.spots || []).filter(Boolean)" :key="spot.id || spot._id" :label="spot.name" :value="spot.id || spot._id" /></el-select></label>
         <label class="package-form-field"><span>拍摄风格</span><el-select v-model="form.seriesId" clearable filterable placeholder="可选"><el-option v-for="series in (data.series || []).filter(Boolean)" :key="series.id || series._id" :label="series.name" :value="series.id || series._id" /></el-select></label>

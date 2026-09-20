@@ -51,56 +51,32 @@ function publicIdentity(openid = "customer-openid") {
   return { identity: { kind: "public", openid } };
 }
 
-test("booking remains awaiting service confirmation until its snapshot opens an idempotent deposit intent", async () => {
+test("booking is payable without a customer-selected shooting time and deposit intent is idempotent", async () => {
   const source = makeSource();
   const booking = await rpc(source, "createBooking", {
     data: {
       name: "测试用户", phone: "13800000000", items: [{ packageId: "package-1" }],
-      date: "2026-12-20", timePeriod: "上午",
       idempotencyKey: "booking-test-0001",
     },
   }, publicIdentity());
   assert.equal(booking.success, true);
   const order = await source.get("orders", booking.orderId);
-  assert.equal(order.date, "2026-12-20");
-  assert.equal(order.time, "上午");
+  assert.equal(order.date, "");
+  assert.equal(order.time, "");
   assert.equal(order.depositRatio, 0.3);
   assert.equal(order.depositDue, 30);
   assert.equal(order.finalDue, 70);
-  assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_CONFIRMATION);
+  assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
   assert.deepEqual(order.paymentRecords, []);
   assert.equal(order.customer, "测试用户");
   assert.equal(order.products[0].packageId, "package-1");
 
   const repeatedBooking = await rpc(source, "createBooking", {
-    data: { name: "测试用户", phone: "13800000000", date: "2026-12-20", timePeriod: "上午", items: [{ packageId: "package-1" }], idempotencyKey: "booking-test-0001" },
+    data: { name: "测试用户", phone: "13800000000", items: [{ packageId: "package-1" }], idempotencyKey: "booking-test-0001" },
   }, publicIdentity());
   assert.equal(repeatedBooking.success, true);
   assert.equal(repeatedBooking.idempotent, true);
   assert.equal(repeatedBooking.orderId, booking.orderId);
-
-  const blockedBeforeConfirmation = await rpc(source, "createPayment", {
-    data: { orderId: booking.orderId, phase: "deposit", amount: 30, idempotencyKey: "payment-before-confirmation-0001" },
-  }, publicIdentity());
-  assert.equal(blockedBeforeConfirmation.success, false);
-
-  source.collections.orders[booking.orderId] = {
-    ...source.collections.orders[booking.orderId],
-    status: "confirmed",
-    serviceConfirmedAt: "2026-09-18T00:00:00.000Z",
-    appointmentAt: "2026-12-20",
-    appointmentLocation: "测试地点",
-    peopleCount: 2,
-    serviceContent: "测试服务说明",
-    confirmationSnapshot: {
-      appointmentAt: "2026-12-20", timePeriod: "上午", appointmentLocation: "测试地点", peopleCount: 2,
-      serviceContent: "测试服务说明", totalAmount: 100, depositRatio: 0.3, depositDue: 30, finalDue: 70,
-    },
-    paymentRecords: [{ id: "deposit-placeholder", phase: "deposit", amount: 30, status: "not_created" }],
-  };
-  const beforeIntent = await rpc(source, "getPaymentStatus", { data: { orderId: booking.orderId, phase: "deposit" } }, publicIdentity());
-  assert.equal(beforeIntent.success, true);
-  assert.equal(beforeIntent.data.status, "not_created");
 
   const intent = await rpc(source, "createPayment", {
     data: { orderId: booking.orderId, phase: "deposit", amount: 30, idempotencyKey: "payment-test-0001" },
@@ -144,21 +120,21 @@ test("payment relation round-trips all workflow identifiers through normalized M
   assert.deepEqual(restored.paymentRecords[0], { ...payment, paymentType: "wechat" });
 });
 
-test("completed orders have a distinct public stage and timeline omits private operators and notes", () => {
+test("completed orders remain in the customer-facing delivered state and timeline omits private operators and notes", () => {
   const output = workflow.publicOrderProjection({
     id: "completed-order", status: "completed", totalAmount: 100, depositDue: 30, finalDue: 70,
     depositPaid: 30, finalPaid: 70, depositFinanceStatus: "已审", finalFinanceStatus: "已审",
     statusLogs: [{ type: "后台订单操作", action: "完成订单：内部备注", operator: "admin", operatorId: "staff-1", note: "private", createTime: "2026-09-12T10:00:00.000Z" }],
   }, { detail: true });
   assert.equal(output.workflowStage, workflow.WORKFLOW_STAGES.COMPLETED);
-  assert.equal(output.statusText, "已完成");
+  assert.equal(output.statusText, "已交付");
   assert.equal(output.paymentPhase, "");
   assert.deepEqual(output.statusTimeline, [{ type: "后台订单操作", action: "完成订单", createTime: "2026-09-12T10:00:00.000Z", time: "2026-09-12T10:00:00.000Z" }]);
   assert.equal(JSON.stringify(output).includes("staff-1"), false);
   assert.equal(JSON.stringify(output).includes("private"), false);
 });
 
-test("delivery before final payment remains in the actionable final-payment stage", () => {
+test("legacy delivery before final payment remains actionable but private to the customer", () => {
   const output = workflow.publicOrderProjection({
     id: "delivered-unpaid", status: "delivered", totalAmount: 100, depositDue: 30, finalDue: 70,
     depositPaid: 30, depositFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:00:00.000Z",
@@ -168,7 +144,8 @@ test("delivery before final payment remains in the actionable final-payment stag
   assert.equal(output.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT);
   assert.equal(output.paymentPhase, "final");
   assert.equal(output.paymentStatus, "not_created");
-  assert.deepEqual(output.deliveryRecord, { method: "wechat", deliveredAt: "2026-09-12T10:00:00.000Z", note: "private delivery note" });
+  assert.equal(output.deliveryRecord, undefined);
+  assert.deepEqual(output.deliverFiles, []);
 });
 
 test("booking rejects a peripheral-only cart even when the client bypasses its form validation", async () => {
@@ -181,30 +158,27 @@ test("booking rejects a peripheral-only cart even when the client bypasses its f
   assert.equal(result.error, "影像周边需搭配拍摄项目一起预约");
 });
 
-test("customer order filters and counts use non-overlapping canonical workflow stages", async () => {
+test("customer order filters and counts use the five business states", async () => {
   const source = makeSource();
   source.collections.orders = {
     pending: { id: "pending", openid: "customer-openid", status: "new", totalAmount: 100, depositDue: 30, finalDue: 70 },
-    deposit: {
-      id: "deposit", openid: "customer-openid", status: "confirmed", totalAmount: 100, depositDue: 30, finalDue: 70,
-      serviceConfirmedAt: "2026-09-18T00:00:00.000Z", confirmationSnapshot: { appointmentAt: "2026-12-20", timePeriod: "上午", appointmentLocation: "测试地点", peopleCount: 2, serviceContent: "测试服务", totalAmount: 100, depositRatio: 0.3, depositDue: 30, finalDue: 70 },
-    },
     dispatch: {
       id: "dispatch", openid: "customer-openid", status: "deposit_paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70,
-      serviceConfirmedAt: "2026-09-18T00:00:00.000Z", confirmationSnapshot: { appointmentAt: "2026-12-20", timePeriod: "上午", appointmentLocation: "测试地点", peopleCount: 2, serviceContent: "测试服务", totalAmount: 100, depositRatio: 0.3, depositDue: 30, finalDue: 70 },
+      paymentRecords: [{ id: "dispatch-deposit", phase: "deposit", amount: 30, status: "confirmed" }],
     },
-    final: { id: "final", openid: "customer-openid", status: "delivered", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-12T10:00:00.000Z" },
-    completed: { id: "completed", openid: "customer-openid", status: "completed", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", deliveryRecord: { method: "wechat" } },
+    shot: { id: "shot", openid: "customer-openid", status: "final_pending", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, shootingCompletedAt: "2026-09-12T09:00:00.000Z", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z" },
+    paid: { id: "paid", openid: "customer-openid", status: "paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", paymentRecords: [{ id: "paid-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "paid-final", phase: "final", amount: 70, status: "confirmed" }] },
+    delivered: { id: "delivered", openid: "customer-openid", status: "delivered", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-12T10:00:00.000Z", paymentRecords: [{ id: "delivered-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "delivered-final", phase: "final", amount: 70, status: "confirmed" }] },
   };
-  for (const [status, expected] of [["pending", "pending"], ["deposit", "deposit"], ["confirmed", "dispatch"], ["final", "final"], ["completed", "completed"]]) {
+  for (const [status, expected] of [["pending_payment", "pending"], ["awaiting_photographer", "dispatch"], ["shot", "shot"], ["paid", "paid"], ["delivered", "delivered"]]) {
     const result = await rpc(source, "getMyOrders", { data: { status, page: 1, pageSize: 20 } }, publicIdentity());
     assert.deepEqual(result.data.map((row) => row.id), [expected]);
   }
   const counts = await rpc(source, "getOrderStatusCount", { data: {} }, publicIdentity());
-  assert.deepEqual(counts.data, { pending: 1, deposit: 1, confirmed: 1, shooting: 0, editing: 0, final: 1, paid: 0, completed: 1, canceled: 0 });
+  assert.deepEqual(counts.data.businessStatus, { pending_payment: 1, awaiting_photographer: 1, shot: 1, paid: 1, delivered: 1 });
 });
 
-test("manual order creation cannot bypass the confirmation-first product-backed deposit stage", async () => {
+test("manual order creation uses the product-backed deposit stage", async () => {
   const source = makeSource();
   source.collections.packages["package-1"].depositRatio = 50;
   const auth = {
@@ -226,7 +200,8 @@ test("manual order creation cannot bypass the confirmation-first product-backed 
     assert.equal(response.status, 201);
     const body = await response.json();
     assert.equal(body.status, "new");
-    assert.equal(body.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_CONFIRMATION);
+    assert.equal(body.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
+    assert.equal(body.businessStatus, "pending_payment");
     assert.equal(body.depositDue, 50, "manual orders use the selected product's server-side deposit ratio");
     assert.equal(body.finalDue, 50);
     assert.equal(body.depositPaid, 0);

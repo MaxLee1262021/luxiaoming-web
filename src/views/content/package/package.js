@@ -53,6 +53,10 @@ window.LXM_PAGES.register({
       const ids = spotIdsOf(source);
       const description = String(source.description || source.intro || "").trim();
       const serviceTags = tagsOf(source);
+      const rawDepositRatio = Number(source.depositRatio ?? source.depositRate ?? source.depositPercent ?? 30);
+      const depositRatio = Number.isFinite(rawDepositRatio)
+        ? Math.min(100, Math.max(0, rawDepositRatio <= 1 ? rawDepositRatio * 100 : rawDepositRatio))
+        : 30;
       return {
         ...source,
         id: rowId(source),
@@ -66,6 +70,7 @@ window.LXM_PAGES.register({
         description,
         intro: description,
         serviceTags,
+        depositRatio,
         tags: Array.isArray(source.tags) && source.tags.length ? source.tags : serviceTags.slice(),
         isMainPush: source.isMainPush === true || source.mainPush === true,
         mainPush: source.isMainPush === true || source.mainPush === true,
@@ -121,7 +126,7 @@ window.LXM_PAGES.register({
       const source = row ? normalizeRow(row) : {
         id: "", name: "", cover: "", price: 0, originalPrice: 0,
         description: "", spotIds: [], spotId: "", seriesId: "", albumId: "",
-        serviceTags: [], isShow: true, isMainPush: false, includedItems: []
+        serviceTags: [], depositRatio: 30, isShow: true, isMainPush: false, includedItems: []
       };
       return {
         ...clone(source),
@@ -164,6 +169,10 @@ window.LXM_PAGES.register({
       const spotIds = [...new Set((Array.isArray(source.spotIds) ? source.spotIds : []).filter(Boolean).map(String))];
       const price = Math.max(0, Number(source.price || 0));
       const originalPrice = Math.max(0, Number(source.originalPrice || 0));
+      const ratioInput = Number(source.depositRatio);
+      const depositRatio = Number.isFinite(ratioInput)
+        ? Math.min(100, Math.max(0, ratioInput <= 1 ? ratioInput * 100 : ratioInput))
+        : 30;
       const description = String(source.description || source.intro || "").trim();
       const serviceTags = normalizeTagInput(source.serviceTagsText);
       const id = source.id || `pkg_${Date.now().toString(36)}`;
@@ -180,6 +189,7 @@ window.LXM_PAGES.register({
         price,
         specialPrice: price,
         originalPrice,
+        depositRatio,
         description,
         intro: description,
         spotIds,

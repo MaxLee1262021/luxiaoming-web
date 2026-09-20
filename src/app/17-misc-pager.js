@@ -45,15 +45,17 @@
   } = ctx;
 
 const WORKFLOW_STATUS_META = {
-  awaiting_deposit: { label: "待付订金", color: "#F97316" },
-  awaiting_dispatch: { label: "待派单", color: "#F59E0B" },
-  awaiting_shoot: { label: "已派单", color: "#3B82F6" },
-  shooting: { label: "拍摄中", color: "#3B82F6" },
-  selection_pending: { label: "待选片", color: "#F97316" },
-  awaiting_final_payment: { label: "待付尾款", color: "#F97316" },
-  paid: { label: "待交付", color: "#10B981" },
+  awaiting_confirmation: { label: "待支付", color: "#F97316" },
+  awaiting_deposit: { label: "待支付", color: "#F97316" },
+  awaiting_dispatch: { label: "待安排摄影师", color: "#F59E0B" },
+  awaiting_shoot: { label: "待安排摄影师", color: "#3B82F6" },
+  shooting: { label: "待安排摄影师", color: "#3B82F6" },
+  selection_pending: { label: "已拍摄", color: "#F97316" },
+  awaiting_delivery: { label: "已拍摄", color: "#F97316" },
+  awaiting_final_payment: { label: "已拍摄", color: "#F97316" },
+  paid: { label: "已支付", color: "#10B981" },
   delivered: { label: "已交付", color: "#10B981" },
-  completed: { label: "已完成", color: "#6B7280" },
+  completed: { label: "已交付", color: "#10B981" },
   cancelled: { label: "已取消", color: "#6B7280" }
 };
 function orderWorkflowStatusMeta(row) {

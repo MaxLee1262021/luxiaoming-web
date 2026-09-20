@@ -10,7 +10,7 @@ async function fixture(t) {
   const collections = { staff: {}, orders: {}, afterSales: {}, logs: {}, mediaFiles: {}, userProfiles: {}, samples: {}, homeConfig: {}, adjustmentRecords: {} };
   let sequence = 0;
   for (const role of ["super", "service", "photo", "finance", "content"]) collections.staff[role] = { id: role, account: role, role, status: "启用" };
-  const readyOrder = { status: "final_pending", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 0,
+  const readyOrder = { status: "paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审",
     shootingCompletedAt: "2026-09-16T09:00:00.000Z", shootingStartedAt: "2026-09-16T08:00:00.000Z", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-16T10:00:00.000Z" };
   collections.orders.own = { ...readyOrder, id: "own", orderNo: "TEST-OWN", openid: "customer", photographerId: "photo" };
   collections.orders.other = { ...readyOrder, id: "other", orderNo: "TEST-OTHER", openid: "other-customer", photographerId: "other-photo" };
@@ -72,7 +72,7 @@ test("file intents enforce verified session, order ownership and live account st
   assert.equal((await f.request("photo", `/api/files/${id}/access`, {})).status, 401);
 });
 
-test("photographer saves drafts but only customer service publishes; owner downloads before final payment", async (t) => {
+test("photographer saves drafts but only customer service publishes; paid owner downloads after delivery", async (t) => {
   const f = await fixture(t);
   const id = await f.upload("photo", { purpose: "order-delivery", orderId: "own" });
   let response = await f.request("photo", "/api/orders/own/action", { action: "deliverydraft", fileIds: [id] });
@@ -86,7 +86,7 @@ test("photographer saves drafts but only customer service publishes; owner downl
   assert.equal((await f.request("photo", "/api/orders/own/action", publish)).status, 403);
   response = await f.request("service", "/api/orders/own/action", publish);
   assert.equal(response.status, 200, JSON.stringify(response.body));
-  assert.equal(response.body.data.workflowStage, "awaiting_final_payment");
+  assert.equal(response.body.data.workflowStage, "delivered");
   assert.equal(response.body.data.deliverFiles[0].fileId, id);
   const detail = await f.request("customer", "/api/rpc/getOrderDetail", { orderId: "own" });
   assert.equal(detail.body.data.deliverFiles[0].fileId, id);
@@ -179,6 +179,9 @@ test("migrated private markers become authorized file descriptors, never loadabl
 
   const deliveryId = await f.upload("photo", { purpose: "order-delivery", orderId: "own" });
   const order = f.collections.orders.own;
+  order.status = "paid";
+  order.finalPaid = 70;
+  order.finalFinanceStatus = "已审";
   order.deliveredAt = "2026-09-17T00:00:00.000Z";
   order.deliveryRecord = { method: "企业微信" };
   order.photos = [`oss-file:${deliveryId}`, { url: `oss-file:${deliveryId}`, name: "精修照片" }];

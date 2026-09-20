@@ -127,6 +127,8 @@ const state = reactive({
     timePeriod: "",
     appointmentLocation: "",
     peopleCount: 1,
+    confirmationMethod: "",
+    customerConfirmationNote: "",
     note: ""
   },
   transferDialog: false,

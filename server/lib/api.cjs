@@ -13,6 +13,11 @@ const {
   isServiceConfirmed,
   hasDeliveryRecord,
   hasPaymentIntent,
+  selectionConfirmed,
+  businessStatusForOrder,
+  businessStatusLabel,
+  customerStatusForOrder,
+  isDepositRefundable,
   normalizePaymentStatus,
   canonicalStage,
   customerStatusForStage,
@@ -78,6 +83,12 @@ function activeAssignedOrder(order = {}) {
 }
 function confirmedPaidAmount(order = {}) {
   const deposit = hasConfirmedPayment(order, "deposit") ? Math.max(roundMoney(order.depositPaid), depositDue(order)) : 0;
+  const final = hasConfirmedPayment(order, "final") ? Math.max(roundMoney(order.finalPaid), finalDue(order)) : 0;
+  return roundMoney(deposit + final);
+}
+function confirmedRefundablePaidAmount(order = {}) {
+  const deposit = isDepositRefundable(order) && hasConfirmedPayment(order, "deposit")
+    ? Math.max(roundMoney(order.depositPaid), depositDue(order)) : 0;
   const final = hasConfirmedPayment(order, "final") ? Math.max(roundMoney(order.finalPaid), finalDue(order)) : 0;
   return roundMoney(deposit + final);
 }
@@ -787,7 +798,8 @@ module.exports = function createApi(source, mode, options = {}) {
     if (session.kind === "public") {
       if (!session.openid || String(order.openid || order._openid || "") !== String(session.openid)) return false;
       if (purpose === "order-delivery") {
-        return read && !!(order.deliveryRecord || order.deliveredAt)
+        const finalSettled = finalDue(order) <= 0 || hasConfirmedPayment(order, "final");
+        return read && finalSettled && !!(order.deliveryRecord || order.deliveredAt)
           && referencedFileIds(order.deliverFiles || order.photos).includes(String(asset.fileId || asset.id || ""));
       }
       if (sameFileOwner(session, asset)) return true;
@@ -880,6 +892,12 @@ module.exports = function createApi(source, mode, options = {}) {
     let out = redactRow(key, row, session);
     if (!out || typeof out !== "object") return out;
     if (key === "orders") {
+      const businessStatus = businessStatusForOrder(row);
+      out.businessStatus = businessStatus;
+      out.businessStatusCode = businessStatus;
+      out.businessStatusText = businessStatusLabel(businessStatus);
+      out.orderStatus = businessStatusLabel(businessStatus);
+      out.depositRefundable = isDepositRefundable(row);
       if (Array.isArray(out.deliveryDraftFileIds)) out.deliveryDraftFiles = await describeFiles(out.deliveryDraftFileIds);
       if (out.deliverFiles || out.photos) {
         out.deliverFiles = await enrichFileDescriptors(publicDeliveryFiles(out.deliverFiles || out.photos));
@@ -2018,6 +2036,21 @@ module.exports = function createApi(source, mode, options = {}) {
     if (key === "siteConfig" && normalizeRole(session.role) === "content" && containsConfigSensitive(body)) {
       return forbidden(res, session, pathname, "内容运营不能修改集成凭据");
     }
+    if (key === "packages" && Object.prototype.hasOwnProperty.call(body, "depositRatio")) {
+      const rawRatio = Number(body.depositRatio);
+      // Accept either a fraction (0.3) or a percentage (30), but never let a
+      // malformed/over-100 value silently become a fully paid deposit.
+      if (!Number.isFinite(rawRatio) || rawRatio < 0 || rawRatio > 100) return json(res, 400, { error: "套餐订金比例必须在 0 到 100% 之间" });
+      body.depositRatio = normalizeRatio(rawRatio);
+    } else if (key === "packages") {
+      for (const alias of ["depositRate", "depositPercent", "depositPercentage"]) {
+        if (!Object.prototype.hasOwnProperty.call(body, alias)) continue;
+        const rawRatio = Number(body[alias]);
+        if (!Number.isFinite(rawRatio) || rawRatio < 0 || rawRatio > 100) return json(res, 400, { error: "套餐订金比例必须在 0 到 100% 之间" });
+        body.depositRatio = normalizeRatio(rawRatio);
+        break;
+      }
+    }
     if (key === "reconciliationTransfers") {
       const role = normalizeRole(session.role);
       if (method === "POST") {
@@ -2124,9 +2157,11 @@ module.exports = function createApi(source, mode, options = {}) {
         return json(res, 409, { error: "该订单已有处理中售后工单" });
       }
       const refundAmount = Number(body.refundAmount || 0);
-      const refundableLimit = roundMoney(Math.max(confirmedPaidAmount(order) - confirmedRefundAmount(tickets), 0));
+      const refundPhase = String(body.refundPhase || body.refundType || "").trim().toLowerCase();
+      if (!isDepositRefundable(order) && ["deposit", "定金", "deposit_refund"].includes(refundPhase)) return json(res, 409, { error: "派单后订金不可退款" });
+      const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(tickets), 0));
       if (!Number.isFinite(refundAmount) || refundAmount < 0 || refundAmount > refundableLimit) return json(res, 409, { error: "退款金额不能超过已确认到账且未退款金额" });
-      const allowedFields = new Set(["id", "_id", "orderId", "orderNo", "customer", "packageName", "type", "reason", "refundAmount", "submitSource", "assigneeId", "attachmentFileIds", "internalAttachmentFileIds"]);
+      const allowedFields = new Set(["id", "_id", "orderId", "orderNo", "customer", "packageName", "type", "reason", "refundAmount", "refundPhase", "submitSource", "assigneeId", "attachmentFileIds", "internalAttachmentFileIds"]);
       Object.keys(body).forEach((field) => { if (!allowedFields.has(field)) delete body[field]; });
       body.orderId = orderId;
       body.orderNo = order.orderNo || body.orderNo || "";
@@ -2136,6 +2171,7 @@ module.exports = function createApi(source, mode, options = {}) {
       body.customerVisibleStatus = "已提";
       body.financeStatus = refundAmount > 0 ? "待审" : "无需财务审核";
       body.refundAmount = refundAmount;
+      body.refundPhase = refundPhase || "";
       body.refundStatus = refundAmount > 0 ? "pending_review" : "not_requested";
       body.refundConfirmed = false;
       body.submitSource = "后台提交";
@@ -2223,8 +2259,10 @@ module.exports = function createApi(source, mode, options = {}) {
       body.depositFinanceStatus = "";
       body.finalFinanceStatus = "";
       body.status = "new";
-      body.customerStatus = customerStatusForStage(WORKFLOW_STAGES.AWAITING_CONFIRMATION);
-      body.workflowStage = WORKFLOW_STAGES.AWAITING_CONFIRMATION;
+      body.customerStatus = due > 0 ? "待支付" : "待安排摄影师";
+      body.workflowStage = due > 0 ? WORKFLOW_STAGES.AWAITING_DEPOSIT : WORKFLOW_STAGES.AWAITING_DISPATCH;
+      body.businessStatus = due > 0 ? "pending_payment" : "awaiting_photographer";
+      body.businessStatusText = due > 0 ? "待支付" : "待安排摄影师";
       body.dispatchStatus = "pending";
       body.depositRefundable = true;
       body.selectionStatus = "not_started";
@@ -2513,7 +2551,6 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.customerStatus = customerStatusForStage(patch.workflowStage);
       label = "确认服务快照";
     } else if (action === "assign") {
-      if (!isServiceConfirmed(current)) return json(res, 409, { error: "确认服务快照后才能派单" });
       if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "订金到账确认后才能派单" });
       if (![WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能派单" });
       const photographerId = String(body.photographerId || "").trim();
@@ -2524,31 +2561,64 @@ module.exports = function createApi(source, mode, options = {}) {
       );
       if (!photographer) return json(res, 400, { error: "摄影师账号不存在或已停用" });
       const confirmation = current.confirmationSnapshot && typeof current.confirmationSnapshot === "object" ? current.confirmationSnapshot : {};
-      const appointmentAt = String(current.appointmentAt || current.date || confirmation.appointmentAt || "").trim();
-      const appointmentLocation = String(current.appointmentLocation || current.shootLocation || current.location || confirmation.appointmentLocation || "").trim();
-      const peopleCount = Number(current.peopleCount ?? current.participantCount ?? confirmation.peopleCount ?? 0);
-      const timePeriod = String(current.timePeriod || current.time || confirmation.timePeriod || confirmation.time || "").trim();
-      if (!appointmentAt || !timePeriod || !appointmentLocation || !Number.isInteger(peopleCount) || peopleCount < 1) return json(res, 400, { error: "确认服务快照缺少时间、时段、地点或人数" });
-      if ((body.appointmentAt && String(body.appointmentAt).trim() !== appointmentAt)
-        || (body.timePeriod && String(body.timePeriod).trim() !== timePeriod)
-        || (body.time && String(body.time).trim() !== timePeriod)
-        || (body.appointmentLocation && String(body.appointmentLocation).trim() !== appointmentLocation)
-        || (body.peopleCount !== undefined && Number(body.peopleCount) !== peopleCount)) {
-        return json(res, 409, { error: "派单不能改写确认服务快照，请先通过改期操作处理" });
-      }
-      const allOrders = await source.list("orders");
-      if ((Array.isArray(allOrders) ? allOrders : []).some((order) => order && getRowId(order) !== String(orderId)
-        && String(order.photographerId || "") === photographerId && activeAssignedOrder(order)
-        && appointmentConflicts({ appointmentAt, timePeriod }, order))) {
-        return json(res, 409, { error: "摄影师在该档期已有任务，请选择其他摄影师或改期" });
+      // Actual shooting details are entered on the dispatch page. Checkout
+      // does not need to provide an expected date or time.
+      const appointmentAt = String(body.confirmedShootDate || body.shootingDate || body.appointmentAt || body.date
+        || current.appointmentAt || current.date || confirmation.appointmentAt || "").trim();
+      const timePeriod = String(body.confirmedShootTime || body.shootingTime || body.timePeriod || body.time
+        || current.timePeriod || current.time || confirmation.timePeriod || confirmation.time || "").trim();
+      const appointmentLocation = String(body.confirmedShootLocation || body.shootingLocation || body.appointmentLocation
+        || body.shootLocation || body.location || current.appointmentLocation || current.shootLocation || current.location
+        || confirmation.appointmentLocation || "").trim();
+      const suppliedPeopleCount = Number(body.participantCount ?? body.peopleCount ?? current.peopleCount ?? current.participantCount ?? confirmation.peopleCount ?? 1);
+      const peopleCount = Number.isInteger(suppliedPeopleCount) && suppliedPeopleCount > 0 ? suppliedPeopleCount : 1;
+      if (!appointmentAt || !appointmentLocation) return json(res, 400, { error: "派单必须填写实际拍摄时间和地点" });
+      const dispatchContactName = String(body.dispatchContactName || body.contactName || current.contactName || current.name || current.customer || "").trim();
+      const dispatchContactPhone = String(body.dispatchContactPhone || body.contactPhone || current.contactPhone || current.phone || "").trim();
+      const dispatchNote = String(body.dispatchNote || body.contactNote || body.dispatchRemark || body.note || reason || "").trim();
+      const confirmationMethod = String(body.confirmationMethod || body.confirmMethod || "").trim();
+      const customerConfirmationNote = String(body.customerConfirmationNote || body.customerConfirmNote || dispatchNote || "").trim();
+      const confirmedShootAt = String(body.confirmedShootAt || `${appointmentAt}${timePeriod ? ` ${timePeriod}` : ""}`).trim();
+      const dispatchBaseInfo = {
+        photographerId,
+        confirmedShootAt,
+        confirmedShootDate: appointmentAt,
+        confirmedShootTime: timePeriod,
+        confirmedShootLocation: appointmentLocation,
+        participantCount: peopleCount,
+        contactName: dispatchContactName,
+        contactPhone: dispatchContactPhone,
+        contactNote: dispatchNote,
+        confirmationMethod,
+        customerConfirmationNote,
+      };
+      // Scheduling conflicts are intentionally a human workflow concern in
+      // this release. Keep the old checker available only for an explicit
+      // opt-in caller; dispatch itself must not perform automatic排期.
+      if (body.enforceScheduleConflict === true) {
+        const allOrders = await source.list("orders");
+        if ((Array.isArray(allOrders) ? allOrders : []).some((order) => order && getRowId(order) !== String(orderId)
+          && String(order.photographerId || "") === photographerId && activeAssignedOrder(order)
+          && appointmentConflicts({ appointmentAt, timePeriod }, order))) {
+          return json(res, 409, { error: "摄影师在该档期已有任务，请选择其他摄影师或改期" });
+        }
       }
       patch.photographerId = photographerId;
       patch.appointmentAt = appointmentAt;
       patch.appointmentLocation = appointmentLocation;
       patch.shootLocation = appointmentLocation;
       patch.peopleCount = peopleCount;
+      patch.participantCount = peopleCount;
       patch.timePeriod = timePeriod;
       patch.time = timePeriod;
+      patch.confirmedShootAt = confirmedShootAt;
+      patch.confirmedShootDate = appointmentAt;
+      patch.confirmedShootTime = timePeriod;
+      patch.confirmedShootLocation = appointmentLocation;
+      patch.confirmationMethod = confirmationMethod;
+      patch.customerConfirmationNote = customerConfirmationNote;
+      patch.dispatchBaseInfo = dispatchBaseInfo;
+      patch.depositRefundable = false;
       patch.dispatchStatus = "pending_acceptance";
       patch.taskStatus = "pending_acceptance";
       patch.taskAcceptedAt = null;
@@ -2556,7 +2626,7 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.dispatchRecord = {
         id: makePaymentId("dispatch"), type: current.photographerId ? "reassign" : "assign",
         previous: { photographerId: current.photographerId || "", taskStatus: current.taskStatus || "", appointmentAt: current.appointmentAt || "", appointmentLocation: current.appointmentLocation || current.shootLocation || "", peopleCount: Number(current.peopleCount || 0) || null },
-        next: { photographerId, taskStatus: "pending_acceptance", appointmentAt, appointmentLocation, peopleCount }, reason, operator: session.account, operatorId: session.subjectId, createTime: now,
+        next: { ...dispatchBaseInfo, taskStatus: "pending_acceptance", appointmentAt, appointmentLocation, peopleCount }, reason, operator: session.account, operatorId: session.subjectId, createTime: now,
       };
       patch.dispatchRecords = [...(Array.isArray(current.dispatchRecords) ? current.dispatchRecords : []), patch.dispatchRecord];
       patch.status = "assigned";
@@ -2580,6 +2650,7 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.photographerId = "";
       patch.dispatchStatus = "pending_reassignment";
       patch.taskStatus = action === "unable" ? "unable" : "unassigned";
+      patch.depositRefundable = false;
       patch.dispatchRecords = [...(Array.isArray(current.dispatchRecords) ? current.dispatchRecords : []), {
         id: makePaymentId("dispatch"), type: action === "unable" ? "unable" : "unassign", previous: { photographerId: current.photographerId || "", taskStatus: current.taskStatus || "" }, next: { photographerId: "", taskStatus: action === "unable" ? "unable" : "unassigned" }, reason,
         operator: session.account, operatorId: session.subjectId, createTime: now,
@@ -2613,7 +2684,8 @@ module.exports = function createApi(source, mode, options = {}) {
       if (role !== "super" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能开始自己的拍摄任务");
       if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "订金到账确认后才能开始拍摄" });
       if (!current.photographerId || ![WORKFLOW_STAGES.AWAITING_SHOOT].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
-      if (String(current.taskStatus || "").toLowerCase() === "pending_acceptance") return json(res, 409, { error: "摄影师接受任务后才能开始拍摄" });
+      // Task acceptance remains available for teams that use it, but it is
+      // optional: once a photographer is assigned, they may start directly.
       if (String(current.taskStatus || "").toLowerCase() === "unable") return json(res, 409, { error: "任务已标记无法履约，请等待重新派单" });
       patch.status = "shooting";
       patch.shootingStartedAt = current.shootingStartedAt || now;
@@ -2635,6 +2707,8 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.selectionConfirmedAt = now;
       patch.selectionConfirmedBy = session.account;
       patch.selectionNote = reason;
+      patch.selectionMethod = "offline";
+      patch.selectionRecord = { method: "offline", note: reason, operator: session.account, operatorId: session.subjectId, confirmedAt: now };
       patch.status = "final_pending";
       patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.AWAITING_DELIVERY);
       label = "线下选片确认";
@@ -2645,8 +2719,8 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!["pending", "confirmed", "failed"].includes(paymentStatus)) return json(res, 400, { error: "支付状态无效" });
       if (role === "service" && paymentStatus !== "pending") return forbidden(res, session, pathname, "客服只能登记待财务审核的收款");
       if (paymentStatus === "confirmed" && !["super", "finance"].includes(role)) return forbidden(res, session, pathname, "只有财务或超管可以确认到账");
-      if (phase === "deposit" && (!isServiceConfirmed(current) || ![WORKFLOW_STAGES.AWAITING_DEPOSIT, WORKFLOW_STAGES.AWAITING_DISPATCH].includes(currentStage))) return json(res, 409, { error: "确认服务快照后才能登记订金" });
-      if (phase === "final" && (!hasDeliveryRecord(current) || ![WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED].includes(currentStage))) return json(res, 409, { error: "成片发布后才能登记尾款" });
+      if (phase === "deposit" && currentStage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return json(res, 409, { error: "当前订单不在待支付订金阶段" });
+      if (phase === "final" && (!selectionConfirmed(current) || (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) || ![WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.AWAITING_DELIVERY].includes(currentStage))) return json(res, 409, { error: "定金到账且线下选片确认后才能登记尾款" });
       const due = phase === "deposit" ? depositDue(current) : finalDue(current);
       if (due <= 0) return json(res, 409, { error: "该支付阶段无需收款" });
       const amount = roundMoney(body.amount ?? body.paidAmount ?? due);
@@ -2712,8 +2786,7 @@ module.exports = function createApi(source, mode, options = {}) {
       if (paymentStatus === "confirmed") {
         patch[phase + "ConfirmedAt"] = now;
         patch[phase + "ConfirmedBy"] = session.account;
-        patch.status = phase === "deposit" ? "deposit_paid"
-          : (hasDeliveryRecord(current) || beforeStatus === "delivered" ? "delivered" : "paid");
+        patch.status = phase === "deposit" ? "deposit_paid" : "paid";
       } else if (paymentStatus === "failed") {
         patch.status = phase === "deposit" ? "new" : "final_pending";
       }
@@ -2726,7 +2799,7 @@ module.exports = function createApi(source, mode, options = {}) {
       label = "保存成片草稿";
     } else if (action === "deliver") {
       if (!["super", "service"].includes(role)) return forbidden(res, session, pathname, "只有客服或超管可以发布成片交付");
-      if (currentStage !== WORKFLOW_STAGES.AWAITING_DELIVERY || !current.selectionConfirmedAt) return json(res, 409, { error: "线下选片确认后才能发布成片" });
+      if (currentStage !== WORKFLOW_STAGES.PAID || !selectionConfirmed(current) || !hasConfirmedPayment(current, "final")) return json(res, 409, { error: "尾款确认到账后才能交付成片" });
       const deliveryMethod = String(body.deliveryMethod || body.deliveryType || body.method || "企业微信").trim();
       if (body.fileIds !== undefined || deliveryMethod === "小程序成片") {
         boundFileIds = fileIds(body.fileIds);
@@ -2778,11 +2851,11 @@ module.exports = function createApi(source, mode, options = {}) {
       const requested = body.fields && typeof body.fields === "object" && !Array.isArray(body.fields) ? body.fields : {};
       if (Object.keys(requested).some((field) => IMMUTABLE_ORDER_FIELDS.has(field))) return json(res, 400, { error: "订单标识字段不可修改" });
       const commandOnlyFields = new Set([
-        "status", "customerStatus", "workflowStage", "depositRatio", "depositDue", "finalDue", "depositPaid", "finalPaid",
+        "status", "customerStatus", "businessStatus", "businessStatusText", "workflowStage", "depositRatio", "depositDue", "finalDue", "depositPaid", "finalPaid",
         "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt", "depositPaymentStatus", "finalPaymentStatus",
         "depositConfirmedAt", "depositConfirmedBy", "finalConfirmedAt", "finalConfirmedBy", "paymentVerify", "paymentRecords",
-        "photographerId", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "dispatchRecord", "dispatchRecords", "shootingStartedAt", "shootingCompletedAt", "shootingCompletedBy",
-        "selectionStatus", "selectionConfirmedAt", "selectionConfirmedBy", "selectionNote", "deliveryRecord", "deliveryMethod", "deliveredAt", "deliveredBy",
+        "photographerId", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "dispatchRecord", "dispatchRecords", "dispatchBaseInfo", "depositRefundable", "confirmedShootAt", "confirmedShootDate", "confirmedShootTime", "confirmedShootLocation", "confirmationMethod", "customerConfirmationNote", "shootingStartedAt", "shootingCompletedAt", "shootingCompletedBy",
+        "selectionStatus", "selectionConfirmedAt", "selectionConfirmedBy", "selectionNote", "selectionMethod", "selectionRecord", "deliveryRecord", "deliveryMethod", "deliveredAt", "deliveredBy",
         "completedAt", "afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId", "isDeleted", "deleted",
         "serviceConfirmedAt", "serviceConfirmedBy", "serviceConfirmReason", "serviceContent", "confirmationSnapshot", "rescheduleRecords",
       ]);
@@ -2925,7 +2998,12 @@ module.exports = function createApi(source, mode, options = {}) {
     // Keep the service status and the customer-facing stage in sync. The
     // projection also derives this value, but persisting it makes admin lists
     // and normalized MySQL rows immediately queryable.
-    if (action !== "note" || !current.customerStatus) patch.customerStatus = customerStatusForStage(patch.workflowStage);
+    if (action !== "note" || !current.customerStatus) {
+      const businessStatus = businessStatusForOrder(afterDraft);
+      patch.businessStatus = businessStatus;
+      patch.businessStatusText = businessStatusLabel(businessStatus);
+      patch.customerStatus = customerStatusForOrder(afterDraft);
+    }
     const changes = diffFacts(current, { ...current, ...patch });
     const timeline = { type: "后台订单操作", action: `${label}${reason ? `：${reason}` : ""}`, operator: session.account, operatorId: session.subjectId, from: beforeStatus, to: patch.status || beforeStatus, workflowStage: patch.workflowStage, reason, changes, createTime: now };
     patch.statusLogs = [...(Array.isArray(current.statusLogs) ? current.statusLogs : []), timeline];
@@ -2991,12 +3069,14 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!["待审", "已审", "已驳"].includes(currentFinanceStatus)) return json(res, 409, { error: "该售后当前不在财务审核队列" });
       const refundAmount = roundMoney(current.refundAmount);
       if (approved && refundAmount > 0) {
+        const refundPhase = String(current.refundPhase || "").trim().toLowerCase();
+        if (!isDepositRefundable(order) && ["deposit", "定金", "deposit_refund"].includes(refundPhase)) return json(res, 409, { error: "派单后订金不可退款" });
         const refundTransactionId = String(body.refundTransactionId || body.externalTransactionId || "").trim().slice(0, 160);
         const refundMethod = String(body.refundMethod || "人工退款").trim().slice(0, 64);
         if (!refundTransactionId) return json(res, 400, { error: "确认人工退款必须填写退款流水号或凭据编号" });
         let allTickets;
         try { allTickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用，无法确认退款" }); }
-        const refundableLimit = roundMoney(Math.max(confirmedPaidAmount(order) - confirmedRefundAmount(allTickets, ticketId), 0));
+        const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(allTickets, ticketId), 0));
         if (refundAmount > refundableLimit) return json(res, 409, { error: "退款金额超过已确认到账且未退款金额" });
         if ((Array.isArray(allTickets) ? allTickets : []).some((ticket) => ticket && String(ticket.id || ticket._id || "") !== ticketId
           && refundTransactionId === String(ticket.refundTransactionId || ""))) return json(res, 409, { error: "退款流水号已被其他售后工单使用" });
@@ -3025,9 +3105,11 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!Number.isFinite(refundAmount) || refundAmount < 0) return json(res, 400, { error: "退款金额无效" });
       if (refundAmount > 0) {
         if (action !== "complete") return json(res, 400, { error: "请在结案操作中提交退款审核申请" });
+        const refundPhase = String(current.refundPhase || "").trim().toLowerCase();
+        if (!isDepositRefundable(order) && ["deposit", "定金", "deposit_refund"].includes(refundPhase)) return json(res, 409, { error: "派单后订金不可退款" });
         let allTickets;
         try { allTickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用，无法登记退款" }); }
-        const refundableLimit = roundMoney(Math.max(confirmedPaidAmount(order) - confirmedRefundAmount(allTickets, ticketId), 0));
+        const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(allTickets, ticketId), 0));
         if (refundAmount > refundableLimit) return json(res, 409, { error: "退款金额不能超过已确认到账且未退款金额" });
         patch.refundAmount = roundMoney(refundAmount);
         patch.refundConfirmed = false;

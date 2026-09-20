@@ -181,8 +181,8 @@ function resetManualOrderForm() {
     distributorId: "",
     productId: defaultProduct.id || "",
     productType: defaultProduct.productType || defaultProduct.type || "package",
-    appointmentAt: `${today} 10:00`,
-    timePeriod: "待客服确",
+    appointmentAt: "",
+    timePeriod: "",
     internalNote: "",
   };
 }
@@ -198,11 +198,14 @@ async function confirmCreateManualOrder() {
   if (!String(form.phone || "").trim()) return ElMessage.warning("请填写客户手机号");
   if (form.sourceType === "shop" && !form.shopId) return ElMessage.warning("请选择来源商家");
   if (!form.productId) return ElMessage.warning("请选择下单商品");
-  if (!form.appointmentAt) return ElMessage.warning("请选择拍摄预约时间");
   const now = LXMFormat.nowText();
   const today = now.slice(0, 10);
   const selected = manualOrderProducts.value.find((item) => item.id === form.productId) || {};
   const product = selected.id ? { id: selected.id, type: selected.productType || selected.type || "package", price: Number(selected.specialPrice || selected.price || 0) } : { id: "", type: "package", price: 0 };
+  const rawDepositRatio = Number(selected.depositRatio ?? selected.depositRate ?? 30);
+  const depositRatio = Number.isFinite(rawDepositRatio) ? Math.min(1, Math.max(0, rawDepositRatio > 1 ? rawDepositRatio / 100 : rawDepositRatio)) : 0.3;
+  const totalAmount = Number(product.price || 0);
+  const depositDue = Math.round(totalAmount * depositRatio * 100) / 100;
   const isShopSource = form.sourceType === "shop";
   const isHeadquarterSourceValue = form.sourceType === "headquarter";
   const order = {
@@ -217,18 +220,23 @@ async function confirmCreateManualOrder() {
     sourceType: form.sourceType,
     sourceName: isHeadquarterSourceValue ? "总部二维码" : isShopSource ? "商家二维码" : "客服手动创建",
     sourceScene: isHeadquarterSourceValue ? "总部自有二维" : isShopSource ? "商家铺码转化" : "后台手动录入",
-    status: "pending",
-    customerStatus: "reserved",
+    status: "deposit_pending",
+    customerStatus: "待支付",
+    workflowStage: depositDue > 0 ? "awaiting_deposit" : "awaiting_dispatch",
     assigneeId: roleProfile.value.staffId || currentStaff.value?.id || "",
     photographerId: "",
-    appointmentAt: form.appointmentAt,
-    timePeriod: form.timePeriod || "待客服确",
-    totalAmount: Number(product.price || 0),
+    appointmentAt: "",
+    timePeriod: "",
+    totalAmount,
+    depositRatio,
+    depositDue,
+    finalDue: Math.max(totalAmount - depositDue, 0),
+    depositPaid: 0,
     finalPaid: 0,
     depositFinanceStatus: "",
     finalFinanceStatus: "",
     paymentVerify: "未核销",
-    packageSnapshot: selected.id ? { name: selected.name, price: Number(product.price || 0), originalPrice: Number(selected.originalPrice || selected.price || product.price || 0) } : {},
+    packageSnapshot: selected.id ? { name: selected.name, price: totalAmount, originalPrice: Number(selected.originalPrice || selected.price || product.price || 0), depositRatio } : {},
     priceAdjustReason: "",
     customerRemark: "",
     internalNote: form.internalNote || "客服后台手动创建订单",

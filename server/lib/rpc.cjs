@@ -14,6 +14,9 @@ const {
   hasConfirmedPayment,
   isServiceConfirmed,
   hasDeliveryRecord,
+  selectionConfirmed,
+  businessStatusForOrder,
+  businessStatusLabel,
   hasActiveAfterSale,
   customerCancellation,
   normalizePaymentStatus,
@@ -946,6 +949,13 @@ const STATUS_GROUPS = {
   completed: ["delivered", "completed"],
   canceled: ["canceled", "cancelled"]
 };
+const BUSINESS_STATUS_FILTERS = Object.freeze({
+  pending_payment: "pending_payment", "待支付": "pending_payment", pending: "pending_payment", deposit: "pending_payment",
+  awaiting_photographer: "awaiting_photographer", "待安排摄影师": "awaiting_photographer", confirmed: "awaiting_photographer",
+  shot: "shot", "已拍摄": "shot", shooting: "shot", editing: "shot", final: "shot",
+  paid: "paid", "已支付": "paid",
+  delivered: "delivered", "已交付": "delivered", completed: "delivered",
+});
 function customerStatusText(status) {
   if (STATUS_GROUPS.pending.includes(status)) return "预约待确认";
   if (STATUS_GROUPS.confirmed.includes(status)) return "已确认拍摄";
@@ -1616,11 +1626,15 @@ async function rpcGetMyOrders(source, openid, data = {}, ctx = {}) {
   try {
     if (!openid) return { success: false, error: "请先完成微信登录" };
     const { status } = data;
+    const requestedBusinessStatus = BUSINESS_STATUS_FILTERS[String(data.businessStatus || data.orderStatus || status || "").trim().toLowerCase()]
+      || BUSINESS_STATUS_FILTERS[String(data.businessStatus || data.orderStatus || status || "").trim()];
     const page = Math.max(1, Math.floor(Number(data.page) || 1));
     const pageSize = Math.min(100, Math.max(1, Math.floor(Number(data.pageSize) || 10)));
     let list = await source.list("orders");
     list = list.filter(o => !o.isDeleted && !o.deleted && (!openid || getOrderOpenid(o) === openid));
-    if (status && STATUS_GROUPS[status]) {
+    if (requestedBusinessStatus && (data.businessStatus !== undefined || data.orderStatus !== undefined || ["pending_payment", "awaiting_photographer", "shot", "paid", "delivered", "待支付", "待安排摄影师", "已拍摄", "已支付", "已交付"].includes(String(status || "")))) {
+      list = list.filter((order) => businessStatusForOrder(order) === requestedBusinessStatus);
+    } else if (status && STATUS_GROUPS[status]) {
       const allowed = STATUS_GROUPS[status];
       const stageMap = {
         pending: [WORKFLOW_STAGES.AWAITING_CONFIRMATION],
@@ -1701,6 +1715,16 @@ async function rpcOrderStatusCount(source, openid) {
     for (const key of Object.keys(groups)) {
       result[key] = all.filter(o => groups[key].includes(canonicalStage(o))).length;
     }
+    // Stable five-state counters for the current customer workflow. Legacy
+    // counters above remain available to older clients during migration.
+    result.businessStatus = Object.fromEntries(Object.values(BUSINESS_STATUS_FILTERS)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .map((value) => [value, all.filter((order) => businessStatusForOrder(order) === value).length]));
+    result.pending_payment = result.businessStatus.pending_payment || 0;
+    result.awaiting_photographer = result.businessStatus.awaiting_photographer || 0;
+    result.shot = result.businessStatus.shot || 0;
+    result.paid = result.businessStatus.paid || 0;
+    result.delivered = result.businessStatus.delivered || 0;
     return { success: true, data: result };
   } catch (err) {
     return { success: false, error: publicRpcError(err) };
@@ -1959,7 +1983,10 @@ async function rpcCreateBookingUnlocked(source, data = {}) {
     const timeValue = String(time || timePeriod || expectedTimePeriod || timeSlot || data.bookingTime || scheduleTime || "").trim();
     if (!name || !phone) return { success: false, error: "请完整填写姓名和手机号" };
     if (!/^1[3-9]\d{9}$/.test(String(phone).trim())) return { success: false, error: "手机号格式不正确" };
-    if (!date || !timeValue) return { success: false, error: "请填写期望拍摄日期和时段，客服确认后才生效" };
+    // The customer does not choose or lock a shooting time at checkout. The
+    // actual date/time is entered later by service staff on the dispatch form.
+    // Keep these fields optional for compatibility with older callers that do
+    // still send an expected date/time.
     if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T00:00:00+08:00`).getTime()))) return { success: false, error: "预约日期格式不正确" };
     const hasBookingItem = !!primaryPackageId || !!data.albumId || !!seriesId
       || normalizedItems.some((item) => item && (item.custom === true || item.packageId || item.albumId || item.peripheralId || item.productId || item.seriesId));
@@ -2025,8 +2052,8 @@ async function rpcCreateBookingUnlocked(source, data = {}) {
       packageSnapshot: { ...(firstItem || {}), items: bookingItems.map((item) => ({ ...item, price: roundMoney(item.price), depositRatio: normalizeRatio(item.depositRatio) })), totalPrice: serverTotalPrice, depositRatio },
       price: serverTotalPrice, totalPrice: serverTotalPrice, totalAmount: serverTotalPrice, amountTotal: serverTotalPrice,
       depositRatio, depositDue: depositAmount, finalDue: finalAmount,
-      depositPaid: 0, finalPaid: 0, bookingMode: "consult", workflowStage: WORKFLOW_STAGES.AWAITING_CONFIRMATION,
-      status: "new", customerStatus: "待客服联系确认", dispatchStatus: "pending", depositRefundable: true, selectionStatus: "not_started",
+      depositPaid: 0, finalPaid: 0, bookingMode: "consult", workflowStage: depositAmount > 0 ? WORKFLOW_STAGES.AWAITING_DEPOSIT : WORKFLOW_STAGES.AWAITING_DISPATCH,
+      status: "new", customerStatus: depositAmount > 0 ? "待支付" : "待安排摄影师", businessStatus: depositAmount > 0 ? "pending_payment" : "awaiting_photographer", businessStatusText: depositAmount > 0 ? "待支付" : "待安排摄影师", dispatchStatus: "pending", depositRefundable: true, selectionStatus: "not_started",
       serviceUser: "", serviceUserId: "", photographer: "", photographerId: "", serviceNote: "", deliveryNote: "", participantCount: Number(data.participantCount || firstItem.participantCount || 0) || undefined,
       paymentRecords: [],
       statusLogs: [{ type: "客户预约", action: "提交预约申请", operator: "系统", operatorId: openid, from: "", to: "new", workflowStage: WORKFLOW_STAGES.AWAITING_CONFIRMATION, createTime: now }],
@@ -2120,8 +2147,10 @@ async function rpcCreatePaymentIntent(source, openid, data = {}) {
     if (relatedAfterSaleTickets(order, tickets).some((ticket) => activeAfterSaleTicket(ticket)
       && (!ticket.orderId || String(ticket.orderId) === String(orderKey)))) return { success: false, error: "订单存在处理中售后，暂不能创建支付单" };
     const stage = canonicalStage(order);
-    if (phase === "deposit" && (!isServiceConfirmed(order) || stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT)) return { success: false, error: "客服确认服务快照后才能创建订金支付单" };
-    if (phase === "final" && (!hasDeliveryRecord(order) || stage !== WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT)) return { success: false, error: "成片发布后才能创建尾款支付单" };
+    if (phase === "deposit" && stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return { success: false, error: "当前订单不在待支付订金阶段" };
+    // Offline selection is the final-payment gate. Delivery is performed only
+    // after the final payment is confirmed.
+    if (phase === "final" && (!selectionConfirmed(order) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "定金到账且线下选片确认后才能创建尾款支付单" };
     const due = phase === "deposit" ? depositDue(order) : finalDue(order);
     if (due <= 0) return { success: false, error: "当前支付阶段无需收款" };
     const suppliedAmount = data.amount == null ? due : Number(data.amount);
@@ -2197,8 +2226,8 @@ async function rpcTestPayment(source, openid, data = {}) {
       if (relatedAfterSaleTickets(order, tickets).some((ticket) => activeAfterSaleTicket(ticket)
         && (!ticket.orderId || String(ticket.orderId) === String(orderKey)))) return { success: false, error: "订单存在处理中售后，暂不能测试支付" };
       const stage = canonicalStage(order);
-      if (phase === "deposit" && (!isServiceConfirmed(order) || stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT)) return { success: false, error: "客服确认服务快照后才能测试支付订金" };
-      if (phase === "final" && (!hasDeliveryRecord(order) || stage !== WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT)) return { success: false, error: "成片发布后才能测试支付尾款" };
+      if (phase === "deposit" && stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return { success: false, error: "当前订单不在待支付订金阶段" };
+      if (phase === "final" && (!selectionConfirmed(order) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "定金到账且线下选片确认后才能测试支付尾款" };
       const due = phase === "deposit" ? depositDue(order) : finalDue(order);
       if (due <= 0) return { success: false, error: "当前支付阶段无需收款" };
       const allOrders = await source.list("orders");
@@ -2228,7 +2257,7 @@ async function rpcTestPayment(source, openid, data = {}) {
       const patch = {
         paymentRecords: nextRecords, [paidField]: due, [financeField]: "已审", [paidAtField]: now,
         [confirmedAtField]: now, [confirmedByField]: "test_payment", [phase + "PaymentStatus"]: "confirmed",
-        status: phase === "deposit" ? "deposit_paid" : "delivered",
+        status: phase === "deposit" ? "deposit_paid" : "paid",
         statusLogs: [...(Array.isArray(order.statusLogs) ? order.statusLogs : []), timeline],
         followRecords: [...(Array.isArray(order.followRecords) ? order.followRecords : []), timeline], updateTime: now,
       };

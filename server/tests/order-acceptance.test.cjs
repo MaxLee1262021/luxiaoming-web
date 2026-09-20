@@ -137,13 +137,11 @@ async function withPaymentEnvironment(values, callback) {
   }
 }
 
-test("booking uses the verified owner, requires an expected slot, and rejects ambiguous order numbers", async () => {
+test("booking uses the verified owner, leaves shooting time for manual confirmation, and rejects ambiguous order numbers", async () => {
   const source = makeSource();
   const request = {
     name: "Customer",
     phone: "13800000000",
-    date: "2026-12-20",
-    timePeriod: "morning",
     items: [{ packageId: "package-1" }],
     idempotencyKey: "booking-owner-0001",
     openid: "spoofed-owner",
@@ -155,7 +153,9 @@ test("booking uses the verified owner, requires an expected slot, and rejects am
   assert.equal(created.success, true);
   const order = await source.get("orders", created.orderId);
   assert.equal(order.openid, "owner");
-  assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_CONFIRMATION);
+  assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
+  assert.equal(order.date, "");
+  assert.equal(order.timePeriod, "");
   assert.deepEqual(order.paymentRecords, []);
   assert.match(order.orderNo, /^LS\d{8}[A-F0-9]{10}$/);
 
@@ -168,10 +168,10 @@ test("booking uses the verified owner, requires an expected slot, and rejects am
   const reusedByAnotherOwner = await rpc(source, "createBooking", { data: request }, publicIdentity("other-owner"));
   assert.equal(reusedByAnotherOwner.success, false);
 
-  const missingSlot = await rpc(source, "createBooking", {
+  const noSlot = await rpc(source, "createBooking", {
     data: { ...request, idempotencyKey: "booking-owner-0002", date: "", timePeriod: "" },
   }, publicIdentity("owner"));
-  assert.equal(missingSlot.success, false);
+  assert.equal(noSlot.success, true);
 
   source.collections.orders["duplicate-a"] = { id: "duplicate-a", orderNo: "DUPLICATE-ORDER", openid: "owner", status: "new" };
   source.collections.orders["duplicate-b"] = { id: "duplicate-b", orderNo: "DUPLICATE-ORDER", openid: "owner", status: "new" };
@@ -183,7 +183,7 @@ test("booking uses the verified owner, requires an expected slot, and rejects am
   assert.match(migration, /CREATE TABLE IF NOT EXISTS `lxm_orders`[\s\S]*?UNIQUE KEY `uq_order_number` \(`orderNo`\)/);
 });
 
-test("public status filters keep the same stage ownership as the mini-program", async () => {
+test("public status filters use the five customer-facing business states", async () => {
   const source = makeSource();
   source.collections.orders.confirmation = { id: "confirmation", openid: "owner", status: "new", totalAmount: 100, depositDue: 30, finalDue: 70 };
   source.collections.orders.dispatch = {
@@ -204,13 +204,13 @@ test("public status filters keep the same stage ownership as the mini-program", 
     dispatchRecord: { id: "dispatch-record" },
     paymentRecords: [{ id: "assigned-deposit", phase: "deposit", amount: 30, status: "confirmed", provider: "manual" }],
   };
-  source.collections.orders.completed = { ...confirmedOrder("completed"), openid: "owner", status: "completed", depositPaid: 30, finalPaid: 70, depositFinanceStatus: "confirmed", finalFinanceStatus: "confirmed" };
+  source.collections.orders.completed = { ...confirmedOrder("completed"), openid: "owner", status: "delivered", depositPaid: 30, finalPaid: 70, depositFinanceStatus: "confirmed", finalFinanceStatus: "confirmed", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-20T10:00:00.000Z", deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-20T11:00:00.000Z", paymentRecords: [{ id: "completed-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "completed-final", phase: "final", amount: 70, status: "confirmed" }] };
 
-  const pending = await rpc(source, "getMyOrders", { data: { status: "pending", page: 1, pageSize: 20 } }, publicIdentity("owner"));
+  const pending = await rpc(source, "getMyOrders", { data: { status: "pending_payment", page: 1, pageSize: 20 } }, publicIdentity("owner"));
   assert.deepEqual(pending.data.map((row) => row.id), ["confirmation"]);
-  const confirmed = await rpc(source, "getMyOrders", { data: { status: "confirmed", page: 1, pageSize: 20 } }, publicIdentity("owner"));
+  const confirmed = await rpc(source, "getMyOrders", { data: { status: "awaiting_photographer", page: 1, pageSize: 20 } }, publicIdentity("owner"));
   assert.deepEqual(new Set(confirmed.data.map((row) => row.id)), new Set(["dispatch", "assigned"]));
-  const completed = await rpc(source, "getMyOrders", { data: { status: "completed", page: 1, pageSize: 20 } }, publicIdentity("owner"));
+  const completed = await rpc(source, "getMyOrders", { data: { status: "delivered", page: 1, pageSize: 20 } }, publicIdentity("owner"));
   assert.deepEqual(completed.data.map((row) => row.id), ["completed"]);
 });
 
@@ -462,27 +462,19 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
 
   const conflictingDispatch = await post("super-token", "/api/orders/dispatch-target/action", {
     action: "assign", photographerId: "photo", appointmentAt: "2026-12-20", timePeriod: "morning",
-    appointmentLocation: "test location", peopleCount: 2, reason: "conflicting assignment",
+    appointmentLocation: "test location", peopleCount: 2, enforceScheduleConflict: true, reason: "conflicting assignment",
   });
   assert.equal(conflictingDispatch.status, 409, JSON.stringify(conflictingDispatch.body));
   assert.equal((await source.get("orders", "dispatch-target")).photographerId || "", "");
 
   const serviceStart = await post("service-token", "/api/orders/task/action", { action: "start", reason: "service must not start task" });
   assert.equal(serviceStart.status, 403);
-  const startBeforeAccept = await post("photo-token", "/api/orders/task/action", { action: "start", reason: "must accept first" });
-  assert.equal(startBeforeAccept.status, 409);
+  const startBeforeAccept = await post("photo-token", "/api/orders/task/action", { action: "start", reason: "direct start after assignment" });
+  assert.equal(startBeforeAccept.status, 200, JSON.stringify(startBeforeAccept.body));
   const crossPhotographerAccept = await post("other-photo-token", "/api/orders/task/action", { action: "taskaccept", reason: "wrong photographer" });
   assert.equal(crossPhotographerAccept.status, 403);
-  const acceptedTask = await post("photo-token", "/api/orders/task/action", { action: "taskaccept", reason: "accept assigned task" });
-  assert.equal(acceptedTask.status, 200, JSON.stringify(acceptedTask.body));
-  const repeatedAccept = await post("photo-token", "/api/orders/task/action", { action: "taskaccept", reason: "repeat assigned task" });
-  assert.equal(repeatedAccept.status, 200);
-  assert.equal(repeatedAccept.body.idempotent, true);
-  assert.equal((await source.get("orders", "task")).taskStatus, "accepted");
   const serviceComplete = await post("service-token", "/api/orders/task/action", { action: "shootcomplete", reason: "service must not complete task" });
   assert.equal(serviceComplete.status, 403);
-  const startedTask = await post("photo-token", "/api/orders/task/action", { action: "start", reason: "start accepted task" });
-  assert.equal(startedTask.status, 200, JSON.stringify(startedTask.body));
   const completedTask = await post("photo-token", "/api/orders/task/action", { action: "shootcomplete", reason: "complete accepted task" });
   assert.equal(completedTask.status, 200, JSON.stringify(completedTask.body));
   const unableTask = await post("photo-token", "/api/orders/unable/action", { action: "unable", reason: "photographer unavailable" });
@@ -497,16 +489,21 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
   const selected = await post("photo-token", "/api/orders/selection/action", { action: "selectionConfirm", reason: "selection completed" });
   assert.equal(selected.status, 200, JSON.stringify(selected.body));
   const selectedOrder = await source.get("orders", "selection");
-  assert.equal(workflow.canonicalStage(selectedOrder), workflow.WORKFLOW_STAGES.AWAITING_DELIVERY);
-  const finalBeforePublication = await rpc(source, "createPayment", {
+  assert.equal(workflow.canonicalStage(selectedOrder), workflow.WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT);
+  const finalIntent = await rpc(source, "createPayment", {
     data: { orderId: "selection", phase: "final", idempotencyKey: "final-before-publication-0001" },
   }, publicIdentity("owner"));
-  assert.equal(finalBeforePublication.success, false);
+  assert.equal(finalIntent.success, true, JSON.stringify(finalIntent));
+  const finalConfirmed = await post("finance-token", "/api/orders/selection/action", {
+    action: "payment", phase: "final", paymentStatus: "confirmed", amount: 70,
+    externalTransactionId: "selection-final-tx-0001", idempotencyKey: "selection-final-confirm-0001", reason: "confirm final payment",
+  });
+  assert.equal(finalConfirmed.status, 200, JSON.stringify(finalConfirmed.body));
   const published = await post("super-token", "/api/orders/selection/action", {
     action: "deliver", deliveryMethod: "enterprise_wechat", reason: "publish completed files",
   });
   assert.equal(published.status, 200, JSON.stringify(published.body));
-  assert.equal(workflow.canonicalStage(await source.get("orders", "selection")), workflow.WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT);
+  assert.equal(workflow.canonicalStage(await source.get("orders", "selection")), workflow.WORKFLOW_STAGES.DELIVERED);
 
   const overConfirmedFunds = await post("super-token", "/api/after-sales/refund-ticket/action", {
     action: "complete", reason: "request too much", refundAmount: 31, refundConfirmed: true,

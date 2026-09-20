@@ -253,7 +253,32 @@ async function persistOrderAction(order, action, payload = {}) {
       });
     }
     if (action === "start") { order.status = "shooting"; order.customerStatus = "shooting"; }
-    if (action === "deliver") { order.status = "delivered"; order.customerStatus = "done"; }
+    if (action === "assign") {
+      Object.assign(order, {
+        photographerId: payload.photographerId || order.photographerId || "",
+        appointmentAt: payload.appointmentAt || order.appointmentAt || "",
+        appointmentLocation: payload.appointmentLocation || order.appointmentLocation || "",
+        peopleCount: payload.peopleCount || order.peopleCount || 1,
+        dispatchStatus: "assigned",
+        depositRefundable: false,
+        workflowStage: "awaiting_shoot",
+        status: "assigned",
+        customerStatus: "待安排摄影师"
+      });
+    }
+    if (action === "shootcomplete") {
+      Object.assign(order, { status: "final_pending", workflowStage: "selection_pending", shootingCompletedAt: LXMFormat.nowText(), selectionStatus: "pending", customerStatus: "已拍摄" });
+    }
+    if (action === "selectionconfirm") {
+      Object.assign(order, { status: "final_pending", workflowStage: "awaiting_final_payment", selectionStatus: "confirmed", selectionConfirmedAt: LXMFormat.nowText(), customerStatus: "已拍摄" });
+    }
+    if (action === "payment" && payload.phase === "deposit" && String(payload.paymentStatus || "") === "confirmed") {
+      Object.assign(order, { status: "deposit_paid", workflowStage: "awaiting_dispatch", customerStatus: "待安排摄影师", depositRefundable: false });
+    }
+    if (action === "payment" && payload.phase === "final" && String(payload.paymentStatus || "") === "confirmed") {
+      Object.assign(order, { status: "paid", workflowStage: "paid", customerStatus: "已支付" });
+    }
+    if (action === "deliver") { order.status = "delivered"; order.workflowStage = "delivered"; order.customerStatus = "已交付"; }
     if (action === "complete") { order.status = "completed"; order.customerStatus = "done"; }
     if (action === "cancel") { order.status = "cancelled"; order.customerStatus = "已取消"; order.deleted = true; order.isDeleted = true; }
     if (action === "unassign") { order.photographerId = ""; order.status = "confirmed"; order.customerStatus = "confirmed"; }
