@@ -197,7 +197,13 @@ function createJson(options) {
     // the active authorization policy is menu-only.
     setRolePermissions: async (roleId) => ({ roleId }),
     getRolePermissions: async (roleId) => ({ roleId }),
-    async authenticate(account, password) { const found = values("users").find((u) => u.account === String(account).trim()); if (!found || ["disabled", "停用", "禁用"].includes(String(found.status).toLowerCase()) || !verifyPassword(found.password || found.passwordHash, password)) return null; return safeUser(found); },
+    async authenticate(account, password, options = {}) {
+      const found = values("users").find((user) => user.account === String(account).trim());
+      if (!found || !verifyPassword(found.password || found.passwordHash, password)) return null;
+      const disabled = ["disabled", "停用", "禁用", "inactive"].includes(String(found.status || "").toLowerCase());
+      if (disabled && options.includeDisabled !== true) return null;
+      return safeUser(found);
+    },
     async snapshot() { return { menus: values("menus"), roles: values("roles"), roleMenus: values("roleMenus"), users: await listUsers() }; },
     async close() {}
   };

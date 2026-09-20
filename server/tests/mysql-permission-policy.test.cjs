@@ -134,6 +134,83 @@ test("menu policy closes active parents and ignores legacy action grants", async
   }
 });
 
+test("disabled permission account exposes status only after correct credentials", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lxm-disabled-login-"));
+  const file = path.join(dir, "authz.json");
+  let store;
+  let auth;
+  let server;
+
+  try {
+    fs.writeFileSync(file, JSON.stringify({ collections: {}, authz: { menus: {}, roles: {}, roleMenus: {}, rolePermissions: {}, users: {} } }), "utf8");
+    store = createPermissionStore({ backend: "json", jsonFile: file });
+    await store.ensureSchema();
+    await store.createMenu({ id: "menu_dashboard", menuKey: "dashboard", name: "Dashboard", path: "/dashboard", status: "active", meta: { routeKey: "dashboard" } });
+    await store.createRole({ id: "role_super", roleKey: "super", name: "System", status: "active" });
+    await store.createRole({ id: "role_member", roleKey: "member", name: "Member", status: "active" });
+    await store.createUser({
+      id: "user_admin", account: "admin", name: "Admin", password: "AdminPass123",
+      roleId: "role_super", role: "super", status: "active",
+      extra: { legacyKey: "staff", legacyId: "user_admin", subjectType: "staff", subjectId: "user_admin" }
+    });
+    await store.createUser({
+      id: "user_disabled", account: "disabled_member", name: "Disabled Member", password: "DisabledPass123",
+      roleId: "role_member", role: "member", status: "disabled",
+      extra: { legacyKey: "staff", legacyId: "user_disabled", subjectType: "staff", subjectId: "user_disabled" }
+    });
+    // The JSON store emulates the production permission-login path for this API test.
+    store.required = true;
+    store.backend = "mysql";
+    auth = createAuthStore();
+    const source = makeSource();
+    const handler = createApi(source, "json", { auth, permissionStore: store, sourceStatus: { configured: true, ready: true, persistent: false } });
+    server = http.createServer((req, res) => handler(req, res, (req.url || "/").split("?")[0]));
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const login = async (account, password) => {
+      const response = await fetch(`${base}/api/auth/login`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account, password })
+      });
+      return { status: response.status, body: await response.json() };
+    };
+
+    const adminLogin = await login("admin", "AdminPass123");
+    assert.equal(adminLogin.status, 200);
+
+    const invalidPhoneUpdate = await fetch(`${base}/api/permissions/users/user_disabled`, {
+      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.body.token}` },
+      body: JSON.stringify({ phone: "1550000001sd" })
+    });
+    assert.equal(invalidPhoneUpdate.status, 400);
+    assert.equal((await invalidPhoneUpdate.json()).error, "手机号格式不正确，请输入 11 位大陆手机号");
+    assert.equal(await source.get("staff", "user_disabled"), null);
+
+    const validPhoneUpdate = await fetch(`${base}/api/permissions/users/user_disabled`, {
+      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.body.token}` },
+      body: JSON.stringify({ phone: "15500000001" })
+    });
+    assert.equal(validPhoneUpdate.status, 200);
+    assert.equal((await validPhoneUpdate.json()).phone, "15500000001");
+    assert.equal((await source.get("staff", "user_disabled")).phone, "15500000001");
+
+    const disabled = await login("disabled_member", "DisabledPass123");
+    assert.equal(disabled.status, 403);
+    assert.deepEqual(disabled.body, { ok: false, code: "ACCOUNT_DISABLED", error: "该账号已被停用，请联系管理员启用后再登录" });
+    assert.equal(JSON.stringify(disabled.body).includes("DisabledPass123"), false);
+
+    const wrongPassword = await login("disabled_member", "wrong-password");
+    assert.equal(wrongPassword.status, 401);
+    assert.equal(wrongPassword.body && wrongPassword.body.error, "账号或密码错");
+    assert.equal(Object.prototype.hasOwnProperty.call(wrongPassword.body || {}, "code"), false);
+  } finally {
+    await closeServer(server);
+    if (auth) await auth.close();
+    if (store) await store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("MySQL admin policy is automatic and password changes require admin", { skip: !RUN_MYSQL_TESTS }, async () => {
   const config = databaseConfig();
   const database = `codex_permission_policy_${process.pid}_${Date.now()}`;
@@ -235,6 +312,16 @@ test("MySQL admin policy is automatic and password changes require admin", { ski
     assert.equal(memberLogin.body.menuDefinitions.every((menu) => ["root", "child"].includes(menu.key)), true);
     assert.equal(memberLogin.body.menuDefinitions.find((menu) => menu.key === "root").containerOnly, true);
     assert.equal(memberLogin.body.menuDefinitions.find((menu) => menu.key === "child").containerOnly, false);
+
+    await store.updateUser("user_member", { status: "disabled" });
+    const disabledMemberLogin = await login("member", "MemberPass123");
+    assert.equal(disabledMemberLogin.status, 403);
+    assert.deepEqual(disabledMemberLogin.body, { ok: false, code: "ACCOUNT_DISABLED", error: "该账号已被停用，请联系管理员启用后再登录" });
+    const disabledMemberWrongPassword = await login("member", "wrong-password");
+    assert.equal(disabledMemberWrongPassword.status, 401);
+    assert.equal(disabledMemberWrongPassword.body && disabledMemberWrongPassword.body.error, "账号或密码错");
+    await store.updateUser("user_member", { status: "active" });
+
     const memberUpdate = await fetch(`${base}/api/permissions/users/user_member`, {
       method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.body.token}` },
       body: JSON.stringify({ permissionKeys: ["financeReview"], permissions: ["financeReview"] })
@@ -242,6 +329,21 @@ test("MySQL admin policy is automatic and password changes require admin", { ski
     const memberUpdateBody = await memberUpdate.json();
     assert.equal(memberUpdate.status, 200);
     assert.equal(Object.prototype.hasOwnProperty.call(memberUpdateBody, "permissionKeys"), false);
+
+    const invalidPhoneUpdate = await fetch(`${base}/api/permissions/users/user_member`, {
+      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.body.token}` },
+      body: JSON.stringify({ phone: "1550000001sd" })
+    });
+    assert.equal(invalidPhoneUpdate.status, 400);
+    assert.equal((await invalidPhoneUpdate.json()).error, "手机号格式不正确，请输入 11 位大陆手机号");
+
+    const validPhoneUpdate = await fetch(`${base}/api/permissions/users/user_member`, {
+      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminLogin.body.token}` },
+      body: JSON.stringify({ phone: "15500000001" })
+    });
+    assert.equal(validPhoneUpdate.status, 200);
+    assert.equal((await validPhoneUpdate.json()).phone, "15500000001");
+
     const [legacyRoleRows] = await admin.query(`SELECT permission_key FROM \`${database}\`.lxm_auth_role_permissions WHERE role_id=?`, ["role_member"]);
     const [legacyUserRows] = await admin.query(`SELECT permission_key FROM \`${database}\`.lxm_auth_user_permissions WHERE user_id=?`, ["user_member"]);
     assert.deepEqual(legacyRoleRows.map((row) => row.permission_key), ["orderEdit"]);

@@ -36,6 +36,7 @@ const ALL_KEYS = [
   "financeSettings", "monthlyClosings", "adjustmentRecords", "homeConfig", "logs", "trash",
   "merchantCodes", "siteConfig", "userProfiles", "config"
 ];
+const MAINLAND_MOBILE_PHONE_PATTERN = /^1[3-9]\d{9}$/;
 const KEY_SET = new Set(ALL_KEYS);
 const DOCUMENT_KEYS = new Set(["homeConfig", "siteConfig", "config", "financeSettings"]);
 const AFTER_SALE_TERMINAL_STATUSES = new Set(["completed", "closed", "done", "已完", "已完成", "已结案", "已结束"]);
@@ -1198,13 +1199,18 @@ module.exports = function createApi(source, mode, options = {}) {
   async function handlePermissionLogin(req, res, account, password, lockKey) {
     if (!permissionStore || !permissionStore.required) return false;
     await initPermissions();
-    const user = await permissionStore.authenticate(account, password);
+    // The status is surfaced only after the supplied password is verified. This
+    // preserves generic failures for unknown accounts and incorrect passwords.
+    const user = await permissionStore.authenticate(account, password, { includeDisabled: true });
     if (!user) {
       const result = await auth.recordLoginFailure(lockKey);
       if (result.blocked) return json(res, 429, { ok: false, error: "账号或密码错（失败次数过多，账号已临时锁定）" });
       return json(res, 401, { ok: false, error: "账号或密码错" });
     }
-    if (isDisabledStatus(user.status)) return json(res, 403, { ok: false, error: "该账号已被停用，请联系管理员启用后再登录" });
+    if (isDisabledStatus(user.status)) {
+      await auditDenied({ account }, "/api/auth/login", "账号当前已停用");
+      return json(res, 403, { ok: false, code: "ACCOUNT_DISABLED", error: "该账号已被停用，请联系管理员启用后再登录" });
+    }
     const policy = await permissionStore.getPolicyForUser(user);
     const subject = authzSubject(user, policy);
     if (!policy || !policy.role || !subject.roleKey || isDisabledStatus(policy.role.status)) return json(res, 403, { ok: false, error: "该账号绑定的角色不存在或已停用" });
@@ -1895,13 +1901,16 @@ module.exports = function createApi(source, mode, options = {}) {
       if (idPart && passwordProvided && !isBuiltinAdminAccount(session)) return forbidden(res, session, pathname, "仅 admin 账号可以修改人员密码");
       if (!idPart && !password) return json(res, 400, { error: "新增人员必须设置密码" });
       if (password && (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password))) return json(res, 400, { error: "密码至少 8 位且同时包含字母和数字" });
+      const phoneProvided = Object.prototype.hasOwnProperty.call(body, "phone");
+      const phone = String(body.phone ?? (existingUser && existingUser.phone) ?? "").trim();
+      if (phoneProvided && phone && !MAINLAND_MOBILE_PHONE_PATTERN.test(phone)) return json(res, 400, { error: "手机号格式不正确，请输入 11 位大陆手机号" });
       const userId = idPart || String(body.id || `staff_${crypto.randomBytes(8).toString("hex")}`);
       const inferredSubjectType = existingExtra.subjectType || (existingExtra.legacyKey === "shops" ? "merchant" : existingExtra.legacyKey === "distributors" ? "distributor" : existingExtra.legacyKey === "agents" ? "agent" : "staff");
       const inferredLegacyKey = existingExtra.legacyKey || (inferredSubjectType === "merchant" ? "shops" : inferredSubjectType === "distributor" ? "distributors" : inferredSubjectType === "agent" ? "agents" : "staff");
       const extra = { ...existingExtra, ...(body.extra && typeof body.extra === "object" ? body.extra : {}), subjectType: String(body.subjectType || inferredSubjectType), subjectId: String(body.subjectId || existingExtra.subjectId || userId), legacyKey: inferredLegacyKey, legacyId: String(existingExtra.legacyId || userId), distributorId: String(body.distributorId ?? existingExtra.distributorId ?? ""), agentId: String(body.agentId ?? existingExtra.agentId ?? ""), shopId: String(body.shopId ?? existingExtra.shopId ?? "") };
       delete extra.permissions;
       delete extra.permissionKeys;
-      const payload = { id: userId, account, name, displayName: name, roleId: role.id, role: role.roleKey, status: body.status === undefined ? permissionStatus(existingUser && existingUser.status) : permissionStatus(body.status), phone: String(body.phone ?? (existingUser && existingUser.phone) ?? "").slice(0, 64), email: String(body.email ?? (existingUser && existingUser.email) ?? "").slice(0, 255), extra };
+      const payload = { id: userId, account, name, displayName: name, roleId: role.id, role: role.roleKey, status: body.status === undefined ? permissionStatus(existingUser && existingUser.status) : permissionStatus(body.status), phone: phone.slice(0, 64), email: String(body.email ?? (existingUser && existingUser.email) ?? "").slice(0, 255), extra };
       const superRole = roles.find((item) => item.roleKey === "super");
       if (existingUser && isBuiltinAdminAccount(existingUser) && (role.roleKey !== "super" || payload.status === "disabled")) {
         return json(res, 409, { error: "内置 admin 账号必须保持启用的系统管理员角色" });

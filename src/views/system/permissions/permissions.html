@@ -1,68 +1,275 @@
 <div class="permissions-page">
-  <div class="permissions-header">
+  <header class="permissions-header">
     <div>
-      <span class="permissions-eyebrow">系统安全 / 权限中心</span>
+      <span class="permissions-eyebrow">系统安全</span>
       <h2>权限管理</h2>
-      <p>统一维护后台菜单、角色授权与人员账号，授权变更会写入权限数据表。</p>
+      <p>菜单、角色与人员账号统一维护。</p>
     </div>
     <div class="permissions-header-actions">
       <el-tag :type="readOnly ? 'info' : 'success'">{{ readOnly ? '只读模式' : '可配置权限' }}</el-tag>
       <el-button :loading="loading" @click="loadAll">刷新数据</el-button>
     </div>
-  </div>
-
-  <div class="permissions-stat-grid">
-    <div><span>启用菜单</span><strong>{{ activeMenuCount }}</strong><em>当前菜单配置</em></div>
-    <div><span>启用角色</span><strong>{{ activeRoleCount }}</strong><em>授权角色</em></div>
-    <div><span>人员账号</span><strong>{{ userRows.length }}</strong><em>后台登录账号</em></div>
-    <div class="permissions-stat-note"><span>权限原则</span><strong>最小授权</strong><em>停用账号立即失效</em></div>
-  </div>
+  </header>
 
   <el-tabs v-model="activeTab" class="permissions-tabs">
-    <el-tab-pane label="菜单配置" name="menus">
-      <div class="permissions-toolbar">
-        <el-input v-model="menuFilter" clearable placeholder="搜索菜单名称、标识或分组" />
-        <el-button type="primary" :disabled="readOnly" @click="openMenu()">新增菜单</el-button>
-      </div>
-      <div class="permissions-table-panel">
-        <div class="permissions-section-title"><div><strong>后台菜单</strong><p>菜单可独立命名并绑定到已注册后台页面，层级最多为两级。</p></div><el-tag type="info">{{ filteredMenus.length }} 项</el-tag></div>
-        <el-table :data="filteredMenus" stripe border empty-text="暂无菜单配置">
-          <el-table-column prop="name" label="菜单名称" min-width="180"><template #default="{row}"><strong>{{ row.name || row.label || menuLabel(row.key) }}</strong><div class="muted">{{ row.key }}</div></template></el-table-column>
-          <el-table-column prop="group" label="分组" width="140" />
-          <el-table-column prop="parentId" label="上级菜单" width="140"><template #default="{row}">{{ (row.parentKey !== undefined ? row.parentKey : row.parentId) ? menuLabel(row.parentKey !== undefined ? row.parentKey : row.parentId, row.parentKey !== undefined ? row.parentKey : row.parentId) : '顶级菜单' }}</template></el-table-column>
-          <el-table-column prop="sort" label="排序" width="80" align="center" />
-          <el-table-column label="状态" width="100"><template #default="{row}"><el-switch :model-value="row.status === '启用'" :disabled="readOnly" @change="toggleMenu(row, $event)" /></template></el-table-column>
-          <el-table-column fixed="right" label="操作" width="160"><template #default="{row}"><el-button link type="primary" :disabled="readOnly" @click="openMenu(row)">编辑</el-button><el-button link type="danger" :disabled="readOnly" @click="deleteMenu(row)">删除</el-button></template></el-table-column>
-        </el-table>
-      </div>
-    </el-tab-pane>
-
-    <el-tab-pane label="角色授权" name="roles">
-      <div class="role-layout">
-        <aside class="role-list-panel">
-          <div class="permissions-section-title"><div><strong>角色列表</strong><p>{{ roleRows.length }} 个角色</p></div><el-button link type="primary" :disabled="readOnly" @click="openRole()">新增</el-button></div>
-          <button v-for="role in roleRows" :key="role.id" class="role-list-item" :class="{active: selectedRoleId === role.id}" @click="selectRole(role)"><span>{{ role.name }}</span><small>{{ role.key }} · {{ role.status || '启用' }}</small></button>
+    <el-tab-pane label="菜单管理" name="menus">
+      <div class="permissions-menu-workbench">
+        <aside class="permissions-group-panel" aria-label="菜单分组筛选">
+          <div class="permissions-group-panel__head">
+            <span>菜单分组</span>
+            <strong>业务导航</strong>
+          </div>
+          <div class="permissions-group-list">
+            <button
+              v-for="item in menuGroupOptions"
+              :key="item.key || 'all'"
+              type="button"
+              class="permissions-group-item"
+              :class="{ active: menuQuery.group === item.key }"
+              @click="selectMenuGroup(item.key)"
+            >
+              <span>{{ item.label }}</span>
+              <em>{{ item.count }}</em>
+            </button>
+          </div>
         </aside>
-        <section class="role-editor-panel" v-if="selectedRole">
-          <div class="permissions-section-title"><div><strong>{{ selectedRole.name }}</strong><p>{{ selectedRole.description || '为角色配置可访问的后台菜单。' }}</p></div><div v-if="selectedRole.key !== 'super'"><el-button :disabled="readOnly" @click="toggleRole(selectedRole)">{{ selectedRole.status === '停用' ? '启用角色' : '停用角色' }}</el-button><el-button type="primary" :disabled="readOnly" @click="editSelectedRole">编辑授权</el-button><el-button link type="danger" :disabled="readOnly" @click="deleteRole(selectedRole)">删除</el-button></div></div>
-          <div class="role-summary"><div><span>授权菜单</span><strong>{{ (selectedRole.menus || []).length }} 项</strong></div><div><span>状态</span><el-tag :type="selectedRole.status === '停用' ? 'danger' : 'success'">{{ selectedRole.status || '启用' }}</el-tag></div></div>
-          <div class="role-permission-block"><h4>菜单权限</h4><div class="permission-chip-list"><el-tag v-for="key in selectedRole.menus" :key="key" effect="plain">{{ menuLabel(key, key) }}</el-tag><span v-if="!(selectedRole.menus || []).length" class="muted">暂未授权菜单</span></div></div>
-        </section>
-        <el-empty v-else description="请选择角色" />
+
+        <main class="permissions-workspace">
+          <section class="permissions-filter-panel" aria-label="菜单筛选">
+            <div class="permissions-filter-fields">
+              <label class="permissions-filter-field">
+                <span>菜单名称</span>
+                <el-input v-model="menuQuery.keyword" clearable placeholder="输入菜单名称或标识" @keyup.enter="applyMenuFilters" />
+              </label>
+              <label class="permissions-filter-field">
+                <span>菜单层级</span>
+                <el-select v-model="menuQuery.level" clearable placeholder="全部层级">
+                  <el-option label="一级菜单" value="一级菜单" />
+                  <el-option label="二级菜单" value="二级菜单" />
+                </el-select>
+              </label>
+              <label class="permissions-filter-field">
+                <span>状态</span>
+                <el-select v-model="menuQuery.status" clearable placeholder="全部状态">
+                  <el-option label="启用" value="启用" />
+                  <el-option label="停用" value="停用" />
+                </el-select>
+              </label>
+            </div>
+            <div class="permissions-filter-actions">
+              <el-button type="primary" @click="applyMenuFilters">查询</el-button>
+              <el-button @click="resetMenuFilters">重置</el-button>
+            </div>
+          </section>
+
+          <section class="permissions-list-panel">
+            <div class="permissions-list-toolbar">
+              <div>
+                <strong>菜单列表</strong>
+                <span>{{ filteredMenus.length }} 项</span>
+              </div>
+              <div class="permissions-list-actions">
+                <el-button :loading="loading" @click="loadAll">刷新</el-button>
+                <el-button type="primary" :disabled="readOnly" @click="openMenu()">新增一级菜单</el-button>
+              </div>
+            </div>
+            <div class="permissions-table-scroll">
+              <el-table :data="filteredMenus" stripe border row-key="id" empty-text="暂无符合条件的菜单">
+                <el-table-column label="菜单名称" min-width="150">
+                  <template #default="{row}">
+                    <div class="permission-menu-name" :class="{ 'is-child': row.depth }">
+                      <span v-if="row.depth" class="permission-menu-branch" aria-hidden="true">└</span>
+                      <strong>{{ row.name || row.label || menuLabel(row.key) }}</strong>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="key" label="菜单标识" min-width="120" />
+                <el-table-column label="点击后进入的页面" min-width="150">
+                  <template #default="{row}">
+                    <div class="permission-route-cell"><strong>{{ routeLabel(row.routeKey || row.targetKey || row.key) }}</strong><small>{{ row.routeKey || row.targetKey || row.key }}</small></div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="菜单归属" min-width="160">
+                  <template #default="{row}">
+                    <div class="permission-meta-cell"><el-tag size="small" effect="plain">{{ menuLevelLabel(row) }}</el-tag><span>{{ row.group || '未分组' }} · 排序 {{ row.sort ?? row.sortNo ?? 0 }}</span></div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="状态" width="70" align="center"><template #default="{row}"><el-switch :model-value="row.status !== '停用'" :disabled="readOnly" :aria-label="`${row.name || row.label || row.key}菜单状态`" @change="toggleMenu(row, $event)" /></template></el-table-column>
+                <el-table-column label="操作" width="180">
+                  <template #default="{row}">
+                    <div class="permissions-row-actions">
+                      <el-button v-if="menuLevelLabel(row) === '一级菜单'" link type="primary" :disabled="readOnly" @click="openChildMenu(row)">新增二级</el-button>
+                      <el-button link type="primary" :disabled="readOnly" @click="openMenu(row)">编辑</el-button>
+                      <el-button link type="danger" :disabled="readOnly" @click="deleteMenu(row)">删除</el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+          </section>
+        </main>
       </div>
     </el-tab-pane>
 
-    <el-tab-pane label="人员账号" name="users">
-      <div class="permissions-toolbar user-toolbar"><el-input v-model="userFilter.keyword" clearable placeholder="搜索姓名、账号、手机号" /><el-select v-model="userFilter.role" clearable placeholder="全部角色"><el-option v-for="role in roleRows" :key="role.id" :label="role.name" :value="role.key || role.id" /></el-select><el-select v-model="userFilter.status" clearable placeholder="全部状态"><el-option label="启用" value="启用" /><el-option label="停用" value="停用" /></el-select><el-button type="primary" :disabled="readOnly" @click="openUser()">新增人员</el-button></div>
-      <div class="permissions-table-panel"><div class="permissions-section-title"><div><strong>后台人员</strong><p>人员账号必须绑定角色，停用后不能创建新的后台会话。</p></div><el-tag type="info">{{ filteredUsers.length }} 人</el-tag></div><el-table :data="filteredUsers" stripe border empty-text="暂无人员账号"><el-table-column prop="name" label="姓名" min-width="140" /><el-table-column prop="account" label="登录账号" min-width="160" /><el-table-column label="角色" width="130"><template #default="{row}"><el-tag size="small">{{ userRoleName(row) }}</el-tag></template></el-table-column><el-table-column prop="phone" label="手机号" width="150" /><el-table-column label="状态" width="100"><template #default="{row}"><el-tag :type="row.status === '停用' ? 'danger' : 'success'">{{ row.status || '启用' }}</el-tag></template></el-table-column><el-table-column label="操作" fixed="right" width="300"><template #default="{row}"><el-button link type="primary" :disabled="readOnly" @click="openUser(row)">编辑</el-button><el-button v-if="isAdminAccount" link type="primary" :disabled="readOnly" @click="openPassword(row)">修改密码</el-button><el-button link :type="row.status === '停用' ? 'success' : 'danger'" :disabled="readOnly" @click="toggleUser(row)">{{ row.status === '停用' ? '启用' : '停用' }}</el-button><el-button link type="danger" :disabled="readOnly" @click="deleteUser(row)">删除</el-button></template></el-table></div>
+    <el-tab-pane label="角色管理" name="roles">
+      <div class="permissions-workspace permissions-workspace--wide">
+        <section class="permissions-filter-panel" aria-label="角色筛选">
+          <div class="permissions-filter-fields">
+            <label class="permissions-filter-field">
+              <span>角色名称</span>
+              <el-input v-model="roleQuery.keyword" clearable placeholder="输入角色名称或标识" @keyup.enter="applyRoleFilters" />
+            </label>
+            <label class="permissions-filter-field">
+              <span>状态</span>
+              <el-select v-model="roleQuery.status" clearable placeholder="全部状态">
+                <el-option label="启用" value="启用" />
+                <el-option label="停用" value="停用" />
+              </el-select>
+            </label>
+          </div>
+          <div class="permissions-filter-actions">
+            <el-button type="primary" @click="applyRoleFilters">查询</el-button>
+            <el-button @click="resetRoleFilters">重置</el-button>
+          </div>
+        </section>
+
+        <section class="permissions-list-panel">
+          <div class="permissions-list-toolbar">
+            <div><strong>角色列表</strong><span>{{ filteredRoles.length }} 项</span></div>
+            <div class="permissions-list-actions">
+              <el-button :loading="loading" @click="loadAll">刷新</el-button>
+              <el-button type="primary" :disabled="readOnly" @click="openRole()">新增角色</el-button>
+            </div>
+          </div>
+          <div class="permissions-table-scroll">
+            <el-table :data="filteredRoles" stripe border empty-text="暂无符合条件的角色">
+              <el-table-column prop="name" label="角色名称" min-width="150" />
+              <el-table-column label="角色标识" min-width="130"><template #default="{row}">{{ row.key || row.roleKey || row.id }}</template></el-table-column>
+              <el-table-column label="授权菜单" width="110" align="center"><template #default="{row}">{{ (row.menus || []).length }} 项</template></el-table-column>
+              <el-table-column prop="description" label="说明" min-width="240" show-overflow-tooltip />
+              <el-table-column label="状态" width="94" align="center"><template #default="{row}"><el-tag size="small" :type="row.status === '停用' ? 'danger' : 'success'">{{ row.status || '启用' }}</el-tag></template></el-table-column>
+              <el-table-column label="操作" fixed="right" min-width="210">
+                <template #default="{row}">
+                  <div v-if="(row.key || row.roleKey) !== 'super'" class="permissions-row-actions">
+                    <el-button link type="primary" :disabled="readOnly" @click="openRole(row)">授权</el-button>
+                    <el-button link :type="row.status === '停用' ? 'success' : 'warning'" :disabled="readOnly" @click="toggleRole(row)">{{ row.status === '停用' ? '启用' : '停用' }}</el-button>
+                    <el-button link type="danger" :disabled="readOnly" @click="deleteRole(row)">删除</el-button>
+                  </div>
+                  <el-tag v-else size="small" type="info">系统维护</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
+      </div>
+    </el-tab-pane>
+
+    <el-tab-pane label="用户管理" name="users">
+      <div class="permissions-workspace permissions-workspace--wide">
+        <section class="permissions-filter-panel" aria-label="人员筛选">
+          <div class="permissions-filter-fields">
+            <label class="permissions-filter-field permissions-filter-field--wide">
+              <span>姓名或账号</span>
+              <el-input v-model="userQuery.keyword" clearable placeholder="输入姓名、账号或手机号" @keyup.enter="applyUserFilters" />
+            </label>
+            <label class="permissions-filter-field">
+              <span>角色</span>
+              <el-select v-model="userQuery.role" clearable placeholder="全部角色">
+                <el-option v-for="role in roleRows" :key="role.id" :label="role.name" :value="role.key || role.id" />
+              </el-select>
+            </label>
+            <label class="permissions-filter-field">
+              <span>状态</span>
+              <el-select v-model="userQuery.status" clearable placeholder="全部状态">
+                <el-option label="启用" value="启用" />
+                <el-option label="停用" value="停用" />
+              </el-select>
+            </label>
+          </div>
+          <div class="permissions-filter-actions">
+            <el-button type="primary" @click="applyUserFilters">查询</el-button>
+            <el-button @click="resetUserFilters">重置</el-button>
+          </div>
+        </section>
+
+        <section class="permissions-list-panel">
+          <div class="permissions-list-toolbar">
+            <div><strong>人员列表</strong><span>{{ filteredUsers.length }} 人</span></div>
+            <div class="permissions-list-actions">
+              <el-button :loading="loading" @click="loadAll">刷新</el-button>
+              <el-button type="primary" :disabled="readOnly" @click="openUser()">新增人员</el-button>
+            </div>
+          </div>
+          <div class="permissions-table-scroll">
+            <el-table :data="filteredUsers" stripe border empty-text="暂无符合条件的人员账号">
+              <el-table-column prop="name" label="姓名" min-width="130" />
+              <el-table-column prop="account" label="登录账号" min-width="160" />
+              <el-table-column label="角色" min-width="130"><template #default="{row}"><el-tag size="small" effect="plain">{{ userRoleName(row) }}</el-tag></template></el-table-column>
+              <el-table-column prop="phone" label="手机号" min-width="145" />
+              <el-table-column label="状态" width="94" align="center"><template #default="{row}"><el-tag size="small" :type="row.status === '停用' ? 'danger' : 'success'">{{ row.status || '启用' }}</el-tag></template></el-table-column>
+              <el-table-column label="操作" fixed="right" min-width="258">
+                <template #default="{row}">
+                  <div class="permissions-row-actions">
+                    <el-button link type="primary" :disabled="readOnly" @click="openUser(row)">编辑</el-button>
+                    <el-button v-if="isAdminAccount" link type="primary" :disabled="readOnly" @click="openPassword(row)">修改密码</el-button>
+                    <el-button link :type="row.status === '停用' ? 'success' : 'warning'" :disabled="readOnly" @click="toggleUser(row)">{{ row.status === '停用' ? '启用' : '停用' }}</el-button>
+                    <el-button link type="danger" :disabled="readOnly" @click="deleteUser(row)">删除</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </section>
+      </div>
     </el-tab-pane>
   </el-tabs>
 
-  <el-dialog v-model="menuDialog" class="permissions-dialog permissions-menu-dialog" :title="menuForm.id ? '编辑菜单' : '新增菜单'" width="620px"><el-form label-width="96px"><el-form-item label="菜单标识"><el-input v-model="menuForm.key" :disabled="!!menuForm.id" placeholder="例如 monthlyReport" /></el-form-item><el-form-item label="菜单名称"><el-input v-model="menuForm.name" placeholder="例如 月度经营报表" /></el-form-item><el-form-item label="目标页面" required><el-select v-model="menuForm.routeKey" placeholder="选择已注册后台页面"><el-option v-for="item in routeOptions" :key="item.key" :label="item.label" :value="item.key" /></el-select></el-form-item><el-form-item label="分组"><el-input v-model="menuForm.group" placeholder="例如 系统安全" /></el-form-item><el-form-item label="上级菜单"><el-select v-model="menuForm.parentId" clearable placeholder="顶级菜单"><el-option v-for="item in menuOptions" :key="item.id" :label="item.name || item.label" :value="item.key || item.id" /></el-select></el-form-item><el-form-item label="排序"><el-input-number v-model="menuForm.sort" :min="0" :max="999" /></el-form-item><el-form-item label="状态"><el-radio-group v-model="menuForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item></el-form><template #footer><el-button @click="menuDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveMenu">保存菜单</el-button></template></el-dialog>
+  <el-dialog v-model="menuDialog" class="permissions-dialog permissions-menu-dialog" :title="menuForm.id ? '编辑菜单' : '新增菜单'" width="620px">
+    <el-form label-width="112px">
+      <el-form-item label="菜单标识"><el-input v-model="menuForm.key" :disabled="!!menuForm.id" placeholder="例如 monthlyReport" /></el-form-item>
+      <el-form-item label="菜单名称"><el-input v-model="menuForm.name" placeholder="例如 月度经营报表" /></el-form-item>
+      <el-form-item label="菜单层级" required>
+        <el-radio-group v-model="menuLevel" @change="changeMenuLevel"><el-radio label="一级菜单">一级菜单</el-radio><el-radio label="二级菜单">二级菜单</el-radio></el-radio-group>
+        <p class="permissions-form-help">一级菜单位于侧栏首层；二级菜单必须归属于一个一级菜单。</p>
+      </el-form-item>
+      <el-form-item v-if="menuLevel === '二级菜单'" label="所属一级菜单" required><el-select v-model="menuForm.parentId" placeholder="选择一级菜单"><el-option v-for="item in menuOptions" :key="item.id" :label="item.name || item.label" :value="item.key || item.id" /></el-select></el-form-item>
+      <el-form-item label="点击后进入的页面" required>
+        <el-select v-model="menuForm.routeKey" placeholder="选择已注册后台页面"><el-option v-for="item in routeOptions" :key="item.key" :label="item.label" :value="item.key" /></el-select>
+        <p class="permissions-form-help">点击该菜单后，系统会加载这里绑定的功能页面。</p>
+      </el-form-item>
+      <el-form-item label="侧栏分组"><el-input v-model="menuForm.group" placeholder="例如 系统安全" /><p class="permissions-form-help">分组只影响侧边栏归类，不决定一级、二级关系。</p></el-form-item>
+      <el-form-item label="排序"><el-input-number v-model="menuForm.sort" :min="0" :max="999" /></el-form-item>
+      <el-form-item label="状态"><el-radio-group v-model="menuForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item>
+    </el-form>
+    <template #footer><el-button @click="menuDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveMenu">保存菜单</el-button></template>
+  </el-dialog>
 
-  <el-dialog v-model="roleDialog" class="permissions-dialog permissions-role-dialog" title="角色授权" width="880px"><el-form label-width="96px"><el-form-item label="角色标识"><el-input v-model="roleForm.key" :disabled="!!roleForm.id" placeholder="例如 service" /></el-form-item><el-form-item label="角色名称"><el-input v-model="roleForm.name" placeholder="例如 客服" /></el-form-item><el-form-item label="说明"><el-input v-model="roleForm.description" type="textarea" :rows="3" /></el-form-item><el-form-item label="菜单权限"><el-checkbox-group v-model="roleForm.menus" class="permission-check-grid"><el-checkbox v-for="item in menuRows.filter(item => roleForm.key === 'super' || (item.key || item.id) !== 'permissions')" :key="item.id" :label="item.key || item.id">{{ item.name || item.label }}</el-checkbox></el-checkbox-group></el-form-item><el-form-item label="状态"><el-radio-group v-model="roleForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form><template #footer><el-button @click="roleDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveRole">保存授权</el-button></template></el-dialog>
+  <el-dialog v-model="roleDialog" class="permissions-dialog permissions-role-dialog" title="角色授权" width="880px">
+    <el-form label-width="96px">
+      <el-form-item label="角色标识"><el-input v-model="roleForm.key" :disabled="!!roleForm.id" placeholder="例如 service" /></el-form-item>
+      <el-form-item label="角色名称"><el-input v-model="roleForm.name" placeholder="例如 客服" /></el-form-item>
+      <el-form-item label="说明"><el-input v-model="roleForm.description" type="textarea" :rows="3" /></el-form-item>
+      <el-form-item label="菜单权限"><el-checkbox-group v-model="roleForm.menus" class="permission-check-grid"><el-checkbox v-for="item in menuRows.filter(item => roleForm.key === 'super' || (item.key || item.id) !== 'permissions')" :key="item.id" :label="item.key || item.id">{{ item.name || item.label }}</el-checkbox></el-checkbox-group></el-form-item>
+      <el-form-item label="状态"><el-radio-group v-model="roleForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item>
+    </el-form>
+    <template #footer><el-button @click="roleDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveRole">保存授权</el-button></template>
+  </el-dialog>
 
-  <el-dialog v-model="userDialog" class="permissions-dialog permissions-user-dialog" :title="userForm.id ? '编辑人员' : '新增人员'" width="680px"><el-form label-width="96px"><el-form-item label="姓名" required><el-input v-model="userForm.name" /></el-form-item><el-form-item label="登录账号" required><el-input v-model="userForm.account" autocomplete="off" /></el-form-item><el-form-item v-if="!userForm.id" label="登录密码" required><el-input v-model="userForm.password" type="password" show-password placeholder="至少 8 位，含字母和数字" autocomplete="new-password" /></el-form-item><el-form-item label="手机号"><el-input v-model="userForm.phone" /></el-form-item><el-form-item label="邮箱"><el-input v-model="userForm.email" autocomplete="off" /></el-form-item><el-form-item label="绑定角色" required><el-select v-model="userForm.role" placeholder="选择角色"><el-option v-for="role in roleRows" :key="role.id" :label="role.name" :value="role.key || role.id" /></el-select></el-form-item><el-form-item label="状态"><el-radio-group v-model="userForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item></el-form><template #footer><el-button @click="userDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveUser">保存人员</el-button></template></el-dialog>
+  <el-dialog v-model="userDialog" class="permissions-dialog permissions-user-dialog" :title="userForm.id ? '编辑人员' : '新增人员'" width="680px">
+    <el-form label-width="96px">
+      <el-form-item label="姓名" required><el-input v-model="userForm.name" /></el-form-item>
+      <el-form-item label="登录账号" required><el-input v-model="userForm.account" autocomplete="off" /></el-form-item>
+      <el-form-item v-if="!userForm.id" label="登录密码" required><el-input v-model="userForm.password" type="password" show-password placeholder="至少 8 位，含字母和数字" autocomplete="new-password" /></el-form-item>
+      <el-form-item label="手机号" :error="userPhoneError"><el-input v-model="userForm.phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入 11 位大陆手机号" @input="userPhoneError=''" @blur="validateUserPhone" /></el-form-item>
+      <el-form-item label="邮箱"><el-input v-model="userForm.email" autocomplete="off" /></el-form-item>
+      <el-form-item label="绑定角色" required><el-select v-model="userForm.role" placeholder="选择角色"><el-option v-for="role in roleRows" :key="role.id" :label="role.name" :value="role.key || role.id" /></el-select></el-form-item>
+      <el-form-item label="状态"><el-radio-group v-model="userForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item>
+    </el-form>
+    <template #footer><el-button @click="userDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveUser">保存人员</el-button></template>
+  </el-dialog>
 
-  <el-dialog v-model="passwordDialog" class="permissions-dialog" title="修改人员密码" width="460px"><el-form label-width="96px"><el-form-item label="人员"><span>{{ passwordForm.name || passwordForm.account }}</span></el-form-item><el-form-item label="新密码" required><el-input v-model="passwordForm.password" type="password" show-password autocomplete="new-password" placeholder="至少 8 位，含字母和数字" /></el-form-item></el-form><template #footer><el-button @click="passwordDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="savePassword">确认修改</el-button></template></el-dialog>
+  <el-dialog v-model="passwordDialog" class="permissions-dialog" title="修改人员密码" width="460px">
+    <el-form label-width="96px"><el-form-item label="人员"><span>{{ passwordForm.name || passwordForm.account }}</span></el-form-item><el-form-item label="新密码" required><el-input v-model="passwordForm.password" type="password" show-password autocomplete="new-password" placeholder="至少 8 位，含字母和数字" /></el-form-item></el-form>
+    <template #footer><el-button @click="passwordDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="savePassword">确认修改</el-button></template>
+  </el-dialog>
 </div>

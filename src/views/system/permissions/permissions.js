@@ -63,29 +63,87 @@
     const menuRows = ref(fallbackMenus());
     const roleRows = ref(fallbackRoles());
     const userRows = ref([]);
-    const menuFilter = ref("");
-    const userFilter = reactive({ keyword: "", role: "", status: "" });
+    const menuQuery = reactive({ keyword: "", level: "", status: "", group: "" });
+    const menuFilters = reactive({ keyword: "", level: "", status: "", group: "" });
+    const roleQuery = reactive({ keyword: "", status: "" });
+    const roleFilters = reactive({ keyword: "", status: "" });
+    const userQuery = reactive({ keyword: "", role: "", status: "" });
+    const userFilters = reactive({ keyword: "", role: "", status: "" });
     const selectedRoleId = ref("");
     const menuDialog = ref(false);
     const roleDialog = ref(false);
     const userDialog = ref(false);
     const passwordDialog = ref(false);
     const menuForm = reactive({ id: "", key: "", name: "", parentId: "", group: "", routeKey: "dashboard", sort: 1, status: "启用" });
+    const menuLevel = ref("一级菜单");
     const roleForm = reactive({ id: "", key: "", name: "", description: "", menus: [], status: "启用" });
     const userForm = reactive(defaultUser());
+    const userPhoneError = ref("");
     const passwordForm = reactive({ id: "", account: "", name: "", password: "" });
 
+    const menuLevelLabel = (row) => text(row?.parentKey !== undefined ? row.parentKey : row?.parentId).trim() ? "二级菜单" : "一级菜单";
+    const parentKeyOf = (row) => text(row?.parentKey !== undefined ? row.parentKey : row?.parentId).trim();
+    const menuTreeRows = computed(() => {
+      const rows = menuRows.value.map((row, index) => ({ ...row, _index: index, depth: 0 }));
+      const byKey = new Map(rows.map((row) => [text(row.key || row.id), row]));
+      const children = new Map();
+      const roots = [];
+      const compare = (left, right) => Number(left.sort ?? left.sortNo ?? 0) - Number(right.sort ?? right.sortNo ?? 0)
+        || left._index - right._index || text(left.key).localeCompare(text(right.key));
+      rows.forEach((row) => {
+        const parentKey = parentKeyOf(row);
+        if (!parentKey || !byKey.has(parentKey)) {
+          roots.push(row);
+          return;
+        }
+        const siblings = children.get(parentKey) || [];
+        siblings.push(row);
+        children.set(parentKey, siblings);
+      });
+      const output = [];
+      const append = (row, depth) => {
+        output.push({ ...row, depth });
+        (children.get(text(row.key || row.id)) || []).sort(compare).forEach((child) => append(child, depth + 1));
+      };
+      roots.sort(compare).forEach((row) => append(row, 0));
+      return output;
+    });
     const filteredMenus = computed(() => {
-      const keyword = menuFilter.value.trim().toLowerCase();
-      if (!keyword) return menuRows.value;
-      return menuRows.value.filter((row) => JSON.stringify(row).toLowerCase().includes(keyword));
+      const keyword = text(menuFilters.keyword).trim().toLowerCase();
+      const matches = menuTreeRows.value.filter((row) => {
+        const matchesKeyword = !keyword || `${JSON.stringify(row)} ${menuLevelLabel(row)}`.toLowerCase().includes(keyword);
+        const matchesLevel = !menuFilters.level || menuLevelLabel(row) === menuFilters.level;
+        const matchesStatus = !menuFilters.status || (row.status || "启用") === menuFilters.status;
+        const matchesGroup = !menuFilters.group
+          || (menuFilters.group === "__ungrouped__" ? !text(row.group).trim() : text(row.group).trim() === menuFilters.group);
+        return matchesKeyword && matchesLevel && matchesStatus && matchesGroup;
+      });
+      if (matches.length === menuTreeRows.value.length) return matches;
+      const visibleKeys = new Set(matches.map((row) => text(row.key || row.id)));
+      const parents = new Map(menuTreeRows.value.map((row) => [text(row.key || row.id), parentKeyOf(row)]));
+      [...visibleKeys].forEach((key) => {
+        let parentKey = parents.get(key);
+        while (parentKey) {
+          visibleKeys.add(parentKey);
+          parentKey = parents.get(parentKey);
+        }
+      });
+      return menuTreeRows.value.filter((row) => visibleKeys.has(text(row.key || row.id)));
+    });
+    const filteredRoles = computed(() => {
+      const keyword = text(roleFilters.keyword).trim().toLowerCase();
+      return roleRows.value.filter((row) => {
+        const matchesKeyword = !keyword || JSON.stringify(row).toLowerCase().includes(keyword);
+        const matchesStatus = !roleFilters.status || (row.status || "启用") === roleFilters.status;
+        return matchesKeyword && matchesStatus;
+      });
     });
     const filteredUsers = computed(() => {
-      const keyword = userFilter.keyword.trim().toLowerCase();
+      const keyword = text(userFilters.keyword).trim().toLowerCase();
       return userRows.value.filter((row) => {
         const matchesKeyword = !keyword || JSON.stringify(row).toLowerCase().includes(keyword);
-        const matchesRole = !userFilter.role || row.role === userFilter.role;
-        const matchesStatus = !userFilter.status || (row.status || "启用") === userFilter.status;
+        const matchesRole = !userFilters.role || row.role === userFilters.role;
+        const matchesStatus = !userFilters.status || (row.status || "启用") === userFilters.status;
         return matchesKeyword && matchesRole && matchesStatus;
       });
     });
@@ -101,6 +159,60 @@
     });
     const activeMenuCount = computed(() => menuRows.value.filter((row) => (row.status || "启用") === "启用").length);
     const activeRoleCount = computed(() => roleRows.value.filter((row) => (row.status || "启用") === "启用").length);
+    const menuGroupOptions = computed(() => {
+      const configured = Array.isArray(window.LXM_CONFIG?.groups) ? window.LXM_CONFIG.groups : [];
+      const dynamic = menuRows.value.map((row) => text(row.group).trim()).filter(Boolean);
+      const groups = [...new Set([...configured, ...dynamic])];
+      const options = [{ key: "", label: "全部菜单", count: menuRows.value.length }];
+      groups.forEach((group) => options.push({
+        key: group,
+        label: group,
+        count: menuRows.value.filter((row) => text(row.group).trim() === group).length
+      }));
+      const ungrouped = menuRows.value.filter((row) => !text(row.group).trim()).length;
+      if (ungrouped) options.push({ key: "__ungrouped__", label: "未分组", count: ungrouped });
+      return options;
+    });
+    const routeLabel = (routeKey) => routeOptions.value.find((item) => item.key === text(routeKey).trim())?.label || text(routeKey, "-");
+
+    function applyMenuFilters() {
+      Object.assign(menuFilters, { ...menuQuery, keyword: text(menuQuery.keyword).trim() });
+    }
+
+    function resetMenuFilters() {
+      Object.assign(menuQuery, { keyword: "", level: "", status: "", group: "" });
+      Object.assign(menuFilters, { keyword: "", level: "", status: "", group: "" });
+    }
+
+    function selectMenuGroup(group) {
+      const nextGroup = group === "__ungrouped__" ? "__ungrouped__" : text(group).trim();
+      menuQuery.group = nextGroup;
+      menuFilters.group = nextGroup;
+    }
+
+    function applyRoleFilters() {
+      Object.assign(roleFilters, { ...roleQuery, keyword: text(roleQuery.keyword).trim() });
+    }
+
+    function resetRoleFilters() {
+      Object.assign(roleQuery, { keyword: "", status: "" });
+      Object.assign(roleFilters, { keyword: "", status: "" });
+    }
+
+    function applyUserFilters() {
+      Object.assign(userFilters, { ...userQuery, keyword: text(userQuery.keyword).trim() });
+    }
+
+    function resetUserFilters() {
+      Object.assign(userQuery, { keyword: "", role: "", status: "" });
+      Object.assign(userFilters, { keyword: "", role: "", status: "" });
+    }
+
+    function validateUserPhone(value = userForm.phone) {
+      const phone = text(value).trim();
+      userPhoneError.value = phone && !/^1[3-9]\d{9}$/.test(phone) ? "请输入有效的 11 位大陆手机号" : "";
+      return !userPhoneError.value;
+    }
 
     function normalizeRows(rows, prefix) {
       return unwrapRows(rows).map((row, index) => ({
@@ -196,22 +308,44 @@
 
     function openMenu(row = null) {
       if (!ensureWriteAccess()) return;
+      const parentId = row ? (row.parentKey !== undefined ? row.parentKey : (row.parentId || "")) : "";
       Object.assign(menuForm, row ? {
         ...row,
-        parentId: row.parentKey !== undefined ? row.parentKey : (row.parentId || ""),
+        parentId,
         routeKey: row.routeKey || row.targetKey || row.key
       } : { id: "", key: "", name: "", parentId: "", group: "系统安全", routeKey: routeOptions.value[0]?.key || "dashboard", sort: menuRows.value.length + 1, status: "启用" });
+      menuLevel.value = text(parentId).trim() ? "二级菜单" : "一级菜单";
       menuDialog.value = true;
+    }
+
+    function openChildMenu(row) {
+      if (!ensureWriteAccess()) return;
+      const parentKey = text(row?.key || row?.id).trim();
+      if (!parentKey) return;
+      Object.assign(menuForm, {
+        id: "", key: "", name: "", parentId: parentKey,
+        group: text(row?.group).trim() || "系统安全",
+        routeKey: routeOptions.value[0]?.key || "dashboard",
+        sort: menuRows.value.length + 1,
+        status: "启用"
+      });
+      menuLevel.value = "二级菜单";
+      menuDialog.value = true;
+    }
+
+    function changeMenuLevel(level) {
+      if (level === "一级菜单") menuForm.parentId = "";
     }
 
     async function saveMenu() {
       if (!ensureWriteAccess() || !menuForm.key.trim() || !menuForm.name.trim() || !text(menuForm.routeKey).trim()) return ElMessage.warning("请填写菜单标识、菜单名称并选择目标页面");
+      if (menuLevel.value === "二级菜单" && !text(menuForm.parentId).trim()) return ElMessage.warning("请选择所属一级菜单");
       const parent = menuRows.value.find((row) => text(row.key || row.id) === text(menuForm.parentId).trim());
       const selectedParentKey = parent && parent.parentKey !== undefined ? parent.parentKey : parent?.parentId;
       if (parent && text(selectedParentKey).trim()) return ElMessage.warning("菜单最多支持两级");
       saving.value = true;
       try {
-        const parentKey = text(menuForm.parentId).trim() || null;
+        const parentKey = menuLevel.value === "二级菜单" ? text(menuForm.parentId).trim() || null : null;
         const payload = {
           key: menuForm.key.trim(),
           name: menuForm.name.trim(),
@@ -324,6 +458,7 @@
     function openUser(row = null) {
       if (!ensureWriteAccess()) return;
       Object.assign(userForm, row ? { ...row, password: "" } : defaultUser());
+      validateUserPhone();
       userDialog.value = true;
     }
 
@@ -356,9 +491,10 @@
     async function saveUser() {
       if (!ensureWriteAccess() || !userForm.name.trim() || !userForm.account.trim() || !userForm.role) return ElMessage.warning("请填写姓名、登录账号并选择角色");
       if (!userForm.id && !userForm.password) return ElMessage.warning("新增人员必须设置登录密码");
+      if (!validateUserPhone()) return ElMessage.warning(userPhoneError.value);
       saving.value = true;
       try {
-        const payload = { ...userForm, name: userForm.name.trim(), account: userForm.account.trim() };
+        const payload = { ...userForm, name: userForm.name.trim(), account: userForm.account.trim(), phone: text(userForm.phone).trim() };
         if (!payload.password) delete payload.password;
         const write = requireRemoteWrite(userForm.id ? "updateUser" : "createUser");
         await (userForm.id ? write(userForm.id, payload) : write(payload));
@@ -402,11 +538,13 @@
     onMounted(loadAll);
     return {
       activeTab, loading, saving, readOnly, canWrite, isAdminAccount, menuRows, roleRows, userRows,
-      menuFilter, userFilter, filteredMenus, filteredUsers, selectedRole,
-      menuOptions, routeOptions, activeMenuCount, activeRoleCount, menuForm, roleForm, userForm, passwordForm,
+      menuQuery, roleQuery, userQuery, filteredMenus, filteredRoles, filteredUsers, selectedRole,
+      menuGroupOptions, menuOptions, routeOptions, activeMenuCount, activeRoleCount, menuForm, menuLevel, menuLevelLabel, roleForm, userForm, passwordForm,
+      userPhoneError,
       menuDialog, roleDialog, userDialog, passwordDialog, selectedRoleId,
-      openMenu, saveMenu, toggleMenu, deleteMenu, selectRole, openRole, editSelectedRole, saveRole, toggleRole, deleteRole,
-      openUser, saveUser, openPassword, savePassword, toggleUser, deleteUser, userRoleName, menuLabel, roleLabel, loadAll
+      applyMenuFilters, resetMenuFilters, selectMenuGroup, applyRoleFilters, resetRoleFilters, applyUserFilters, resetUserFilters,
+      validateUserPhone, openMenu, openChildMenu, changeMenuLevel, saveMenu, toggleMenu, deleteMenu, selectRole, openRole, editSelectedRole, saveRole, toggleRole, deleteRole,
+      openUser, saveUser, openPassword, savePassword, toggleUser, deleteUser, userRoleName, menuLabel, roleLabel, routeLabel, loadAll
     };
   }
 

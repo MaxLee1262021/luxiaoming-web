@@ -164,8 +164,10 @@ async function login() {
     } catch (error) {
       // 只有明确处于离线演示环境时才允许本地兜底；服务端 401/403 或已探测到服务端时绝不绕过。
       if (error && error.status) {
+        const message = serverErrorMessage(error);
+        if (error.status === 403) state.authNotice = message;
         log("登录失败", "后台", "服务端拒绝登录", account, { level: "高" });
-        return ElMessage.error(serverErrorMessage(error));
+        return ElMessage.error(message);
       }
       const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
       if (!isExplicitDemoMode() || reachable === true) {
@@ -187,7 +189,9 @@ async function login() {
     await loadAuthenticatedData();
     ElMessage.success("登录成功");
   } catch (error) {
-    ElMessage.error(serverErrorMessage(error));
+    const message = serverErrorMessage(error);
+    if (error && error.status === 403) state.authNotice = message;
+    ElMessage.error(message);
   } finally {
     state.loading = false;
   }

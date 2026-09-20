@@ -39,7 +39,7 @@ window.LXM_VIEWS = {
         <div class="lxm-brand">
           <div class="brand-mark">鹿</div>
           <div class="brand-copy"><strong>鹿小鸣旅拍</strong><span>长沙旅拍经营后台</span></div>
-          <button class="sidebar-toggle" :title="state.sidebarCollapsed ? '展开菜单' : '收起菜单'" @click="state.sidebarCollapsed=!state.sidebarCollapsed">{{ state.sidebarCollapsed ? '›' : '‹' }}</button>
+          <button class="sidebar-toggle" :title="state.sidebarCollapsed ? '展开菜单' : '收起菜单'" :aria-label="state.sidebarCollapsed ? '展开菜单' : '收起菜单'" :aria-expanded="String(!state.sidebarCollapsed)" @click="state.sidebarCollapsed=!state.sidebarCollapsed">{{ state.sidebarCollapsed ? '›' : '‹' }}</button>
         </div>
         <div class="menu-search" v-show="!state.sidebarCollapsed">
           <span class="menu-search-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
@@ -73,63 +73,21 @@ window.LXM_VIEWS = {
       <button v-if="state.mobileMenuOpen" class="mobile-nav-backdrop" aria-label="关闭导航" @click="state.mobileMenuOpen=false"></button>
 
       <main class="lxm-main">
-        <header class="lxm-topbar">
-          <div>
-            <button class="mobile-menu-toggle" aria-label="打开导航" title="打开导航" @click="state.mobileMenuOpen=!state.mobileMenuOpen">☰</button>
-            <nav class="topbar-breadcrumb" v-if="breadcrumbTrail.length">
-              <span v-for="(crumb, idx) in breadcrumbTrail" :key="idx" :class="{current: idx === breadcrumbTrail.length - 1}">
-                <i v-if="idx">›</i>{{ crumb }}
-              </span>
-            </nav>
-            <h1>{{ activeMenu.label }}</h1>
-            <p>{{ roleProfile.name }} · {{ LXM_SERVICE.queryOnlyNotice }}</p>
-          </div>
-          <div class="top-actions">
-            <el-date-picker v-model="state.filters.dateRange" type="daterange" size="small" range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期" style="width:250px" />
-
-            <el-select v-if="!['merchant','photo'].includes(state.role) && data.shops.length" v-model="state.filters.shopId" clearable filterable size="small" placeholder="全商家" style="width:150px"><el-option v-for="s in scopedShops" :key="s.id" :label="s.name" :value="s.id" /></el-select>
-            <el-popover placement="bottom-end" width="360" trigger="click">
-              <template #reference>
-                <el-badge :value="messageRows.length" :hidden="!messageRows.length">
-                  <el-button size="small">消息提醒</el-button>
-                </el-badge>
-              </template>
-              <div class="message-panel">
-                <div v-if="messageRows.length" v-for="m in messageRows" :key="m.type" class="message-row" @click="handleMessage(m)">
-                  <strong>{{ m.type }} · {{ m.count }}</strong>
-                  <span>{{ m.text }}</span>
-                </div>
-                <div v-else class="empty-mini">当前范围暂无待处理提醒</div>
-              </div>
-            </el-popover>
-            <el-select v-if="canPreviewRoles" v-model="state.previewRole" size="small" style="width:156px" @change="switchRole">
-              <el-option v-for="(r,k) in LXM_CONFIG.roles" :key="k" :label="'预览：'+r.name" :value="k" />
-            </el-select>
-            <span class="role-pill">{{ roleProfile.name }}</span>
-            <el-button v-if="can('export')" size="small" @click="openExportDialog()">导出报表</el-button>
-            <span class="conn-status" :class="'conn-' + (state.serverReachable===false ? 'offline' : (state.cloudMode || 'checking'))" :title="state.serverReachable===false ? '未连接后台服务，当前仅可使用本地演示数据' : state.cloudMode==='mock' ? '已连接后台服务，但当前数据源为演示模式' : '已连接后台服务，改动会写入真实数据库'">
-              <i class="dot"></i>
-              <template v-if="state.cloudMode==='checking'">连接检测中…</template>
-              <template v-else-if="state.serverReachable===false">未连接服务 · 本地演示</template>
-              <template v-else-if="state.cloudMode==='mock'">已连接 · 演示数据</template>
-              <template v-else-if="state.cloudMode==='json'">已连本地真实库</template>
-              <template v-else-if="state.cloudMode==='mysql'">已连生产数据库</template>
-              <template v-else>已连接服务端</template>
+        <header class="lxm-topbar lxm-topbar--account-only">
+          <button class="mobile-menu-toggle" aria-label="打开导航" title="打开导航" @click="state.mobileMenuOpen=!state.mobileMenuOpen">☰</button>
+          <el-dropdown trigger="click" class="user-menu">
+            <span class="user-trigger">
+              <i class="user-avatar">鹿</i>
+              <span class="user-name">{{ state.currentAccount || roleProfile.name }}</span>
+              <i class="user-caret">▾</i>
             </span>
-            <el-dropdown trigger="click" class="user-menu">
-              <span class="user-trigger">
-                <i class="user-avatar">鹿</i>
-                <span class="user-name">{{ state.currentAccount || roleProfile.name }}</span>
-                <i class="user-caret">▾</i>
-              </span>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item @click="openChangePwd()">修改密码</el-dropdown-item>
-                  <el-dropdown-item divided @click="logout()">退出登录</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="openChangePwd()">修改密码</el-dropdown-item>
+                <el-dropdown-item divided @click="logout()">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </header>
 
         <section class="lxm-content">

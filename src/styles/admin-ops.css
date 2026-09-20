@@ -27,6 +27,160 @@ body::after {
   background: transparent !important;
 }
 
+/* Desktop navigation and workspace scroll independently. This keeps a long
+ * sidebar usable without moving the active page away from its current work. */
+@media (min-width: 761px) {
+  .admin-shell {
+    position: fixed;
+    inset: 0;
+    min-height: 0 !important;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .lxm-sidebar {
+    height: 100vh;
+    height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+
+  .lxm-main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .lxm-topbar {
+    flex: 0 0 auto;
+  }
+
+  .lxm-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-shell {
+    min-height: 0 !important;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .lxm-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .lxm-topbar {
+    flex: 0 0 auto;
+  }
+
+  .lxm-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .lxm-sidebar {
+    overscroll-behavior: contain;
+  }
+}
+
+/* The desktop collapse handle stays on the sidebar edge instead of competing
+ * with the brand area or the active page header. */
+@media (min-width: 761px) {
+  .admin-shell .lxm-sidebar.collapsed {
+    width: 76px !important;
+    flex-basis: 76px !important;
+  }
+
+  .admin-shell .sidebar-toggle {
+    position: fixed;
+    left: 248px;
+    top: 50%;
+    z-index: 1200;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 64px;
+    padding: 0;
+    border: 1px solid var(--lxm-line-strong, #e2d5c8) !important;
+    border-left: 0 !important;
+    border-radius: 0 8px 8px 0;
+    background: var(--lxm-surface, #fff) !important;
+    color: var(--lxm-brand-strong, #ee2c2c) !important;
+    box-shadow: 4px 5px 16px rgba(42, 33, 27, .14);
+    cursor: pointer;
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+    transform: translateY(-50%);
+    transition: left .18s ease, background-color .18s ease, color .18s ease, box-shadow .18s ease;
+  }
+
+  .admin-shell .sidebar-toggle:hover {
+    border-color: var(--lxm-brand-strong, #ee2c2c) !important;
+    background: var(--lxm-brand-strong, #ee2c2c) !important;
+    color: #fff !important;
+    box-shadow: 5px 7px 20px rgba(238, 44, 44, .24);
+  }
+
+  .admin-shell .sidebar-toggle:focus-visible {
+    outline-offset: 3px;
+  }
+
+  .admin-shell .lxm-sidebar.collapsed .sidebar-toggle {
+    left: 62px;
+    top: 50%;
+    width: 28px;
+    height: 64px;
+    transform: translateY(-50%);
+  }
+
+  .admin-shell .lxm-sidebar.collapsed .menu-group {
+    display: grid;
+    min-height: 18px;
+    padding: 8px 0 4px;
+    place-items: center;
+  }
+
+  .admin-shell .lxm-sidebar.collapsed .menu-group strong {
+    display: none;
+  }
+
+  .admin-shell .lxm-sidebar.collapsed .menu-group::before {
+    width: 22px;
+    border-top: 1px solid rgba(255, 255, 255, .14);
+    content: "";
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-shell .sidebar-toggle {
+    display: none !important;
+  }
+}
+
 .lxm-sidebar {
   background: var(--lxm-ink) !important;
   backdrop-filter: none !important;
@@ -45,6 +199,64 @@ body::after {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border-bottom: 1px solid var(--lxm-line) !important;
+}
+
+.lxm-topbar--account-only {
+  min-height: 60px;
+  justify-content: flex-end;
+}
+
+/* Keep the signed-in account in the expected upper-right anchor on wide
+ * admin screens, independently of the filters and system indicators. */
+@media (min-width: 1100px) {
+  .lxm-topbar {
+    padding-right: 176px;
+  }
+
+  .lxm-topbar--account-only {
+    padding-right: 18px;
+  }
+
+  .lxm-topbar .user-menu {
+    position: absolute;
+    top: 12px;
+    right: 18px;
+    z-index: 2;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 1099px) {
+  .lxm-topbar--account-only {
+    justify-content: space-between;
+  }
+
+  .lxm-topbar .user-menu {
+    position: static;
+    margin-left: 6px;
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .lxm-topbar--account-only {
+    align-items: center !important;
+    min-height: 60px !important;
+    padding: 10px 12px !important;
+  }
+
+  .lxm-topbar--account-only .mobile-menu-toggle {
+    display: inline-flex;
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .lxm-topbar--account-only > .user-menu {
+    display: inline-flex;
+    width: auto !important;
+    min-width: 0;
+    margin-left: auto;
+  }
 }
 
 .table-card,
@@ -73,9 +285,24 @@ body::after {
 
 .el-button--primary,
 .lxm-btn--primary {
+  --el-button-text-color: #ffffff !important;
+  --el-button-hover-text-color: #ffffff !important;
+  --el-button-active-text-color: #ffffff !important;
   background: var(--lxm-brand-strong) !important;
   border-color: var(--lxm-brand-strong) !important;
   box-shadow: 0 4px 12px rgba(238, 44, 44, .18) !important;
+  color: #ffffff !important;
+}
+
+/* Solid red actions always retain high-contrast text, even inside a panel
+ * that styles descendant spans for labels or counts. */
+.el-button--primary > span,
+.lxm-btn--primary > span,
+.el-button--primary .el-icon,
+.lxm-btn--primary .el-icon,
+.el-button--danger:not(.is-plain):not(.is-link):not(.is-text) > span,
+.el-button--danger:not(.is-plain):not(.is-link):not(.is-text) .el-icon {
+  color: #ffffff !important;
 }
 
 .el-button--primary:hover:not(.is-disabled),

@@ -408,7 +408,14 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   async function createUser(input) { try { return await writeUser(input); } catch (error) { if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("账号已存在"), { code: "DUPLICATE_RECORD" }); throw error; } }
   async function updateUser(entityId, input) { try { return await writeUser(input, entityId); } catch (error) { if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("账号已存在"), { code: "DUPLICATE_RECORD" }); throw error; } }
   async function deleteUser(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.userAttributes} WHERE user_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.users} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
-  async function authenticate(account, password, options = {}) { const rows = await query(pool, `SELECT * FROM ${TABLES.users} WHERE account=? LIMIT 1`, [String(account).trim()]); const row = rows[0]; const verifier = typeof options.verifyPassword === "function" ? options.verifyPassword : verifyPassword; if (!row || DISABLED.has(String(row.status).toLowerCase()) || !verifier(row.password_hash, password)) return null; return userDocument(row); }
+  async function authenticate(account, password, options = {}) {
+    const rows = await query(pool, `SELECT * FROM ${TABLES.users} WHERE account=? LIMIT 1`, [String(account).trim()]);
+    const row = rows[0];
+    const verifier = typeof options.verifyPassword === "function" ? options.verifyPassword : verifyPassword;
+    if (!row || !verifier(row.password_hash, password)) return null;
+    if (DISABLED.has(String(row.status || "").toLowerCase()) && options.includeDisabled !== true) return null;
+    return userDocument(row);
+  }
   async function setRoleMenus(roleId, menuIds) { return withTransaction(async (conn) => { const keys = [...new Set((menuIds || []).map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [roleId]); for (const key of keys) await execute(conn, `INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`, [roleId, key]); return { roleId, menuKeys: keys }; }); }
   async function getRoleMenus(roleId) { const rows = await query(pool, `SELECT menu_key FROM ${TABLES.roleMenus} WHERE role_id=? ORDER BY menu_key`, [roleId]); return { roleId, menuKeys: rows.map((row) => row.menu_key), menuIds: rows.map((row) => row.menu_key) }; }
   // Keep historic action rows intact, but do not use or modify them in the
