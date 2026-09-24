@@ -470,6 +470,7 @@ const RELATIONS = {
       "order_id VARCHAR(128) NOT NULL", "record_no INT NOT NULL", "payment_id VARCHAR(128) NULL",
       "phase VARCHAR(32) NULL", "payment_type VARCHAR(64) NULL", "amount DECIMAL(18,2) NULL", "status VARCHAR(64) NULL",
       "attempt INT NULL", "provider VARCHAR(64) NULL", "idempotency_key VARCHAR(128) NULL", "confirmation_idempotency_key VARCHAR(128) NULL",
+      "out_trade_no VARCHAR(32) NULL", "prepay_id VARCHAR(128) NULL", "trade_state VARCHAR(32) NULL", "prepay_created_at VARCHAR(64) NULL", "failure_reason VARCHAR(64) NULL",
       "external_transaction_id VARCHAR(160) NULL", "operator VARCHAR(255) NULL", "operator_id VARCHAR(128) NULL",
       "paid_at VARCHAR(64) NULL", "record_created_at VARCHAR(64) NULL", "record_updated_at VARCHAR(64) NULL", "admin_registered_at VARCHAR(64) NULL", "note TEXT NULL"
     ],
@@ -479,6 +480,7 @@ const RELATIONS = {
       "UNIQUE KEY uq_order_payment_id (payment_id)",
       "UNIQUE KEY uq_order_payment_idempotency (idempotency_key)",
       "UNIQUE KEY uq_order_payment_confirmation_key (confirmation_idempotency_key)",
+      "UNIQUE KEY uq_order_payment_out_trade_no (out_trade_no)",
       "UNIQUE KEY uq_order_payment_transaction (external_transaction_id)"
     ]
   },
@@ -900,7 +902,7 @@ function isMaterializedPath(key, path, input) {
     const follow = arrayPath(path, "followRecords");
     if (follow && follow.rest && ["type", "action", "operator", "operatorId", "note", "reason", "from", "to", "createTime"].includes(follow.rest)) return true;
     const payment = arrayPath(path, "paymentRecords");
-    if (payment && payment.rest && ["id", "phase", "type", "paymentType", "amount", "status", "attempt", "provider", "idempotencyKey", "confirmationIdempotencyKey", "externalTransactionId", "operator", "operatorId", "paidAt", "createdAt", "updatedAt", "adminRegisteredAt", "note"].includes(payment.rest)) return true;
+    if (payment && payment.rest && ["id", "phase", "type", "paymentType", "amount", "status", "attempt", "provider", "idempotencyKey", "confirmationIdempotencyKey", "outTradeNo", "prepayId", "tradeState", "prepayCreatedAt", "failureReason", "externalTransactionId", "operator", "operatorId", "paidAt", "createdAt", "updatedAt", "adminRegisteredAt", "note"].includes(payment.rest)) return true;
     return false;
   }
   if (key === "afterSales") {
@@ -1191,6 +1193,8 @@ function materializeRelations(key, input) {
       phase: item && item.phase || null, payment_type: item && (item.type || item.paymentType) || null,
       amount: numberOrNull(item && item.amount), status: item && item.status || null, attempt: numberOrNull(item && item.attempt), provider: item && item.provider || null,
       idempotency_key: item && item.idempotencyKey || null, confirmation_idempotency_key: item && item.confirmationIdempotencyKey || null,
+      out_trade_no: item && item.outTradeNo || null, prepay_id: item && item.prepayId || null, trade_state: item && item.tradeState || null,
+      prepay_created_at: item && item.prepayCreatedAt || null, failure_reason: item && item.failureReason || null,
       external_transaction_id: item && item.externalTransactionId || null, operator: item && item.operator || null, operator_id: item && item.operatorId || null,
       paid_at: item && item.paidAt || null, record_created_at: item && item.createdAt || null, record_updated_at: item && item.updatedAt || null,
       admin_registered_at: item && item.adminRegisteredAt || null, note: item && item.note || null
@@ -1413,7 +1417,8 @@ function hydrateDocument(key, row, relationRows = {}) {
       ...(existingPayments[r.record_no] || {}), id: r.payment_id || existingPayments[r.record_no] && (existingPayments[r.record_no].id || existingPayments[r.record_no]._id),
       phase: r.phase, type: r.payment_type, paymentType: r.payment_type, amount: r.amount == null ? undefined : Number(r.amount), status: r.status,
       attempt: r.attempt == null ? undefined : Number(r.attempt), provider: r.provider, idempotencyKey: r.idempotency_key,
-      confirmationIdempotencyKey: r.confirmation_idempotency_key, externalTransactionId: r.external_transaction_id,
+      confirmationIdempotencyKey: r.confirmation_idempotency_key, outTradeNo: r.out_trade_no, prepayId: r.prepay_id, tradeState: r.trade_state,
+      prepayCreatedAt: r.prepay_created_at, failureReason: r.failure_reason, externalTransactionId: r.external_transaction_id,
       operator: r.operator, operatorId: r.operator_id, paidAt: r.paid_at, createdAt: r.record_created_at || r.paid_at,
       updatedAt: r.record_updated_at || r.record_created_at || r.paid_at, adminRegisteredAt: r.admin_registered_at, note: r.note
     }));

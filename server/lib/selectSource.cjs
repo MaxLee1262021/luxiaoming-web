@@ -72,7 +72,8 @@ module.exports = function selectSource() {
       dbName: String(process.env.DB_NAME || "").trim(),
       autoMigrate: String(process.env.DB_AUTO_MIGRATE || "false").toLowerCase() === "true",
       dbSsl: String(process.env.DB_SSL || "false").toLowerCase() === "true",
-      connectTimeout: Math.min(Math.max(Number(process.env.DB_CONNECT_TIMEOUT_MS || 3000), 500), 10000)
+      connectTimeout: Math.min(Math.max(Number(process.env.DB_CONNECT_TIMEOUT_MS || 3000), 500), 10000),
+      connectionLimit: Math.min(Math.max(Number(process.env.DB_CONNECTION_LIMIT || 10), 1), 100)
     };
     if (!cfg.dbHost || !cfg.dbUser || !cfg.dbName) {
       const source = unavailableSource("mysql", "mysql_config_missing");

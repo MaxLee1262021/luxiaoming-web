@@ -59,8 +59,26 @@ function activeAfterSaleTicket(ticket) {
   return !!ticket && !isAfterSaleTerminalStatus(ticket.status);
 }
 function testPaymentEnabled() {
-  return String(process.env.TEST_PAYMENT_ENABLED || "").trim().toLowerCase() === "true"
+  const requested = String(process.env.TEST_PAYMENT_ENABLED || "").trim().toLowerCase() === "true"
     || String(process.env.PAYMENT_MODE || "").trim().toLowerCase() === "test";
+  // Test payment is deliberately unavailable outside the isolated JSON test
+  // harness. A production environment variable mistake must not create a
+  // customer-accessible path that marks an order as paid.
+  const isolated = String(process.env.NODE_ENV || "").trim().toLowerCase() === "test"
+    && String(process.env.LXM_ALLOW_TEST_JSON_SOURCE || "").trim().toLowerCase() === "true"
+    && String(process.env.DATA_MODE || "").trim().toLowerCase() === "json";
+  return requested && isolated;
+}
+
+// `mock` is an explicit, server-only temporary mode for the period before
+// WeChat Pay is available. Any unknown value falls back to the real payment
+// path so a configuration typo can never mark an order paid.
+function paymentMode() {
+  return String(process.env.PAYMENT_MODE || "").trim().toLowerCase() === "mock" ? "mock" : "wechat";
+}
+
+function simulatedPaymentEnabled() {
+  return paymentMode() === "mock";
 }
 async function restoreOrderSnapshot(source, id, original) {
   if (!source || !id || !original) return null;
@@ -115,13 +133,13 @@ module.exports = async function rpc(source, name, body = {}, ctx = {}) {
     case "createPayment":
     case "createPaymentIntent":
       if (!openid) return { success: false, error: "请先完成微信登录" };
-      return await rpcCreatePaymentIntent(source, openid, data);
+      return await rpcCreatePaymentIntent(source, openid, data, ctx);
     case "testPayment":
       if (!openid) return { success: false, error: "请先完成微信登录" };
       return await rpcTestPayment(source, openid, data);
     case "getPaymentStatus":
       if (!openid) return { success: false, error: "请先完成微信登录" };
-      return await rpcGetPaymentStatus(source, openid, data);
+      return await rpcGetPaymentStatus(source, openid, data, ctx);
     case "createBooking":
     case "createOrder": return await rpcCreateBooking(source, withIdentity(), ctx);
     case "updateOrderStatus":
@@ -1318,6 +1336,7 @@ async function rpcGetSeriesDetail(source, data = {}) {
 
     if (packageId) {
       currentPackage = await source.get("packages", packageId);
+      if (!currentPackage) return { success: false, error: "套餐不存在" };
       if (currentPackage && !isVisibleSimple(currentPackage)) return { success: false, error: "套餐已下架" };
       if (currentPackage) {
         currentPackage = projectPublicSpotScope(currentPackage, publicSpotIds, { seriesSpotScopes });
@@ -1383,17 +1402,17 @@ async function rpcGetSeriesDetail(source, data = {}) {
     const packageContext = { albums: allVisibleAlbums, videos: allPackages, peripherals: allPeripherals };
     const packageRows = allPackages.map((item) => normalizePublicPackage(item, packageContext));
     const currentPackageRow = currentPackage ? normalizePublicPackage(currentPackage, packageContext) : null;
-    const mainPushIds = new Set(packageRows.filter(packageIsMainPush).map((item) => getItemId(item)));
-    const mainPushPackages = packageRows.filter(packageIsMainPush);
-    const spotPackages = packageRows.filter((item) => {
-      const belongs = currentSpotId && packageSpotIds(item).includes(String(currentSpotId));
-      return belongs && !mainPushIds.has(getItemId(item));
-    });
     const configuredSeriesPackageIds = new Set((Array.isArray(series.packageIds) ? series.packageIds : []).map(String));
     const seriesPackages = packageRows.filter((item) => String(item.seriesId || "") === String(seriesId) || configuredSeriesPackageIds.has(String(getItemId(item))));
     if (currentPackageRow && !seriesPackages.some((item) => getItemId(item) === getItemId(currentPackageRow))) {
       seriesPackages.unshift(currentPackageRow);
     }
+    const mainPushIds = new Set(seriesPackages.filter(packageIsMainPush).map((item) => getItemId(item)));
+    const mainPushPackages = seriesPackages.filter(packageIsMainPush);
+    const spotPackages = seriesPackages.filter((item) => {
+      const belongs = currentSpotId && packageSpotIds(item).includes(String(currentSpotId));
+      return belongs && !mainPushIds.has(getItemId(item));
+    });
 
     const prices = [...albums.map(a => Number(a.price || 0)), ...mainPushPackages.map(p => Number(p.price || 0)), ...spotPackages.map(p => Number(p.price || 0))].filter(p => p > 0);
     const recommendedVideos = isVideoProduct(currentPackage) ? await getRecommendedVideos(source, { currentPackage: currentPackage || {}, series, currentSpotId, publicSpotIds, seriesSpotScopes }) : [];
@@ -1493,7 +1512,7 @@ async function rpcGetPhotoCollection(source, data = {}) {
     const publicPackages = packagesAll.map((item) => normalizePublicPackage(item, packageContext));
     const configuredPackageIds = new Set((Array.isArray(series.packageIds) ? series.packageIds : []).map(String));
     const packages = publicPackages.filter((p) => String(p.seriesId || "") === String(seriesId) || configuredPackageIds.has(String(getItemId(p))));
-    const featuredPackages = publicPackages.filter((p) => packageIsMainPush(p) || packageIsHot(p))
+    const featuredPackages = packages.filter((p) => packageIsMainPush(p) || packageIsHot(p))
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     let spotPackages = [];
     if (seriesSpotIds.length) {
@@ -1501,7 +1520,7 @@ async function rpcGetPhotoCollection(source, data = {}) {
       const targetSpotId = requestedSpotId && publicSpotIds.has(requestedSpotId) && seriesSpotIds.includes(requestedSpotId)
         ? requestedSpotId
         : seriesSpotIds[0];
-      spotPackages = publicPackages.filter((p) => packageSpotIds(p).includes(String(targetSpotId)))
+      spotPackages = packages.filter((p) => packageSpotIds(p).includes(String(targetSpotId)))
         .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 10);
     }
     const firstAlbum = albums.find(a => a.seriesId === seriesId && isVisibleSimple(a));
@@ -1602,6 +1621,7 @@ function projectPublicDeliveryFiles(value) {
 function projectPublicOrder(order = {}) {
   const projected = publicOrderProjection(order, { detail: true });
   const paymentTestModeEnabled = testPaymentEnabled();
+  const paymentSimulationEnabled = simulatedPaymentEnabled();
   return {
     ...projected,
     id: projected._id,
@@ -1610,6 +1630,8 @@ function projectPublicOrder(order = {}) {
     bookingMode: typeof order.bookingMode === "string" ? order.bookingMode : "consult",
     paymentTestModeEnabled,
     canRunTestPayment: paymentTestModeEnabled && projected.canPay === true,
+    paymentMode: paymentSimulationEnabled ? "mock" : "wechat",
+    paymentSimulationEnabled,
   };
 }
 async function enrichPublicOrderFiles(order, ctx) {
@@ -2111,7 +2133,250 @@ function publicPaymentSummary(order, phase, record = null) {
   };
 }
 
-async function rpcCreatePaymentIntent(source, openid, data = {}) {
+function paymentCasExpected(order = {}) {
+  return {
+    paymentRecords: Array.isArray(order.paymentRecords) ? order.paymentRecords : [],
+    statusLogs: Array.isArray(order.statusLogs) ? order.statusLogs : [],
+    followRecords: Array.isArray(order.followRecords) ? order.followRecords : [],
+    status: order.status,
+    workflowStage: order.workflowStage,
+    depositPaid: order.depositPaid,
+    depositFinanceStatus: order.depositFinanceStatus,
+    finalPaid: order.finalPaid,
+    finalFinanceStatus: order.finalFinanceStatus,
+  };
+}
+
+async function updatePaymentOrder(source, orderId, order, patch) {
+  if (source && typeof source.compareAndUpdate === "function") {
+    return source.compareAndUpdate("orders", orderId, paymentCasExpected(order), patch);
+  }
+  return source.update("orders", orderId, patch);
+}
+
+function replacePaymentRecord(order = {}, paymentId, nextPayment) {
+  return (Array.isArray(order.paymentRecords) ? order.paymentRecords : []).map((record) =>
+    getItemId(record) === String(paymentId) ? nextPayment : record);
+}
+
+function publicWechatPaymentResult(order, phase, payment, wechatPay, extra = {}) {
+  const status = hasConfirmedPayment(order, phase) ? "confirmed" : normalizePaymentStatus(payment && payment.status);
+  const isWechatPay = String(payment && payment.provider || "") === "wechat_pay";
+  const isMockPayment = String(payment && payment.provider || "") === "mock_payment";
+  const result = {
+    ...publicPaymentSummary(order, phase, payment),
+    provider: String(payment && payment.provider || "wechat_pay"),
+    requiresFinanceConfirmation: !isWechatPay && status !== "confirmed",
+    invokeWeChatPay: false,
+    ...(isMockPayment ? { paymentMode: "mock", simulatedPayment: true } : {}),
+    ...extra,
+  };
+  if (isWechatPay && status === "pending" && payment && payment.prepayId && wechatPay && wechatPay.isConfigured()) {
+    result.invokeWeChatPay = true;
+    result.paymentParams = wechatPay.buildMiniProgramPaymentParams(payment.prepayId);
+  }
+  return result;
+}
+
+async function markPaymentIntentFailed(source, orderId, paymentId, reason, { allowPrepared = false } = {}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const order = await source.get("orders", orderId);
+    const records = Array.isArray(order && order.paymentRecords) ? order.paymentRecords : [];
+    const record = records.find((item) => getItemId(item) === String(paymentId));
+    if (!order || !record || normalizePaymentStatus(record.status) !== "pending" || (!allowPrepared && record.prepayId)) return order;
+    const now = new Date().toISOString();
+    const failed = { ...record, status: "failed", failureReason: String(reason || "wechat_pay_create_failed").slice(0, 64), updatedAt: now };
+    const timeline = { id: makePaymentId("timeline"), type: "微信支付", action: "微信支付单创建失败", createTime: now };
+    const updated = await updatePaymentOrder(source, orderId, order, {
+      paymentRecords: replacePaymentRecord(order, paymentId, failed),
+      statusLogs: [...(Array.isArray(order.statusLogs) ? order.statusLogs : []), timeline],
+      followRecords: [...(Array.isArray(order.followRecords) ? order.followRecords : []), timeline],
+      updateTime: now,
+    });
+    if (updated) return updated;
+  }
+  return null;
+}
+
+function paymentRecoveryAgeMs(name, fallback, minimum, maximum) {
+  const value = Number(process.env[name] || fallback);
+  return Number.isFinite(value) ? Math.min(Math.max(value, minimum), maximum) : fallback;
+}
+
+function paymentCreatedAt(payment = {}) {
+  const value = Date.parse(String(payment.prepayCreatedAt || payment.createdAt || ""));
+  return Number.isFinite(value) ? value : 0;
+}
+
+function pendingPaymentNeedsRecovery(payment = {}) {
+  const age = Date.now() - paymentCreatedAt(payment);
+  const hasPrepayId = !!String(payment.prepayId || "");
+  const threshold = hasPrepayId
+    ? paymentRecoveryAgeMs("WECHAT_PAY_PREPAY_TTL_MS", 110 * 60 * 1000, 10 * 60 * 1000, 115 * 60 * 1000)
+    : paymentRecoveryAgeMs("WECHAT_PAY_PREPAY_RECOVERY_GRACE_MS", 60 * 1000, 15 * 1000, 10 * 60 * 1000);
+  return age >= threshold;
+}
+
+async function recoverPendingWechatPayment(source, orderId, payment, wechatPay) {
+  if (!payment || String(payment.provider || "") !== "wechat_pay" || normalizePaymentStatus(payment.status) !== "pending" || !payment.outTradeNo || !pendingPaymentNeedsRecovery(payment)) return null;
+  try {
+    const transaction = await wechatPay.queryTransaction(payment.outTradeNo);
+    if (transaction.tradeState === "SUCCESS") {
+      await wechatPay.confirmTransaction(source, transaction);
+      return { state: "confirmed", order: await source.get("orders", orderId) };
+    }
+    if (["CLOSED", "PAYERROR", "REVOKED"].includes(transaction.tradeState)) {
+      await wechatPay.confirmTransaction(source, transaction);
+      return { state: "failed", order: await source.get("orders", orderId) };
+    }
+    if (transaction.tradeState === "NOTPAY") {
+      await wechatPay.closeTransaction(payment.outTradeNo);
+      return { state: "failed", order: await markPaymentIntentFailed(source, orderId, getItemId(payment), payment.prepayId ? "prepay_expired" : "prepay_recovery", { allowPrepared: true }) };
+    }
+  } catch (error) {
+    if (error && error.code === "WECHAT_PAY_TRANSACTION_NOT_FOUND") {
+      return { state: "failed", order: await markPaymentIntentFailed(source, orderId, getItemId(payment), "prepay_not_found", { allowPrepared: true }) };
+    }
+  }
+  return null;
+}
+
+async function rpcCreatePaymentIntent(source, openid, data = {}, ctx = {}) {
+  if (simulatedPaymentEnabled()) return rpcMockPayment(source, openid, data);
+  const wechatPay = ctx.wechatPay;
+  if (!wechatPay || !wechatPay.isConfigured()) return { success: false, error: "微信支付暂未配置，请联系客服" };
+  const phase = String(data.phase || data.paymentPhase || "").trim().toLowerCase();
+  if (!["deposit", "final"].includes(phase)) return { success: false, error: "支付阶段必须是 deposit 或 final" };
+  const requestedKey = String(data.idempotencyKey || data.requestId || "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/.test(requestedKey)) return { success: false, error: "请提供有效的支付请求标识" };
+  const initial = await findOrder(source, data.orderId, data.orderNo);
+  if (!initial || initial.isDeleted || initial.deleted) return { success: false, error: "订单不存在" };
+  if (getOrderOpenid(initial) !== openid) return { success: false, error: "无权限操作该订单" };
+  const orderKey = getItemId(initial);
+  return withOrderMutex(`order:${orderKey}`, async () => {
+    const order = await source.get("orders", orderKey);
+    if (!order || order.isDeleted || order.deleted || getOrderOpenid(order) !== openid) return { success: false, error: "订单不存在或无权限" };
+    const records = Array.isArray(order.paymentRecords) ? order.paymentRecords : [];
+    const usesKey = (record, key) => String(record && record.idempotencyKey || "") === key
+      || String(record && record.confirmationIdempotencyKey || "") === key;
+    const existing = records.find((record) => usesKey(record, requestedKey));
+    if (existing) {
+      if (String(existing.phase || "") !== phase) return { success: false, error: "支付请求标识已用于其他支付阶段" };
+      const existingStatus = normalizePaymentStatus(existing.status);
+      if (!["pending", "confirmed"].includes(existingStatus)) return { success: false, error: "该支付请求已失败，请重新发起支付" };
+      if (existingStatus === "pending" && String(existing.provider || "") === "wechat_pay" && pendingPaymentNeedsRecovery(existing)) {
+        const recovered = await recoverPendingWechatPayment(source, orderKey, existing, wechatPay);
+        if (recovered && recovered.order) {
+          const refreshed = (Array.isArray(recovered.order.paymentRecords) ? recovered.order.paymentRecords : []).find((record) => getItemId(record) === getItemId(existing));
+          if (refreshed && normalizePaymentStatus(refreshed.status) === "confirmed") return { success: true, data: publicWechatPaymentResult(recovered.order, phase, refreshed, wechatPay, { idempotent: true }) };
+          return { success: false, error: "原支付单已失效，请重新发起支付" };
+        }
+        return { success: false, error: "支付状态同步中，请稍后重试" };
+      }
+      if (existingStatus === "pending" && String(existing.provider || "") === "wechat_pay" && !existing.prepayId) {
+        return { success: false, error: "支付单正在生成，请稍后刷新支付状态" };
+      }
+      return { success: true, data: publicWechatPaymentResult(order, phase, existing, wechatPay, { idempotent: true }) };
+    }
+    const allOrders = await source.list("orders");
+    const conflict = (Array.isArray(allOrders) ? allOrders : []).some((candidate) => {
+      if (!candidate || getItemId(candidate) === orderKey) return false;
+      return (Array.isArray(candidate.paymentRecords) ? candidate.paymentRecords : []).some((record) => usesKey(record, requestedKey));
+    });
+    if (conflict) return { success: false, error: "支付请求标识已用于其他订单" };
+    if (order.riskBlocked || order.riskFlag || order.frozen || order.freezeReason || order.riskReason) return { success: false, error: "订单存在风控冻结，暂不能发起支付" };
+    let tickets = [];
+    try { tickets = await source.list("afterSales"); } catch (_) { return { success: false, error: "售后数据暂不可用，请稍后重试" }; }
+    if (relatedAfterSaleTickets(order, tickets).some((ticket) => activeAfterSaleTicket(ticket)
+      && (!ticket.orderId || String(ticket.orderId) === String(orderKey)))) return { success: false, error: "订单存在处理中售后，暂不能创建支付单" };
+    const stage = canonicalStage(order);
+    if (phase === "deposit" && stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return { success: false, error: "当前订单不在待支付订金阶段" };
+    if (phase === "final" && (!selectionConfirmed(order) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "定金到账且线下选片确认后才能创建尾款支付单" };
+    const due = phase === "deposit" ? depositDue(order) : finalDue(order);
+    if (due <= 0) return { success: false, error: "当前支付阶段无需收款" };
+    // Never use a client-supplied amount to create a transaction. Keeping the
+    // optional value as a comparison catches stale or tampered clients.
+    if (data.amount != null && (!Number.isFinite(Number(data.amount)) || Math.abs(roundMoney(data.amount) - roundMoney(due)) > 0.009)) {
+      return { success: false, error: "支付金额与订单应收不一致" };
+    }
+    if (hasConfirmedPayment(order, phase)) return { success: false, error: "该支付阶段已确认到账" };
+    const activePending = records.find((record) => String(record.phase || "") === phase && normalizePaymentStatus(record.status) === "pending" && String(record.idempotencyKey || ""));
+    if (activePending) {
+      if (String(activePending.provider || "") !== "wechat_pay") return { success: false, error: "该订单已有待处理收款，请联系客服" };
+      if (pendingPaymentNeedsRecovery(activePending)) {
+        const recovered = await recoverPendingWechatPayment(source, orderKey, activePending, wechatPay);
+        if (recovered && recovered.order) {
+          const refreshed = (Array.isArray(recovered.order.paymentRecords) ? recovered.order.paymentRecords : []).find((record) => getItemId(record) === getItemId(activePending));
+          if (refreshed && normalizePaymentStatus(refreshed.status) === "confirmed") return { success: true, data: publicWechatPaymentResult(recovered.order, phase, refreshed, wechatPay, { idempotent: true }) };
+          return { success: false, error: "原支付单已失效，请重新发起支付" };
+        }
+        return { success: false, error: "支付状态同步中，请稍后重试" };
+      }
+      if (!activePending.prepayId) return { success: false, error: "支付单正在生成，请稍后刷新支付状态" };
+      return { success: true, data: publicWechatPaymentResult(order, phase, activePending, wechatPay, { idempotent: true, reused: true }) };
+    }
+
+    const now = new Date().toISOString();
+    const placeholder = records.find((record) => String(record.phase || "") === phase
+      && ["pending", "not_created"].includes(normalizePaymentStatus(record.status)) && !String(record.idempotencyKey || ""));
+    const paymentId = getItemId(placeholder) || makePaymentId("payment");
+    const payment = {
+      ...(placeholder || {}),
+      id: paymentId,
+      phase,
+      amount: roundMoney(due),
+      status: "pending",
+      attempt: Number(placeholder && placeholder.attempt || 0) || (records.filter((record) => String(record && record.phase || "") === phase).length + 1),
+      idempotencyKey: requestedKey,
+      provider: "wechat_pay",
+      outTradeNo: wechatPay.createOutTradeNo(orderKey, paymentId),
+      operator: "customer",
+      operatorId: openid,
+      createdAt: placeholder && placeholder.createdAt || now,
+      updatedAt: now,
+    };
+    const timeline = { id: makePaymentId("timeline"), type: "微信支付", action: phase === "deposit" ? "创建微信支付订金单" : "创建微信支付尾款单", createTime: now };
+    const saved = await updatePaymentOrder(source, orderKey, order, {
+      paymentRecords: placeholder ? replacePaymentRecord(order, paymentId, payment) : [...records, payment],
+      statusLogs: [...(Array.isArray(order.statusLogs) ? order.statusLogs : []), timeline],
+      followRecords: [...(Array.isArray(order.followRecords) ? order.followRecords : []), timeline],
+      updateTime: now,
+    });
+    if (!saved) {
+      const latest = await source.get("orders", orderKey).catch(() => null);
+      const matched = latest && (Array.isArray(latest.paymentRecords) ? latest.paymentRecords : []).find((record) => usesKey(record, requestedKey));
+      if (matched && String(matched.phase || "") === phase) return { success: true, data: publicWechatPaymentResult(latest, phase, matched, wechatPay, { idempotent: true }) };
+      return { success: false, error: "订单状态已更新，请刷新后重试" };
+    }
+    try {
+      await source.create("logs", { action: "创建微信支付单", operator: openid, operatorId: openid, targetType: "order", targetId: orderKey, detail: `${phase} payment intent`, auditEvent: "wechat_pay_intent", immutable: true, createTime: now });
+    } catch (_) {
+      // The timeline persisted with the order remains the source of truth.
+    }
+    try {
+      const transaction = await wechatPay.createJsapiTransaction({ order: saved, phase, payment, openid });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const current = await source.get("orders", orderKey);
+        const currentRecord = (Array.isArray(current && current.paymentRecords) ? current.paymentRecords : []).find((record) => getItemId(record) === paymentId);
+        if (!current || !currentRecord) return { success: false, error: "支付单状态已更新，请刷新后重试" };
+        if (currentRecord.prepayId) return { success: true, data: publicWechatPaymentResult(current, phase, currentRecord, wechatPay, { idempotent: true }) };
+        const preparedAt = new Date().toISOString();
+        const prepared = { ...currentRecord, prepayId: transaction.prepayId, prepayCreatedAt: preparedAt, updatedAt: preparedAt };
+        const updated = await updatePaymentOrder(source, orderKey, current, {
+          paymentRecords: replacePaymentRecord(current, paymentId, prepared),
+          updateTime: preparedAt,
+        });
+        if (updated) return { success: true, data: publicWechatPaymentResult(updated, phase, prepared, wechatPay) };
+      }
+      return { success: false, error: "支付单状态正在更新，请稍后刷新支付状态" };
+    } catch (error) {
+      await markPaymentIntentFailed(source, orderKey, paymentId, error && error.code).catch(() => null);
+      return { success: false, error: wechatPay.publicMessage(error) };
+    }
+  });
+}
+
+async function rpcCreatePaymentIntentLegacy(source, openid, data = {}) {
   const phase = String(data.phase || data.paymentPhase || "").trim().toLowerCase();
   if (!["deposit", "final"].includes(phase)) return { success: false, error: "支付阶段必须是 deposit 或 final" };
   const requestedKey = String(data.idempotencyKey || data.requestId || "").trim();
@@ -2131,7 +2396,7 @@ async function rpcCreatePaymentIntent(source, openid, data = {}) {
       if (String(existing.phase || "") !== phase) return { success: false, error: "支付请求标识已用于其他支付阶段" };
       const existingStatus = normalizePaymentStatus(existing.status);
       if (["pending", "confirmed"].includes(existingStatus)) {
-        return { success: true, data: { ...publicPaymentSummary(order, phase, existing), provider: String(existing.provider || "wechat_pay_placeholder"), requiresFinanceConfirmation: existingStatus !== "confirmed", invokeWeChatPay: false, idempotent: true } };
+        return { success: true, data: { ...publicPaymentSummary(order, phase, existing), provider: String(existing.provider || "manual_payment"), requiresFinanceConfirmation: existingStatus !== "confirmed", invokeWeChatPay: false, idempotent: true } };
       }
       return { success: false, error: "该支付请求已失败，请更换请求标识重试" };
     }
@@ -2157,14 +2422,14 @@ async function rpcCreatePaymentIntent(source, openid, data = {}) {
     if (!Number.isFinite(suppliedAmount) || Math.abs(roundMoney(suppliedAmount) - roundMoney(due)) > 0.009) return { success: false, error: "支付金额与订单应收不一致" };
     if (hasConfirmedPayment(order, phase)) return { success: false, error: "该支付阶段已确认到账" };
     const activePending = records.find((record) => String(record.phase || "") === phase && normalizePaymentStatus(record.status) === "pending" && String(record.idempotencyKey || ""));
-    if (activePending) return { success: true, data: { ...publicPaymentSummary(order, phase, activePending), provider: String(activePending.provider || "wechat_pay_placeholder"), requiresFinanceConfirmation: true, invokeWeChatPay: false, idempotent: true, reused: true } };
+    if (activePending) return { success: true, data: { ...publicPaymentSummary(order, phase, activePending), provider: String(activePending.provider || "manual_payment"), requiresFinanceConfirmation: true, invokeWeChatPay: false, idempotent: true, reused: true } };
     const now = new Date().toISOString();
     const placeholder = records.find((record) => String(record.phase || "") === phase
       && ["pending", "not_created"].includes(normalizePaymentStatus(record.status)) && !String(record.idempotencyKey || ""));
     const payment = {
       ...(placeholder || {}), id: getItemId(placeholder) || makePaymentId("payment"), phase, amount: roundMoney(due), status: "pending",
       attempt: Number(placeholder && placeholder.attempt || 0) || (records.filter((record) => String(record.phase || "") === phase).length + 1),
-      idempotencyKey: requestedKey, provider: "wechat_pay_placeholder", operator: "customer", operatorId: openid,
+      idempotencyKey: requestedKey, provider: "manual_payment", operator: "customer", operatorId: openid,
       createdAt: placeholder && placeholder.createdAt || now, updatedAt: now,
     };
     const nextRecords = placeholder ? records.map((record) => record === placeholder ? payment : record) : [...records, payment];
@@ -2181,7 +2446,7 @@ async function rpcCreatePaymentIntent(source, openid, data = {}) {
         const latest = await source.get("orders", orderKey).catch(() => null);
         const matched = latest && (Array.isArray(latest.paymentRecords) ? latest.paymentRecords : []).find((record) => usesKey(record, requestedKey));
         if (matched && String(matched.phase || "") === phase) {
-          return { success: true, data: { ...publicPaymentSummary(latest, phase, matched), provider: String(matched.provider || "wechat_pay_placeholder"), requiresFinanceConfirmation: !hasConfirmedPayment(latest, phase), invokeWeChatPay: false, idempotent: true } };
+          return { success: true, data: { ...publicPaymentSummary(latest, phase, matched), provider: String(matched.provider || "manual_payment"), requiresFinanceConfirmation: !hasConfirmedPayment(latest, phase), invokeWeChatPay: false, idempotent: true } };
         }
       }
       throw error;
@@ -2193,16 +2458,35 @@ async function rpcCreatePaymentIntent(source, openid, data = {}) {
       try { await restoreOrderSnapshot(source, orderKey, original); } catch (__) {}
       return { success: false, error: "支付单未创建，审计服务暂不可用" };
     }
-    return { success: true, data: { ...publicPaymentSummary(updated, phase, payment), provider: "wechat_pay_placeholder", requiresFinanceConfirmation: true, invokeWeChatPay: false, paymentParams: null, message: "微信支付入口已预留，当前不会唤起微信支付；请等待客服/财务确认到账" } };
+    return { success: true, data: { ...publicPaymentSummary(updated, phase, payment), provider: "manual_payment", requiresFinanceConfirmation: true, invokeWeChatPay: false, paymentParams: null, message: "历史人工收款处理待确认" } };
   });
 }
 
-async function rpcTestPayment(source, openid, data = {}) {
-  if (!testPaymentEnabled()) return { success: false, error: "测试支付未启用" };
+function publicImmediatePaymentResult(order, phase, payment, config, extra = {}) {
+  return {
+    ...publicPaymentSummary(order, phase, payment),
+    provider: config.provider,
+    [config.responseFlag]: true,
+    ...(config.paymentMode ? { paymentMode: config.paymentMode } : {}),
+    ...(config.paymentMode === "mock" ? { paymentParams: null } : {}),
+    requiresFinanceConfirmation: false,
+    invokeWeChatPay: false,
+    ...extra,
+  };
+}
+
+async function rpcImmediatePayment(source, openid, data = {}, config = {}) {
+  const label = config.label || "模拟支付";
+  const provider = config.provider || "mock_payment";
+  const responseFlag = config.responseFlag || "simulatedPayment";
+  const transactionPrefix = config.transactionPrefix || "mock";
+  const operator = config.operator || provider;
+  const auditEvent = config.auditEvent || "payment_mock";
+  const paymentConfig = { ...config, provider, responseFlag, transactionPrefix, operator, auditEvent, label };
   const phase = String(data.phase || data.paymentPhase || "").trim().toLowerCase();
   if (!['deposit', 'final'].includes(phase)) return { success: false, error: "支付阶段必须是 deposit 或 final" };
   const idempotencyKey = String(data.idempotencyKey || data.requestId || "").trim();
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/.test(idempotencyKey)) return { success: false, error: "请提供有效的测试支付请求标识" };
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$/.test(idempotencyKey)) return { success: false, error: `请提供有效的${label}请求标识` };
   try {
     const initial = await findOrder(source, data.orderId, data.orderNo);
     if (!initial || initial.isDeleted || initial.deleted) return { success: false, error: "订单不存在" };
@@ -2214,37 +2498,55 @@ async function rpcTestPayment(source, openid, data = {}) {
       const records = Array.isArray(order.paymentRecords) ? order.paymentRecords : [];
       const usesKey = (record, key) => String(record && record.idempotencyKey || "") === key || String(record && record.confirmationIdempotencyKey || "") === key;
       const exact = records.find((record) => usesKey(record, idempotencyKey));
+      let pendingToReplace = null;
       if (exact) {
-        if (String(exact.phase || "") !== phase) return { success: false, error: "测试支付请求标识已用于其他支付阶段" };
-        if (normalizePaymentStatus(exact.status) === "confirmed" && String(exact.provider || "") === "test_payment") {
-          return { success: true, data: { ...publicPaymentSummary(order, phase, exact), provider: "test_payment", testPayment: true, requiresFinanceConfirmation: false, invokeWeChatPay: false, idempotent: true } };
+        if (String(exact.phase || "") !== phase) return { success: false, error: `${label}请求标识已用于其他支付阶段` };
+        if (normalizePaymentStatus(exact.status) === "confirmed" && String(exact.provider || "") === provider) {
+          return { success: true, data: publicImmediatePaymentResult(order, phase, exact, paymentConfig, { idempotent: true }) };
         }
-        return { success: false, error: "测试支付请求标识已被使用" };
+        if (normalizePaymentStatus(exact.status) !== "pending" || !config.allowPendingOverride) {
+          return { success: false, error: `${label}请求标识已被使用` };
+        }
+        pendingToReplace = exact;
       }
+      if (order.riskBlocked || order.riskFlag || order.frozen || order.freezeReason || order.riskReason) return { success: false, error: `订单存在风控冻结，暂不能${label}` };
       let tickets = [];
       try { tickets = await source.list("afterSales"); } catch (_) { return { success: false, error: "售后数据暂不可用，请稍后重试" }; }
       if (relatedAfterSaleTickets(order, tickets).some((ticket) => activeAfterSaleTicket(ticket)
-        && (!ticket.orderId || String(ticket.orderId) === String(orderKey)))) return { success: false, error: "订单存在处理中售后，暂不能测试支付" };
+        && (!ticket.orderId || String(ticket.orderId) === String(orderKey)))) return { success: false, error: `订单存在处理中售后，暂不能${label}` };
       const stage = canonicalStage(order);
       if (phase === "deposit" && stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return { success: false, error: "当前订单不在待支付订金阶段" };
-      if (phase === "final" && (!selectionConfirmed(order) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "定金到账且线下选片确认后才能测试支付尾款" };
+      if (phase === "final" && (!selectionConfirmed(order) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: `定金到账且线下选片确认后才能${label}尾款` };
       const due = phase === "deposit" ? depositDue(order) : finalDue(order);
       if (due <= 0) return { success: false, error: "当前支付阶段无需收款" };
+      if (data.amount != null && (!Number.isFinite(Number(data.amount)) || Math.abs(roundMoney(data.amount) - roundMoney(due)) > 0.009)) {
+        return { success: false, error: "支付金额与订单应收不一致" };
+      }
       const allOrders = await source.list("orders");
       if ((Array.isArray(allOrders) ? allOrders : []).some((candidate) => getItemId(candidate) !== orderKey
         && (Array.isArray(candidate.paymentRecords) ? candidate.paymentRecords : []).some((record) => usesKey(record, idempotencyKey)))) {
-        return { success: false, error: "测试支付请求标识已用于其他订单" };
+        return { success: false, error: `${label}请求标识已用于其他订单` };
       }
       if (hasConfirmedPayment(order, phase)) return { success: false, error: "该支付阶段已确认到账" };
+      const activePending = records.find((record) => String(record && record.phase || "") === phase
+        && normalizePaymentStatus(record.status) === "pending" && String(record.idempotencyKey || ""));
+      if (activePending && String(activePending.provider || "") !== provider && !config.allowPendingOverride) {
+        return { success: false, error: "该订单已有待处理支付，请等待结果后再试" };
+      }
+      if (!pendingToReplace && activePending && config.allowPendingOverride) pendingToReplace = activePending;
       const now = new Date().toISOString();
-      const externalTransactionId = `test:${crypto.createHash("sha256").update(`${orderKey}:${phase}:${idempotencyKey}`).digest("hex").slice(0, 40)}`;
-      const reusable = records.find((record) => String(record && record.phase || "") === phase
-        && ["not_created", "pending"].includes(normalizePaymentStatus(record.status)));
+      const externalTransactionId = `${transactionPrefix}:${crypto.createHash("sha256").update(`${orderKey}:${phase}:${idempotencyKey}`).digest("hex").slice(0, 40)}`;
+      const reusable = pendingToReplace || records.find((record) => String(record && record.phase || "") === phase
+        && ["not_created", "pending"].includes(normalizePaymentStatus(record.status)) && !String(record.idempotencyKey || ""));
+      const reusableFields = { ...(reusable || {}) };
+      ["outTradeNo", "prepayId", "prepayCreatedAt", "tradeState", "paymentParams"].forEach((field) => delete reusableFields[field]);
       const payment = {
-        ...(reusable || {}), id: getItemId(reusable) || makePaymentId("testpay"), phase, amount: due, status: "confirmed",
+        ...reusableFields, id: getItemId(reusable) || makePaymentId(`${transactionPrefix}pay`), phase, amount: roundMoney(due), status: "confirmed",
         attempt: Number(reusable && reusable.attempt || 0) || (records.filter((record) => String(record && record.phase || "") === phase).length + 1),
-        idempotencyKey, confirmationIdempotencyKey: idempotencyKey, provider: "test_payment", externalTransactionId,
-        operator: "test_payment", operatorId: openid, testPayment: true, paidAt: now, confirmedAt: now, createdAt: reusable && reusable.createdAt || now, updatedAt: now,
+        idempotencyKey, confirmationIdempotencyKey: idempotencyKey, provider, externalTransactionId,
+        operator, operatorId: openid, [responseFlag]: true,
+        ...(paymentConfig.paymentMode ? { paymentMode: paymentConfig.paymentMode } : {}),
+        paidAt: now, confirmedAt: now, createdAt: reusable && reusable.createdAt || now, updatedAt: now,
       };
       const nextRecords = reusable ? records.map((record) => record === reusable ? payment : record) : [...records, payment];
       const paidField = phase === "deposit" ? "depositPaid" : "finalPaid";
@@ -2253,40 +2555,96 @@ async function rpcTestPayment(source, openid, data = {}) {
       const confirmedAtField = phase === "deposit" ? "depositConfirmedAt" : "finalConfirmedAt";
       const confirmedByField = phase === "deposit" ? "depositConfirmedBy" : "finalConfirmedBy";
       const original = JSON.parse(JSON.stringify(order));
-      const timeline = { id: makePaymentId("timeline"), type: "测试支付", action: phase === "deposit" ? "确认测试订金支付" : "确认测试尾款支付", operator: "test_payment", operatorId: openid, createTime: now };
+      const timeline = { id: makePaymentId("timeline"), type: label, action: phase === "deposit" ? `确认${label}订金支付` : `确认${label}尾款支付`, operator, operatorId: openid, createTime: now };
       const patch = {
-        paymentRecords: nextRecords, [paidField]: due, [financeField]: "已审", [paidAtField]: now,
-        [confirmedAtField]: now, [confirmedByField]: "test_payment", [phase + "PaymentStatus"]: "confirmed",
+        paymentRecords: nextRecords, [paidField]: roundMoney(due), [financeField]: "已审", [paidAtField]: now,
+        [confirmedAtField]: now, [confirmedByField]: operator, [phase + "PaymentStatus"]: "confirmed",
         status: phase === "deposit" ? "deposit_paid" : "paid",
         statusLogs: [...(Array.isArray(order.statusLogs) ? order.statusLogs : []), timeline],
         followRecords: [...(Array.isArray(order.followRecords) ? order.followRecords : []), timeline], updateTime: now,
       };
-      const updated = await source.update("orders", orderKey, patch);
-      if (!updated) return { success: false, error: "订单保存失败，请稍后重试" };
+      const updated = await updatePaymentOrder(source, orderKey, order, patch);
+      if (!updated) return { success: false, error: "订单状态已更新，请刷新后重试" };
       try {
-        await source.create("logs", { action: "确认测试支付", operator: "test_payment", operatorId: openid, targetType: "order", targetId: orderKey, detail: `${phase} provider=test_payment`, auditEvent: "test_payment", immutable: true, createTime: now });
+        await source.create("logs", { action: `确认${label}`, operator, operatorId: openid, targetType: "order", targetId: orderKey, detail: `${phase} provider=${provider}`, auditEvent, immutable: true, createTime: now });
       } catch (_) {
         try { await restoreOrderSnapshot(source, orderKey, original); } catch (__) {}
-        return { success: false, error: "测试支付未确认，审计服务暂不可用" };
+        return { success: false, error: `${label}未确认，审计服务暂不可用` };
       }
-      return { success: true, data: { ...publicPaymentSummary(updated, phase, payment), provider: "test_payment", testPayment: true, requiresFinanceConfirmation: false, invokeWeChatPay: false } };
+      return { success: true, data: publicImmediatePaymentResult(updated, phase, payment, paymentConfig) };
     });
   } catch (error) {
-    return { success: false, error: publicRpcError(error, "测试支付失败") };
+    return { success: false, error: publicRpcError(error, `${label}失败`) };
   }
 }
 
-async function rpcGetPaymentStatus(source, openid, data = {}) {
+function rpcMockPayment(source, openid, data = {}) {
+  return rpcImmediatePayment(source, openid, data, {
+    label: "模拟支付",
+    provider: "mock_payment",
+    responseFlag: "simulatedPayment",
+    transactionPrefix: "mock",
+    operator: "mock_payment",
+    auditEvent: "payment_mock",
+    paymentMode: "mock",
+    allowPendingOverride: true,
+  });
+}
+
+async function rpcTestPayment(source, openid, data = {}) {
+  if (!testPaymentEnabled()) return { success: false, error: "测试支付未启用" };
+  return rpcImmediatePayment(source, openid, data, {
+    label: "测试支付",
+    provider: "test_payment",
+    responseFlag: "testPayment",
+    transactionPrefix: "test",
+    operator: "test_payment",
+    auditEvent: "test_payment",
+    // The isolated test helper intentionally confirms an intent created by
+    // the real-payment path, preserving the historical test workflow.
+    allowPendingOverride: true,
+  });
+}
+
+async function rpcGetPaymentStatus(source, openid, data = {}, ctx = {}) {
   const phase = String(data.phase || data.paymentPhase || "").trim().toLowerCase();
   if (!["deposit", "final"].includes(phase)) return { success: false, error: "支付阶段必须是 deposit 或 final" };
-  const order = await findOrder(source, data.orderId, data.orderNo);
+  let order = await findOrder(source, data.orderId, data.orderNo);
   if (!order || order.isDeleted || order.deleted) return { success: false, error: "订单不存在" };
   if (getOrderOpenid(order) !== openid) return { success: false, error: "无权限查看该订单" };
-  const records = (Array.isArray(order.paymentRecords) ? order.paymentRecords : []).filter((record) => String(record.phase || "") === phase);
-  const confirmed = records.filter((record) => normalizePaymentStatus(record.status) === "confirmed").slice(-1)[0] || null;
-  const latest = confirmed || (records.length ? records[records.length - 1] : null);
-  const intent = latest && (latest.idempotencyKey || latest.provider) ? latest : null;
-  return { success: true, data: { ...publicPaymentSummary(order, phase, intent), provider: intent && intent.provider || "wechat_pay_placeholder", requiresFinanceConfirmation: !hasConfirmedPayment(order, phase), invokeWeChatPay: false } };
+  const findIntent = (candidate) => {
+    const records = (Array.isArray(candidate && candidate.paymentRecords) ? candidate.paymentRecords : []).filter((record) => String(record.phase || "") === phase);
+    const confirmed = records.filter((record) => normalizePaymentStatus(record.status) === "confirmed").slice(-1)[0] || null;
+    const latest = confirmed || (records.length ? records[records.length - 1] : null);
+    return latest && (latest.idempotencyKey || latest.provider) ? latest : null;
+  };
+  let intent = findIntent(order);
+  let syncPending = false;
+  if (intent && String(intent.provider || "") === "wechat_pay" && normalizePaymentStatus(intent.status) === "pending" && ctx.wechatPay && ctx.wechatPay.isConfigured() && pendingPaymentNeedsRecovery(intent)) {
+    const recovered = await recoverPendingWechatPayment(source, getItemId(order), intent, ctx.wechatPay);
+    if (recovered && recovered.order) {
+      order = recovered.order;
+      intent = findIntent(order);
+    } else {
+      syncPending = true;
+    }
+  }
+  if (intent && String(intent.provider || "") === "wechat_pay" && normalizePaymentStatus(intent.status) === "pending" && intent.outTradeNo && ctx.wechatPay && ctx.wechatPay.isConfigured()) {
+    try {
+      const transaction = await ctx.wechatPay.queryTransaction(intent.outTradeNo);
+      if (["SUCCESS", "CLOSED", "PAYERROR", "REVOKED"].includes(transaction.tradeState)) {
+        await ctx.wechatPay.confirmTransaction(source, transaction);
+        order = await source.get("orders", getItemId(order));
+        intent = findIntent(order);
+      }
+    } catch (_) {
+      // The callback may arrive before a query result is available. Keep the
+      // payment retryable and never infer success on the client.
+      syncPending = true;
+    }
+  }
+  const dataOut = publicWechatPaymentResult(order, phase, intent, ctx.wechatPay, syncPending ? { syncPending: true } : {});
+  return { success: true, data: dataOut };
 }
 
 /* ============================ 订单状态变更（客人自助取消/删除） ============================ */

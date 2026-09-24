@@ -331,6 +331,7 @@ async function ensureNormalizedIndexes(conn) {
     ["payment_id", "uq_order_payment_id"],
     ["idempotency_key", "uq_order_payment_idempotency"],
     ["confirmation_idempotency_key", "uq_order_payment_confirmation_key"],
+    ["out_trade_no", "uq_order_payment_out_trade_no"],
     ["external_transaction_id", "uq_order_payment_transaction"],
   ]) await uniqueIdentity("lxm_order_payment_records", column, indexName);
 }

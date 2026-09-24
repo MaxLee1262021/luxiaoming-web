@@ -330,7 +330,7 @@ async function requestJson(baseUrl, requestPath, options = {}) {
     const text = await response.text();
     let parsed = null;
     try { parsed = text ? JSON.parse(text) : null; } catch { /* keep null */ }
-    return { status: response.status, body: parsed, text };
+    return { status: response.status, body: parsed, text, headers: Object.fromEntries(response.headers.entries()) };
   } finally {
     clearTimeout(timeout);
   }
@@ -419,6 +419,9 @@ function spawnServer(root, fixtureFile, options = {}) {
     DOTENV_CONFIG_PATH: options.dotenvPath || path.join(path.dirname(fixtureFile), ".env"),
     SESSION_STORE: options.sessionStore || "memory",
     AUTH_REQUIRED: "true",
+    // Explicitly enable the in-process payment stub only for this isolated
+    // NODE_ENV=test fixture. Production cannot activate this code path.
+    WECHAT_PAY_MOCK_MODE: "true",
     ...(fs.existsSync(localNodeModules) ? { NODE_PATH: localNodeModules } : {}),
     ...(options.env || {}),
   });
@@ -755,6 +758,17 @@ async function runSmoke(options = {}) {
       superToken = await login(server.baseUrl, fixture.accounts.super);
       assert.ok(superToken);
     });
+    await check(report, "admin module bootstrap batches authorized screen data", async () => {
+      const result = await requestJson(server.baseUrl, "/api/modules/orders?keys=orders,shops,logs", { headers: authHeaders(superToken) });
+      assert.equal(result.status, 200);
+      assert.equal(result.body && result.body.module, "orders");
+      assert.ok(Array.isArray(result.body && result.body.collections && result.body.collections.orders));
+      assert.ok(Array.isArray(result.body && result.body.collections && result.body.collections.shops));
+      assert.equal(Object.prototype.hasOwnProperty.call(result.body && result.body.collections || {}, "logs"), false, "module boundary must reject unrelated collections");
+      assert.ok((result.body && result.body.skippedKeys || []).includes("logs"));
+      assert.match(String(result.headers && result.headers["x-request-id"] || ""), /^[A-Za-z0-9_-]{8,128}$/);
+      assertNoPasswordFields(result.body, "module bootstrap");
+    });
     await check(report, "public profile rejects an admin Bearer session", async () => {
       assert.ok(superToken, "admin token is required");
       const result = await requestJson(server.baseUrl, "/api/rpc/getMyProfile", {
@@ -870,17 +884,12 @@ async function runSmoke(options = {}) {
         assert.equal(result.status, 403, `${role} must not read global audit logs`);
       }
     });
-    await check(report, "client audit writes cannot impersonate an operator", async () => {
+    await check(report, "client cannot forge audit entries", async () => {
       const serviceToken = await login(server.baseUrl, fixture.accounts.service);
       const write = await requestJson(server.baseUrl, "/api/collection/logs", {
         method: "POST", headers: authHeaders(serviceToken), body: { operator: "evil", user: "evil", action: "synthetic client audit" },
       });
-      assert.equal(write.status, 201);
-      const logs = await requestJson(server.baseUrl, "/api/collection/logs", { headers: authHeaders(superToken) });
-      const row = responseRows(logs.body).find((item) => item && item.action === "synthetic client audit");
-      assert.ok(row);
-      assert.equal(row.operator, fixture.accounts.service.account);
-      assert.notEqual(row.operator, "evil");
+      assert.equal(write.status, 403, "audit writes must be owned by server-side business actions");
     });
       await check(report, "channel dashboard and home aggregates stay scoped", async () => {
       const merchantToken = await login(server.baseUrl, fixture.accounts.merchant);
@@ -1331,8 +1340,9 @@ async function runSmoke(options = {}) {
         const financeToken = await login(server.baseUrl, fixture.accounts.finance);
         const photoToken = await login(server.baseUrl, fixture.accounts.photo);
         const actionPath = `/api/orders/${encodeURIComponent(orderId)}/action`;
-        assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.provider, "wechat_pay_placeholder");
-        assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.invokeWeChatPay, false);
+        assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.provider, "wechat_pay");
+        assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.invokeWeChatPay, true);
+        assert.ok(depositIntent.body && depositIntent.body.data && depositIntent.body.data.paymentParams, "test gateway must return signed payment-shaped parameters");
         const duplicateIntent = await requestJson(server.baseUrl, "/api/rpc/createPaymentIntent", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
         });
@@ -1385,7 +1395,7 @@ async function runSmoke(options = {}) {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", amount: 70, idempotencyKey: `workflow-final-intent-${suffix}` } },
         });
         assert.equal(finalIntent.status, 200, `final intent: ${JSON.stringify(finalIntent.body)}`);
-        assert.equal(finalIntent.body && finalIntent.body.data && finalIntent.body.data.invokeWeChatPay, false);
+        assert.equal(finalIntent.body && finalIntent.body.data && finalIntent.body.data.invokeWeChatPay, true);
         const confirmFinal = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(financeToken), body: { action: "payment", phase: "final", paymentStatus: "confirmed", amount: 70, idempotencyKey: `workflow-final-confirm-${suffix}`, externalTransactionId: `workflow-final-tx-${suffix}`, reason: "workflow confirm final" },
         });

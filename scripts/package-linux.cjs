@@ -52,6 +52,7 @@ function packageLinux(options) {
     "README.md",
     "docs/OSS接入与迁移.md",
     "docs/oss-ram-policy.json",
+    "docs/微信支付接入说明.md",
     ...(options.includeEnv ? [".env"] : [])
   ];
   const includeDirectories = ["public", "src", "server", "scripts", "deploy"];
@@ -92,12 +93,16 @@ function packageLinux(options) {
     });
   }
 
-  for (const script of [
-    path.join(outputRoot, "deploy", "linux", "install.sh"),
-    path.join(outputRoot, "deploy", "linux", "start.sh")
-  ]) {
-    fs.chmodSync(script, 0o755);
-  }
+for (const script of [
+  path.join(outputRoot, "deploy", "linux", "install.sh"),
+  path.join(outputRoot, "deploy", "linux", "start.sh")
+]) {
+  // The source tree is edited on Windows and may carry CRLF. Linux parses the
+  // shebang literally, so normalize release launchers before archiving them.
+  const scriptText = fs.readFileSync(script, "utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  fs.writeFileSync(script, scriptText, { encoding: "utf8" });
+  fs.chmodSync(script, 0o755);
+}
   if (options.includeEnv) fs.chmodSync(path.join(outputRoot, ".env"), 0o600);
 
   function runTar(args) {

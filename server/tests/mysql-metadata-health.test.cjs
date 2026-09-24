@@ -88,3 +88,26 @@ test("MySQL permission health accepts uppercase information_schema metadata fiel
     await store.close();
   }
 });
+
+test("batched relation hydration groups rows without cross-record leakage", () => {
+  const grouped = createMysqlSource.groupRelationRows(
+    ["order-a", "order-b"],
+    [
+      { record_id: "order-a", path: "custom.flag", value_type: "boolean", value_bool: 1 },
+      { record_id: "order-b", path: "custom.note", value_type: "string", value_text: "ok" },
+    ],
+    {
+      order_products: {
+        parentColumn: "order_id",
+        rows: [
+          { order_id: "order-a", item_no: 0, product_id: "pkg-a" },
+          { order_id: "order-b", item_no: 0, product_id: "pkg-b" },
+        ],
+      },
+    },
+  );
+  assert.equal(grouped.get("order-a")[schema.COLLECTION_VALUES_TABLE].length, 1);
+  assert.equal(grouped.get("order-b")[schema.COLLECTION_VALUES_TABLE].length, 1);
+  assert.deepEqual(grouped.get("order-a").order_products.map((row) => row.product_id), ["pkg-a"]);
+  assert.deepEqual(grouped.get("order-b").order_products.map((row) => row.product_id), ["pkg-b"]);
+});

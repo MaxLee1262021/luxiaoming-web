@@ -6,6 +6,9 @@ const rpc = require("../lib/rpc.cjs");
 const schema = require("../lib/mysqlSchema.cjs");
 const workflow = require("../lib/orderWorkflow.cjs");
 const createApi = require("../lib/api.cjs");
+const { createTestWechatPay } = require("./helpers/wechatPay.cjs");
+
+const TEST_WECHAT_PAY = createTestWechatPay();
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -48,7 +51,7 @@ function makeSource() {
 }
 
 function publicIdentity(openid = "customer-openid") {
-  return { identity: { kind: "public", openid } };
+  return { identity: { kind: "public", openid }, wechatPay: TEST_WECHAT_PAY };
 }
 
 test("booking is payable without a customer-selected shooting time and deposit intent is idempotent", async () => {
@@ -83,8 +86,9 @@ test("booking is payable without a customer-selected shooting time and deposit i
   }, publicIdentity());
   assert.equal(intent.success, true);
   assert.equal(intent.data.status, "pending");
-  assert.equal(intent.data.provider, "wechat_pay_placeholder");
-  assert.equal(intent.data.invokeWeChatPay, false);
+  assert.equal(intent.data.provider, "wechat_pay");
+  assert.equal(intent.data.invokeWeChatPay, true);
+  assert.ok(intent.data.paymentParams);
 
   const repeatIntent = await rpc(source, "createPaymentIntent", {
     data: { orderId: booking.orderId, phase: "deposit", amount: 30, idempotencyKey: "payment-test-0001" },
@@ -215,7 +219,7 @@ test("manual order creation uses the product-backed deposit stage", async () => 
     const adjusted = await adjust.json();
     assert.equal(adjusted.data.depositDue, 50);
     assert.equal(adjusted.data.finalDue, 70);
-    source.collections.orders[body.id].paymentRecords.push({ id: "final-intent", phase: "final", amount: 70, status: "pending", provider: "wechat_pay_placeholder", idempotencyKey: "final-intent-0001" });
+    source.collections.orders[body.id].paymentRecords.push({ id: "final-intent", phase: "final", amount: 70, status: "pending", provider: "manual_payment", idempotencyKey: "final-intent-0001" });
     const blocked = await fetch(`http://127.0.0.1:${address.port}/api/orders/${encodeURIComponent(body.id)}/action`, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer admin-token" },
       body: JSON.stringify({ action: "update", reason: "再次改价", fields: { totalAmount: 140 } }),

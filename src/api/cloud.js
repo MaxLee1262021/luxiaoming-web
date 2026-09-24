@@ -196,6 +196,14 @@
     return jsonResponse(response);
   }
 
+  async function getModuleData(moduleName, keys) {
+    if (!hasSession()) throw authError("需要登录后读取管理数据", 401);
+    const requested = Array.isArray(keys) ? keys.filter(Boolean).join(",") : "";
+    const suffix = requested ? `?keys=${encodeURIComponent(requested)}` : "";
+    const response = await request(`${base}/modules/${encodeURIComponent(moduleName)}${suffix}`);
+    return jsonResponse(response);
+  }
+
   async function getDoc(key, id) {
     if (!hasSession()) throw authError("需要登录后读取管理数据", 401);
     const response = await request(`${base}/collection/${encodeURIComponent(key)}/${encodeURIComponent(id)}`);
@@ -265,13 +273,6 @@
     if (!hasSession()) throw authError("需要登录后读取商家码", 401);
     const response = await request(`${base}/merchant-codes?shopId=${encodeURIComponent(shopId || "")}`);
     return jsonResponse(response);
-  }
-
-  async function availableDataKeys() {
-    if (!hasSession()) throw authError("需要登录后读取数据权限", 401);
-    const response = await request(`${base}/meta/keys`);
-    const body = await jsonResponse(response);
-    return new Set(Array.isArray(body && body.keys) ? body.keys.map(String) : []);
   }
 
   // Permission data has its own normalized tables and must not be routed
@@ -345,8 +346,8 @@
   const knownDataKeys = new Set((cfg.dataKeys || []).concat(cfg.stateKeys || [], cfg.docKeys || []));
   const stateDataKeys = new Set((cfg.stateKeys || []).concat(cfg.docKeys || []));
   const menuData = cfg.menuData && typeof cfg.menuData === "object" ? cfg.menuData : {};
+  const menuModules = cfg.menuModules && typeof cfg.menuModules === "object" ? cfg.menuModules : {};
   const routeAliases = { videoProducts: "videoSingles" };
-  const allowedKeyCache = { value: null, promise: null };
   const menuLoadChains = new Map();
   const keyRequestVersion = new Map();
   const keyRequestSequence = new Map();
@@ -363,26 +364,14 @@
     return [...new Set(configured.map((item) => String(item || "").trim()).filter((item) => knownDataKeys.has(item)))];
   }
 
-  async function permittedKeys() {
-    if (allowedKeyCache.value) return allowedKeyCache.value;
-    if (!allowedKeyCache.promise) {
-      allowedKeyCache.promise = availableDataKeys()
-        .then((keys) => {
-          allowedKeyCache.value = keys;
-          return keys;
-        })
-        .catch((error) => {
-          allowedKeyCache.promise = null;
-          throw error;
-        });
-    }
-    return allowedKeyCache.promise;
+  function menuModuleFor(menuKey) {
+    const key = normalizeMenuKey(menuKey);
+    const value = String(menuModules[key] || "").trim();
+    return /^[a-z][a-z0-9_-]{0,63}$/i.test(value) ? value : "";
   }
 
   function clearMenuLoadState() {
     loadEpoch += 1;
-    allowedKeyCache.value = null;
-    allowedKeyCache.promise = null;
     menuLoadChains.clear();
     keyRequestVersion.clear();
     keyRequestSequence.clear();
@@ -427,11 +416,33 @@
     return applyLoadedValue("financeSettings", { ...(data.financeSettings || {}), ...merged }, data, null, version);
   }
 
-  async function loadDataKey(key, data, state) {
+  function beginDataKeyLoad(key) {
     const sequence = (keyRequestSequence.get(key) || 0) + 1;
     keyRequestSequence.set(key, sequence);
     const version = `${loadEpoch}:${sequence}`;
     keyRequestVersion.set(key, version);
+    return version;
+  }
+
+  function normalizeModuleValue(key, value, data) {
+    if (key === "homeConfig") return value && value.editorConfig && typeof value.editorConfig === "object" ? value.editorConfig : value;
+    if (key === "financeSettings") {
+      if (!Array.isArray(value)) return { ...((data && data.financeSettings) || {}), ...(value || {}) };
+      const merged = value.reduce((memo, row) => {
+        if (!row || typeof row !== "object") return memo;
+        const id = String(row.id || row._id || "");
+        const valueKeys = Object.keys(row).filter((name) => !["id", "_id"].includes(name));
+        if (valueKeys.length === 1 && valueKeys[0] === "value") memo[id] = row.value;
+        else Object.assign(memo, row);
+        return memo;
+      }, {});
+      return { ...((data && data.financeSettings) || {}), ...merged };
+    }
+    return safeCollectionValue(key, value);
+  }
+
+  async function loadDataKey(key, data, state) {
+    const version = beginDataKeyLoad(key);
     try {
       if (key === "homeConfig") {
         const doc = await getDoc("homeConfig", "homeStats");
@@ -456,6 +467,28 @@
     }
   }
 
+  async function loadModuleData(moduleName, keys, data, state) {
+    const versions = new Map(keys.map((key) => [key, beginDataKeyLoad(key)]));
+    let payload;
+    try {
+      payload = await getModuleData(moduleName, keys);
+    } catch (error) {
+      // Keep compatibility with an older server during a rolling deployment.
+      if (error && error.status === 404) return Promise.all(keys.map((key) => loadDataKey(key, data, state)));
+      if (error && error.status === 401) return keys.map((key) => ({ key, error, status: 401 }));
+      if (error && error.status === 403) return keys.map((key) => ({ key, skipped: true, status: 403 }));
+      if (window.console && console.warn) console.warn(`[cloud] 模块 ${moduleName} 加载失败，未覆盖当前数据`, error && error.message ? error.message : error);
+      return keys.map((key) => ({ key, error }));
+    }
+    const collections = payload && payload.collections && typeof payload.collections === "object" ? payload.collections : {};
+    const skipped = new Set(Array.isArray(payload && payload.skippedKeys) ? payload.skippedKeys.map(String) : []);
+    return keys.map((key) => {
+      if (!Object.prototype.hasOwnProperty.call(collections, key)) return skipped.has(key) ? { key, skipped: true, status: 403 } : { key, skipped: true };
+      const value = normalizeModuleValue(key, collections[key], data);
+      return { key, loaded: applyLoadedValue(key, value, data, state, versions.get(key)) };
+    });
+  }
+
   async function loadMenuData(menuKey, data, state, options = {}) {
     if (!hasSession()) return { skipped: true, reason: "unauthenticated" };
     const routeKey = normalizeMenuKey(menuKey || (state && state.active));
@@ -466,24 +499,17 @@
     // stale cache hit. Every menu activation performs a new related-data read.
     const previous = menuLoadChains.get(routeKey) || Promise.resolve();
     const task = previous.catch(() => {}).then(async () => {
-      let allowedKeys = null;
-      try {
-        allowedKeys = await permittedKeys();
-      } catch (error) {
-        if (error && error.status === 401) return { ok: false, status: 401, routeKey };
-        // A legacy server may not expose /meta/keys. The collection-level
-        // authorization guard below remains the source of truth in that case.
-      }
-      const requested = allowedKeys ? keys.filter((key) => allowedKeys.has(key)) : keys;
-      const skipped = allowedKeys ? keys.filter((key) => !allowedKeys.has(key)) : [];
-      const results = await Promise.all(requested.map((key) => loadDataKey(key, data, state)));
+      const moduleName = menuModuleFor(routeKey);
+      const results = moduleName
+        ? await loadModuleData(moduleName, keys, data, state)
+        : await Promise.all(keys.map((key) => loadDataKey(key, data, state)));
       const unauthorized = results.find((result) => result && result.status === 401);
-      if (unauthorized) return { ok: false, status: 401, routeKey, loaded: results.filter((result) => result.loaded).map((result) => result.key), skipped };
+      if (unauthorized) return { ok: false, status: 401, routeKey, loaded: results.filter((result) => result.loaded).map((result) => result.key), skipped: [] };
       return {
         ok: true,
         routeKey,
         loaded: results.filter((result) => result && result.loaded).map((result) => result.key),
-        skipped: [...skipped, ...results.filter((result) => result && result.skipped).map((result) => result.key)],
+        skipped: results.filter((result) => result && result.skipped).map((result) => result.key),
         failed: results.filter((result) => result && result.error && !result.status).map((result) => result.key)
       };
     });
@@ -503,5 +529,5 @@
 
   window.addEventListener("lxm-auth-changed", () => clearMenuLoadState());
 
-  window.LXM_CLOUD = { getColl, getDoc, create, update, upsertDoc, remove, orderAction, afterSaleAction, merchantCodes, merchantCodeStats, generateMerchantCode, loadMenuData, loadAdminData, clearMenuLoadState, menuKeysFor, mode: () => window.LXM_CLOUD_MODE };
+  window.LXM_CLOUD = { getColl, getDoc, getModuleData, create, update, upsertDoc, remove, orderAction, afterSaleAction, merchantCodes, merchantCodeStats, generateMerchantCode, loadMenuData, loadAdminData, clearMenuLoadState, menuKeysFor, menuModuleFor, mode: () => window.LXM_CLOUD_MODE };
 })();

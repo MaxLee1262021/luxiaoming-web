@@ -6,6 +6,9 @@ const test = require("node:test");
 const createApi = require("../lib/api.cjs");
 const rpc = require("../lib/rpc.cjs");
 const workflow = require("../lib/orderWorkflow.cjs");
+const { createTestWechatPay } = require("./helpers/wechatPay.cjs");
+
+const TEST_WECHAT_PAY = createTestWechatPay();
 
 const CONFIRMED_DEPOSIT = {
   depositDue: 30,
@@ -75,7 +78,7 @@ function makeSource() {
 }
 
 function publicIdentity(openid = "owner") {
-  return { identity: { kind: "public", openid } };
+  return { identity: { kind: "public", openid }, wechatPay: TEST_WECHAT_PAY };
 }
 
 async function startAdminApi(source) {
@@ -106,12 +109,24 @@ async function closeServer(server) {
 
 async function withTestPayment(callback) {
   const previous = process.env.TEST_PAYMENT_ENABLED;
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousIsolatedSource = process.env.LXM_ALLOW_TEST_JSON_SOURCE;
+  const previousDataMode = process.env.DATA_MODE;
   try {
     process.env.TEST_PAYMENT_ENABLED = "true";
+    process.env.NODE_ENV = "test";
+    process.env.LXM_ALLOW_TEST_JSON_SOURCE = "true";
+    process.env.DATA_MODE = "json";
     return await callback();
   } finally {
     if (previous === undefined) delete process.env.TEST_PAYMENT_ENABLED;
     else process.env.TEST_PAYMENT_ENABLED = previous;
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    if (previousIsolatedSource === undefined) delete process.env.LXM_ALLOW_TEST_JSON_SOURCE;
+    else process.env.LXM_ALLOW_TEST_JSON_SOURCE = previousIsolatedSource;
+    if (previousDataMode === undefined) delete process.env.DATA_MODE;
+    else process.env.DATA_MODE = previousDataMode;
   }
 }
 

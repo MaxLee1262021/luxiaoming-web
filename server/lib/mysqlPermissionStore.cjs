@@ -5,6 +5,7 @@
 // typed attribute leaves in separate columns/rows.  No credential or object
 // payload is serialized into a single database column.
 const crypto = require("crypto");
+const { createLogger, errorCode, recordDatabaseOperation } = require("./observability.cjs");
 
 const TABLES = Object.freeze({
   menus: "lxm_auth_menus",
@@ -38,6 +39,13 @@ function parseObject(value) {
   catch (_) { throw Object.assign(new Error("旧版权限载荷格式无效"), { code: "DATA_SOURCE_INVALID" }); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw Object.assign(new Error("旧版权限载荷格式无效"), { code: "DATA_SOURCE_INVALID" });
   return parsed;
+}
+
+function sqlSummary(sql) {
+  const text = String(sql || "").replace(/\s+/g, " ").trim();
+  const verb = (text.match(/^([A-Za-z]+)/) || ["", "SQL"])[1].toUpperCase();
+  const table = (text.match(/\b(?:FROM|INTO|UPDATE|TABLE)\s+`?([A-Za-z0-9_]+)/i) || ["", "metadata"])[1];
+  return `${verb}:${String(table || "metadata").slice(0, 120)}`;
 }
 function hashPassword(plain) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -158,6 +166,7 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     catch (_) { throw Object.assign(new Error("MySQL 驱动未安装"), { code: "DATA_SOURCE_UNAVAILABLE" }); }
   }
   if (!options.pool && (!options.dbHost || !options.dbUser || !options.dbName)) throw Object.assign(new Error("MySQL 配置不完整"), { code: "DATA_SOURCE_CONFIG_INVALID" });
+  const logger = options.logger || createLogger({ service: "luxiaoming-admin" });
   const pool = options.pool || mysql.createPool({
     host: options.dbHost, port: options.dbPort || 3306, user: options.dbUser,
     password: options.dbPassword || "", database: options.dbName, waitForConnections: true,
@@ -165,12 +174,43 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     multipleStatements: false, ...(options.dbSsl ? { ssl: { rejectUnauthorized: true } } : {})
   });
   const autoMigrate = options.autoMigrate === true || String(options.autoMigrate ?? process.env.DB_AUTO_MIGRATE ?? "false").toLowerCase() === "true";
+  const slowQueryMs = Math.min(Math.max(Number(options.slowQueryMs ?? process.env.DB_SLOW_QUERY_MS ?? 500), 1), 120000);
   let ensurePromise = null;
   let schemaReady = false;
   let closed = false;
 
-  async function query(conn, sql, params = []) { const [rows] = await conn.query(sql, params); return rows; }
-  async function execute(conn, sql, params = []) { const [result] = await conn.query(sql, params); return result; }
+  async function query(conn, sql, params = []) {
+    const startedAt = process.hrtime.bigint();
+    const operation = sqlSummary(sql);
+    try {
+      const [rows] = await conn.query(sql, params);
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      if (durationMs >= slowQueryMs) logger.warn("authz.database.query.slow", { operation, durationMs: Math.round(durationMs * 100) / 100, rowCount: Array.isArray(rows) ? rows.length : 0 });
+      return rows;
+    } catch (error) {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      logger.error("authz.database.query.failed", { operation, durationMs: Math.round(durationMs * 100) / 100, errorCode: errorCode(error) });
+      throw error;
+    }
+  }
+  async function execute(conn, sql, params = []) {
+    const startedAt = process.hrtime.bigint();
+    const operation = sqlSummary(sql);
+    try {
+      const [result] = await conn.query(sql, params);
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      if (durationMs >= slowQueryMs) logger.warn("authz.database.execute.slow", { operation, durationMs: Math.round(durationMs * 100) / 100, affectedRows: Number(result && result.affectedRows || 0) });
+      return result;
+    } catch (error) {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      logger.error("authz.database.execute.failed", { operation, durationMs: Math.round(durationMs * 100) / 100, errorCode: errorCode(error) });
+      throw error;
+    }
+  }
   async function withTransaction(work) {
     if (typeof pool.getConnection !== "function") return work(pool);
     const conn = await pool.getConnection();

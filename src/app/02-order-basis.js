@@ -159,13 +159,10 @@ function log(action, target, detail, operator = roleProfile.value.name, meta = {
     snapshot: meta.snapshot || "",
   };
   state.logs.unshift(entry);
-  const session = window.LXM_AUTH?.getSession?.();
-  const dynamicRole = !!(session && (session.roleId || session.permissionsConfigured || session.permissionSource));
-  const canWriteAudit = !dynamicRole || (Array.isArray(session?.menuKeys) && session.menuKeys.includes("logs"));
-  if (ctx.isServerConnected() && canWriteAudit) {
-    // 联网模式：审计日志实时写回服务端 logs 集合（fire-and-forget，失败不阻塞操作、不重复弹窗）。
-    window.LXM_CLOUD.create("logs", entry).catch(() => {});
-  } else if (!(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) {
+  // Server-side domain actions own the authoritative audit trail. Browser
+  // entries only keep the current mock-session experience responsive and are
+  // never sent as fire-and-forget audit writes.
+  if (!ctx.isServerConnected() && !(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) {
     schedulePersist();
   }
   return entry;

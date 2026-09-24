@@ -15,6 +15,7 @@
 const crypto = require("crypto");
 const { isDeepStrictEqual } = require("util");
 const schema = require("./mysqlSchema.cjs");
+const { createLogger, errorCode, recordDatabaseOperation } = require("./observability.cjs");
 
 const {
   ALL_KEYS,
@@ -57,6 +58,43 @@ function relationParent(definitionName) {
   if (definitionName === "collection_values") return { columns: ["collection_name", "record_id"] };
   if (definitionName === "trash_source_attributes") return { columns: ["trash_id"] };
   return { columns: columns.length ? [columns[0]] : [] };
+}
+
+function sqlSummary(sql) {
+  const text = String(sql || "").replace(/\s+/g, " ").trim();
+  const verb = (text.match(/^([A-Za-z]+)/) || ["", "SQL"])[1].toUpperCase();
+  const table = (text.match(/\b(?:FROM|INTO|UPDATE|TABLE)\s+`?([A-Za-z0-9_]+)/i) || ["", "metadata"])[1];
+  return `${verb}:${String(table || "metadata").slice(0, 120)}`;
+}
+
+function chunks(values, size) {
+  const output = [];
+  for (let index = 0; index < values.length; index += size) output.push(values.slice(index, index + size));
+  return output;
+}
+
+function emptyRelations() {
+  return { [COLLECTION_VALUES_TABLE]: [] };
+}
+
+function groupRelationRows(ids, attributes, relationRowsByName) {
+  const output = new Map(ids.map((id) => [String(id), emptyRelations()]));
+  for (const row of attributes || []) {
+    const id = String(row && row.record_id || "");
+    const target = output.get(id);
+    if (target) target[COLLECTION_VALUES_TABLE].push(row);
+  }
+  for (const [relationName, payload] of Object.entries(relationRowsByName || {})) {
+    const parentColumn = payload && payload.parentColumn;
+    for (const row of payload && payload.rows || []) {
+      const id = String(row && row[parentColumn] || "");
+      const target = output.get(id);
+      if (!target) continue;
+      if (!target[relationName]) target[relationName] = [];
+      target[relationName].push(row);
+    }
+  }
+  return output;
 }
 
 function createCollectionSql(key) {
@@ -170,6 +208,7 @@ module.exports = function createMysqlSource(cfg = {}) {
     throw failure;
   }
 
+  const logger = cfg.logger || createLogger({ service: "luxiaoming-admin" });
   const pool = cfg.pool || mysql.createPool({
     host: cfg.dbHost,
     port: cfg.dbPort || 3306,
@@ -196,18 +235,50 @@ module.exports = function createMysqlSource(cfg = {}) {
     : 5000;
   let latestReadyHealth = null;
   let healthInFlight = null;
+  const slowQueryMs = Math.min(Math.max(Number(cfg.slowQueryMs ?? process.env.DB_SLOW_QUERY_MS ?? 500), 1), 120000);
+  const slowTransactionMs = Math.min(Math.max(Number(cfg.slowTransactionMs ?? process.env.DB_SLOW_TRANSACTION_MS ?? 1000), 1), 120000);
+  const relationBatchSize = Math.min(Math.max(Number(cfg.relationBatchSize ?? process.env.DB_RELATION_BATCH_SIZE ?? 500), 1), 1000);
 
   async function query(conn, sql, params = []) {
-    const [rows] = await conn.query(sql, params);
-    return rows;
+    const startedAt = process.hrtime.bigint();
+    const operation = sqlSummary(sql);
+    try {
+      const [rows] = await conn.query(sql, params);
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      if (durationMs >= slowQueryMs) {
+        logger.warn("database.query.slow", { operation, durationMs: Math.round(durationMs * 100) / 100, rowCount: Array.isArray(rows) ? rows.length : 0 });
+      }
+      return rows;
+    } catch (error) {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      logger.error("database.query.failed", { operation, durationMs: Math.round(durationMs * 100) / 100, errorCode: errorCode(error) });
+      throw error;
+    }
   }
   async function execute(conn, sql, params = []) {
-    const [result] = await conn.query(sql, params);
-    return result;
+    const startedAt = process.hrtime.bigint();
+    const operation = sqlSummary(sql);
+    try {
+      const [result] = await conn.query(sql, params);
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      if (durationMs >= slowQueryMs) {
+        logger.warn("database.execute.slow", { operation, durationMs: Math.round(durationMs * 100) / 100, affectedRows: Number(result && result.affectedRows || 0) });
+      }
+      return result;
+    } catch (error) {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      recordDatabaseOperation(durationMs);
+      logger.error("database.execute.failed", { operation, durationMs: Math.round(durationMs * 100) / 100, errorCode: errorCode(error) });
+      throw error;
+    }
   }
   async function withTransaction(fn) {
     if (typeof pool.getConnection !== "function") return fn(pool);
     const conn = await pool.getConnection();
+    const startedAt = process.hrtime.bigint();
     try {
       await conn.beginTransaction();
       const result = await fn(conn);
@@ -215,8 +286,13 @@ module.exports = function createMysqlSource(cfg = {}) {
       return result;
     } catch (error) {
       try { await conn.rollback(); } catch (_) {}
+      logger.error("database.transaction.failed", { durationMs: Math.round((Number(process.hrtime.bigint() - startedAt) / 1e6) * 100) / 100, errorCode: errorCode(error) });
       throw error;
-    } finally { try { conn.release(); } catch (_) {} }
+    } finally {
+      const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      if (durationMs >= slowTransactionMs) logger.warn("database.transaction.slow", { durationMs: Math.round(durationMs * 100) / 100 });
+      try { conn.release(); } catch (_) {}
+    }
   }
 
   async function inspectTable(conn, table) {
@@ -469,6 +545,35 @@ module.exports = function createMysqlSource(cfg = {}) {
     return output;
   }
 
+  // A list used to hydrate every record by issuing one attribute query and one
+  // query per relation for each row. Batch relationship reads keep query count
+  // proportional to relationship types rather than the number of records.
+  async function relationRowsMany(key, ids, conn = pool) {
+    const uniqueIds = [...new Set((ids || []).map((id) => String(id || "")).filter(Boolean))];
+    const output = new Map(uniqueIds.map((id) => [id, emptyRelations()]));
+    if (!uniqueIds.length) return output;
+    const relationPayload = {};
+    for (const relationName of RELATION_BY_KEY[key] || []) {
+      if (relationName === "account_permissions") continue;
+      const relation = RELATIONS[relationName];
+      const parent = relationParent(relationName);
+      if (relation && parent && parent.columns[0]) relationPayload[relationName] = { parentColumn: parent.columns[0], rows: [] };
+    }
+    const attributes = [];
+    for (const batch of chunks(uniqueIds, relationBatchSize)) {
+      const placeholders = batch.map(() => "?").join(",");
+      const attributeRows = await query(conn, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id IN (${placeholders}) ORDER BY record_id,path,ordinal`, [key, ...batch]);
+      attributes.push(...attributeRows);
+      for (const [relationName, payload] of Object.entries(relationPayload)) {
+        const relation = RELATIONS[relationName];
+        const orderBy = relationOrderColumns(relation).map((name) => `\`${name}\``).join(",");
+        const rows = await query(conn, `SELECT * FROM \`${relation.table}\` WHERE \`${payload.parentColumn}\` IN (${placeholders}) ORDER BY \`${payload.parentColumn}\`,${orderBy}`, batch);
+        payload.rows.push(...rows);
+      }
+    }
+    return groupRelationRows(uniqueIds, attributes, relationPayload);
+  }
+
   async function readOne(key, id) {
     await ensure();
     const item = state.get(assertKey(key));
@@ -493,9 +598,22 @@ module.exports = function createMysqlSource(cfg = {}) {
     }
     if (item && item.legacy) return (await readLegacy(key)).map((row) => ({ ...sanitizeLegacyDocument(row.doc), id: row.id, _id: row.id }));
     const rows = await query(pool, `SELECT * FROM \`${tableFor(key)}\` ORDER BY id`);
-    const output = [];
-    for (const row of rows) output.push(hydrateDocument(key, row, await relationRows(key, String(row.id))));
-    return output;
+    const related = await relationRowsMany(key, rows.map((row) => String(row.id)));
+    return rows.map((row) => hydrateDocument(key, row, related.get(String(row.id)) || emptyRelations()));
+  }
+
+  async function findOrderByPaymentOutTradeNo(outTradeNo) {
+    await ensure();
+    const value = String(outTradeNo || "").trim();
+    if (!value) return null;
+    const orderState = state.get("orders");
+    if (orderState && (orderState.legacy || orderState.missing)) {
+      const error = new Error("订单数据结构尚未就绪"); error.code = "SCHEMA_MISSING"; throw error;
+    }
+    const relation = RELATIONS.order_payment_records;
+    const rows = await query(pool, `SELECT order_id FROM \`${relation.table}\` WHERE out_trade_no=? LIMIT 2`, [value]);
+    if (rows.length !== 1) return null;
+    return readOne("orders", String(rows[0].order_id));
   }
 
   async function deleteRelations(conn, key, id) {
@@ -664,6 +782,7 @@ module.exports = function createMysqlSource(cfg = {}) {
     schema,
     list: readMany,
     get: readOne,
+    findOrderByPaymentOutTradeNo,
     create,
     update,
     compareAndUpdate,
@@ -680,3 +799,4 @@ module.exports = function createMysqlSource(cfg = {}) {
 
 module.exports.ALL_KEYS = ALL_KEYS;
 module.exports.schema = schema;
+module.exports.groupRelationRows = groupRelationRows;

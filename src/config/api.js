@@ -53,5 +53,18 @@ window.LXM_API_CONFIG = {
     trash: ["trash"],
     // 权限页有独立的 /api/permissions/* 接口，并在组件挂载时按菜单加载。
     permissions: []
+  },
+  // A menu resolves to one server-side module endpoint. The key list above is
+  // still screen-specific, while the server enforces the module boundary.
+  menuModules: {
+    dashboard: "dashboard", performance: "operations", trace: "operations",
+    orders: "orders", receive: "orders", dispatch: "orders", tasks: "orders", afterSales: "orders",
+    financeReview: "finance", reconciliation: "finance", report: "finance",
+    staff: "channel", distributors: "channel", shops: "channel",
+    contentOverview: "content", spots: "content", cities: "content", series: "content", albums: "content", samples: "content",
+    contentTags: "content", packages: "content", videoSingles: "content", shelfProducts: "content", productAudit: "content",
+    addonServices: "content", peripherals: "content", guides: "content", stories: "content",
+    miniDecor: "configuration", miniConfig: "configuration",
+    logs: "system", trash: "system"
   }
 };

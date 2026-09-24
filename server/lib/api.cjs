@@ -3,6 +3,8 @@
 // separate and private order operations require a verified public session.
 const crypto = require("crypto");
 const { createAuthStore, parseBearer } = require("./auth.cjs");
+const { apiModule, createLogger, currentRequestContext, errorCode, requestId } = require("./observability.cjs");
+const { keysForModule } = require("./apiModules.cjs");
 const {
   WORKFLOW_STAGES,
   roundMoney,
@@ -716,6 +718,23 @@ function readBody(req, maxBytes = 1024 * 1024) {
     });
   });
 }
+function readRawBody(req, maxBytes = 1100 * 1024) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const fail = (error) => { if (!settled) { settled = true; reject(error); } };
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        const error = new Error("请求体过大"); error.code = "REQUEST_TOO_LARGE"; fail(error);
+        try { req.destroy(); } catch (_) {}
+      } else chunks.push(Buffer.from(chunk));
+    });
+    req.on("error", () => { const error = new Error("请求读取失败"); error.code = "INVALID_BODY"; fail(error); });
+    req.on("end", () => { if (!settled) { settled = true; resolve(Buffer.concat(chunks)); } });
+  });
+}
 function decodePart(value) {
   try { return decodeURIComponent(String(value || "")); }
   catch (_) { const error = new Error("路径参数无效"); error.code = "DATA_KEY_INVALID"; throw error; }
@@ -723,6 +742,8 @@ function decodePart(value) {
 
 module.exports = function createApi(source, mode, options = {}) {
   const auth = options.auth || createAuthStore();
+  const logger = options.logger || createLogger({ service: "luxiaoming-admin" });
+  const wechatPay = options.wechatPay || require("./wechatPay.cjs").createWechatPay();
   const files = options.fileService || require("./fileService.cjs").createFileService({ source, authorize: authorizeFile, adapter: options.fileAdapter });
   const permissionStore = options.permissionStore || null;
   const sourceStatus = options.sourceStatus || { configured: true, ready: true, persistent: mode !== "mock" };
@@ -1132,6 +1153,12 @@ module.exports = function createApi(source, mode, options = {}) {
     return { ...config, stats: await scopedDashboard(session) };
   }
   async function auditDenied(session, pathname, detail) {
+    logger.warn("auth.access.denied", {
+      actorId: session && session.subjectId || "",
+      actorRole: session && session.role || "anonymous",
+      route: pathname,
+      reason: String(detail || "权限不足").slice(0, 120),
+    });
     try {
       if (!source || typeof source.create !== "function") return;
       await source.create("logs", {
@@ -1144,39 +1171,75 @@ module.exports = function createApi(source, mode, options = {}) {
   async function auditMutation(session, action, key, id, detail = "") {
     if (key === "logs") return true;
     try {
+      const context = currentRequestContext();
       await source.create("logs", {
         action, operator: session.account, operatorId: session.subjectId,
-        targetType: key, targetId: id || "", detail: String(detail || "").slice(0, 500), createTime: new Date().toISOString()
+        targetType: key, targetId: id || "", detail: String(detail || "").slice(0, 500),
+        requestId: context && context.requestId || "", createTime: new Date().toISOString()
+      });
+      logger.info("business.audit.recorded", {
+        requestId: context && context.requestId || "",
+        actorId: session && session.subjectId || "",
+        actorRole: session && session.role || "",
+        action,
+        entityType: key,
+        entityId: id || "",
       });
       return true;
-    } catch (_) { return false; }
+    } catch (error) {
+      logger.error("business.audit.failed", {
+        requestId: currentRequestContext() && currentRequestContext().requestId || "",
+        action,
+        entityType: key,
+        entityId: id || "",
+        errorCode: errorCode(error),
+      });
+      return false;
+    }
   }
   async function requireSession(req, res, pathname, kind = "admin") {
     await initAuth();
     if (kind === "admin" && permissionStore) {
       try { await initPermissions(); }
       catch (e) {
-        if (permissionStore.required || safeErrorStatus(e) === 503) { json(res, 503, { error: "权限数据服务暂不可用" }); return null; }
+        if (permissionStore.required || safeErrorStatus(e) === 503) {
+          logger.error("auth.permission_store.unavailable", { requestId: req.requestId, route: pathname, errorCode: errorCode(e) });
+          json(res, 503, { error: "权限数据服务暂不可用" }); return null;
+        }
       }
     }
     const token = parseBearer(req);
-    if (!token) { await auditDenied(null, pathname, "缺少 Authorization Bearer 会话"); json(res, 401, { error: "未登录或会话已过期" }); return null; }
+    if (!token) {
+      logger.warn("auth.session.missing", { requestId: req.requestId, route: pathname, kind });
+      await auditDenied(null, pathname, "缺少 Authorization Bearer 会话"); json(res, 401, { error: "未登录或会话已过期" }); return null;
+    }
     let session;
     try { session = await auth.getSession(token); }
-    catch (e) { if (e && e.code === "AUTH_STORE_UNAVAILABLE") { json(res, 503, { error: "认证服务暂不可用" }); return null; } throw e; }
+    catch (e) {
+      if (e && e.code === "AUTH_STORE_UNAVAILABLE") {
+        logger.error("auth.session_store.unavailable", { requestId: req.requestId, route: pathname, errorCode: errorCode(e) });
+        json(res, 503, { error: "认证服务暂不可用" }); return null;
+      }
+      throw e;
+    }
     if (!session || (kind === "admin" && session.kind !== "admin") || (kind === "public" && session.kind !== "public")) {
+      logger.warn("auth.session.invalid", { requestId: req.requestId, route: pathname, kind });
       await auditDenied(session, pathname, "会话类型或凭据无效"); json(res, 401, { error: "未登录或会话已过期" }); return null;
     }
     if (kind === "admin") {
       try { session = await refreshAdminSession(session, token); }
       catch (e) { if (e && e.code === "DATA_SOURCE_UNAVAILABLE") { json(res, 503, { error: "数据服务暂不可用" }); return null; } throw e; }
       if (!session) {
+        logger.warn("auth.session.revoked", { requestId: req.requestId, route: pathname });
         try { await auth.revokeSession(token); } catch (_) {}
         await auditDenied(null, pathname, "账号已停用或凭据已变更");
         json(res, 401, { error: "账号已停用或会话已失效，请重新登录" });
         return null;
       }
     }
+    req.requestActor = session.kind === "admin"
+      ? { type: "admin", id: String(session.subjectId || ""), role: String(session.role || "") }
+      : { type: "public", id: "", role: "" };
     return session;
   }
   function forbidden(res, session, pathname, detail = "当前角色无权访问") {
@@ -1204,6 +1267,7 @@ module.exports = function createApi(source, mode, options = {}) {
     const user = await permissionStore.authenticate(account, password, { includeDisabled: true });
     if (!user) {
       const result = await auth.recordLoginFailure(lockKey);
+      logger.warn("auth.login.failed", { requestId: req.requestId, reason: result.blocked ? "locked" : "invalid_credentials" });
       if (result.blocked) return json(res, 429, { ok: false, error: "账号或密码错（失败次数过多，账号已临时锁定）" });
       return json(res, 401, { ok: false, error: "账号或密码错" });
     }
@@ -1228,6 +1292,7 @@ module.exports = function createApi(source, mode, options = {}) {
     };
     await auth.clearLoginFailures(lockKey);
     const session = await auth.createSession(sessionPayload);
+    logger.info("auth.login.succeeded", { requestId: req.requestId, actorId: sessionPayload.subjectId, actorRole: sessionPayload.role, source: "permission_store" });
     return json(res, 200, {
       ok: true, role: sessionPayload.role, roleName: sessionPayload.roleName, roleId: sessionPayload.roleId || "", account: user.account, name: user.name || account,
       staffId: sessionPayload.subjectId, shopId: sessionPayload.shopId, distributorId: sessionPayload.distributorId, agentId: sessionPayload.agentId,
@@ -1239,13 +1304,22 @@ module.exports = function createApi(source, mode, options = {}) {
     await initAuth();
     const account = String(body && body.account || "").trim();
     const password = String(body && body.password || "");
-    if (!account || !password) return json(res, 401, { ok: false, error: "请输入账号和密码" });
-    if (account.length > 128 || password.length > 256) return json(res, 401, { ok: false, error: "账号或密码错" });
+    if (!account || !password) {
+      logger.warn("auth.login.failed", { requestId: req.requestId, reason: "missing_credentials" });
+      return json(res, 401, { ok: false, error: "请输入账号和密码" });
+    }
+    if (account.length > 128 || password.length > 256) {
+      logger.warn("auth.login.failed", { requestId: req.requestId, reason: "invalid_credentials" });
+      return json(res, 401, { ok: false, error: "账号或密码错" });
+    }
     const lockKey = `${String(req.socket && req.socket.remoteAddress || "unknown")}::${account.toLowerCase()}`;
     try {
       if (typeof auth.isLoginLocked === "function") {
         const lock = await auth.isLoginLocked(lockKey);
-        if (lock && lock.lockedUntil > Date.now()) return json(res, 429, { ok: false, error: "失败次数过多，账号已临时锁定" });
+        if (lock && lock.lockedUntil > Date.now()) {
+          logger.warn("auth.login.failed", { requestId: req.requestId, reason: "locked" });
+          return json(res, 429, { ok: false, error: "失败次数过多，账号已临时锁定" });
+        }
       }
       if (permissionStore && permissionStore.required) return await handlePermissionLogin(req, res, account, password, lockKey);
       const staffList = await source.list("staff");
@@ -1269,6 +1343,7 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       if (!candidate) {
         const result = await auth.recordLoginFailure(lockKey);
+        logger.warn("auth.login.failed", { requestId: req.requestId, reason: result.blocked ? "locked" : "invalid_credentials" });
         if (result.blocked) return json(res, 429, { ok: false, error: "账号或密码错（失败次数过多，账号已临时锁定）" });
         return json(res, 401, { ok: false, error: "账号或密码错" });
       }
@@ -1296,6 +1371,7 @@ module.exports = function createApi(source, mode, options = {}) {
         agentId: matched.subjectType === "agent" ? subjectId : String(candidate.agentId || "")
       };
       const session = await auth.createSession(sessionPayload);
+      logger.info("auth.login.succeeded", { requestId: req.requestId, actorId: subjectId, actorRole: role, source: "legacy" });
       return json(res, 200, {
         ok: true,
         role,
@@ -1313,7 +1389,10 @@ module.exports = function createApi(source, mode, options = {}) {
         expiresIn: Math.floor(session.ttlMs / 1000),
       });
     } catch (e) {
-      if (safeErrorStatus(e) === 503) return json(res, 503, { ok: false, error: "认证或数据服务暂不可用" });
+      if (safeErrorStatus(e) === 503) {
+        logger.error("auth.login.unavailable", { requestId: req.requestId, errorCode: errorCode(e) });
+        return json(res, 503, { ok: false, error: "认证或数据服务暂不可用" });
+      }
       throw e;
     }
   }
@@ -1334,8 +1413,11 @@ module.exports = function createApi(source, mode, options = {}) {
     const data = body && body.data && typeof body.data === "object" ? body.data : (body || {});
     const safeBody = { ...(body || {}), data: { ...(data || {}) } };
     delete safeBody.openid; delete safeBody.data.openid;
-    if (session) { safeBody.openid = session.openid; safeBody.data.openid = session.openid; }
-    const result = await rpc(source, name, safeBody, { req, res, identity: session ? { kind: "public", openid: session.openid } : null, allowDevOpenid, files });
+    if (session) {
+      req.requestActor = { type: "public", id: "", role: "" };
+      safeBody.openid = session.openid; safeBody.data.openid = session.openid;
+    }
+    const result = await rpc(source, name, safeBody, { req, res, identity: session ? { kind: "public", openid: session.openid } : null, allowDevOpenid, files, wechatPay });
     if (result && result.success === false) {
       let unavailable = !!(sourceStatus && sourceStatus.ready === false);
       if (!unavailable && source && typeof source.health === "function") {
@@ -1348,6 +1430,29 @@ module.exports = function createApi(source, mode, options = {}) {
       result.token = created.token; result.userToken = created.token; result.expiresAt = created.expiresAt; result.expiresIn = Math.floor(created.ttlMs / 1000);
     }
     return json(res, 200, result);
+  }
+  async function handleWechatPayNotify(req, res) {
+    if (!wechatPay || !wechatPay.isConfigured()) {
+      logger.warn("payment.notification.unavailable", { requestId: req.requestId });
+      return json(res, 503, { code: "FAIL", message: "payment service unavailable" });
+    }
+    try {
+      const rawBody = await readRawBody(req);
+      const transaction = wechatPay.parseNotification(req.headers || {}, rawBody);
+      await wechatPay.confirmTransaction(source, transaction);
+      logger.info("payment.notification.accepted", { requestId: req.requestId, provider: "wechat_pay" });
+      res.statusCode = 204;
+      return res.end();
+    } catch (error) {
+      const code = String(error && error.code || "");
+      const status = code === "REQUEST_TOO_LARGE" ? 413
+        : code === "WECHAT_PAY_CONFIG_INVALID" ? 503
+        : /(?:SIGNATURE|EXPIRED)/.test(code) ? 401
+          : /(?:NOTIFICATION|MISMATCH|AMOUNT|PAYER|PAYMENT_NOT_FOUND|PAYMENT_AMBIGUOUS)/.test(code) ? 400
+            : 500;
+      logger[status >= 500 ? "error" : "warn"]("payment.notification.rejected", { requestId: req.requestId, provider: "wechat_pay", status, errorCode: errorCode(error) });
+      return json(res, status, { code: "FAIL", message: status >= 500 ? "payment notification processing failed" : "payment notification rejected" });
+    }
   }
   async function enforceOrderPatch(session, key, id, body) {
     if (!ORDER_KEYS.has(key)) return true;
@@ -1973,7 +2078,8 @@ module.exports = function createApi(source, mode, options = {}) {
     if (!["POST", "PUT", "DELETE"].includes(method)) return json(res, 405, { error: "方法不支持" });
     const contentTrashPost = key === "trash" && normalizeRole(session.role) === "content" && method === "POST";
     if (!canWriteKey(session, key) && !contentTrashPost) return forbidden(res, session, pathname);
-    if (key === "logs" && method !== "POST" && normalizeRole(session.role) !== "super") return forbidden(res, session, pathname, "审计日志只能由超管维护");
+    if (key === "logs" && method === "POST") return forbidden(res, session, pathname, "审计日志只能由服务端业务动作写入");
+    if (key === "logs" && normalizeRole(session.role) !== "super") return forbidden(res, session, pathname, "审计日志只能由超管查看");
     if (DOCUMENT_KEYS.has(key)) return json(res, 405, { error: "配置文档必须通过固定文档接口写入" });
     if (ORDER_KEYS.has(key) && ["PUT", "DELETE"].includes(method)) {
       return forbidden(res, session, pathname, "订单和售后变更必须通过专用操作接口");
@@ -2377,6 +2483,46 @@ module.exports = function createApi(source, mode, options = {}) {
     const response = await projectAdminRow(key, created, session);
     if (key === "afterSales" && response && typeof response === "object") response.order = redactRow("orders", linkedOrder, session);
     return json(res, 201, response);
+  }
+  async function moduleValueForKey(key, session) {
+    if (key === "homeConfig") {
+      const value = await readConfigDocument(key, "homeStats");
+      const rows = await filterRows(source, session, key, value ? [value] : []);
+      return rows.length ? projectAdminRow(key, rows[0], session) : null;
+    }
+    if (key === "siteConfig" || key === "financeSettings") {
+      const value = await readConfigDocument(key, "global");
+      const rows = await filterRows(source, session, key, value ? [value] : []);
+      return rows.length ? projectAdminRow(key, rows[0], session) : null;
+    }
+    const value = await source.list(key);
+    const rows = await filterRows(source, session, key, value);
+    return Promise.all(rows.map((row) => projectAdminRow(key, row, session)));
+  }
+  async function moduleRoute(req, res, parts, parsed, session, pathname) {
+    if (req.method !== "GET") return json(res, 405, { error: "请使用 GET" });
+    const requested = keysForModule(decodePart(parts[1]), parsed.query && parsed.query.keys);
+    if (!requested.module) return json(res, 404, { error: "未知业务模块" });
+    const allowedKeys = requested.keys.filter((key) => canReadKey(session, key));
+    const deniedKeys = requested.keys.filter((key) => !canReadKey(session, key));
+    const startedAt = process.hrtime.bigint();
+    const entries = await Promise.all(allowedKeys.map(async (key) => [key, await moduleValueForKey(key, session)]));
+    const collections = Object.fromEntries(entries.filter(([, value]) => value !== null && value !== undefined));
+    const rowCount = Object.values(collections).reduce((total, value) => total + (Array.isArray(value) ? value.length : value ? 1 : 0), 0);
+    logger.info("api.module.loaded", {
+      requestId: req.requestId || requestId(req),
+      module: requested.module,
+      requestedKeys: requested.keys,
+      loadedKeys: Object.keys(collections),
+      skippedKeys: [...requested.rejected, ...deniedKeys],
+      rowCount,
+      durationMs: Math.round((Number(process.hrtime.bigint() - startedAt) / 1e6) * 100) / 100,
+    });
+    return json(res, 200, {
+      module: requested.module,
+      collections,
+      skippedKeys: [...requested.rejected, ...deniedKeys],
+    });
   }
   async function docRoute(req, res, parts, session, pathname) {
     const key = decodePart(parts[1]); const id = decodePart(parts[2]);
@@ -3251,7 +3397,10 @@ module.exports = function createApi(source, mode, options = {}) {
     return { sourceKey, sourceId, current };
   }
   return async function handle(req, res, pathname) {
-    const rid = crypto.randomBytes(8).toString("hex"); res.setHeader("X-Request-Id", rid); setHeaders(req, res);
+    const rid = req.requestId || requestId(req);
+    req.requestId = rid;
+    if (!res.getHeader("X-Request-Id")) res.setHeader("X-Request-Id", rid);
+    setHeaders(req, res);
     let parsed;
     try {
       const parsedUrl = new URL(req.url || pathname || "/", `http://${req.headers && req.headers.host || "localhost"}`);
@@ -3259,12 +3408,17 @@ module.exports = function createApi(source, mode, options = {}) {
     } catch (_) {
       parsed = { pathname: pathname || "/", query: {} };
     }
+    req.apiModule = apiModule(parsed.pathname);
     const parts = parsed.pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean);
     try {
       if (req.method === "OPTIONS") {
         const origin = req.headers && req.headers.origin;
         if (origin && !allowedOrigins.includes(origin)) return json(res, 403, { error: "跨域来源不被允许" });
         res.statusCode = 204; return res.end();
+      }
+      if (parts[0] === "payments" && parts[1] === "wechat" && parts[2] === "notify") {
+        if (req.method !== "POST") return json(res, 405, { code: "FAIL", message: "method not allowed" });
+        return await handleWechatPayNotify(req, res);
       }
       if (parts[0] === "files") return await fileRoute(req, res, parts, parsed.pathname);
       if (parts[0] === "media" && parts.length === 2) {
@@ -3336,6 +3490,10 @@ module.exports = function createApi(source, mode, options = {}) {
         const session = await requireSession(req, res, "/api/meta/keys", "admin"); if (!session) return;
         return json(res, 200, { keys: ALL_KEYS.filter((key) => canReadKey(session, key) || canWriteKey(session, key)) });
       }
+      if (parts[0] === "modules" && parts[1]) {
+        const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin"); if (!session) return;
+        return await moduleRoute(req, res, parts, parsed, session, `/api/${parts.join("/")}`);
+      }
       if (parts[0] === "orders" && parts[1] && parts[2] === "action") {
         const session = await requireSession(req, res, `/api/${parts.join("/")}`, "admin");
         if (!session) return;
@@ -3376,7 +3534,16 @@ module.exports = function createApi(source, mode, options = {}) {
       return json(res, 404, { error: "未知接口" });
     } catch (e) {
       const status = safeErrorStatus(e);
-      if (status >= 500) console.error(`[api:${rid}]`, e && e.code ? e.code : "request_failed");
+      if (status >= 500) {
+        logger.error("api.request.failed", {
+          requestId: rid,
+          module: req.apiModule || apiModule(parsed && parsed.pathname),
+          route: parsed && parsed.pathname || pathname || "/api",
+          method: req.method,
+          status,
+          errorCode: errorCode(e),
+        });
+      }
       if (!res.writableEnded) json(res, status, { error: publicError(e, status), requestId: rid });
     }
   };

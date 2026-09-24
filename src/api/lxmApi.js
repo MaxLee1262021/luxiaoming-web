@@ -11,35 +11,28 @@ window.LXM_API = (() => {
     try { localStorage.setItem(KEY, on ? "1" : "0"); } catch (e) {}
   }
 
+  function cloud() {
+    if (!window.LXM_CLOUD) throw new Error("管理接口尚未初始化");
+    return window.LXM_CLOUD;
+  }
+
   async function loadCollection(name) {
     if (!remoteOn()) return null;
     if (!window.LXM_AUTH?.hasSession()) throw new Error("需要登录后读取管理数据");
-    const r = await window.LXM_HTTP.request(`${base}/collection/${encodeURIComponent(name)}`);
-    if (!r.ok) throw new Error(`载入 ${name} 失败 ${r.status}`);
-    return await r.json();
+    return cloud().getColl(name);
   }
 
   async function saveDoc(name, doc) {
     if (!remoteOn()) return { skipped: true };
     if (!window.LXM_AUTH?.hasSession()) throw new Error("需要登录后写入管理数据");
     const id = doc._id || doc.id;
-    const url = id ? `${base}/collection/${encodeURIComponent(name)}/${encodeURIComponent(id)}` : `${base}/collection/${encodeURIComponent(name)}`;
-    const method = id ? "PUT" : "POST";
-    const r = await window.LXM_HTTP.request(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(doc)
-    });
-    if (!r.ok) throw new Error(`保存 ${name} 失败 ${r.status}`);
-    return await r.json();
+    return id ? cloud().update(name, id, doc) : cloud().create(name, doc);
   }
 
   async function deleteDoc(name, id) {
     if (!remoteOn()) return { skipped: true };
     if (!window.LXM_AUTH?.hasSession()) throw new Error("需要登录后删除管理数据");
-    const r = await window.LXM_HTTP.request(`${base}/collection/${encodeURIComponent(name)}/${encodeURIComponent(id)}`, { method: "DELETE" });
-    if (!r.ok) throw new Error(`删除 ${name} 失败 ${r.status}`);
-    return true;
+    return cloud().remove(name, id);
   }
 
   async function health() {

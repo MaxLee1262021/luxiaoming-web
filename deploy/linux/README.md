@@ -9,7 +9,7 @@ This package runs the integrated management UI and API with Node.js. It connects
 3. Give the account ownership of the application directory: `sudo chown -R luxiaoming:luxiaoming /opt/luxiaoming-admin`.
 4. Provision `.env` on the deployment host from `.env.example` or the existing deployment configuration, and run `chmod 600 .env`. The default archive does not contain `.env`.
 5. Install runtime dependencies: `sudo -u luxiaoming ./deploy/linux/install.sh`.
-6. For an existing normalized database, add only the OSS metadata table with `sudo -u luxiaoming npm run migrate:files -- --schema` if not already present. This command does not migrate or remove business tables. For a new database, review `npm run migrate:mysql -- --dry-run` and initialize the full schema using the separate database migration procedure.
+6. Before enabling WeChat Pay, take a verified database backup and run `sudo -u luxiaoming npm run migrate:mysql -- --apply`; it adds durable payment transaction fields and the `out_trade_no` uniqueness constraint. For an existing normalized database, then add the OSS metadata table with `sudo -u luxiaoming npm run migrate:files -- --schema` if not already present. This command does not migrate or remove business tables.
 7. Run `sudo -u luxiaoming npm run oss:check`; after write permissions are configured, run `sudo -u luxiaoming npm run oss:check -- --write-test` to verify a temporary object's upload, private access, and cleanup.
 8. Copy `deploy/linux/luxiaoming-admin.service` to `/etc/systemd/system/`, then run `sudo systemctl daemon-reload` and `sudo systemctl enable --now luxiaoming-admin`.
 
@@ -23,6 +23,10 @@ From the extracted package root, run `docker compose -f deploy/linux/compose.yam
 
 The default release excludes `.env`. Set MySQL, Redis, WeChat and OSS configuration on the target host. `OSS_BUCKET`, `OSS_REGION`, `OSS_ACCESS_KEY_ID` and `OSS_ACCESS_KEY_SECRET` are required for file operations. The example region is `cn-shanghai`, the example endpoint is `https://oss-cn-shanghai.aliyuncs.com`, and the default prefix is `luxiaoming/prod/`. Use the actual bucket region. `OSS_SESSION_TOKEN` and a custom HTTPS `OSS_READ_DOMAIN` are optional.
 
+For WeChat Pay, configure the API v3 merchant fields from `.env.example`, including the merchant private key, APIv3 key, platform verification key/certificate and a public HTTPS `WECHAT_PAY_NOTIFY_URL`. Keep both old and new platform verifiers during key rotation. Reverse-proxy `/api/payments/wechat/notify` directly to this Node service without modifying the request body. See [WeChat Pay integration](../../docs/微信支付接入说明.md).
+
+While the mini-program is waiting for WeChat Pay approval, set `PAYMENT_MODE=mock` in the deployment `.env` and restart the service. The normal customer payment button then writes an auditable `mock_payment` confirmation without opening the WeChat cashier. After approval and merchant configuration, change it to `PAYMENT_MODE=wechat` (or remove it) and restart; the existing JSAPI/prepay, callback verification and transaction-query path is used immediately for new payments. Do not use `PAYMENT_MODE=test` in production; that value is reserved for isolated JSON tests.
+
 Use one private bucket. Public catalog media is served through stable application `/api/media/:fileId` redirects; avatars, customer evidence, delivery files and finance attachments require authenticated access. Forward `/api/media/` and `/api/files/` to the Node service. Configure browser CORS and WeChat request/uploadFile/downloadFile domains as documented in [OSS setup and migration](../../docs/OSS接入与迁移.md). The required RAM template is included at `docs/oss-ram-policy.json`; no bucket ACL change is required.
 
 The upload limits are JPEG/PNG/WebP at 20 MiB for ordinary images, 5 MiB for avatars, 50 MiB for delivery photos, and MP4 at 500 MiB for content/delivery video.
@@ -31,7 +35,7 @@ The upload limits are JPEG/PNG/WebP at 20 MiB for ordinary images, 5 MiB for ava
 
 From the source project, run `npm run package:linux`. The default output is the adjacent `luxiaoming-admin-linux-20260917-oss` directory and `.tar.gz`. Existing output directories, `.tar` files or `.tar.gz` archives cause an error and remain unchanged. Use `npm run package:linux -- --name luxiaoming-admin-linux-20260917-oss-r2` for a separate release.
 
-For an explicitly configured delivery, append `--include-env`; only that option includes the local `.env`, with archive mode `0600`. Both variants include the OSS guide and RAM policy. The old `20260915` release is not overwritten. Deployment packages omit isolated test directories; run `npm test` in the source project and `npm run check` in the deployment package.
+For an explicitly configured delivery, append `--include-env`; only that option includes the local `.env`, with archive mode `0600`. Both variants include the OSS guide, WeChat Pay guide and RAM policy. The old `20260915` release is not overwritten. Deployment packages omit isolated test directories; run `npm test` in the source project and `npm run check` in the deployment package.
 
 ## Historical Files
 
