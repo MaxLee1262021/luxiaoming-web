@@ -11,6 +11,29 @@
     </div>
   </header>
 
+  <section class="permissions-overview" aria-label="权限概览">
+    <button type="button" class="permissions-overview-card" @click="goPermissionTab('menus')">
+      <span>启用菜单</span>
+      <strong>{{ activeMenuCount }}</strong>
+      <em>当前菜单配置</em>
+    </button>
+    <button type="button" class="permissions-overview-card" @click="goPermissionTab('roles')">
+      <span>启用角色</span>
+      <strong>{{ activeRoleCount }}</strong>
+      <em>授权角色</em>
+    </button>
+    <button type="button" class="permissions-overview-card" @click="goPermissionTab('users')">
+      <span>人员账号</span>
+      <strong>{{ userRows.length }}</strong>
+      <em>后台登录账号</em>
+    </button>
+    <button type="button" class="permissions-overview-card permissions-overview-card--note" @click="showPermissionPrinciple">
+      <span>权限原则</span>
+      <strong>最小授权</strong>
+      <em>停用账号立即失效</em>
+    </button>
+  </section>
+
   <el-tabs v-model="activeTab" class="permissions-tabs">
     <el-tab-pane label="菜单管理" name="menus">
       <div class="permissions-menu-workbench">
@@ -167,6 +190,9 @@
     <el-tab-pane label="用户管理" name="users">
       <div class="permissions-workspace permissions-workspace--wide">
         <section class="permissions-filter-panel" aria-label="人员筛选">
+          <div class="permissions-filter-leading-actions">
+            <el-button type="primary" :disabled="readOnly" @click="openUser()">新增人员</el-button>
+          </div>
           <div class="permissions-filter-fields">
             <label class="permissions-filter-field permissions-filter-field--wide">
               <span>姓名或账号</span>
@@ -194,18 +220,24 @@
 
         <section class="permissions-list-panel">
           <div class="permissions-list-toolbar">
-            <div><strong>人员列表</strong><span>{{ filteredUsers.length }} 人</span></div>
-            <div class="permissions-list-actions">
-              <el-button :loading="loading" @click="loadAll">刷新</el-button>
-              <el-button type="primary" :disabled="readOnly" @click="openUser()">新增人员</el-button>
-            </div>
+              <div><strong>人员列表</strong></div>
+              <div class="permissions-list-actions">
+                <span class="permissions-count-badge">{{ filteredUsers.length }} 人</span>
+                <el-button :loading="loading" @click="loadAll">刷新</el-button>
+              </div>
           </div>
           <div class="permissions-table-scroll">
             <el-table :data="filteredUsers" stripe border empty-text="暂无符合条件的人员账号">
-              <el-table-column prop="name" label="姓名" min-width="130" />
-              <el-table-column prop="account" label="登录账号" min-width="160" />
+              <el-table-column label="姓名" min-width="150">
+                <template #default="{row}"><span class="permissions-copy-cell"><span>{{ row.name || '-' }}</span><el-button link size="small" @click.stop="copyText(row.name, '姓名')">复制</el-button></span></template>
+              </el-table-column>
+              <el-table-column label="登录账号" min-width="180">
+                <template #default="{row}"><span class="permissions-copy-cell"><span>{{ row.account || '-' }}</span><el-button link size="small" @click.stop="copyText(row.account, '登录账号')">复制</el-button></span></template>
+              </el-table-column>
               <el-table-column label="角色" min-width="130"><template #default="{row}"><el-tag size="small" effect="plain">{{ userRoleName(row) }}</el-tag></template></el-table-column>
-              <el-table-column prop="phone" label="手机号" min-width="145" />
+              <el-table-column label="手机号" min-width="170">
+                <template #default="{row}"><span class="permissions-copy-cell"><span>{{ row.phone || '-' }}</span><el-button v-if="row.phone" link size="small" @click.stop="copyText(row.phone, '手机号')">复制</el-button></span></template>
+              </el-table-column>
               <el-table-column label="状态" width="94" align="center"><template #default="{row}"><el-tag size="small" :type="row.status === '停用' ? 'danger' : 'success'">{{ row.status || '启用' }}</el-tag></template></el-table-column>
               <el-table-column label="操作" fixed="right" min-width="258">
                 <template #default="{row}">
@@ -241,7 +273,7 @@
       <el-form-item label="排序"><el-input-number v-model="menuForm.sort" :min="0" :max="999" /></el-form-item>
       <el-form-item label="状态"><el-radio-group v-model="menuForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item>
     </el-form>
-    <template #footer><el-button @click="menuDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveMenu">保存菜单</el-button></template>
+    <template #footer><div class="permissions-dialog-footer"><el-button @click="menuDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveMenu">保存菜单</el-button></div></template>
   </el-dialog>
 
   <el-dialog v-model="roleDialog" class="permissions-dialog permissions-role-dialog" title="角色授权" width="880px">
@@ -252,7 +284,7 @@
       <el-form-item label="菜单权限"><el-checkbox-group v-model="roleForm.menus" class="permission-check-grid"><el-checkbox v-for="item in menuRows.filter(item => roleForm.key === 'super' || (item.key || item.id) !== 'permissions')" :key="item.id" :label="item.key || item.id">{{ item.name || item.label }}</el-checkbox></el-checkbox-group></el-form-item>
       <el-form-item label="状态"><el-radio-group v-model="roleForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item>
     </el-form>
-    <template #footer><el-button @click="roleDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveRole">保存授权</el-button></template>
+    <template #footer><div class="permissions-dialog-footer"><el-button @click="roleDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveRole">保存授权</el-button></div></template>
   </el-dialog>
 
   <el-dialog v-model="userDialog" class="permissions-dialog permissions-user-dialog" :title="userForm.id ? '编辑人员' : '新增人员'" width="680px">
@@ -260,16 +292,16 @@
       <el-form-item label="姓名" required><el-input v-model="userForm.name" /></el-form-item>
       <el-form-item label="登录账号" required><el-input v-model="userForm.account" autocomplete="off" /></el-form-item>
       <el-form-item v-if="!userForm.id" label="登录密码" required><el-input v-model="userForm.password" type="password" show-password placeholder="至少 8 位，含字母和数字" autocomplete="new-password" /></el-form-item>
-      <el-form-item label="手机号" :error="userPhoneError"><el-input v-model="userForm.phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入 11 位大陆手机号" @input="userPhoneError=''" @blur="validateUserPhone" /></el-form-item>
+      <el-form-item label="手机号" :error="userPhoneError"><el-input v-model="userForm.phone" type="tel" inputmode="numeric" maxlength="11" autocomplete="tel" placeholder="请输入 11 位大陆手机号" @input="onUserPhoneInput" @blur="validateUserPhone" /></el-form-item>
       <el-form-item label="邮箱"><el-input v-model="userForm.email" autocomplete="off" /></el-form-item>
       <el-form-item label="绑定角色" required><el-select v-model="userForm.role" placeholder="选择角色"><el-option v-for="role in roleRows" :key="role.id" :label="role.name" :value="role.key || role.id" /></el-select></el-form-item>
       <el-form-item label="状态"><el-radio-group v-model="userForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item>
     </el-form>
-    <template #footer><el-button @click="userDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveUser">保存人员</el-button></template>
+    <template #footer><div class="permissions-dialog-footer"><el-button @click="userDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveUser">保存人员</el-button></div></template>
   </el-dialog>
 
   <el-dialog v-model="passwordDialog" class="permissions-dialog" title="修改人员密码" width="460px">
     <el-form label-width="96px"><el-form-item label="人员"><span>{{ passwordForm.name || passwordForm.account }}</span></el-form-item><el-form-item label="新密码" required><el-input v-model="passwordForm.password" type="password" show-password autocomplete="new-password" placeholder="至少 8 位，含字母和数字" /></el-form-item></el-form>
-    <template #footer><el-button @click="passwordDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="savePassword">确认修改</el-button></template>
+    <template #footer><div class="permissions-dialog-footer"><el-button @click="passwordDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="savePassword">确认修改</el-button></div></template>
   </el-dialog>
 </div>

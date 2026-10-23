@@ -82,10 +82,42 @@ function toggleAddon(item) {
   if (idx >= 0) state.selectedAddonKeys.splice(idx, 1);
   else state.selectedAddonKeys.push(item.key);
 }
+async function replaceOrderProduct(item) {
+  const order = state.currentOrder;
+  if (!order || isOrderAfterSaleLocked(order)) return;
+  const original = JSON.parse(JSON.stringify(order));
+  const replacement = { id: item.id, type: item.type || "package", name: item.name, price: Number(item.price || 0), spotId: item.spotId, seriesId: item.seriesId, albumId: item.albumId };
+  const current = (order.products || []).find((row) => !row.key) || {};
+  const retained = (order.products || []).filter((row) => row.key);
+  const reason = `更换商品：${productName(current) || "原商品"} -> ${item.name || item.id}`;
+  order.products = [replacement, ...retained];
+  order.totalAmount = order.products.reduce((sum, row) => sum + Number(row.price || 0), 0);
+  try {
+    await persistOrderAction(order, "update", { fields: { products: order.products, totalAmount: order.totalAmount, priceAdjustReason: reason }, reason });
+    ElMessage.success("订单商品已更换并记录审计");
+    state.addonDialog = false;
+  } catch (_) { Object.assign(order, original); }
+}
+async function giftOrderAddon(item) {
+  const order = state.currentOrder;
+  if (!order || isOrderAfterSaleLocked(order)) return;
+  const original = JSON.parse(JSON.stringify(order));
+  const gift = { id: item.id, key: `gift-${item.type}-${item.id}-${Date.now().toString(36)}`, type: item.type || "service", name: item.name, price: 0, gift: true, spotId: item.spotId, seriesId: item.seriesId, albumId: item.albumId };
+  const reason = `赠送商品：${item.name || item.id}`;
+  order.addons = [...(order.addons || []), gift];
+  order.products = [...(order.products || []), gift];
+  try {
+    await persistOrderAction(order, "update", { fields: { products: order.products, addons: order.addons, totalAmount: Number(order.totalAmount || 0), priceAdjustReason: reason }, reason });
+    ElMessage.success("赠送商品已记录到订单");
+    state.addonDialog = false;
+  } catch (_) { Object.assign(order, original); }
+}
 async function confirmAddon() {
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能调整加购商品");
   const order = state.currentOrder;
   const original = JSON.parse(JSON.stringify(order));
+  const previousTotal = Number(order.totalAmount || 0);
+  const previousProductNames = (order.products || []).map((item) => productName(item)).filter(Boolean);
   const selected = addonProducts().filter((i) => state.selectedAddonKeys.includes(i.key));
   const base = (order.products || []).filter((p) => !p.key);
   const addons = selected.map((i) => ({ id: i.id, key: i.key, type: i.type, name: i.name, price: i.price || 0, spotId: i.spotId, seriesId: i.seriesId, albumId: i.albumId }));
@@ -93,7 +125,12 @@ async function confirmAddon() {
   order.products = [...base, ...addons];
   order.totalAmount = order.products.reduce((sum, p) => sum + productPrice(p), 0);
   try {
-    await persistOrderAction(order, "update", { fields: { addons: order.addons, products: order.products, totalAmount: order.totalAmount }, reason: `调整加购商品：${addons.map((i) => i.name).join("、") || "清空加购"}` });
+    const giftNames = addons.filter((item) => Number(item.price || 0) === 0).map((item) => item.name).filter(Boolean);
+    const nextNames = [...base, ...addons].map((item) => productName(item)).filter(Boolean);
+    await persistOrderAction(order, "update", {
+      fields: { addons: order.addons, products: order.products, totalAmount: order.totalAmount },
+      reason: `订单商品/加购审计：${previousProductNames.join("、") || "无"} -> ${nextNames.join("、") || "无"}；金额 ${previousTotal} -> ${order.totalAmount}${giftNames.length ? `；赠送：${giftNames.join("、")}` : ""}`
+    });
   } catch (_) {
     Object.keys(order).forEach((key) => { if (!(key in original)) delete order[key]; });
     Object.assign(order, original);
@@ -147,6 +184,8 @@ function zoomImage(url) {
     addonScopeTitle,
     openAddonDialog,
     toggleAddon,
+    replaceOrderProduct,
+    giftOrderAddon,
     confirmAddon,
     removeAddon,
     productTypeText,

@@ -144,6 +144,7 @@ function isExplicitDemoMode() {
 
 function serverErrorMessage(error) {
   if (!error) return "登录失败，请重试";
+  if (error.code === "ACCOUNT_DISABLED") return "该账号已被停用，请联系管理员启用后再登录";
   if (error.status === 401) return error.message || "账号或密码错误";
   if (error.status === 403) return error.message || "该账号当前不可登录";
   if (error.status === 429) return error.message || "登录尝试过于频繁，请稍后再试";
@@ -285,6 +286,7 @@ function loginDemo(account, password) {
 function applyLogin(raw, options = {}) {
   const session = normalizeSession(raw);
   const role = session.role || "super";
+  if (["photo", "photographer"].includes(role)) throw new Error("摄影师账号不开放后台登录，请由客服维护拍摄安排");
   if (options.source === "server") ensureServerRole(session);
   if (!LXM_CONFIG.roles[role]) throw new Error("服务端返回了未知角色");
   if (options.source === "server") {

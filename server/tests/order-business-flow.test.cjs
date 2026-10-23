@@ -71,26 +71,27 @@ async function withApi(source, callback) {
 test("booking does not require an expected shooting time and uses the package deposit ratio", async () => {
   const source = makeSource();
   const result = await rpc(source, "createBooking", {
-    data: { name: "Visitor", phone: "13800000000", items: [{ packageId: "p1" }], idempotencyKey: "booking-no-time-01" },
+    data: { expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true }, name: "Visitor", phone: "13800000000", items: [{ packageId: "p1" }], idempotencyKey: "booking-no-time-01" },
   }, publicIdentity());
   assert.equal(result.success, true, JSON.stringify(result));
-  const order = await source.get("orders", result.orderId);
+  const order = await source.get("bookingRequests", result.bookingId);
   assert.equal(order.date, "");
   assert.equal(order.timePeriod, "");
   assert.equal(order.depositRatio, 0.4);
   assert.equal(order.depositDue, 40);
   assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
-  assert.equal(result.order.statusText, "待支付");
-  assert.equal(result.order.businessStatus, "pending_payment");
+  assert.equal(result.bookingStatus, "pending_payment");
+  assert.equal(result.orderId, undefined);
+  assert.equal((await source.list("orders")).length, 0);
 
   const intent = await rpc(source, "createPayment", {
-    data: { orderId: result.orderId, phase: "deposit", idempotencyKey: "deposit-no-time-01" },
+    data: { bookingId: result.bookingId, phase: "deposit", idempotencyKey: "deposit-no-time-01" },
   }, publicIdentity());
   assert.equal(intent.success, true, JSON.stringify(intent));
   assert.equal(intent.data.status, "pending");
 });
 
-test("dispatch records confirmed facts, locks the deposit refund, and enforces selection -> final payment -> delivery", { concurrency: false }, async () => {
+test("dispatch records confirmed facts and final payment completes independently of delivery", { concurrency: false }, async () => {
   const source = makeSource();
   source.collections.orders.o1 = {
     id: "o1", orderNo: "O-1", openid: "owner", status: "deposit_paid", totalAmount: 100,
@@ -126,30 +127,31 @@ test("dispatch records confirmed facts, locks the deposit refund, and enforces s
       assert.equal(afterAssign.dispatchBaseInfo.confirmationMethod, "phone");
       assert.equal(afterAssign.dispatchBaseInfo.confirmedShootLocation, "Orange Island");
       assert.equal(afterAssign.dispatchRecords.length, 1);
-      assert.equal(workflow.businessStatusForOrder(afterAssign), "awaiting_photographer");
+      assert.equal(workflow.businessStatusForOrder(afterAssign), "awaiting_shoot");
 
       const refund = await post("super-token", "/api/collection/afterSales", { orderId: "o1", refundAmount: 40, refundPhase: "deposit", reason: "deposit refund" });
-      assert.equal(refund.status, 409);
+      assert.equal(refund.status, 201);
+      source.collections.afterSales = {};
 
-      const started = await post("photo-token", "/api/orders/o1/action", { action: "start", reason: "start shooting" });
+      const started = await post("super-token", "/api/orders/o1/action", { action: "start", reason: "start shooting" });
       assert.equal(started.status, 200, JSON.stringify(started.body));
-      const shot = await post("photo-token", "/api/orders/o1/action", { action: "shootcomplete", reason: "shooting completed" });
+      const shot = await post("super-token", "/api/orders/o1/action", { action: "shootcomplete", reason: "shooting completed" });
       assert.equal(shot.status, 200, JSON.stringify(shot.body));
-      const selected = await post("photo-token", "/api/orders/o1/action", { action: "selectionConfirm", reason: "offline selection completed" });
-      assert.equal(selected.status, 200, JSON.stringify(selected.body));
+      const selected = await post("super-token", "/api/orders/o1/action", { action: "selectionConfirm", reason: "offline selection completed" });
+      assert.equal(selected.status, 409, JSON.stringify(selected.body));
       const selectedOrder = await source.get("orders", "o1");
-      assert.equal(selectedOrder.selectionMethod, "offline");
-      assert.equal(workflow.businessStatusForOrder(selectedOrder), "shot");
+      assert.equal(selectedOrder.selectionMethod, undefined);
+      assert.equal(workflow.businessStatusForOrder(selectedOrder), "shooting");
 
-      const finalBefore = await rpc(source, "createPayment", { data: { orderId: "o1", phase: "final", idempotencyKey: "final-before-delivery-01" } }, publicIdentity());
+      const finalBefore = await rpc(source, "createPayment", { data: { orderId: "o1", phase: "final", selectionAccepted: true, idempotencyKey: "final-before-delivery-01" } }, publicIdentity());
       assert.equal(finalBefore.success, true, JSON.stringify(finalBefore));
-      const paid = await rpc(source, "testPayment", { data: { orderId: "o1", phase: "final", idempotencyKey: "test-final-flow-01" } }, publicIdentity());
+      const paid = await rpc(source, "testPayment", { data: { orderId: "o1", phase: "final", selectionAccepted: true, idempotencyKey: "test-final-flow-01" } }, publicIdentity());
       assert.equal(paid.success, true, JSON.stringify(paid));
-      assert.equal(workflow.businessStatusForOrder(await source.get("orders", "o1")), "paid");
+      assert.equal(workflow.businessStatusForOrder(await source.get("orders", "o1")), "completed");
 
       const delivered = await post("super-token", "/api/orders/o1/action", { action: "deliver", deliveryMethod: "enterprise_wechat", reason: "files delivered" });
       assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
-      assert.equal(workflow.businessStatusForOrder(await source.get("orders", "o1")), "delivered");
+      assert.equal(workflow.businessStatusForOrder(await source.get("orders", "o1")), "completed");
     });
   } finally {
     if (previous === undefined) delete process.env.TEST_PAYMENT_ENABLED;

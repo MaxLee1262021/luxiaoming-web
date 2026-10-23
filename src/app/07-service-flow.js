@@ -13,6 +13,7 @@
     canCompleteOrderPayment,
     canEditCurrentOrder,
     canEditOrder,
+    canManageOrderRecords,
     currentOperatorName,
     distributorName,
     due,
@@ -23,6 +24,7 @@
     isOrderCancelledStatus,
     isOrderCompletedStatus,
     isOrderAfterSaleLocked,
+    isCreatedBooking,
     log,
     money,
     normalizeReviewStatus,
@@ -42,27 +44,23 @@
   } = ctx;
 
 const WORKFLOW_STAGES = Object.freeze({
-  AWAITING_CONFIRMATION: "awaiting_confirmation",
-  AWAITING_DEPOSIT: "awaiting_deposit",
-  AWAITING_DISPATCH: "awaiting_dispatch",
-  AWAITING_SHOOT: "awaiting_shoot",
+  AWAITING_DISPATCH: "reserved",
+  AWAITING_SHOOT: "dispatch",
   SHOOTING: "shooting",
-  SELECTION_PENDING: "selection_pending",
-  AWAITING_DELIVERY: "awaiting_delivery",
-  AWAITING_FINAL_PAYMENT: "awaiting_final_payment",
-  PAID: "paid",
-  DELIVERED: "delivered",
+  SELECTION_PENDING: "shooting",
+  AWAITING_DELIVERY: "shooting",
+  AWAITING_FINAL_PAYMENT: "shooting",
+  PAID: "completed",
+  DELIVERED: "completed",
   COMPLETED: "completed",
   CANCELLED: "cancelled",
 });
 
 const serviceFlowSteps = [
-  { key: "awaiting_deposit", label: "待支付", note: "等待订金支付或财务核对" },
-  { key: "dispatch", label: "待安排摄影师", note: "人工确认时间、地点后填写派单记录" },
-  { key: "shoot", label: "拍摄", note: "摄影师按人工确认安排直接拍摄" },
-  { key: "selection", label: "已拍摄", note: "摄影师完成拍摄，后台记录线下选片" },
-  { key: "final", label: "尾款", note: "线下选片确认后收取尾款" },
-  { key: "deliver", label: "已交付", note: "尾款确认后交付照片" },
+  { key: "reserved", label: "已预约", note: "定金已支付，等待客服安排摄影师" },
+  { key: "dispatch", label: "待拍摄", note: "人工确认时间、地点后填写派单记录" },
+  { key: "shoot", label: "拍摄中", note: "客服在确认摄影师到场后登记开始拍摄" },
+  { key: "completed", label: "已完成", note: "尾款支付回调后自动完成，可继续补充交付记录" },
 ];
 
 function paymentDue(order = {}, phase = "deposit") {
@@ -84,42 +82,27 @@ function isPhaseConfirmed(order = {}, phase = "deposit") {
 }
 
 function workflowStageOf(order = {}) {
-  const declared = String(order.workflowStage || "").trim();
-  if (Object.values(WORKFLOW_STAGES).includes(declared)) {
-    return declared === WORKFLOW_STAGES.DELIVERED && isOrderCompletedStatus(order)
-      ? WORKFLOW_STAGES.COMPLETED
-      : declared;
-  }
+  if (!isCreatedBooking(order)) return "";
   const status = String(order.status || "").trim().toLowerCase();
   if (["cancelled", "canceled", "terminated", "deleted"].includes(status)) return WORKFLOW_STAGES.CANCELLED;
-  if (status === "completed") return WORKFLOW_STAGES.COMPLETED;
-  if (["new", "pending", "contacted"].includes(status) && !order.serviceConfirmedAt && !order.confirmationSnapshot) return WORKFLOW_STAGES.AWAITING_CONFIRMATION;
-  if (status === "delivered" || order.deliveryRecord || order.deliveredAt) return WORKFLOW_STAGES.DELIVERED;
-  const selectionConfirmed = String(order.selectionStatus || "").toLowerCase() === "confirmed" || !!order.selectionConfirmedAt;
-  if (selectionConfirmed && isPhaseConfirmed(order, "final")) return WORKFLOW_STAGES.PAID;
-  if (selectionConfirmed) return WORKFLOW_STAGES.AWAITING_DELIVERY;
-  if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return WORKFLOW_STAGES.SELECTION_PENDING;
-  if (status === "shooting" || order.shootingStartedAt) return WORKFLOW_STAGES.SHOOTING;
+  if (status === "completed" || status === "paid" || order.businessStatus === "completed") return WORKFLOW_STAGES.COMPLETED;
+  if (["shooting", "final_pending", "editing", "retouching"].includes(status) || order.shootingStartedAt || order.shootingCompletedAt) return WORKFLOW_STAGES.SHOOTING;
   if (status === "assigned" || order.dispatchRecord || order.dispatchStatus === "assigned" || order.photographerId) return WORKFLOW_STAGES.AWAITING_SHOOT;
-  if (status === "deposit_pending" || (paymentDue(order, "deposit") > 0 && !isPhaseConfirmed(order, "deposit"))) return WORKFLOW_STAGES.AWAITING_DEPOSIT;
-  return WORKFLOW_STAGES.AWAITING_DISPATCH;
+  if (["deposit_paid", "reserved"].includes(status) || order.businessStatus === "reserved" || order.workflowStage === "awaiting_dispatch" || order.workflowStage === "reserved") return WORKFLOW_STAGES.AWAITING_DISPATCH;
+  return isPhaseConfirmed(order, "deposit") || Number(order.depositPaid || 0) > 0 ? WORKFLOW_STAGES.AWAITING_DISPATCH : "";
 }
 
 function serviceFlowIndex(order) {
   const stage = workflowStageOf(order);
-  if (stage === WORKFLOW_STAGES.COMPLETED) return 5;
-  if (hasDeliveryRecord(order)) return 5;
-  if ([WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.PAID].includes(stage) || isSelectionConfirmed(order)) return 4;
-  if (stage === WORKFLOW_STAGES.AWAITING_CONFIRMATION || stage === WORKFLOW_STAGES.AWAITING_DEPOSIT) return 0;
-  if (stage === WORKFLOW_STAGES.AWAITING_DISPATCH) return 1;
-  if ([WORKFLOW_STAGES.AWAITING_SHOOT, WORKFLOW_STAGES.SHOOTING].includes(stage)) return 2;
-  if (stage === WORKFLOW_STAGES.SELECTION_PENDING) return 3;
-  if (stage === WORKFLOW_STAGES.DELIVERED || stage === WORKFLOW_STAGES.COMPLETED) return 5;
-  return 0;
+  if (stage === WORKFLOW_STAGES.COMPLETED) return 3;
+  if (stage === WORKFLOW_STAGES.SHOOTING) return 2;
+  if (stage === WORKFLOW_STAGES.AWAITING_SHOOT) return 1;
+  if (stage === WORKFLOW_STAGES.AWAITING_DISPATCH) return 0;
+  return -1;
 }
 
 function serviceFlowCurrent(order) {
-  return serviceFlowSteps[serviceFlowIndex(order)] || serviceFlowSteps[0];
+  return serviceFlowSteps[serviceFlowIndex(order)] || { key: "", label: "-", note: "" };
 }
 
 function serviceFlowClass(index, order) {
@@ -129,33 +112,31 @@ function serviceFlowClass(index, order) {
 
 function serviceInternalStatusLabel(order) {
   if (!order) return "-";
+  if (isOrderCancelledStatus(order)) return "已取消";
   if (workflowStageOf(order) === WORKFLOW_STAGES.COMPLETED) return "已完成";
   return serviceFlowCurrent(order).label;
 }
 
 function serviceCustomerStatusLabel(order) {
   if (!order) return "-";
+  if (!isCreatedBooking(order)) return "-";
   const customerStatus = String(order.customerStatus || "").trim();
-  if (["待支付", "待安排摄影师", "已拍摄", "已支付", "已交付"].includes(customerStatus)) return customerStatus;
+  if (["已预约", "待拍摄", "拍摄中", "已完成", "已取消"].includes(customerStatus)) return customerStatus;
   const stage = workflowStageOf(order);
-  if (hasDeliveryRecord(order)) return "已交付";
-  if (isPhaseConfirmed(order, "final")) return "已支付";
-  if (isSelectionConfirmed(order) || order.shootingCompletedAt) return "已拍摄";
-  if (isPhaseConfirmed(order, "deposit") || [WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT, WORKFLOW_STAGES.SHOOTING].includes(stage)) return "待安排摄影师";
-  if ([WORKFLOW_STAGES.AWAITING_CONFIRMATION, WORKFLOW_STAGES.AWAITING_DEPOSIT].includes(stage)) return "待支付";
+  if (isOrderCompletedStatus(order) || order.businessStatus === "completed") return "已完成";
+  if (stage === WORKFLOW_STAGES.SHOOTING) return "拍摄中";
+  if (isSelectionConfirmed(order) || order.shootingCompletedAt || hasDeliveryRecord(order)) return "已预约";
+  if (isPhaseConfirmed(order, "deposit") || [WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(stage)) return stage === WORKFLOW_STAGES.AWAITING_SHOOT ? "待拍摄" : "已预约";
   return (LXM_CONFIG.visibleStatus.find((item) => item.value === customerStatus) || {}).label
     || customerStatus
     || statusMeta(order.status).customer
     || "-";
 }
 
-function canAcceptOrder(order = state.currentOrder) {
-  return !!order && canEditCurrentOrder() && !state.orderReadonly && !isOrderAfterSaleLocked(order)
-    && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_CONFIRMATION;
-}
+function canAcceptOrder() { return false; }
 
 function canDispatchOrder(order = state.currentOrder) {
-  return !!order && canEditCurrentOrder() && !state.orderReadonly && !isOrderAfterSaleLocked(order)
+  return !!order && canEditCurrentOrder(order) && !state.orderReadonly && !isOrderAfterSaleLocked(order)
     && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_DISPATCH;
 }
 function canTransferCustomerService(order = state.currentOrder) {
@@ -174,25 +155,16 @@ function canTransferOrder(order = state.currentOrder) {
 }
 function canRescheduleOrder(order = state.currentOrder) {
   return !!order && canEditCurrentOrder() && !state.orderReadonly && !isOrderAfterSaleLocked(order)
-    && [WORKFLOW_STAGES.AWAITING_DEPOSIT, WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(workflowStageOf(order));
+    && [WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(workflowStageOf(order));
 }
 function defaultCustomerStatusForOrderStatus(status) {
   const map = {
-    pending: "reserved",
-    new: "reserved",
-    contacted: "confirmed",
-    deposit_pending: "reserved",
-    deposit_paid: "confirmed",
-    assigned: "confirmed",
-    confirmed: "confirmed",
-    shooting: "shooting",
-    retouching: "shooting",
-    delivered: "done",
-    final_pending: "done",
-    completed: "done",
-    cancelled: "reserved",
+    reserved: "已预约", deposit_paid: "已预约", assigned: "待拍摄",
+    awaiting_shoot: "待拍摄", shooting: "拍摄中", retouching: "拍摄中",
+    delivered: "拍摄中", final_pending: "拍摄中", paid: "已完成",
+    completed: "已完成", cancelled: "已取消", canceled: "已取消",
   };
-  return map[status] || "reserved";
+  return map[status] || "";
 }
 function canUseOrderExceptionTools(order = state.currentOrder) {
   return !!order && state.role === "super" && !state.orderReadonly;
@@ -201,7 +173,7 @@ function openOrderExceptionDialog(order = state.currentOrder) {
   if (!canUseOrderExceptionTools(order)) return ElMessage.error("只有超管可以使用订单异常处理");
   state.currentOrder = order;
   state.exceptionForm = {
-    status: order.status || "pending",
+    status: order.status || "deposit_paid",
     customerStatus: order.customerStatus || defaultCustomerStatusForOrderStatus(order.status),
     sourceType: orderSourceType(order),
     shopId: order.shopId || "",
@@ -317,26 +289,17 @@ function serviceFlowBadgeClass(order, type) {
 async function setServiceFlowStep(step) {
   if (!step) return;
   const order = state.currentOrder;
-  if (!canSetServiceFlowStep(step, order)) return ElMessage.warning(serviceFlowDisabledReason(step, order) || "当前状态不能重复点击或跳转，请按订单流程顺序推进");
+  if (!canSetServiceFlowStep(step, order)) return ElMessage.info(serviceFlowDisabledReason(step, order));
   if (step.key === "dispatch") return openDispatchDialog(order);
   if (step.key === "shoot") return startShooting(order);
-  if (step.key === "selection") return workflowStageOf(order) === WORKFLOW_STAGES.SELECTION_PENDING
-    ? confirmOfflineSelection(order) : completeShooting(order);
-  if (step.key === "final") return confirmFinalPaymentWithCheck();
-  if (step.key === "deliver") return deliverOrder(order);
 }
 function canSetServiceFlowStep(step, order = state.currentOrder) {
   if (!step || !order || !canEditCurrentOrder() || state.orderReadonly || isOrderAfterSaleLocked(order)) return false;
   const current = serviceFlowIndex(order);
   const target = serviceFlowSteps.findIndex((item) => item.key === step.key);
-  if (step.key === "complete" && target === current) return canCompleteWorkflow(order);
   const stage = workflowStageOf(order);
   if (step.key === "dispatch") return stage === WORKFLOW_STAGES.AWAITING_DISPATCH && canDispatchOrder(order);
   if (step.key === "shoot") return stage === WORKFLOW_STAGES.AWAITING_SHOOT && canStartTask(order);
-  if (step.key === "selection") return (stage === WORKFLOW_STAGES.SHOOTING && canCompleteTask(order))
-    || (stage === WORKFLOW_STAGES.SELECTION_PENDING && canConfirmOfflineSelection(order));
-  if (step.key === "final") return isSelectionConfirmed(order) && canRegisterFinalPayment(order);
-  if (step.key === "deliver") return isPhaseConfirmed(order, "final") && canDeliverOrder(order);
   return false;
 }
 function serviceFlowDisabledReason(step, order = state.currentOrder) {
@@ -349,14 +312,10 @@ function serviceFlowDisabledReason(step, order = state.currentOrder) {
   const target = serviceFlowSteps.findIndex((item) => item.key === step.key);
   if (step.key === "complete" && target === current && canCompleteWorkflow(order)) return "";
   const stage = workflowStageOf(order);
-  if (step.key === "awaiting_deposit") return "等待订金支付或财务核对";
-  if (step.key === "dispatch") return "等待订金到账确认后进入待派单";
+  if (step.key === "reserved") return "定金已支付，等待客服安排摄影师";
+  if (step.key === "dispatch") return "等待客服确认拍摄安排";
   if (step.key === "shoot" && stage !== WORKFLOW_STAGES.AWAITING_SHOOT) return "请先完成派单后再开始拍摄";
-  if (step.key === "selection" && stage === WORKFLOW_STAGES.AWAITING_SHOOT) return "请先开始拍摄";
-  if (step.key === "selection") return stage === WORKFLOW_STAGES.SELECTION_PENDING ? "请记录已在线下完成的选片" : "摄影师完成拍摄后才能登记线下选片";
-  if (step.key === "final") return "线下选片确认后才能登记尾款";
-  if (step.key === "deliver") return "尾款到账确认后才能登记成片交付";
-  if (step.key === "complete") return "交付记录及全部款项确认后才能完成订单";
+  if (step.key === "completed") return "尾款支付回调后自动完成";
   return "";
 }
 function dispatchDisabledReason(order = state.currentOrder) {
@@ -364,7 +323,6 @@ function dispatchDisabledReason(order = state.currentOrder) {
   if (!canEditOrder()) return "当前角色无权安排摄影";
   if (state.orderReadonly) return "当前为只读查看模";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，不能安排或改派摄影师";
-  if (workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_DEPOSIT) return "订金到账确认后才能派单";
   if (workflowStageOf(order) !== WORKFLOW_STAGES.AWAITING_DISPATCH) return "订单当前不在待派单阶段";
   return "";
 }
@@ -373,63 +331,27 @@ function rescheduleDisabledReason(order = state.currentOrder) {
   if (!canEditOrder()) return "当前角色无权改期";
   if (state.orderReadonly) return "当前为只读查看模";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，不能改期拍摄";
-  if (![WORKFLOW_STAGES.AWAITING_DEPOSIT, WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(workflowStageOf(order))) return "拍摄开始后需走异常或售后流程调整";
+  if (![WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(workflowStageOf(order))) return "拍摄开始后需走异常或售后流程调整";
   return "";
 }
 function isSelectionConfirmed(order = state.currentOrder) {
   return !!order && (String(order.selectionStatus || "").toLowerCase() === "confirmed" || !!order.selectionConfirmedAt);
 }
 function canRegisterDepositPaymentAction(order = state.currentOrder) {
-  if (!order || !canEditCurrentOrder() || state.orderReadonly || isOrderAfterSaleLocked(order)) return false;
-  return workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_DEPOSIT
-    && paymentDue(order, "deposit") > 0
-    && !["待审", "已审"].includes(normalizeReviewStatus(order.depositFinanceStatus));
+  return false;
 }
-function depositPaymentActionDisabledReason(order = state.currentOrder) {
-  if (!order) return "暂无订单";
-  if (!canEditCurrentOrder()) return "当前订单不可登记订金";
-  if (state.orderReadonly) return "当前为只读查看模式";
-  if (isOrderAfterSaleLocked(order)) return "售后处理中，暂不能登记订金";
-  if (workflowStageOf(order) !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return "订单当前不在订金登记阶段";
-  if (paymentDue(order, "deposit") <= 0) return "当前订单无需收取订金";
-  if (["待审", "已审"].includes(normalizeReviewStatus(order.depositFinanceStatus))) return "订金已提交或已通过财务审核";
-  return "";
-}
+function depositPaymentActionDisabledReason() { return "定金由游客支付，支付回调自动确认到账"; }
 function canRegisterFinalPayment(order = state.currentOrder) {
-  if (!order || !canEditCurrentOrder() || state.orderReadonly || isOrderAfterSaleLocked(order)) return false;
-  if (!isSelectionConfirmed(order)) return false;
-  if (!isPhaseConfirmed(order, "deposit")) return false;
-  return paymentDue(order, "final") > 0 && !["待审", "已审"].includes(normalizeReviewStatus(order.finalFinanceStatus));
+  return false;
 }
-function finalPaymentDisabledReason(order = state.currentOrder) {
-  if (!order) return "暂无订单";
-  if (!canEditCurrentOrder()) return "当前订单不可登记尾款";
-  if (state.orderReadonly) return "当前为只读查看模式";
-  if (isOrderAfterSaleLocked(order)) return "售后处理中，暂不能登记尾款";
-  if (!isSelectionConfirmed(order)) return "线下选片确认后才能登记尾款";
-  if (!isPhaseConfirmed(order, "deposit")) return "定金必须财务审核通过后才能登记尾款";
-  if (paymentDue(order, "final") <= 0) return "当前没有需要登记的应收尾款";
-  if (["待审", "已审"].includes(normalizeReviewStatus(order.finalFinanceStatus))) return "尾款已提交或已通过财务审核";
-  return "";
-}
+function finalPaymentDisabledReason() { return "拍摄中游客可支付尾款，回调后自动完成订单"; }
 function hasDeliveryRecord(order = state.currentOrder) {
-  return !!order && (!!order.deliveryRecord || !!order.deliveredAt || ["delivered", "completed"].includes(String(order.status || "").toLowerCase()));
+  return !!order && (!!order.deliveryRecord || !!order.deliveredAt || !!order.deliveryRecords?.length);
 }
 function canCompleteWorkflow(order = state.currentOrder) {
-  return !!order && !isOrderCompletedStatus(order) && !isOrderCancelledStatus(order)
-    && hasDeliveryRecord(order) && isPhaseConfirmed(order, "deposit") && isPhaseConfirmed(order, "final");
+  return false;
 }
-function completeDisabledReason(order = state.currentOrder) {
-  if (!order) return "暂无订单";
-  if (!canEditOrder()) return "当前角色无权完成订单";
-  if (state.orderReadonly) return "当前为只读查看模";
-  if (isOrderAfterSaleLocked(order)) return "售后处理中，不能完成订单";
-  if (isOrderCompletedStatus(order)) return "订单已完成，不能重复操作";
-  if (!hasDeliveryRecord(order)) return "请先登记成片交付";
-  if (!isPhaseConfirmed(order, "deposit")) return "定金必须财务审核通过";
-  if (!isPhaseConfirmed(order, "final")) return "尾款必须财务审核通过";
-  return "";
-}
+function completeDisabledReason() { return "订单由尾款支付回调自动完成，后台不能手动改为完成"; }
 function cancelDisabledReason(order = state.currentOrder) {
   if (!order) return "暂无订单";
   if (!can("cancelOrder")) return "当前角色无权取消订单";
@@ -446,38 +368,13 @@ async function setOrderStatus(status, customerStatus, label) {
   if (status === "completed") return openCompleteOrderDialog(state.currentOrder);
   return ElMessage.warning("请使用订单流程中的专用操作推进状态");
 }
-function openCompleteOrderDialog(order = state.currentOrder) {
-  if (!order) return;
-  if (!canEditOrder()) return ElMessage.error("当前角色无权完成订单");
-  if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单售后处理中，暂不能完成订单");
-  if (!canCompleteWorkflow(order)) return ElMessage.warning(completeDisabledReason(order));
-  state.currentOrder = order;
-  state.completeOrderNote = "";
-  state.completeOrderDialog = true;
-}
-function confirmCompleteOrder() {
-  const order = state.currentOrder;
-  if (!order) return;
-  if (!canEditOrder()) return ElMessage.error("当前角色无权完成订单");
-  if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单售后处理中，暂不能完成订单");
-  if (!canCompleteWorkflow(order)) return ElMessage.warning(completeDisabledReason(order));
-  const note = String(state.completeOrderNote || "").trim();
-  const reason = note ? `客服确认交付与款项均已完成：${note}` : "客服确认交付与款项均已完成";
-  persistOrderAction(order, "complete", { reason })
-    .then(() => {
-      log("订单完成", order.orderNo, `已确认交付及收款，累计实收 ${money(paid(order))}`);
-      state.completeOrderDialog = false;
-      state.completeOrderNote = "";
-      ElMessage.success("订单已完成");
-    })
-    .catch(() => {});
-}
+function openCompleteOrderDialog() { return ElMessage.info(completeDisabledReason()); }
+function confirmCompleteOrder() { return ElMessage.info(completeDisabledReason()); }
 async function saveOrder() {
-  if (!canEditOrder()) return ElMessage.error("当前角色无权保存客服处理信息");
+  if (!canEditCurrentOrder()) return ElMessage.error("请先领取订单；已完成订单仅可补充交付或跟进记录");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能保存客服处理信息");
   if (!String(state.currentOrder?.customer || "").trim() || !String(state.currentOrder?.phone || "").trim()) return ElMessage.warning("请先填写客户姓名和手机号");
   const original = JSON.parse(JSON.stringify(state.currentOrder));
-  if (state.role === "service" && !state.currentOrder.assigneeId) state.currentOrder.assigneeId = roleProfile.value.staffId || state.currentStaffId || "";
   state.saving = true;
   try {
     const order = state.currentOrder;
@@ -491,7 +388,6 @@ async function saveOrder() {
       appointmentAt: order.appointmentAt || "",
       timePeriod: order.timePeriod || "",
       internalNote: order.internalNote || "",
-      assigneeId: order.assigneeId || "",
     };
     await persistOrderAction(order, "update", { fields, reason: "确认客户信息" });
     state.moneyEdit = "";
@@ -515,7 +411,8 @@ function moneyFieldMeta(field) {
   }[field] || { label: "金额", reason: "调整原因" };
 }
 function enableMoneyEdit(field) {
-  if (!canEditOrder()) return ElMessage.error("当前角色无权调整金额");
+  if (!canEditCurrentOrder()) return ElMessage.error("请先领取订单后调整商品或优惠");
+  if (!["couponAmount", "totalAmount"].includes(field)) return ElMessage.warning("已收款金额由支付回调记录，不可编辑");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能调整金额");
   if (field === "depositPaid" && Number(state.currentOrder?.depositPaid || 0) > 0) return ElMessage.warning("定金已收后不可更");
   state.moneyEdit = field;
@@ -544,9 +441,6 @@ async function confirmMoneyEdit(field) {
     if (next > maxCoupon) return ElMessage.warning(`优惠券金额不能超过当前可优惠金额 ${money(maxCoupon)}`);
     state.currentOrder.finalDiscountAmount = next;
     state.currentOrder.finalDiscountReason = state.currentOrder.priceAdjustReason;
-    if (!["待审", "已审"].includes(normalizeReviewStatus(state.currentOrder.finalFinanceStatus))) {
-      state.currentOrder.finalPaid = 0;
-    }
   }
   if (field === "finalPaid") {
     const expectedFinal = Math.max(Number(state.currentOrder.totalAmount || 0) - Number(state.currentOrder.depositPaid || 0), 0);
@@ -573,48 +467,8 @@ async function confirmMoneyEdit(field) {
     Object.assign(order, beforeValues);
   }
 }
-async function confirmPaymentRegistration(field) {
-  const order = state.currentOrder;
-  if (!order) return;
-  if (!canEditCurrentOrder()) return ElMessage.error("当前状态不能登记收");
-  const phase = field === "depositPaid" ? "deposit" : "final";
-  if (phase === "final" && !canRegisterFinalPayment(order)) return ElMessage.warning(finalPaymentDisabledReason(order));
-  if (phase === "deposit" && workflowStageOf(order) !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return ElMessage.warning("订单当前不在订金登记阶段");
-  const statusField = field === "depositPaid" ? "depositFinanceStatus" : "finalFinanceStatus";
-  const timeField = field === "depositPaid" ? "depositPaidAt" : "finalPaidAt";
-  if (normalizeReviewStatus(order[statusField]) === "待审") return ElMessage.warning(`${moneyFieldMeta(field).label}已提交财务审核，请等待财务确认`);
-  if (normalizeReviewStatus(order[statusField]) === "已审") return ElMessage.warning(`${moneyFieldMeta(field).label}已通过财务审核，如需修改请点击改价并填写原因`);
-  const beforeRegistration = { [field]: order[field], [statusField]: order[statusField], [timeField]: order[timeField] };
-  const amount = paymentDue(order, phase);
-  if (amount <= 0) return ElMessage.warning(`当前没有需要登记的${moneyFieldMeta(field).label}`);
-  order[field] = amount;
-  const orderId = String(order.id || order._id || "order");
-  const idempotencyKey = `admin-${orderId}-${phase}-${Date.now().toString(36)}`.slice(0, 128);
-  const reason = `客服登记${moneyFieldMeta(field).label} ${money(amount)}，待财务审核`;
-  try {
-    await persistOrderAction(order, "payment", { phase, amount, paymentStatus: "pending", idempotencyKey, reason });
-    addOrderTimeline(order, `客服确认登记${moneyFieldMeta(field).label} ${money(amount)}，待财务审核`, currentOperatorName());
-    log("登记收款", order.orderNo, `${moneyFieldMeta(field).label} ${money(amount)} 待财务审核`);
-    ElMessage.success(`${moneyFieldMeta(field).label}已登记，待财务审核确认`);
-  } catch (_) {
-    Object.assign(order, beforeRegistration);
-  }
-}
-function confirmFinalPaymentWithCheck() {
-  const order = state.currentOrder;
-  if (!order) return;
-  if (!canRegisterFinalPayment(order)) return ElMessage.warning(finalPaymentDisabledReason(order));
-  const amount = paymentDue(order, "final");
-  ElMessageBox.confirm(
-    `确认将本单应收尾款 ${money(amount)} 登记为已收尾款，并提交财务审核？\n订单总价 ${money(order.totalAmount)}\n已确认定金 ${money(order.depositPaid)}\n线下选片已确认：${isSelectionConfirmed(order) ? "是" : "否"}`,
-    "确认尾款登记",
-    {
-      type: "warning",
-      confirmButtonText: "确认登记尾款",
-      cancelButtonText: "再核对一下",
-    }
-  ).then(() => confirmPaymentRegistration("finalPaid")).catch(() => {});
-}
+async function confirmPaymentRegistration() { return ElMessage.info("收款由微信支付回调确认，后台不登记收款状态"); }
+function confirmFinalPaymentWithCheck() { return ElMessage.info(finalPaymentDisabledReason()); }
 function cancelMoneyEdit() {
   state.moneyEdit = "";
   state.moneyDraft = 0;
@@ -704,10 +558,8 @@ async function confirmTransferOrder() {
       const note = state.transferForm.note ? `；原因：${state.transferForm.note}` : "";
       const text = `${parts.join("")}${note}`;
       try {
-        const fields = {};
-        if (canService && nextAssigneeId && nextAssigneeId !== order.assigneeId) fields.assigneeId = nextAssigneeId;
-        if (canPhoto && nextPhotographerId && nextPhotographerId !== order.photographerId) fields.photographerId = nextPhotographerId;
-        await persistOrderAction(order, "update", { fields, reason: text });
+        if (canService && nextAssigneeId && nextAssigneeId !== order.assigneeId) await persistOrderAction(order, "transfer", { assigneeId: nextAssigneeId, reason: text });
+        if (canPhoto && nextPhotographerId && nextPhotographerId !== order.photographerId) await persistOrderAction(order, "assign", { photographerId: nextPhotographerId, reason: text });
         log("订单转派", order.orderNo, text, currentOperatorName(), { module: "订单履约", level: "", objectType: "订单", objectName: order.orderNo });
         changed += 1;
       } catch (_) {}
@@ -758,141 +610,39 @@ async function recordScheduleChange() {
 
 function canOperateShootStage(order) {
   if (!order || isOrderAfterSaleLocked(order) || isOrderCancelledStatus(order) || isOrderCompletedStatus(order)) return false;
-  if (state.role === "photo") {
-    return can("shootUpdate") && String(order.photographerId || "") === String(roleProfile.value.staffId || "");
-  }
-  return canEditCurrentOrder() && !state.orderReadonly;
+  return ["service", "super"].includes(state.role) && canEditCurrentOrder() && !state.orderReadonly;
 }
 
-function openServiceConfirmationDialog(order = state.currentOrder) {
-  if (!canAcceptOrder(order)) return ElMessage.warning("当前订单无需重复确认或暂不可确认");
-  const ratio = Number(order.depositRatio);
-  state.currentOrder = order;
-  state.confirmationForm = {
-    appointmentAt: String(order.appointmentAt || order.date || "").trim(),
-    timePeriod: String(order.timePeriod || order.time || "").trim(),
-    appointmentLocation: String(order.appointmentLocation || order.shootLocation || order.location || order.spotName || "").trim(),
-    peopleCount: Math.max(1, Number(order.peopleCount || order.participantCount || 1) || 1),
-    serviceContent: String(order.serviceNote || order.serviceContent || order.customerRemark || "").trim(),
-    totalAmount: Number(order.totalAmount ?? order.totalPrice ?? order.price ?? 0),
-    depositRatioPercent: Number.isFinite(ratio) ? (ratio <= 1 ? ratio * 100 : ratio) : 0,
-    finalDiscountAmount: Math.max(0, Number(order.finalDiscountAmount || 0) || 0),
-    priceAdjustReason: String(order.priceAdjustReason || "").trim(),
-    reason: "客服已确认服务内容、拍摄安排与报价"
-  };
-  state.confirmationDialog = true;
-}
-
-async function confirmServiceConfirmation() {
-  const order = state.currentOrder;
-  if (!order || !canAcceptOrder(order)) return ElMessage.warning("当前订单不可确认服务");
-  const form = state.confirmationForm;
-  const totalAmount = Number(form.totalAmount);
-  const depositRatioPercent = Number(form.depositRatioPercent);
-  const peopleCount = Number(form.peopleCount);
-  const serviceContent = String(form.serviceContent || "").trim();
-  const reason = String(form.reason || "").trim();
-  if (!String(form.appointmentAt || "").trim()) return ElMessage.warning("请确认拍摄时间");
-  if (!String(form.timePeriod || "").trim()) return ElMessage.warning("请确认拍摄时段");
-  if (!String(form.appointmentLocation || "").trim()) return ElMessage.warning("请确认拍摄地点");
-  if (!Number.isInteger(peopleCount) || peopleCount < 1) return ElMessage.warning("参与人数至少为 1 人");
-  if (!serviceContent) return ElMessage.warning("请填写确认后的服务内容");
-  if (!Number.isFinite(totalAmount) || totalAmount < 0) return ElMessage.warning("请填写有效的确认总价");
-  if (!Number.isFinite(depositRatioPercent) || depositRatioPercent < 0 || depositRatioPercent > 100) return ElMessage.warning("订金比例应在 0% 至 100% 之间");
-  if (reason.length < 2) return ElMessage.warning("请填写服务确认说明");
-  const originalAmount = Number(order.totalAmount ?? order.totalPrice ?? order.price ?? 0);
-  if (Math.abs(totalAmount - originalAmount) > 0.009 && !String(form.priceAdjustReason || "").trim()) {
-    return ElMessage.warning("确认总价与原订单金额不一致，请填写调价原因");
-  }
-  try {
-    await persistOrderAction(order, "accept", {
-      appointmentAt: String(form.appointmentAt).trim(),
-      timePeriod: String(form.timePeriod).trim(),
-      appointmentLocation: String(form.appointmentLocation).trim(),
-      peopleCount,
-      serviceContent,
-      totalAmount,
-      depositRatio: depositRatioPercent / 100,
-      finalDiscountAmount: Math.max(0, Number(form.finalDiscountAmount || 0) || 0),
-      priceAdjustReason: String(form.priceAdjustReason || "").trim(),
-      reason
-    });
-    state.confirmationDialog = false;
-    log("确认服务", order.orderNo, `已确认服务、报价 ${money(totalAmount)}、订金比例 ${depositRatioPercent}%`);
-    ElMessage.success("服务已确认，已生成订金应收，等待到账确认");
-  } catch (_) {}
-}
-
-function acceptOrder(order = state.currentOrder) {
-  return openServiceConfirmationDialog(order);
-}
+function openServiceConfirmationDialog() { return ElMessage.info("预约订单在客人支付定金后自动创建"); }
+function confirmServiceConfirmation() { return openServiceConfirmationDialog(); }
+function acceptOrder() { return openServiceConfirmationDialog(); }
 
 async function startShooting(order = state.currentOrder) {
   if (!canStartTask(order)) return ElMessage.warning("当前订单未完成派单或已开始拍摄");
   try {
-    await persistOrderAction(order, "start", { reason: "摄影师开始拍摄服务" });
-    log("开始拍摄", order.orderNo, "摄影师已开始拍摄");
+    await persistOrderAction(order, "start", { reason: "客服确认摄影师已到场，开始拍摄" });
+    log("开始拍摄", order.orderNo, "客服确认摄影师到场并开始拍摄");
     ElMessage.success("已记录开始拍摄");
   } catch (_) {}
 }
 
 async function completeShooting(order = state.currentOrder) {
-  if (!canCompleteTask(order)) return ElMessage.warning("只有拍摄中的订单可以登记拍摄完成");
-  try {
-    await persistOrderAction(order, "shootcomplete", { reason: "摄影师已完成拍摄，等待线下选片确认" });
-    log("拍摄完成", order.orderNo, "拍摄已完成，等待线下选片确认");
-    ElMessage.success("已记录拍摄完成，等待线下选片确认");
-  } catch (_) {}
+  return ElMessage.info("拍摄完成由客服在交付/跟进记录中维护，支付回调负责完成订单主状态");
 }
 
 function canConfirmOfflineSelection(order = state.currentOrder) {
-  return !!order && canOperateShootStage(order)
-    && workflowStageOf(order) === WORKFLOW_STAGES.SELECTION_PENDING;
+  return false;
 }
 
-function confirmOfflineSelection(order = state.currentOrder) {
-  if (!canConfirmOfflineSelection(order)) return ElMessage.warning("拍摄完成后才能登记线下选片确认");
-  ElMessageBox.confirm("确认已完成线下选片并允许登记成片交付？该操作会写入订单时间线。", "确认线下选片", {
-    type: "warning",
-    confirmButtonText: "确认选片",
-    cancelButtonText: "暂不确认",
-  }).then(async () => {
-    try {
-      await persistOrderAction(order, "selectionconfirm", { reason: "线下选片已确认，等待登记成片交付" });
-      log("线下选片确认", order.orderNo, "已确认线下选片，等待登记成片交付");
-      ElMessage.success("已确认线下选片，可继续登记成片交付");
-    } catch (_) {}
-  }).catch(() => {});
-}
-
+function confirmOfflineSelection() { return ElMessage.info("本版无需选片确认，尾款从拍摄中开放"); }
 function canDeliverOrder(order = state.currentOrder) {
-  return !!order && ["service", "super"].includes(state.role) && canOperateShootStage(order)
-    && isSelectionConfirmed(order) && isPhaseConfirmed(order, "final") && !hasDeliveryRecord(order);
+  return canManageOrderRecords(order) && !state.orderReadonly
+    && [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.COMPLETED].includes(workflowStageOf(order));
 }
 
-function deliverOrder(order = state.currentOrder) {
-  if (!canDeliverOrder(order)) return ElMessage.warning("请先确认线下选片和尾款到账后再登记交付");
-  ElMessageBox.confirm("确认尾款已核对到账，并通过企业微信向客户交付成片？", "登记成片交付", {
-    type: "warning",
-    confirmButtonText: "确认交付",
-    cancelButtonText: "暂不交付",
-  }).then(async () => {
-    try {
-      await persistOrderAction(order, "deliver", {
-        deliveryMethod: "企业微信",
-        reason: "成片已通过企业微信交付客户"
-      });
-      log("成片交付", order.orderNo, "已通过企业微信登记成片交付");
-      ElMessage.success("已登记成片交付");
-    } catch (_) {}
-  }).catch(() => {});
-}
-
+function deliverOrder() { return ElMessage.info("请使用独立交付记录表单登记交付"); }
 async function updateTaskStatus(order, status) {
-  if (!can("shootUpdate")) return ElMessage.error("当前角色无权更新拍摄任务");
-  if (status === "shooting") return startShooting(order);
-  if (status === "completed") return completeShooting(order);
-  return ElMessage.warning("请使用拍摄任务提供的专用履约操作");
+  return ElMessage.warning("摄影师任务台仅供查看，拍摄状态由客服在订单管理中登记");
 }
 function taskStatusOf(order = {}) {
   return String(order && order.taskStatus || "pending_acceptance").trim().toLowerCase() || "pending_acceptance";
@@ -905,9 +655,7 @@ function isTaskDrawerReadonly(order = {}) {
   return !!(state.orderReadonly && state.orderDrawer && state.currentOrder === order);
 }
 function canAcceptTask(order) {
-  return !!order && isOwnPhotographyTask(order) && !isTaskDrawerReadonly(order)
-    && !isOrderAfterSaleLocked(order) && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_SHOOT
-    && ["", "pending_acceptance", "assigned"].includes(taskStatusOf(order));
+  return false;
 }
 async function acceptTask(order) {
   if (!canAcceptTask(order)) return ElMessage.warning("当前任务不能接受，请确认任务仍归属本人且未冻结");
@@ -918,19 +666,14 @@ async function acceptTask(order) {
   } catch (_) {}
 }
 function canStartTask(order) {
-  return !!order && isOwnPhotographyTask(order) && !isTaskDrawerReadonly(order)
-    && !isOrderAfterSaleLocked(order) && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_SHOOT
-    && taskStatusOf(order) === "accepted";
+  return !!order && canManageOrderRecords(order) && !state.orderReadonly
+    && !isOrderAfterSaleLocked(order) && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_SHOOT;
 }
 function canCompleteTask(order) {
-  return !!order && isOwnPhotographyTask(order) && !isTaskDrawerReadonly(order)
-    && !isOrderAfterSaleLocked(order) && workflowStageOf(order) === WORKFLOW_STAGES.SHOOTING;
+  return false;
 }
 function canRejectTask(order) {
-  return !!order && isOwnPhotographyTask(order) && !isTaskDrawerReadonly(order)
-    && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_SHOOT
-    && ["", "pending_acceptance", "assigned", "accepted"].includes(taskStatusOf(order))
-    && !isOrderAfterSaleLocked(order);
+  return false;
 }
 function rejectTask(order) {
   if (!can("shootUpdate")) return ElMessage.error("当前角色无权处理拍摄任务");

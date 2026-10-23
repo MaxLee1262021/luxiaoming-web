@@ -9,9 +9,10 @@ User=luxiaoming
 Group=luxiaoming
 WorkingDirectory=/opt/luxiaoming-admin
 ExecStart=/opt/luxiaoming-admin/deploy/linux/start.sh
-Restart=on-failure
+Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

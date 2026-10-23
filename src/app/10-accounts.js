@@ -229,6 +229,7 @@ function openQr(row) {
   state.currentShop = row;
   state.qrDialog = true;
   state.qrPreview = null;
+  state.merchantCodeStats = { scans: 0, orders: 0, deals: 0, codeCount: 0, todayUnique: 0, dailyUnique: 0 };
   state.qrPlacementType = "counter";
   state.qrCustomLabel = "";
   loadMerchantCodes();
@@ -237,7 +238,12 @@ function openQr(row) {
 async function loadMerchantCodes() {
   if (!state.currentShop) return;
   try {
-    if (window.LXM_CLOUD?.merchantCodes) state.merchantCodes = await window.LXM_CLOUD.merchantCodes(state.currentShop.shopId);
+    if (window.LXM_CLOUD?.merchantCodes) {
+      const rows = await window.LXM_CLOUD.merchantCodes(state.currentShop.shopId || state.currentShop.id || state.currentShop._id);
+      const list = Array.isArray(rows) ? rows : [];
+      const fixed = list.filter((item) => item && (item.fixedShopCode === true || item.placementType === "fixed_shop"));
+      state.merchantCodes = fixed.length ? [fixed[0]] : list.slice(0, 1);
+    }
     else state.merchantCodes = [];
   } catch (e) {
     state.merchantCodes = [];
@@ -246,28 +252,28 @@ async function loadMerchantCodes() {
 async function fetchMerchantCodeStats() {
   if (!state.currentShop) return;
   try {
-    if (window.LXM_CLOUD?.merchantCodeStats) state.merchantCodeStats = await window.LXM_CLOUD.merchantCodeStats(state.currentShop.shopId);
+    if (window.LXM_CLOUD?.merchantCodeStats) {
+      const shopId = state.currentShop.shopId || state.currentShop.id || state.currentShop._id;
+      const total = await window.LXM_CLOUD.merchantCodeStats(shopId);
+      let daily = {};
+      if (window.LXM_CLOUD?.merchantCodeDailyStats) {
+        try { daily = await window.LXM_CLOUD.merchantCodeDailyStats(shopId, LXMFormat.date(new Date())); } catch (_) {}
+      }
+      state.merchantCodeStats = { ...state.merchantCodeStats, ...(total || {}), ...(daily || {}) };
+    }
   } catch (e) {}
 }
 async function generateMerchantQr() {
   if (!state.currentShop) return;
-  const custom = (state.qrCustomLabel || "").trim();
-  let placementType, placementLabel;
-  if (custom) {
-    placementType = "custom";
-    placementLabel = custom;
-  } else {
-    const placement = state.qrPositions.find((p) => p.type === state.qrPlacementType) || { type: state.qrPlacementType, label: state.qrPlacementType };
-    placementType = placement.type;
-    placementLabel = placement.label;
-  }
+  const placementType = "fixed_shop";
+  const placementLabel = "门店统一码";
   state.qrGenerating = true;
   try {
     if (!window.LXM_CLOUD?.generateMerchantCode) throw new Error("商家码接口不可用");
-    const res = await window.LXM_CLOUD.generateMerchantCode({ shopId: state.currentShop.shopId, placementType, placementLabel });
+    const res = await window.LXM_CLOUD.generateMerchantCode({ shopId: state.currentShop.shopId || state.currentShop.id || state.currentShop._id, fixedShopCode: true, placementType, placementLabel });
     if (res && res.success) {
       state.qrPreview = { codeId: res.codeId, qrImage: res.qrImage, placementType: res.placementType, placementLabel: res.placementLabel, existed: res.existed };
-      ElMessage.success(res.existed ? "该位置码已存在，已展示已有码" : "二维码生成成功");
+      ElMessage.success(res.existed ? "该门店统一码已存在，已展示已有码" : "门店统一二维码生成成功");
       loadMerchantCodes();
       fetchMerchantCodeStats();
     } else {
@@ -287,7 +293,8 @@ function downloadMerchantQr(code) {
   a.href = url;
   const label = (target && target.placementLabel) || "qr";
   const name = (state.currentShop ? state.currentShop.name : "luxiaoming") + "_" + label;
-  a.download = name + (url.indexOf("image/png") > -1 ? ".png" : ".svg");
+  const extension = /image\/jpe?g/i.test(url) || /\.jpe?g(?:[?#]|$)/i.test(url) ? ".jpg" : /image\/svg/i.test(url) ? ".svg" : ".png";
+  a.download = name + extension;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

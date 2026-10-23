@@ -3,7 +3,7 @@
 </div>
 
 <div class="dispatch-stat">
-  <div><span>待派单</span><strong>{{ scopedOrders.filter(o=>!o.photographerId && ['awaiting_dispatch','deposit_paid','confirmed'].includes(o.workflowStage || o.status) && !['completed','cancelled','已取消','done'].includes(o.status)).length }}</strong></div>
+  <div><span>待拍摄安排</span><strong>{{ scopedOrders.filter(o=>!o.photographerId && ['awaiting_dispatch','deposit_paid','confirmed'].includes(o.workflowStage || o.status) && !['completed','cancelled','已取消','done'].includes(o.status)).length }}</strong></div>
   <div><span>已派单（未完成）</span><strong>{{ scopedOrders.filter(o=>o.photographerId && !['completed','cancelled','已取消','done'].includes(o.status)).length }}</strong></div>
   <div><span>可排期摄影师</span><strong>{{ photographers.length }}</strong></div>
 </div>

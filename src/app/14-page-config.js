@@ -187,7 +187,8 @@ function makeDefaultPageConfig(key) {
     albumIds: [],
     videoIds: [],
     guideIds: [],
-    peripheralIds: []
+    peripheralIds: [],
+    ...(key === "albumDetail" ? { sampleIds: [] } : {})
   };
   // 「全部打卡点页」的筛选标签 / 排序选项：默认带一组合理值，运营可在后台编辑、增删。
   // 注意：categories 的 value 是拿去和打卡点名称/描述/地址/标签做"包含匹配"的关键词（如"古风"要能匹配到打了古风标签的打卡点），
@@ -243,6 +244,17 @@ const publicMiniPreview = computed(() => {
 });
 const activePageRelationGroups = computed(() => {
   const preview = publicMiniPreview.value;
+  if (activePageConfigMeta.value.key === "albumDetail") {
+    return [
+      { field: "bannerIds", title: "照片留影详情顶部轮播", hint: "选择并按顺序展示在详情页顶部，最多 6 张。", limit: 6, rows: preview.samples, price: false },
+      { field: "sampleIds", title: "照片留影详情样片", hint: "选择详情页样片展示顺序，最多 9 张。", limit: 9, rows: preview.samples, price: false },
+      { field: "packageIds", title: "关联套餐", limit: 8, rows: preview.packages, price: true },
+      { field: "albumIds", title: "关联照片留影", limit: 8, rows: preview.albums, price: true },
+      { field: "videoIds", title: "关联短视频", limit: 8, rows: preview.videoProducts, price: true },
+      { field: "guideIds", title: "关联攻略/内容", limit: 6, rows: preview.guides, price: false },
+      { field: "peripheralIds", title: "关联周边", limit: 6, rows: preview.peripherals, price: true }
+    ];
+  }
   return [
     { field: "bannerIds", title: "轮播/样片素材", limit: 6, rows: preview.samples, price: false },
     { field: "packageIds", title: "关联套餐", limit: 8, rows: preview.packages, price: true },
@@ -298,6 +310,20 @@ function togglePageRelation(field, id, limit = 8) {
     list.push(id);
   }
 }
+function movePageRelation(field, index, delta) {
+  const config = ensurePageConfig();
+  const list = config[field] || (config[field] = []);
+  const target = Number(index) + Number(delta);
+  if (index < 0 || index >= list.length || target < 0 || target >= list.length) return;
+  const current = list[index];
+  list[index] = list[target];
+  list[target] = current;
+}
+function removePageRelation(field, index) {
+  const config = ensurePageConfig();
+  const list = config[field] || (config[field] = []);
+  if (index >= 0 && index < list.length) list.splice(index, 1);
+}
 
   return {
     homeModuleOptions,
@@ -325,6 +351,8 @@ function togglePageRelation(field, id, limit = 8) {
     miniPreviewReset,
     selectPageConfig,
     togglePageModule,
-    togglePageRelation
+    togglePageRelation,
+    movePageRelation,
+    removePageRelation
   };
 });

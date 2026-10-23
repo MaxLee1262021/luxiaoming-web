@@ -1534,3 +1534,64 @@ CREATE TABLE IF NOT EXISTS `lxm_mediaFiles` (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- Paid checkout staging; internal and excluded from order APIs.
+CREATE TABLE IF NOT EXISTS `lxm_bookingRequests` (
+  `id` VARCHAR(128) NOT NULL,
+  `openid` VARCHAR(128) NULL,
+  `bookingIdempotencyKey` VARCHAR(128) NULL,
+  `confirmedOrderId` VARCHAR(128) NULL,
+  `bookingStatus` VARCHAR(64) NULL,
+  `status` VARCHAR(64) NULL,
+  `workflowStage` VARCHAR(64) NULL,
+  `totalAmount` DECIMAL(18,2) NULL,
+  `depositDue` DECIMAL(18,2) NULL,
+  `depositPaid` DECIMAL(18,2) NULL,
+  `deleted` TINYINT(1) NULL,
+  `isDeleted` TINYINT(1) NULL,
+  `createdAt` VARCHAR(64) NULL,
+  `updatedAt` VARCHAR(64) NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_updated_at` (`updatedAt`),
+  UNIQUE KEY uq_booking_request_key (bookingIdempotencyKey),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `lxm_booking_payment_records` (
+  booking_id VARCHAR(128) NOT NULL,
+  record_no INT NOT NULL,
+  payment_id VARCHAR(128) NULL,
+  idempotency_key VARCHAR(128) NULL,
+  out_trade_no VARCHAR(32) NULL,
+  external_transaction_id VARCHAR(160) NULL,
+  PRIMARY KEY (booking_id, record_no),
+  UNIQUE KEY uq_booking_payment_id (payment_id),
+  UNIQUE KEY uq_booking_payment_key (idempotency_key),
+  UNIQUE KEY uq_booking_payment_trade (out_trade_no),
+  UNIQUE KEY uq_booking_payment_transaction (external_transaction_id),
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Customer favorites are account-scoped and survive device changes.
+CREATE TABLE IF NOT EXISTS `lxm_user_favorites` (
+  `openid` VARCHAR(128) NOT NULL,
+  `favorite_key` VARCHAR(256) NOT NULL,
+  `type` VARCHAR(64) NOT NULL,
+  `item_id` VARCHAR(128) NOT NULL,
+  `type_label` VARCHAR(255) NULL,
+  `title` VARCHAR(255) NULL,
+  `cover` TEXT NULL,
+  `price` DECIMAL(18,2) NULL,
+  `spot` VARCHAR(255) NULL,
+  `spot_id` VARCHAR(128) NULL,
+  `url` TEXT NULL,
+  `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`openid`, `favorite_key`),
+  UNIQUE KEY `uq_user_favorite_item` (`openid`, `type`, `item_id`),
+  KEY `idx_user_favorite_created` (`openid`, `created_at`),
+  KEY `idx_user_favorite_type` (`openid`, `type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

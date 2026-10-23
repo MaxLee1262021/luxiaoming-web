@@ -78,8 +78,8 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="热度 / 排序" width="122" align="center">
-        <template #default="{row}"><div class="basic-content-number-cell"><strong>{{ row.hotScore || 0 }}</strong><span>排序 {{ row.sort || 0 }}</span></div></template>
+      <el-table-column label="热度 / 热榜排序" width="138" align="center">
+        <template #default="{row}"><div class="basic-content-number-cell"><strong>{{ row.hotScore || 0 }}</strong><span>热榜排序 {{ Number(row.sort) > 0 ? row.sort : '未设置' }}</span></div></template>
       </el-table-column>
       <el-table-column label="展示状态" width="112">
         <template #default="{row}"><el-tag :type="isSpotVisible(row) ? 'success' : 'info'">{{ spotStatusText(row) }}</el-tag></template>

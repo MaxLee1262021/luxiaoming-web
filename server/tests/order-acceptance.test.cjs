@@ -143,6 +143,7 @@ async function withPaymentEnvironment(values, callback) {
 test("booking uses the verified owner, leaves shooting time for manual confirmation, and rejects ambiguous order numbers", async () => {
   const source = makeSource();
   const request = {
+    expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true },
     name: "Customer",
     phone: "13800000000",
     items: [{ packageId: "package-1" }],
@@ -154,7 +155,7 @@ test("booking uses the verified owner, leaves shooting time for manual confirmat
 
   const created = await rpc(source, "createBooking", { data: request }, publicIdentity("owner"));
   assert.equal(created.success, true);
-  const order = await source.get("orders", created.orderId);
+  const order = await source.get("bookingRequests", created.bookingId);
   assert.equal(order.openid, "owner");
   assert.equal(order.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
   assert.equal(order.date, "");
@@ -165,14 +166,15 @@ test("booking uses the verified owner, leaves shooting time for manual confirmat
   const repeated = await rpc(source, "createBooking", { data: request }, publicIdentity("owner"));
   assert.equal(repeated.success, true);
   assert.equal(repeated.idempotent, true);
-  assert.equal(repeated.orderId, created.orderId);
-  assert.equal(Object.keys(source.collections.orders).length, 1);
+  assert.equal(repeated.bookingId, created.bookingId);
+  assert.equal(Object.keys(source.collections.orders).length, 0);
+  assert.equal((await source.list("bookingRequests")).length, 1);
 
   const reusedByAnotherOwner = await rpc(source, "createBooking", { data: request }, publicIdentity("other-owner"));
   assert.equal(reusedByAnotherOwner.success, false);
 
   const noSlot = await rpc(source, "createBooking", {
-    data: { ...request, idempotencyKey: "booking-owner-0002", date: "", timePeriod: "" },
+    data: { expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true }, ...request, idempotencyKey: "booking-owner-0002", date: "", timePeriod: "" },
   }, publicIdentity("owner"));
   assert.equal(noSlot.success, true);
 
@@ -207,30 +209,31 @@ test("public status filters use the five customer-facing business states", async
     dispatchRecord: { id: "dispatch-record" },
     paymentRecords: [{ id: "assigned-deposit", phase: "deposit", amount: 30, status: "confirmed", provider: "manual" }],
   };
-  source.collections.orders.completed = { ...confirmedOrder("completed"), openid: "owner", status: "delivered", depositPaid: 30, finalPaid: 70, depositFinanceStatus: "confirmed", finalFinanceStatus: "confirmed", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-20T10:00:00.000Z", deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-20T11:00:00.000Z", paymentRecords: [{ id: "completed-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "completed-final", phase: "final", amount: 70, status: "confirmed" }] };
+  source.collections.orders.completed = { ...confirmedOrder("completed"), openid: "owner", status: "delivered", depositPaid: 30, finalPaid: 70, depositFinanceStatus: "confirmed", finalFinanceStatus: "confirmed", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-20T10:00:00.000Z", deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-20T11:00:00.000Z", paymentRecords: [{ id: "completed-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "completed-final", phase: "final", selectionAccepted: true, amount: 70, status: "confirmed" }] };
 
   const pending = await rpc(source, "getMyOrders", { data: { status: "pending_payment", page: 1, pageSize: 20 } }, publicIdentity("owner"));
-  assert.deepEqual(pending.data.map((row) => row.id), ["confirmation"]);
-  const confirmed = await rpc(source, "getMyOrders", { data: { status: "awaiting_photographer", page: 1, pageSize: 20 } }, publicIdentity("owner"));
-  assert.deepEqual(new Set(confirmed.data.map((row) => row.id)), new Set(["dispatch", "assigned"]));
+  assert.deepEqual(pending.data.map((row) => row.id), []);
+  const confirmed = await rpc(source, "getMyOrders", { data: { status: "reserved", page: 1, pageSize: 20 } }, publicIdentity("owner"));
+  assert.deepEqual(new Set(confirmed.data.map((row) => row.id)), new Set(["dispatch"]));
   const completed = await rpc(source, "getMyOrders", { data: { status: "delivered", page: 1, pageSize: 20 } }, publicIdentity("owner"));
   assert.deepEqual(completed.data.map((row) => row.id), ["completed"]);
 });
 
-test("service confirmation is a required server snapshot and generic order writes cannot bypass it", async (t) => {
+test("paid bookings reject retired service confirmation and generic order writes cannot bypass payment", async (t) => {
   const source = makeSource();
   source.collections.orders.order = {
     id: "order",
     orderNo: "ORDER-CONFIRM",
     openid: "owner",
-    status: "new",
+    status: "deposit_paid",
+    depositPaid: 30, depositFinanceStatus: "confirmed",
     totalAmount: 100,
     totalPrice: 100,
     price: 100,
     depositRatio: 0.3,
     depositDue: 30,
     finalDue: 70,
-    paymentRecords: [],
+    paymentRecords: [{ id: "paid-checkout", phase: "deposit", amount: 30, status: "confirmed" }],
     productItems: [{ packageId: "package-1", price: 100 }],
   };
   const sessions = {
@@ -251,50 +254,18 @@ test("service confirmation is a required server snapshot and generic order write
     return { status: response.status, body: await response.json() };
   };
 
-  const incomplete = await post("/api/orders/order/action", { action: "accept", reason: "confirm" });
-  assert.equal(incomplete.status, 400);
-  const accepted = await post("/api/orders/order/action", {
-    action: "accept",
-    reason: "confirmed itinerary",
-    appointmentAt: "2026-12-20",
-    timePeriod: "morning",
-    appointmentLocation: "test location",
-    peopleCount: 2,
-    serviceContent: "portrait service",
-    totalAmount: 120,
-    depositRatio: 0.25,
-    priceAdjustReason: "seasonal adjustment",
-  });
-  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
-  assert.equal(accepted.body.data.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
-  const persisted = await source.get("orders", "order");
-  assert.equal(persisted.confirmationSnapshot.totalAmount, 120);
-  assert.equal(persisted.confirmationSnapshot.depositDue, 30);
-  assert.equal(persisted.confirmationSnapshot.finalDue, 90);
-  source.collections.packages["package-1"].price = 999;
-  source.collections.packages["package-1"].depositRatio = 90;
-  assert.deepEqual((await source.get("orders", "order")).confirmationSnapshot, persisted.confirmationSnapshot);
-
-  const intent = await rpc(source, "createPayment", {
-    data: { orderId: "order", phase: "deposit", idempotencyKey: "confirmation-intent-0001" },
-  }, publicIdentity("owner"));
-  assert.equal(intent.success, true);
-  const reconfirm = await post("/api/orders/order/action", {
-    action: "accept",
-    reason: "change snapshot",
-    appointmentAt: "2026-12-21",
-    timePeriod: "afternoon",
-    appointmentLocation: "other location",
-    peopleCount: 3,
-    serviceContent: "other service",
-    totalAmount: 200,
-    depositRatio: 0.5,
-    priceAdjustReason: "not allowed after intent",
-  });
-  assert.equal(reconfirm.status, 409);
+  const retiredConfirmation = await post("/api/orders/order/action", { action: "accept", reason: "paid checkout already created the booking" });
+  assert.equal(retiredConfirmation.status, 409);
 
   const genericWrite = await post("/api/collection/orders/order", { status: "completed" }, "PUT");
   assert.equal(genericWrite.status, 403);
+
+  source.collections.orders.superFinance = confirmedOrder("superFinance");
+  const legacyUnpaid = await post("/api/orders/superFinance/action", {
+    action: "payment", phase: "deposit", paymentStatus: "confirmed", amount: 30,
+    idempotencyKey: "super-approve-deposit-0001", externalTransactionId: "super-deposit-tx-0001", reason: "legacy unpaid booking",
+  });
+  assert.equal(legacyUnpaid.status, 403);
 });
 
 test("customer cancellation uses one guarded contract for both public RPC names", async () => {
@@ -314,7 +285,7 @@ test("customer cancellation uses one guarded contract for both public RPC names"
   const afterConfirmation = await rpc(source, "cancelOrder", {
     data: { orderId: "confirmed", reason: "too late", idempotencyKey: "cancel-confirmed-0001" },
   }, publicIdentity("owner"));
-  assert.equal(afterConfirmation.success, false);
+  assert.equal(afterConfirmation.success, true);
 
   source.collections.orders.afterSale = { id: "afterSale", orderNo: "AFTER-SALE", openid: "owner", status: "new", totalAmount: 100, depositDue: 30, finalDue: 70, afterSaleStatus: "pending", paymentRecords: [] };
   source.collections.afterSales.ticket = { id: "ticket", orderId: "afterSale", status: "pending" };
@@ -375,7 +346,7 @@ test("test payment is opt-in, owner-only, phase-gated, idempotent, and auditable
     assert.equal((await paymentRequest("", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-0001" })).status, 401);
     const foreign = await paymentRequest("other-token", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-0001" });
     assert.equal(foreign.body.success, false);
-    const wrongPhase = await paymentRequest("owner-token", { orderId: "final-before-delivery", phase: "final", idempotencyKey: "test-final-0001" });
+    const wrongPhase = await paymentRequest("owner-token", { orderId: "final-before-delivery", phase: "final", selectionAccepted: true, idempotencyKey: "test-final-0001" });
     assert.equal(wrongPhase.body.success, false);
     const afterSaleFrozen = await paymentRequest("owner-token", { orderId: "frozen", phase: "deposit", idempotencyKey: "test-frozen-0001" });
     assert.equal(afterSaleFrozen.body.success, false);
@@ -428,7 +399,7 @@ test("mock payment mode confirms the normal customer payment request without tou
     async createJsapiTransaction() { gatewayCalled = true; throw new Error("should not create a WeChat prepay order"); },
   };
 
-  await withPaymentEnvironment({ PAYMENT_MODE: "mock", TEST_PAYMENT_ENABLED: undefined }, async () => {
+  await withPaymentEnvironment({ PAYMENT_MODE: "mock", TEST_PAYMENT_ENABLED: undefined, NODE_ENV: "test", DATA_MODE: "json", LXM_ALLOW_TEST_JSON_SOURCE: "true" }, async () => {
     const context = { identity: { kind: "public", openid: "owner" }, wechatPay: unavailableGateway };
     const paid = await rpc(source, "createPayment", {
       data: { orderId: "deposit", phase: "deposit", idempotencyKey: "mock-payment-0001" },
@@ -454,7 +425,7 @@ test("mock payment mode confirms the normal customer payment request without tou
     assert.equal(detail.data.paymentMode, "mock");
 
     const finalPaid = await rpc(source, "createPayment", {
-      data: { orderId: "final", phase: "final", idempotencyKey: "mock-final-payment-0001" },
+      data: { orderId: "final", phase: "final", selectionAccepted: true, idempotencyKey: "mock-final-payment-0001" },
     }, context);
     assert.equal(finalPaid.success, true, JSON.stringify(finalPaid));
     assert.equal(finalPaid.data.status, "confirmed");
@@ -484,8 +455,8 @@ test("mock payment mode confirms the normal customer payment request without tou
   const finalOrder = await source.get("orders", "final");
   assert.equal(finalOrder.finalPaid, 70);
   assert.equal(finalOrder.finalFinanceStatus, "已审");
-  assert.equal(finalOrder.status, "paid");
-  assert.equal(workflow.canonicalStage(finalOrder), workflow.WORKFLOW_STAGES.PAID);
+  assert.equal(finalOrder.status, "completed");
+  assert.equal(workflow.canonicalStage(finalOrder), workflow.WORKFLOW_STAGES.COMPLETED);
   assert.equal(finalOrder.paymentRecords.filter((record) => record.phase === "final")[0].provider, "mock_payment");
   const recoveredOrder = await source.get("orders", "stale");
   assert.equal(recoveredOrder.paymentRecords.length, 1);
@@ -582,15 +553,15 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
 
   const serviceStart = await post("service-token", "/api/orders/task/action", { action: "start", reason: "service must not start task" });
   assert.equal(serviceStart.status, 403);
-  const startBeforeAccept = await post("photo-token", "/api/orders/task/action", { action: "start", reason: "direct start after assignment" });
+  const startBeforeAccept = await post("super-token", "/api/orders/task/action", { action: "start", reason: "direct start after assignment" });
   assert.equal(startBeforeAccept.status, 200, JSON.stringify(startBeforeAccept.body));
   const crossPhotographerAccept = await post("other-photo-token", "/api/orders/task/action", { action: "taskaccept", reason: "wrong photographer" });
-  assert.equal(crossPhotographerAccept.status, 403);
+  assert.equal(crossPhotographerAccept.status, 401);
   const serviceComplete = await post("service-token", "/api/orders/task/action", { action: "shootcomplete", reason: "service must not complete task" });
   assert.equal(serviceComplete.status, 403);
-  const completedTask = await post("photo-token", "/api/orders/task/action", { action: "shootcomplete", reason: "complete accepted task" });
+  const completedTask = await post("super-token", "/api/orders/task/action", { action: "shootcomplete", reason: "complete accepted task" });
   assert.equal(completedTask.status, 200, JSON.stringify(completedTask.body));
-  const unableTask = await post("photo-token", "/api/orders/unable/action", { action: "unable", reason: "photographer unavailable" });
+  const unableTask = await post("super-token", "/api/orders/unable/action", { action: "unable", reason: "photographer unavailable" });
   assert.equal(unableTask.status, 200, JSON.stringify(unableTask.body));
   const unableOrder = await source.get("orders", "unable");
   assert.equal(unableOrder.photographerId, "");
@@ -599,16 +570,16 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
   assert.equal(workflow.canonicalStage(unableOrder), workflow.WORKFLOW_STAGES.AWAITING_DISPATCH);
   assert.ok(unableOrder.dispatchRecords.some((record) => record.type === "unable" && record.reason === "photographer unavailable"));
 
-  const selected = await post("photo-token", "/api/orders/selection/action", { action: "selectionConfirm", reason: "selection completed" });
-  assert.equal(selected.status, 200, JSON.stringify(selected.body));
+  const selected = await post("super-token", "/api/orders/selection/action", { action: "selectionConfirm", reason: "selection completed" });
+  assert.equal(selected.status, 409, JSON.stringify(selected.body));
   const selectedOrder = await source.get("orders", "selection");
   assert.equal(workflow.canonicalStage(selectedOrder), workflow.WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT);
   const finalIntent = await rpc(source, "createPayment", {
-    data: { orderId: "selection", phase: "final", idempotencyKey: "final-before-publication-0001" },
+    data: { orderId: "selection", phase: "final", selectionAccepted: true, idempotencyKey: "final-before-publication-0001" },
   }, publicIdentity("owner"));
   assert.equal(finalIntent.success, true, JSON.stringify(finalIntent));
   const finalConfirmed = await post("finance-token", "/api/orders/selection/action", {
-    action: "payment", phase: "final", paymentStatus: "confirmed", amount: 70,
+    action: "payment", phase: "final", selectionAccepted: true, paymentStatus: "confirmed", amount: 70,
     externalTransactionId: "selection-final-tx-0001", idempotencyKey: "selection-final-confirm-0001", reason: "confirm final payment",
   });
   assert.equal(finalConfirmed.status, 200, JSON.stringify(finalConfirmed.body));
@@ -616,7 +587,7 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
     action: "deliver", deliveryMethod: "enterprise_wechat", reason: "publish completed files",
   });
   assert.equal(published.status, 200, JSON.stringify(published.body));
-  assert.equal(workflow.canonicalStage(await source.get("orders", "selection")), workflow.WORKFLOW_STAGES.DELIVERED);
+  assert.equal(workflow.canonicalStage(await source.get("orders", "selection")), workflow.WORKFLOW_STAGES.COMPLETED);
 
   const overConfirmedFunds = await post("super-token", "/api/after-sales/refund-ticket/action", {
     action: "complete", reason: "request too much", refundAmount: 31, refundConfirmed: true,

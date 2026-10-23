@@ -17,12 +17,14 @@
     financeDue,
     inRoleScope,
     isHeadquarterSource,
+    isCreatedBooking,
     isOrderCancelledStatus,
     isOrderCompletedStatus,
     isOrderAfterSaleLocked,
     normalizeDateText,
     normalizeReviewStatus,
     orderDistributorIds,
+    orderBusinessStatus,
     orderShop,
     orderSourceName,
     orderSplit,
@@ -50,9 +52,10 @@ const dashboard = computed(() => {
   const orders = scopedOrders.value;
   const scans = scopedScans.value;
   const convertedOrders = orders.filter((o) => scans.some((s) => s.orderId === o.id));
+  const visitorKey = (scan) => String(scan && (scan.visitorHash || scan.visitorId || scan.openid || scan.unionid || scan.sessionId || scan.id || "") || "").trim();
   return {
     scans: scans.length,
-    unique: new Set(scans.map((s) => s.openid)).size,
+    unique: new Set(scans.map(visitorKey).filter(Boolean)).size,
     browseOnly: scans.filter((s) => !s.orderId).length,
     conversion: convertedOrders.length,
     orders: convertedOrders.length,
@@ -95,7 +98,7 @@ const dashboardDelta = computed(() => {
     return pct > 0 ? { text: `↑ ${Math.abs(pct)}%`, trend: "up" } : { text: `↓ ${Math.abs(pct)}%`, trend: "down" };
   };
   const prevScans = data.scans.filter((s) => scanInRoleScope(s) && inPrev(s.date) && (!state.filters.shopId || sameShop(s, state.filters.shopId)));
-  const prevOrders = data.orders.filter((o) => !o.deleted && inRoleScope(o) && inPrev(o.appointmentAt) && (!state.filters.shopId || sameShop(o, state.filters.shopId)));
+  const prevOrders = data.orders.filter((o) => isCreatedBooking(o) && !o.deleted && inRoleScope(o) && inPrev(o.appointmentAt) && (!state.filters.shopId || sameShop(o, state.filters.shopId)));
   const prevConverted = prevOrders.filter((o) => prevScans.some((s) => s.orderId === o.id));
   return {
     label: `对比 ${prevRange[0]} ~ ${prevRange[1]}`,
@@ -108,18 +111,19 @@ const reminders = computed(() => statusDict.map((s) => ({
   status: s.value,
   label: s.label,
   color: s.color,
-  count: reminderBaseOrders.value.filter((o) => o.status === s.value).length,
+  count: reminderBaseOrders.value.filter((o) => orderBusinessStatus(o) === s.value).length,
 })));
 const activeAdvFilterCount = computed(() => ["financeStatus", "afterSaleStatus", "refundStatus", "transferStatus", "rescheduleStatus", "sourceType", "distributorId", "shopId", "assigneeId", "photographerId", "productType"].filter((key) => state.filters[key]).length);
 const messageRows = computed(() => {
-  const pending = scopedOrders.value.filter((o) => ["pending", "new"].includes(o.status));
-  const dueList = scopedOrders.value.filter((o) => financeDue(o) > 0 && !["pending", "new"].includes(o.status));
-  const unassigned = scopedOrders.value.filter((o) => ["confirmed", "deposit_paid", "assigned", "shooting"].includes(o.status) && !o.photographerId);
-  const todayScans = scopedScans.value.filter((s) => s.date === "2026-06-29");
+  const pending = scopedOrders.value.filter((o) => orderBusinessStatus(o) === "reserved" && !o.assigneeId);
+  const dueList = scopedOrders.value.filter((o) => financeDue(o) > 0);
+  const unassigned = scopedOrders.value.filter((o) => orderBusinessStatus(o) === "reserved" && !o.photographerId);
+  const today = LXMFormat.date(new Date());
+  const todayScans = scopedScans.value.filter((s) => normalizeDateText(s.businessDate || s.date || s.createTime || s.scanTime) === today);
   return [
     { type: "新预约", count: pending.length, text: "待客服联系确认细节", action: "pending" },
     { type: "待收尾款", count: dueList.length, text: "已产生待收尾款的订单", action: "due" },
-    { type: "待派摄影", count: unassigned.length, text: "已接单但未安排摄影师", action: "unassigned" },
+    { type: "待派摄影", count: unassigned.length, text: "已支付定金但未安排摄影师", action: "unassigned" },
     { type: "今日扫码", count: todayScans.length, text: "扫码明细可在看板下钻查看", action: "scan" },
   ].filter((m) => m.count > 0);
 });
@@ -146,13 +150,13 @@ const dashboardScopeScans = computed(() => scopedScans.value.filter((scan) => {
   return true;
 }));
 const shopRank = computed(() => scopedShops.value.filter((shop) => !state.dashboardCityId || sameCity(shop, state.dashboardCityId)).map((shop) => {
-  const orders = data.orders.filter((o) => sameShop(o, shop) && !o.deleted);
+  const orders = data.orders.filter((o) => sameShop(o, shop) && isCreatedBooking(o) && !o.deleted);
   const scans = data.scans.filter((s) => sameShop(s, shop));
   return { ...shop, orderCount: orders.length, scanCount: scans.length, amount: orders.reduce((n, o) => n + Number(o.totalAmount || 0), 0) };
 }).sort((a, b) => b.amount - a.amount));
 const cityRank = computed(() => visibleCities.value.map((city) => {
   const shops = scopedShops.value.filter((s) => sameCity(s, city));
-  const orders = data.orders.filter((o) => shops.some((shop) => sameShop(o, shop)) && !o.deleted);
+  const orders = data.orders.filter((o) => shops.some((shop) => sameShop(o, shop)) && isCreatedBooking(o) && !o.deleted);
   return { ...city, shops: shops.length, orders: orders.length, amount: orders.reduce((s, o) => s + o.totalAmount, 0) };
 }).sort((a, b) => b.amount - a.amount));
 const scanHeat = computed(() => Array.from({ length: 24 }, (_, hour) => ({ hour, count: dashboardScopeScans.value.filter((s) => s.hour === hour).length })));
@@ -171,7 +175,7 @@ const drillTitle = computed(() => ({
   deposit: "已收定金订单",
   final: "已收尾款订单",
   due: "待收尾款订单",
-  amount: "成交额订单明"
+  amount: "成交额订单明细"
 }[state.dashboardDrill] || "点击上方数据卡片查看追溯明细"));
 const drillRows = computed(() => {
   if (!state.dashboardDrill) return [];
@@ -188,7 +192,7 @@ const drillRows = computed(() => {
         distributorId: s.distributorId || order?.distributorId || "",
         distributorIds: orderDistributorIds(order || { shopId: s.shopId }),
         sourceName: orderSourceName(order || s),
-        status: s.orderId ? "已转" : "浏览未下",
+        status: s.orderId ? "已转化" : "浏览未下单",
         scanCount: 1,
         orderNo: order?.orderNo || "-",
         customer: order?.customer || "-",
@@ -226,7 +230,7 @@ const scanMetricSummary = computed(() => {
   const converted = rows.filter((row) => row.orderId);
   return {
     scans: rows.length,
-    unique: new Set(rows.map((row) => row.openid)).size,
+    unique: new Set(rows.map((row) => String(row.visitorHash || row.visitorId || row.openid || row.unionid || row.sessionId || row.id || "")).filter(Boolean)).size,
     browseOnly: rows.filter((row) => !row.orderId).length,
     converted: converted.length,
     shops: new Set(rows.map((row) => row.shopId)).size,
@@ -234,6 +238,20 @@ const scanMetricSummary = computed(() => {
     amount: converted.reduce((sum, row) => sum + Number(row.totalAmount || 0), 0),
   };
 });
+const recentScanSources = computed(() => scopedScans.value
+  .slice()
+  .sort((a, b) => String(b.scanTime || b.createTime || b.businessDate || b.date || "").localeCompare(String(a.scanTime || a.createTime || a.businessDate || a.date || "")))
+  .slice(0, 8)
+  .map((scan) => {
+    const order = scan.orderId ? data.orders.find((item) => String(item.id || item._id) === String(scan.orderId)) : null;
+    return {
+      ...scan,
+      sourceName: orderSourceName(order || scan),
+      shopName: shopName(scan.shopId || order?.shopId),
+      date: normalizeDateText(scan.businessDate || scan.date || scan.scanTime || scan.createTime),
+      converted: !!scan.orderId,
+    };
+  }));
 function dashboardProductCategory(product = {}, source = null) {
   const id = product.id || product.productId || source?.id || "";
   const pkg = source || data.packages.find((item) => item.id === id);
@@ -509,7 +527,7 @@ function clearOrderFilters() {
   state.selectedOrderIds = [];
 }
 function openReminderPreview(row) {
-  const rows = reminderBaseOrders.value.filter((order) => order.status === row.status);
+  const rows = reminderBaseOrders.value.filter((order) => orderBusinessStatus(order) === row.status);
   state.reminderPreview = {
     ...row,
     rows,
@@ -547,6 +565,7 @@ function confirmReminderJump() {
     drillTitle,
     drillRows,
     scanMetricSummary,
+    recentScanSources,
     dashboardProductCategory,
     dashboardCategoryLabel,
     dashboardCategoryColor,

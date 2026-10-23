@@ -3730,6 +3730,18 @@ body {
   font-size: 12px;
 }
 
+.metric-filter .metric-filter-reset {
+  align-self: end;
+  min-width: 82px;
+}
+
+.metric-filter .el-input__wrapper.is-focus,
+.metric-filter .el-select .el-input.is-focus .el-input__wrapper,
+.metric-filter .el-date-editor.el-input__wrapper.is-focus {
+  border-color: var(--line) !important;
+  box-shadow: 0 0 0 1px var(--line) inset !important;
+}
+
 .metric-summary {
   margin-bottom: 12px;
   display: grid;

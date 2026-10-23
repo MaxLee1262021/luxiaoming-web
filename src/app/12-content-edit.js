@@ -330,19 +330,32 @@ async function addTrash(key, source, previous, row) {
   return false;
 }
 
-const videoSingleRows = computed(() => {
-  // 短视频统一存进 packages 集合（type=video + isVideoSingle），小程序读 packages 作为视频商品，无需另接
-  let list = data.packages.filter((r) => !r.deleted && r.type === "video" && r.isVideoSingle);
+function isVideoSingleProduct(row) {
+  if (!row || row.deleted === true || row.isDeleted === true) return false;
+  const video = [row.serviceType, row.type, row.productType, row.productKind, row.category]
+    .some((value) => value !== undefined && value !== null && /video|短视频|视频/.test(String(value).trim().toLowerCase()));
+  return video && (row.isVideoSingle === true || row.productKind === "video_single");
+}
+function filterVideoSingleRows(rows) {
+  let list = (Array.isArray(rows) ? rows : []).filter(isVideoSingleProduct);
   const f = state.filters;
   if (f.contentSpotId) list = list.filter((r) => r.spotId === f.contentSpotId || (r.spotIds || []).includes(f.contentSpotId));
-  if (f.contentSeriesId) list = list.filter((r) => r.seriesId === f.contentSeriesId);
+  if (f.contentSeriesId) list = list.filter((r) => r.seriesId === f.contentSeriesId || (r.seriesIds || []).includes(f.contentSeriesId));
   if (f.contentStatus) list = list.filter((r) => videoSingleStatus(r) === f.contentStatus || (r.status || (r.isShow === false ? "下架" : "上架")) === f.contentStatus);
   if (f.keyword) {
     const kw = (f.keyword || "").toLowerCase();
     list = list.filter((r) => (r.title || r.name || "").toLowerCase().includes(kw) || (r.tags || []).join(",").toLowerCase().includes(kw));
   }
   return list;
-});
+}
+const videoSingleRows = computed(() => filterVideoSingleRows(data.packages));
+function videoSingleWriteAllowed() {
+  if ((state.authSource === "server" || window.LXM_AUTH?.hasSession?.() || window.LXM_API?.remoteOn?.()) && !isServerConnected()) {
+    ElMessage.warning("真实后端连接不可用，请恢复连接后重试");
+    return false;
+  }
+  return true;
+}
 function videoSingleStatus(row) {
   if (row.status) return row.status;
   return row.isShow === false ? "下架" : "上架";
@@ -355,15 +368,17 @@ function openVideoSingle(row = null) {
   state.videoSingleDialog = true;
 }
 async function saveVideoSingle() {
+  if (!videoSingleWriteAllowed()) return false;
   const form = state.videoSingleForm;
   if (!form) return;
   if (!form.title && !form.name) return ElMessage.warning("请填写短视频名称");
   form.title = form.title || form.name;
-  form.name = form.name || form.title;
+  form.name = form.title;
   form.type = "video";
   form.isVideoSingle = true;
   form.productKind = "video_single";
-  const source = data.packages.find((item) => item.id === form.id);
+  form.isShow = (form.status || "上架") === "上架";
+  const source = data.packages.find((item) => (item.id || item._id) === (form.id || form._id));
   const previous = source ? { ...source } : null;
   const target = source || { ...form };
   if (source) {
@@ -373,33 +388,38 @@ async function saveVideoSingle() {
   }
   if (isServerConnected() && !(await persistContentMutation("packages", target, previous))) {
     if (!source) data.packages = data.packages.filter((item) => item !== target);
-    return;
+    return false;
   }
   log(source ? "编辑短视频" : "新增短视频", "短视频", form.title);
   state.videoSingleDialog = false;
   ElMessage.success(source ? "已保存短视频" : "已新增短视频");
+  return true;
 }
 async function deleteVideoSingle(row) {
-  const source = data.packages.find((item) => item.id === row.id) || row;
-  const previous = { ...source };
+  if (!videoSingleWriteAllowed()) return false;
+  const source = data.packages.find((item) => (item.id || item._id) === (row.id || row._id)) || row;
+  const previous = { ...source, deleted: source.deleted === true, isDeleted: source.isDeleted === true };
   source.deleted = true;
   source.isDeleted = true;
   source.isShow = false;
   source.status = "下架";
-  if (!(await persistContentMutation("packages", source, previous))) return;
-  if (!(await addTrash("packages", source, previous, { id: `trash-vs-${source.id}-${Date.now()}`, type: "短视频", sourceKey: "packages", name: source.title || source.name, reason: "删除短视频", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return;
+  if (!(await persistContentMutation("packages", source, previous))) return false;
+  if (!(await addTrash("packages", source, previous, { id: `trash-vs-${source.id || source._id}-${Date.now()}`, type: "短视频", sourceKey: "packages", name: source.title || source.name, reason: "删除短视频", time: LXMFormat.nowText(), deletedAt: LXMFormat.dateTime(new Date()), operator: currentOperatorName(), restorable: true, source: { ...source } }))) return false;
   log("删除短视频进入回收站", "短视频", source.title || source.name);
   ElMessage.success("短视频已进入回收站，可由超管恢复");
+  return true;
 }
 async function toggleVideoSingleShelf(row) {
-  const source = data.packages.find((item) => item.id === row.id) || row;
+  if (!videoSingleWriteAllowed()) return false;
+  const source = data.packages.find((item) => (item.id || item._id) === (row.id || row._id)) || row;
   const previous = { ...source };
   const next = videoSingleStatus(source) === "下架";
   source.isShow = next;
   source.status = next ? "上架" : "下架";
-  if (isServerConnected() && !(await persistContentMutation("packages", source, previous))) return;
+  if (isServerConnected() && !(await persistContentMutation("packages", source, previous))) return false;
   log(next ? "短视频上架" : "短视频下架", "短视频", source.title || source.name);
   ElMessage.success(`${source.title || source.name} 已${next ? "上架" : "下架"}`);
+  return true;
 }
 // ===== 拍摄风格：降级为分类词表管理（保留 seriesId 外键，去除内容实体属性）=====
 function normalizeSeriesSpotRelations(row) {
@@ -560,10 +580,21 @@ function openContent(row = null) {
     peripherals: { name: "", category: "相册", price: 99, enabled: true, isShow: true, intro: "", specs: [], isNew: false, images: [], cover: contentCover("新周", "摄影周边") },
     guides: { name: "", title: "", description: "", targetPackageId: "", status: "草稿", tag: "攻略", isHot: false, readCount: 0, score: "4.9", spotId: defaultSpotId, seriesId: defaultSeriesId, cover: contentCover("新攻", "内容运营") },
     stories: { name: "", title: "", subtitle: "", status: "草稿", tag: "故事", spotId: defaultSpotId, cover: contentCover("新故", "品牌故事") },
-    cities: { name: "", mode: "直营", status: "运营中", visible: true, latitude: null, longitude: null, coordType: "gcj02" },
+    cities: { name: "", mode: "直营", status: "启用", enabled: true, visible: true, latitude: null, longitude: null, coordType: "gcj02" },
   };
   const sourceRow = row?.__source || row;
   state.editContent = sourceRow ? { ...sourceRow, __key: key } : { ...(defaults[key] || {}), id: "", __key: key };
+  if (key === "cities") {
+    const status = String(state.editContent.status || "").trim().toLowerCase();
+    const enabled = state.editContent.enabled !== undefined && state.editContent.enabled !== null && String(state.editContent.enabled).trim() !== ""
+      ? state.editContent.enabled
+      : state.editContent.isEnabled;
+    const visible = state.editContent.visible;
+    state.editContent.enabled = ![false, 0, "0", "false", "no", "off"].includes(typeof enabled === "string" ? enabled.trim().toLowerCase() : enabled)
+      && ![false, 0, "0", "false", "no", "off"].includes(typeof visible === "string" ? visible.trim().toLowerCase() : visible)
+      && !["禁用", "停用", "筹备中", "未开通", "未启用", "关闭", "已停用", "disabled", "offline", "closed", "inactive", "unavailable"].includes(status);
+    state.editContent.status = state.editContent.enabled ? "启用" : "停用";
+  }
   if (key === "spots") {
     const city = cityById(state.editContent.cityId || state.editContent.city);
     if (city && (city.id || city._id)) {
@@ -690,8 +721,15 @@ async function saveContent() {
     payload.district = String(payload.district || "").trim();
     const coordinateError = normalizeMapCoordinates(payload, "打卡点");
     if (coordinateError) return ElMessage.warning(coordinateError);
+    const hotRank = Number(payload.sort);
+    payload.sort = Number.isFinite(hotRank) && Number.isInteger(hotRank) && hotRank > 0 ? hotRank : 0;
   }
   if (key === "cities") {
+    const falseLike = (value) => [false, 0, "0", "false", "no", "off"].includes(typeof value === "string" ? value.trim().toLowerCase() : value);
+    payload.enabled = !falseLike(payload.enabled);
+    payload.status = payload.enabled ? "启用" : "停用";
+    // Keep visibility synchronized for public RPCs and legacy data sources.
+    payload.visible = payload.enabled;
     const coordinateError = normalizeMapCoordinates(payload, "城市中心");
     if (coordinateError) return ElMessage.warning(coordinateError);
   }
@@ -1084,6 +1122,12 @@ function buildMiniProgramHomeConfig() {
       ...ctx.makeDefaultPageConfig(page.key),
       ...((state.homeConfig.pageModules || {})[page.key] || {})
     };
+    if (page.key === "albumDetail") {
+      // Keep the dedicated photo-detail carousel/sample order in the exported
+      // contract; older configs simply start with empty arrays.
+      map[page.key].bannerIds = Array.isArray(map[page.key].bannerIds) ? map[page.key].bannerIds.slice() : [];
+      map[page.key].sampleIds = Array.isArray(map[page.key].sampleIds) ? map[page.key].sampleIds.slice() : [];
+    }
     return map;
   }, {});
   const moduleDefinitions = [
@@ -1198,6 +1242,8 @@ async function saveSiteConfig() {
 
   return {
     videoSingleRows,
+    isVideoSingleProduct,
+    filterVideoSingleRows,
     videoSingleStatus,
     openVideoSingle,
     saveVideoSingle,

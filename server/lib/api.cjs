@@ -12,6 +12,7 @@ const {
   depositDue,
   finalDue,
   hasConfirmedPayment,
+  isUnpaidBooking,
   isServiceConfirmed,
   hasDeliveryRecord,
   hasPaymentIntent,
@@ -120,12 +121,14 @@ const PUBLIC_RPC_NAMES = new Set([
   "login", "bindPhone", "getHomeData", "getSpots", "getBookingData", "getSeriesList",
   "getSeriesDetail", "getPhotoCollection", "getPeripherals", "getGuides", "listGuides", "getGuide", "getMyOrders",
   "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "updateOrderStatus", "cancelOrder",
-  "createPayment", "createPaymentIntent", "getPaymentStatus", "testPayment",
+  "createPayment", "createPaymentIntent", "getPaymentStatus", "testPayment", "cancelBooking",
   "submitAfterSale", "resolveMerchantCode", "getCities", "getPrivacyPolicy", "getSearchConfig",
-  "getBookingConfig", "getFootprintConfig", "getCorpConfig", "getVideoSingles", "getMyProfile", "updateMyProfile", "getMyAfterSales"
+  "getBookingConfig", "getFootprintConfig", "getCorpConfig", "getVideoSingles", "getMyProfile", "updateMyProfile", "getMyAfterSales",
+  "getMyFavorites", "checkFavorite", "addFavorite", "removeFavorite", "toggleFavorite"
 ]);
 const PUBLIC_PRIVATE_RPC = new Set([
-  "bindPhone", "getMyProfile", "updateMyProfile", "getMyAfterSales", "getMyOrders", "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "createPayment", "createPaymentIntent", "getPaymentStatus", "testPayment", "updateOrderStatus", "cancelOrder", "submitAfterSale"
+  "bindPhone", "getMyProfile", "updateMyProfile", "getMyAfterSales", "getMyOrders", "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "createPayment", "createPaymentIntent", "getPaymentStatus", "testPayment", "cancelBooking", "updateOrderStatus", "cancelOrder", "submitAfterSale",
+  "getMyFavorites", "checkFavorite", "addFavorite", "removeFavorite", "toggleFavorite"
 ]);
 const ADMIN_RPC_ACTIONS = { getDashboard: "dashboard", generateMerchantQR: "shopEdit" };
 
@@ -343,6 +346,7 @@ function menuAllowsAction(session, action) {
 }
 function hasAction(session, action) {
   const configured = roleActions(session);
+  if (configured.has("*")) return true;
   if (configured.size && !configured.has("*") && !configured.has(action)) return false;
   return menuAllowsAction(session, action);
 }
@@ -551,7 +555,8 @@ function containsConfigSensitive(value, seen = new WeakSet()) {
 }
 
 async function filterRows(source, session, key, value) {
-  const rows = Array.isArray(value) ? value : (value && typeof value === "object" ? Object.values(value) : []);
+  const candidates = Array.isArray(value) ? value : (value && typeof value === "object" ? Object.values(value) : []);
+  const rows = key === "orders" ? candidates.filter((row) => !isUnpaidBooking(row)) : candidates;
   const role = normalizeRole(session.role);
   // Custom roles receive no implicit headquarters scope. Their authorized
   // menu module determines both the available capability and row set.
@@ -573,7 +578,18 @@ async function filterRows(source, session, key, value) {
     return [];
   }
   if (role === "super" || role === "finance" || role === "content") return rows;
-  if (role === "service") return rows;
+  // Customer-service accounts work from a shared unclaimed queue and retain
+  // access only to orders currently assigned to themselves. This scope is
+  // reused by collection reads, details, actions, after-sales and exports.
+  if (role === "service") {
+    const subject = String(session.subjectId || "");
+    if (key === "afterSales") {
+      const currentOrders = await source.list("orders");
+      const ownedIds = new Set(currentOrders.filter((order) => order && String(order.assigneeId || "") === subject).map(getRowId));
+      return rows.filter((row) => row && ownedIds.has(String(row.orderId || "")));
+    }
+    return rows.filter((row) => row && (!String(row.assigneeId || "") || String(row.assigneeId || "") === subject));
+  }
   if (role === "photo") return key === "orders" ? rows.filter((row) => row && String(row.photographerId || "") === String(session.subjectId || "")) : rows;
   if (role === "merchant") {
     if (key === "shops") return rows.filter((row) => shopMatches(row, session));
@@ -821,7 +837,7 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!session.openid || String(order.openid || order._openid || "") !== String(session.openid)) return false;
       if (purpose === "order-delivery") {
         const finalSettled = finalDue(order) <= 0 || hasConfirmedPayment(order, "final");
-        return read && finalSettled && !!(order.deliveryRecord || order.deliveredAt)
+        return read && finalSettled && order.deliveryRecord?.visibility !== "internal" && !!(order.deliveryRecord || order.deliveredAt)
           && referencedFileIds(order.deliverFiles || order.photos).includes(String(asset.fileId || asset.id || ""));
       }
       if (sameFileOwner(session, asset)) return true;
@@ -844,7 +860,8 @@ module.exports = function createApi(source, mode, options = {}) {
       || !!customOrderActionCapability(session, "deliverydraft");
     if (!allowed || !canReadKey(session, "orders")) return false;
     if (read) return true;
-    if (isOrderCompletedStatus(order.status) || !order.shootingCompletedAt) return false;
+    if (role === "service" && String(order.assigneeId || "") !== String(session.subjectId || "")) return false;
+    if (![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.COMPLETED, WORKFLOW_STAGES.DELIVERED].includes(canonicalStage(order))) return false;
     return !(await source.list("afterSales")).some((ticket) => ticket && String(ticket.orderId || "") === String(asset.orderId) && !isAfterSaleTerminalStatus(ticket.status));
   }
   async function requireFileSession(req, res, pathname) {
@@ -1017,6 +1034,7 @@ module.exports = function createApi(source, mode, options = {}) {
       if (!policy || !policy.role || isDisabledStatus(policy.role.status)) return null;
       const role = dynamicRoleKey(policy.role.roleKey || policy.role.code);
       if (!role) return null;
+      if (normalizeRole(role) === "photo") return null;
       const extra = user.extra && typeof user.extra === "object" ? user.extra : {};
       const subjectType = extra.subjectType || (extra.legacyKey === "shops" ? "merchant" : extra.legacyKey === "distributors" ? "distributor" : extra.legacyKey === "agents" ? "agent" : "staff");
       const subjectId = String(extra.subjectId || extra.legacyId || session.subjectId || user.id);
@@ -1048,6 +1066,7 @@ module.exports = function createApi(source, mode, options = {}) {
     const current = await source.get(key, session.subjectId);
     if (!current || current.isDeleted || current.deleted || isDisabledStatus(current.status)) return null;
     const role = session.subjectType === "merchant" ? "merchant" : normalizeRole(current.role || session.role);
+    if (role === "photo") return null;
     if (!ROLE_ACTIONS[role]) return null;
     // Credential changes invalidate older browser sessions on their next
     // request without requiring a session index in Redis.
@@ -1277,6 +1296,7 @@ module.exports = function createApi(source, mode, options = {}) {
     }
     const policy = await permissionStore.getPolicyForUser(user);
     const subject = authzSubject(user, policy);
+    if (normalizeRole(subject.roleKey) === "photo") return json(res, 403, { ok: false, code: "PHOTOGRAPHER_LOGIN_DISABLED", error: "摄影师账号不开放后台登录" });
     if (!policy || !policy.role || !subject.roleKey || isDisabledStatus(policy.role.status)) return json(res, 403, { ok: false, error: "该账号绑定的角色不存在或已停用" });
     const menuKeys = Array.isArray(policy.menuKeys) ? [...new Set(policy.menuKeys.map(String))] : [];
     const menuRows = typeof permissionStore.listMenus === "function" ? await permissionStore.listMenus() : [];
@@ -1349,6 +1369,7 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       await auth.clearLoginFailures(lockKey);
       const role = matched.role;
+      if (role === "photo") return json(res, 403, { ok: false, code: "PHOTOGRAPHER_LOGIN_DISABLED", error: "摄影师账号不开放后台登录" });
       if (!ROLE_ACTIONS[role]) return json(res, 403, { ok: false, error: "账号角色未配置" });
       const subjectId = String(candidate.id || candidate._id || "");
       // Migrate legacy plaintext credentials before issuing the session so the
@@ -2121,7 +2142,7 @@ module.exports = function createApi(source, mode, options = {}) {
     const body = suppliedBody === undefined ? await readBody(req) : suppliedBody;
     if (!body || Array.isArray(body) || typeof body !== "object") return json(res, 400, { error: "请求体无效" });
     if (key === "afterSales" && method === "POST" && suppliedBody === undefined) {
-      return withOrderMutex(`after-sale:${String(body.orderId || "")}`, () => collectionRoute(req, res, parts, session, pathname, body));
+      return withOrderMutex(`order:${String(body.orderId || "")}`, () => collectionRoute(req, res, parts, session, pathname, body));
     }
     if (contentTrashPost) {
       const validated = await validateContentTrashPost(body);
@@ -2266,6 +2287,7 @@ module.exports = function createApi(source, mode, options = {}) {
       const order = orderId ? await source.get("orders", orderId) : null;
       if (!order || order.isDeleted || order.deleted) return json(res, 404, { error: "关联订单不存在" });
       if (!(await filterRows(source, session, "orders", [order])).length) return forbidden(res, session, pathname, "不能为未授权订单创建售后工单");
+      if (role === "service" && String(order.assigneeId || "") !== String(session.subjectId || "")) return forbidden(res, session, pathname, "请先领取订单后创建审核事项");
       let tickets;
       try { tickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用" }); }
       if ((Array.isArray(tickets) ? tickets : []).some((ticket) => ticket && String(ticket.orderId || "") === orderId && !isAfterSaleTerminalStatus(ticket.status))) {
@@ -2273,7 +2295,6 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       const refundAmount = Number(body.refundAmount || 0);
       const refundPhase = String(body.refundPhase || body.refundType || "").trim().toLowerCase();
-      if (!isDepositRefundable(order) && ["deposit", "定金", "deposit_refund"].includes(refundPhase)) return json(res, 409, { error: "派单后订金不可退款" });
       const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(tickets), 0));
       if (!Number.isFinite(refundAmount) || refundAmount < 0 || refundAmount > refundableLimit) return json(res, 409, { error: "退款金额不能超过已确认到账且未退款金额" });
       const allowedFields = new Set(["id", "_id", "orderId", "orderNo", "customer", "packageName", "type", "reason", "refundAmount", "refundPhase", "submitSource", "assigneeId", "attachmentFileIds", "internalAttachmentFileIds"]);
@@ -2287,6 +2308,7 @@ module.exports = function createApi(source, mode, options = {}) {
       body.financeStatus = refundAmount > 0 ? "待审" : "无需财务审核";
       body.refundAmount = refundAmount;
       body.refundPhase = refundPhase || "";
+      body.reviewLane = [WORKFLOW_STAGES.AWAITING_DEPOSIT, WORKFLOW_STAGES.AWAITING_DISPATCH].includes(canonicalStage(order)) ? "pre_dispatch" : "service_exception";
       body.refundStatus = refundAmount > 0 ? "pending_review" : "not_requested";
       body.refundConfirmed = false;
       body.submitSource = "后台提交";
@@ -2307,91 +2329,7 @@ module.exports = function createApi(source, mode, options = {}) {
       delete body.approvedBy; delete body.approvedAt; delete body.financeReviewedBy; delete body.financeReviewedAt;
       body.createdBy = session.account;
     }
-    if (key === "orders" && method === "POST") {
-      for (const field of ["deliveryDraftFileIds", "deliveryDraftFiles", "deliverFiles", "photos"]) delete body[field];
-      // The customer identity is assigned by the public booking RPC. Admin
-      // manual orders are intentionally unowned and cannot impersonate a user.
-      delete body.openid;
-      delete body._openid;
-      body.createdBy = session.account;
-      body.createdById = session.subjectId;
-      const now = new Date().toISOString();
-      const role = normalizeRole(session.role);
-      body.orderNo = String(body.orderNo || generatedOrderNo()).trim();
-      if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{4,127}$/.test(body.orderNo)) return json(res, 400, { error: "订单号格式无效" });
-      try {
-        if ((await source.list("orders")).some((order) => order && String(order.orderNo || "") === body.orderNo)) return json(res, 409, { error: "订单号已存在" });
-      } catch (_) { return json(res, 503, { error: "订单数据暂不可用" }); }
-      const total = roundMoney(body.totalAmount ?? body.totalPrice ?? body.price ?? 0);
-      const discount = roundMoney(body.finalDiscountAmount);
-      if (discount > total) return json(res, 400, { error: "优惠金额不能超过订单总价" });
-      const manualItems = Array.isArray(body.products) ? body.products
-        : Array.isArray(body.productItems) ? body.productItems : Array.isArray(body.items) ? body.items : [];
-      let productRatio = 0.3;
-      if (manualItems.length) {
-        try {
-          const [packages, albums, peripherals, addons] = await Promise.all([
-            source.list("packages"), source.list("albums"), source.list("peripherals"), source.list("addonServices")
-          ]);
-          const groups = { package: packages || [], album: albums || [], peripheral: peripherals || [], addon: addons || [] };
-          const resolveProduct = (item) => {
-            const type = String(item && (item.productType || item.type) || "").trim().toLowerCase();
-            const id = String(item && (item.packageId || item.albumId || item.peripheralId || item.addonId || item.productId || item.id) || "");
-            if (!id) return null;
-            const ordered = /peripheral|addon|accessor/.test(type) ? ["peripheral", "addon"]
-              : /album|sample|photo_album/.test(type) ? ["album"]
-                : /package|photo|video/.test(type) ? ["package"] : ["package", "album", "peripheral", "addon"];
-            for (const group of ordered) {
-              const row = (groups[group] || []).find((candidate) => getRowId(candidate) === id);
-              if (row) return row;
-            }
-            return null;
-          };
-          const selected = manualItems.map(resolveProduct).find(Boolean);
-          const configured = selected && (selected.depositRatio ?? selected.depositRate ?? selected.depositPercent ?? selected.depositPercentage);
-          if (configured !== undefined && configured !== null && configured !== "") productRatio = normalizeRatio(configured);
-        } catch (_) { return json(res, 503, { error: "商品定金配置暂不可用" }); }
-      }
-      const explicitOverride = role === "super" && body.depositPolicyOverride === true;
-      const suppliedRatio = explicitOverride ? (body.depositRatio ?? body.depositRate ?? body.depositPercent) : productRatio;
-      const ratio = suppliedRatio === undefined || suppliedRatio === null || suppliedRatio === "" ? 0.3 : normalizeRatio(suppliedRatio);
-      const suppliedDeposit = explicitOverride && body.depositDue !== undefined && body.depositDue !== null && body.depositDue !== "" ? Number(body.depositDue) : null;
-      delete body.depositPolicyOverride;
-      if (suppliedDeposit !== null && (!Number.isFinite(suppliedDeposit) || suppliedDeposit < 0)) return json(res, 400, { error: "定金应收金额无效" });
-      const due = roundMoney(suppliedDeposit === null ? total * ratio : suppliedDeposit);
-      if (due > Math.max(total - discount, 0)) return json(res, 409, { error: "定金应收不能超过订单应收" });
-      // Manual creation is always an unpaid booking. Even super users must use
-      // dedicated actions for payment, dispatch, delivery and completion.
-      ["bookingIdempotencyKey", "workflowStage", "paymentRecords", "depositPaid", "finalPaid", "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt", "photographerId", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "dispatchRecord", "dispatchRecords", "selectionStatus", "selectionConfirmedAt", "deliveryRecord", "deliveredAt", "completedAt", "afterSaleStatus", "afterSaleId", "serviceConfirmedAt", "serviceConfirmedBy", "serviceConfirmReason", "serviceContent", "confirmationSnapshot", "isDeleted", "deleted"].forEach((field) => { delete body[field]; });
-      body.totalAmount = total;
-      body.totalPrice = total;
-      body.price = total;
-      body.depositRatio = total > 0 ? normalizeRatio(due / total) : ratio;
-      body.depositDue = due;
-      body.finalDue = roundMoney(Math.max(total - due - discount, 0));
-      body.depositPaid = 0;
-      body.finalPaid = 0;
-      body.depositFinanceStatus = "";
-      body.finalFinanceStatus = "";
-      body.status = "new";
-      body.customerStatus = due > 0 ? "待支付" : "待安排摄影师";
-      body.workflowStage = due > 0 ? WORKFLOW_STAGES.AWAITING_DEPOSIT : WORKFLOW_STAGES.AWAITING_DISPATCH;
-      body.businessStatus = due > 0 ? "pending_payment" : "awaiting_photographer";
-      body.businessStatusText = due > 0 ? "待支付" : "待安排摄影师";
-      body.dispatchStatus = "pending";
-      body.depositRefundable = true;
-      body.selectionStatus = "not_started";
-      body.paymentRecords = [];
-      body.statusLogs = [{ type: "后台手工建单", action: "创建订单", operator: session.account, operatorId: session.subjectId, createTime: now }];
-      body.followRecords = [...(Array.isArray(body.followRecords) ? body.followRecords : []), { type: "后台手工建单", action: "创建订单", operator: session.account, operatorId: session.subjectId, createTime: now }];
-      body.createTime = body.createTime || now;
-      body.createdAt = body.createdAt || now;
-      if (role !== "super") {
-        delete body.source;
-        delete body.sourceCodeId;
-        delete body.distributorId;
-      }
-    }
+    if (key === "orders" && method === "POST") return forbidden(res, session, pathname, "请由客人在小程序提交预约并完成定金支付后创建订单");
     const boundFileIds = await validateBusinessFiles(session, key, body, id || body.id || body._id);
     if (method === "PUT") {
       if (!id) return json(res, 400, { error: "缺少记录 id" });
@@ -2588,28 +2526,35 @@ module.exports = function createApi(source, mode, options = {}) {
     if ((current.isDeleted || current.deleted) && action !== "restore") return json(res, 404, { error: "订单不存在" });
     const role = normalizeRole(session.role);
     const actionRoles = {
+      claim: ["super", "service"],
+      transfer: ["super", "service"],
       accept: ["super", "service"],
       assign: ["super", "service"],
-      taskaccept: ["photo"],
-      unable: ["photo"],
-      unassign: ["super", "photo"],
+      taskaccept: ["super"],
+      unable: ["super"],
+      unassign: ["super", "service"],
       reschedule: ["super", "service"],
-      start: ["super", "photo"],
-      shootcomplete: ["super", "photo"],
-      selectionconfirm: ["super", "service", "photo"],
+      start: ["super", "service"],
+      shootcomplete: ["super", "service"],
+      selectionconfirm: ["super", "service"],
       payment: ["super", "service", "finance"],
-      deliverydraft: ["super", "service", "photo"],
+      deliverydraft: ["super", "service"],
       deliver: ["super", "service"],
+      deliveryrecord: ["super", "service"],
       complete: ["super", "service"],
       cancel: ["super", "service"],
       restore: ["super"],
       note: ["super", "service"],
-      update: ["super", "service", "finance", "photo"],
+      followup: ["super", "service"],
+      update: ["super", "service", "finance"],
     };
     const customCapability = customOrderActionCapability(session, action);
     if ((!actionRoles[action] || !actionRoles[action].includes(role)) && !customCapability) return forbidden(res, session, pathname, "当前角色不能执行该订单操作");
     const actionPermission = customCapability || (role === "super" ? "*" : ["photo"].includes(role) ? "shootUpdate" : ["finance"].includes(role) ? "financeReview" : "orderEdit");
     if (actionPermission !== "*" && !hasAction(session, actionPermission)) return forbidden(res, session, pathname, "当前账号未授予该订单操作权限");
+    if (role === "service" && action !== "claim" && String(current.assigneeId || "") !== String(session.subjectId || "")) {
+      return forbidden(res, session, pathname, "请先领取订单后再执行客服操作");
+    }
 
     let activeTickets = [];
     if (["accept", "assign", "taskaccept", "unable", "unassign", "reschedule", "start", "shootcomplete", "selectionconfirm", "payment", "deliverydraft", "deliver", "complete", "cancel"].includes(action)) {
@@ -2628,7 +2573,7 @@ module.exports = function createApi(source, mode, options = {}) {
     let boundFileIds = [];
     let label = "";
     const reason = String(body.reason || body.note || "").trim();
-    const requireReason = ["accept", "assign", "taskaccept", "unable", "unassign", "reschedule", "start", "shootcomplete", "selectionconfirm", "payment", "deliver", "complete", "cancel", "restore", "note", "update"].includes(action);
+    const requireReason = ["claim", "transfer", "accept", "assign", "taskaccept", "unable", "unassign", "reschedule", "start", "shootcomplete", "selectionconfirm", "payment", "deliver", "deliveryrecord", "complete", "cancel", "restore", "note", "followup", "update"].includes(action);
     if (requireReason && reason.length < 2) return json(res, 400, { error: "请填写操作原因" });
     const canTransition = (allowedFrom, next) => {
       if (!allowedFrom.includes(beforeStatus)) return false;
@@ -2637,7 +2582,29 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.customerStatus = next === "confirmed" ? "confirmed" : next === "shooting" ? "shooting" : next === "delivered" || next === "completed" ? "done" : next === "cancelled" ? "已取消" : current.customerStatus;
       return true;
     };
-    if (action === "restore") {
+    if (action === "claim") {
+      const claimant = String(body.assigneeId || session.subjectId || "");
+      if (role === "service" && claimant !== String(session.subjectId || "")) return forbidden(res, session, pathname, "客服只能领取给自己");
+      if (current.assigneeId && String(current.assigneeId) !== claimant) return json(res, 409, { error: "订单已被其他客服领取" });
+      if (current.assigneeId && String(current.assigneeId) === claimant) return json(res, 200, { ok: true, idempotent: true, data: await projectAdminRow("orders", current, session) });
+      const staffRows = await source.list("staff");
+      if (!(Array.isArray(staffRows) ? staffRows : []).some((staff) => staff && String(staff.id || staff._id) === claimant && normalizeRole(staff.role) === "service" && isActiveStatusForScope(staff))) return json(res, 400, { error: "客服账号不存在或已停用" });
+      patch.assigneeId = claimant;
+      patch.claimedAt = now;
+      patch.claimedBy = session.subjectId;
+      patch.assignmentVersion = Number(current.assignmentVersion || 0) + 1;
+      patch.assignmentRecords = [...(Array.isArray(current.assignmentRecords) ? current.assignmentRecords : []), { id: makePaymentId("assignment"), from: "", to: claimant, reason, operatorId: session.subjectId, createTime: now }];
+      label = "领取订单";
+    } else if (action === "transfer") {
+      const nextAssigneeId = String(body.assigneeId || "").trim();
+      if (!nextAssigneeId) return json(res, 400, { error: "请选择接手客服" });
+      const staffRows = await source.list("staff");
+      if (!(Array.isArray(staffRows) ? staffRows : []).some((staff) => staff && String(staff.id || staff._id) === nextAssigneeId && normalizeRole(staff.role) === "service" && isActiveStatusForScope(staff))) return json(res, 400, { error: "接手客服账号不存在或已停用" });
+      patch.assigneeId = nextAssigneeId;
+      patch.assignmentVersion = Number(current.assignmentVersion || 0) + 1;
+      patch.assignmentRecords = [...(Array.isArray(current.assignmentRecords) ? current.assignmentRecords : []), { id: makePaymentId("assignment"), from: current.assigneeId || "", to: nextAssigneeId, reason, operatorId: session.subjectId, createTime: now }];
+      label = "转交客服";
+    } else if (action === "restore") {
       if (!current.isDeleted && !current.deleted) return json(res, 409, { error: "订单当前未在回收站" });
       patch.status = "new";
       patch.isDeleted = false;
@@ -2679,6 +2646,8 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.price = confirmedTotal;
       patch.depositRatio = depositRatio;
       patch.depositDue = confirmedDepositDue;
+      patch.depositFrozenAmount = current.depositFrozenAmount ?? confirmedDepositDue;
+      patch.depositFrozenAt = current.depositFrozenAt || now;
       patch.finalDiscountAmount = finalDiscountAmount;
       patch.finalDue = confirmedFinalDue;
       patch.appointmentAt = appointmentAt;
@@ -2836,9 +2805,8 @@ module.exports = function createApi(source, mode, options = {}) {
       }];
       label = "改期拍摄";
     } else if (action === "start") {
-      if (role !== "super" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能开始自己的拍摄任务");
       if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "订金到账确认后才能开始拍摄" });
-      if (!current.photographerId || ![WORKFLOW_STAGES.AWAITING_SHOOT].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
+      if (![WORKFLOW_STAGES.AWAITING_SHOOT].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
       // Task acceptance remains available for teams that use it, but it is
       // optional: once a photographer is assigned, they may start directly.
       if (String(current.taskStatus || "").toLowerCase() === "unable") return json(res, 409, { error: "任务已标记无法履约，请等待重新派单" });
@@ -2847,7 +2815,6 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.SHOOTING);
       label = "开始拍摄";
     } else if (action === "shootcomplete") {
-      if (role !== "super" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能完成自己的拍摄任务");
       if (currentStage !== WORKFLOW_STAGES.SHOOTING || !current.shootingStartedAt) return json(res, 409, { error: "只有已开始拍摄的任务可以标记拍摄完成" });
       patch.status = "final_pending";
       patch.shootingCompletedAt = now;
@@ -2856,17 +2823,7 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.SELECTION_PENDING);
       label = "拍摄完成";
     } else if (action === "selectionconfirm") {
-      if (role === "photo" && String(current.photographerId || "") !== String(session.subjectId)) return forbidden(res, session, pathname, "只能确认自己的线下选片");
-      if (currentStage !== WORKFLOW_STAGES.SELECTION_PENDING || !current.shootingCompletedAt) return json(res, 409, { error: "拍摄完成后才能登记线下选片确认" });
-      patch.selectionStatus = "confirmed";
-      patch.selectionConfirmedAt = now;
-      patch.selectionConfirmedBy = session.account;
-      patch.selectionNote = reason;
-      patch.selectionMethod = "offline";
-      patch.selectionRecord = { method: "offline", note: reason, operator: session.account, operatorId: session.subjectId, confirmedAt: now };
-      patch.status = "final_pending";
-      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.AWAITING_DELIVERY);
-      label = "线下选片确认";
+      return json(res, 409, { error: "选片认可由游客确认尾款支付记录，不能通过后台选片操作代替" });
     } else if (action === "payment") {
       const phase = String(body.phase || body.paymentPhase || "").trim().toLowerCase();
       if (!["deposit", "final"].includes(phase)) return json(res, 400, { error: "支付阶段必须是 deposit 或 final" });
@@ -2875,7 +2832,7 @@ module.exports = function createApi(source, mode, options = {}) {
       if (role === "service" && paymentStatus !== "pending") return forbidden(res, session, pathname, "客服只能登记待财务审核的收款");
       if (paymentStatus === "confirmed" && !["super", "finance"].includes(role)) return forbidden(res, session, pathname, "只有财务或超管可以确认到账");
       if (phase === "deposit" && currentStage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return json(res, 409, { error: "当前订单不在待支付订金阶段" });
-      if (phase === "final" && (!selectionConfirmed(current) || (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) || ![WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.AWAITING_DELIVERY].includes(currentStage))) return json(res, 409, { error: "定金到账且线下选片确认后才能登记尾款" });
+      if (phase === "final" && ((depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.AWAITING_DELIVERY].includes(currentStage))) return json(res, 409, { error: "进入拍摄中且定金到账后才能登记尾款" });
       const due = phase === "deposit" ? depositDue(current) : finalDue(current);
       if (due <= 0) return json(res, 409, { error: "该支付阶段无需收款" });
       const amount = roundMoney(body.amount ?? body.paidAmount ?? due);
@@ -2942,19 +2899,29 @@ module.exports = function createApi(source, mode, options = {}) {
         patch[phase + "ConfirmedAt"] = now;
         patch[phase + "ConfirmedBy"] = session.account;
         patch.status = phase === "deposit" ? "deposit_paid" : "paid";
+        if (phase === "final") {
+          patch.selectionStatus = "confirmed";
+          patch.selectionConfirmedAt = current.selectionConfirmedAt || now;
+          patch.selectionAcknowledgedAt = current.selectionAcknowledgedAt || now;
+          patch.selectionConfirmedBy = current.selectionConfirmedBy || session.subjectId;
+          patch.selectionMethod = current.selectionMethod || "payment_acknowledgement";
+          patch.status = "completed";
+          patch.completedAt = current.completedAt || now;
+          patch.completionSource = current.completionSource || "manual_final";
+        }
       } else if (paymentStatus === "failed") {
         patch.status = phase === "deposit" ? "new" : "final_pending";
       }
       label = phase === "deposit" ? (paymentStatus === "confirmed" ? "订金到账确认" : "登记订金收款") : (paymentStatus === "confirmed" ? "尾款到账确认" : "登记尾款收款");
     } else if (action === "deliverydraft") {
-      if (!current.shootingCompletedAt || isOrderCompletedStatus(beforeStatus) || isOrderCancelledStatus(beforeStatus)) return json(res, 409, { error: "拍摄完成后才能上传成片，已完成订单不可修改" });
+      if (![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.COMPLETED, WORKFLOW_STAGES.DELIVERED].includes(currentStage)) return json(res, 409, { error: "拍摄开始后才能上传成片" });
       boundFileIds = fileIds(body.fileIds);
       if (boundFileIds.length) await files.assertFiles(session, boundFileIds, { purpose: "order-delivery", orderId });
       patch.deliveryDraftFileIds = boundFileIds;
       label = "保存成片草稿";
-    } else if (action === "deliver") {
+    } else if (action === "deliver" || action === "deliveryrecord") {
       if (!["super", "service"].includes(role)) return forbidden(res, session, pathname, "只有客服或超管可以发布成片交付");
-      if (currentStage !== WORKFLOW_STAGES.PAID || !selectionConfirmed(current) || !hasConfirmedPayment(current, "final")) return json(res, 409, { error: "尾款确认到账后才能交付成片" });
+      if (![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.COMPLETED, WORKFLOW_STAGES.PAID, WORKFLOW_STAGES.DELIVERED].includes(currentStage)) return json(res, 409, { error: "进入拍摄中后才能登记交付" });
       const deliveryMethod = String(body.deliveryMethod || body.deliveryType || body.method || "企业微信").trim();
       if (body.fileIds !== undefined || deliveryMethod === "小程序成片") {
         boundFileIds = fileIds(body.fileIds);
@@ -2967,26 +2934,21 @@ module.exports = function createApi(source, mode, options = {}) {
         });
         patch.deliveryDraftFileIds = [];
       }
-      patch.deliveryRecord = { method: deliveryMethod, deliveredAt: now, deliveredBy: session.account, deliveredById: session.subjectId, note: reason };
+      patch.deliveryRecord = { method: deliveryMethod, deliveredAt: now, deliveredBy: session.account, deliveredById: session.subjectId, note: reason,
+        visibility: String(body.visibility || "customer"), fileIds: boundFileIds };
+      patch.deliveryRecords = [...(Array.isArray(current.deliveryRecords) ? current.deliveryRecords : []), { ...patch.deliveryRecord, id: makePaymentId("delivery") }];
       patch.deliveryMethod = deliveryMethod;
       patch.deliveredAt = now;
       patch.deliveredBy = session.account;
       patch.deliveryNote = reason;
-      patch.status = "delivered";
-      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.DELIVERED);
       label = "标记成片交付";
     } else if (action === "complete") {
-      if (currentStage !== WORKFLOW_STAGES.DELIVERED || !current.deliveryRecord && !current.deliveredAt) return json(res, 409, { error: "交付记录完成后才能完成订单" });
-      if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "定金到账确认后才能完成订单" });
-      if (finalDue(current) > 0 && !hasConfirmedPayment(current, "final")) return json(res, 409, { error: "尾款到账确认后才能完成订单" });
-      patch.status = "completed";
-      patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.COMPLETED);
-      patch.completedAt = now;
-      label = "完成订单";
+      if (currentStage === WORKFLOW_STAGES.COMPLETED) return json(res, 200, { ok: true, idempotent: true, data: await projectAdminRow("orders", current, session) });
+      return json(res, 409, { error: "订单由游客支付尾款或确认零尾款后自动完成" });
     } else if (action === "cancel") {
       if (isOrderCompletedStatus(beforeStatus) || isOrderCancelledStatus(beforeStatus)) return json(res, 409, { error: "订单当前状态不能取消" });
-      if (isServiceConfirmed(current) || hasPaymentIntent(current) || hasConfirmedPayment(current, "deposit") || Number(current.depositPaid || 0) > 0) {
-        return json(res, 409, { error: "服务已确认或已创建订金支付，请通过售后工单处理" });
+      if (hasConfirmedPayment(current, "deposit") || Number(current.depositPaid || 0) > 0) {
+        return json(res, 409, { error: "定金已支付，请通过审核工单处理" });
       }
       if ([WORKFLOW_STAGES.AWAITING_SHOOT, WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.SELECTION_PENDING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.PAID, WORKFLOW_STAGES.DELIVERED].includes(currentStage)
         || current.depositRefundable === false || current.dispatchRecord) return json(res, 409, { error: "派单或履约开始后不能取消订单" });
@@ -3002,16 +2964,32 @@ module.exports = function createApi(source, mode, options = {}) {
     } else if (action === "note") {
       patch.internalNote = [current.internalNote, reason].filter(Boolean).join("\n");
       label = "补充订单备注";
+    } else if (action === "followup") {
+      const content = String(body.content || body.reason || body.note || "").trim();
+      if (content.length < 2) return json(res, 400, { error: "请填写跟进内容" });
+      const followupId = String(body.followupId || makePaymentId("followup"));
+      const prior = (Array.isArray(current.followRecords) ? current.followRecords : []).find((entry) => String(entry.id || "") === followupId && entry.type === "customer_followup");
+      if (body.followupId && !prior) return json(res, 404, { error: "跟进事项不存在" });
+      if (!["pending", "completed"].includes(String(body.status || "pending"))) return json(res, 400, { error: "跟进状态无效" });
+      patch.followRecords = [...(Array.isArray(current.followRecords) ? current.followRecords : []).filter((entry) => String(entry.id || "") !== followupId), {
+        ...(prior || {}), id: followupId, type: "customer_followup", followupType: String(body.type || "service"), content, note: content,
+        status: String(body.status || "pending"), ownerId: current.assigneeId || session.subjectId, operator: session.account, operatorId: session.subjectId,
+        reason, createTime: prior && prior.createTime || now, createdAt: prior && (prior.createdAt || prior.createTime) || now, time: now,
+        completedAt: String(body.status || "pending") === "completed" ? prior && prior.completedAt || now : undefined,
+        ...(body.nextFollowAt ? { nextFollowAt: String(body.nextFollowAt).slice(0, 64) } : {}), updatedAt: now,
+      }];
+      label = "客服附加跟进";
     } else if (action === "update") {
       const requested = body.fields && typeof body.fields === "object" && !Array.isArray(body.fields) ? body.fields : {};
       if (Object.keys(requested).some((field) => IMMUTABLE_ORDER_FIELDS.has(field))) return json(res, 400, { error: "订单标识字段不可修改" });
+      if (Object.keys(requested).some((field) => ["source", "sourceCodeId", "sourceScene", "scene", "shopId", "distributorId", "sourceType", "sourceChannel", "attributionSessionId", "scanEventId"].includes(field))) return json(res, 409, { error: "订单来源已冻结，不能通过普通编辑修改" });
       const commandOnlyFields = new Set([
-        "status", "customerStatus", "businessStatus", "businessStatusText", "workflowStage", "depositRatio", "depositDue", "finalDue", "depositPaid", "finalPaid",
+        "status", "customerStatus", "businessStatus", "businessStatusText", "publicStatus", "publicStatusText", "workflowStage", "depositRatio", "depositDue", "finalDue", "depositPaid", "finalPaid",
         "depositFinanceStatus", "finalFinanceStatus", "depositPaidAt", "finalPaidAt", "depositPaymentStatus", "finalPaymentStatus",
         "depositConfirmedAt", "depositConfirmedBy", "finalConfirmedAt", "finalConfirmedBy", "paymentVerify", "paymentRecords",
-        "photographerId", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "dispatchRecord", "dispatchRecords", "dispatchBaseInfo", "depositRefundable", "confirmedShootAt", "confirmedShootDate", "confirmedShootTime", "confirmedShootLocation", "confirmationMethod", "customerConfirmationNote", "shootingStartedAt", "shootingCompletedAt", "shootingCompletedBy",
+        "assigneeId", "photographerId", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "dispatchRecord", "dispatchRecords", "dispatchBaseInfo", "depositRefundable", "claimedAt", "claimedBy", "assignmentVersion", "assignmentRecords", "confirmedShootAt", "confirmedShootDate", "confirmedShootTime", "confirmedShootLocation", "confirmationMethod", "customerConfirmationNote", "shootingStartedAt", "shootingCompletedAt", "shootingCompletedBy",
         "selectionStatus", "selectionConfirmedAt", "selectionConfirmedBy", "selectionNote", "selectionMethod", "selectionRecord", "deliveryRecord", "deliveryMethod", "deliveredAt", "deliveredBy",
-        "completedAt", "afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId", "isDeleted", "deleted",
+        "completedAt", "completionSource", "deliveryRecords", "afterSaleStatus", "afterSaleReason", "afterSaleCreateTime", "afterSaleId", "isDeleted", "deleted",
         "serviceConfirmedAt", "serviceConfirmedBy", "serviceConfirmReason", "serviceContent", "confirmationSnapshot", "rescheduleRecords",
       ]);
       if (Object.keys(requested).some((field) => commandOnlyFields.has(field))) return json(res, 409, { error: "订单流程字段必须通过专用操作命令更新" });
@@ -3020,6 +2998,7 @@ module.exports = function createApi(source, mode, options = {}) {
       const rejected = Object.keys(requested).filter((key) => !allowed.has(key));
       if (rejected.length) return forbidden(res, session, pathname, "当前角色不能直接更新订单流程字段，请使用专用操作");
       const changesPriceOrProducts = Object.keys(requested).some((field) => ORDER_PRICE_OR_PRODUCT_FIELDS.has(field));
+      if (changesPriceOrProducts && currentStage === WORKFLOW_STAGES.COMPLETED) return json(res, 409, { error: "已完成订单不能修改商品和金额" });
       const changesProductRows = ["products", "productItems", "items", "addons"].some((field) => Object.prototype.hasOwnProperty.call(requested, field));
       const suppliesTotal = ["totalAmount", "totalPrice", "price"].some((field) => Object.prototype.hasOwnProperty.call(requested, field));
       if (changesProductRows && !suppliesTotal) return json(res, 400, { error: "调整商品或加购时必须同时提交订单总价" });
@@ -3034,7 +3013,8 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       const finalIntentExists = (Array.isArray(current.paymentRecords) ? current.paymentRecords : []).some((record) => record
         && String(record.phase || "") === "final"
-        && (normalizePaymentStatus(record.status) === "confirmed" || record.idempotencyKey || record.provider || record.externalTransactionId));
+        && ["pending", "confirmed"].includes(normalizePaymentStatus(record.status))
+        && (record.idempotencyKey || record.provider || record.externalTransactionId));
       if (changesPriceOrProducts && finalIntentExists) return json(res, 409, { error: "尾款支付单已创建或确认，不能再调整订单金额或商品" });
       if (changesPriceOrProducts && !String(requested.priceAdjustReason || "").trim()) return json(res, 400, { error: "调整价格或商品必须填写调整原因" });
       if (role === "service" && Object.keys(requested).some((field) => ORDER_SERVICE_LOCKED_FIELDS.has(field))) {
@@ -3157,15 +3137,24 @@ module.exports = function createApi(source, mode, options = {}) {
       const businessStatus = businessStatusForOrder(afterDraft);
       patch.businessStatus = businessStatus;
       patch.businessStatusText = businessStatusLabel(businessStatus);
+      patch.publicStatus = businessStatus;
+      patch.publicStatusText = businessStatusLabel(businessStatus);
       patch.customerStatus = customerStatusForOrder(afterDraft);
     }
     const changes = diffFacts(current, { ...current, ...patch });
     const timeline = { type: "后台订单操作", action: `${label}${reason ? `：${reason}` : ""}`, operator: session.account, operatorId: session.subjectId, from: beforeStatus, to: patch.status || beforeStatus, workflowStage: patch.workflowStage, reason, changes, createTime: now };
     patch.statusLogs = [...(Array.isArray(current.statusLogs) ? current.statusLogs : []), timeline];
-    patch.followRecords = [...(Array.isArray(current.followRecords) ? current.followRecords : []), timeline];
+    patch.followRecords = [...(Array.isArray(patch.followRecords) ? patch.followRecords : Array.isArray(current.followRecords) ? current.followRecords : []), timeline];
     patch.updateTime = now;
-    const updated = await source.update("orders", orderId, patch);
-    if (!updated) return json(res, 404, { error: "订单不存在" });
+    // Compare under the adapter's database row lock as well as the process
+    // mutex. In particular two server instances must not both claim an empty
+    // assignee, or overwrite a transfer/payment that changed after this read.
+    const expected = {};
+    for (const field of new Set([...Object.keys(patch), "assigneeId", "assignmentVersion", "status", "paymentRecords"])) expected[field] = current[field];
+    const updated = typeof source.compareAndUpdate === "function"
+      ? await source.compareAndUpdate("orders", orderId, expected, patch)
+      : await source.update("orders", orderId, patch);
+    if (!updated) return json(res, 409, { error: "订单已被其他操作更新，请刷新后重试" });
     try {
       await source.create("logs", { action: label, operator: session.account, operatorId: session.subjectId, targetType: "order", targetId: orderId, detail: reason || `${beforeStatus} -> ${updated.status}`, createTime: now });
     } catch (_) {
@@ -3184,6 +3173,11 @@ module.exports = function createApi(source, mode, options = {}) {
     return json(res, 200, { ok: true, auditRecorded: true, data: await projectAdminRow("orders", updated, session) });
   }
   async function afterSaleActionRoute(req, res, parts, session, pathname) {
+    const ticket = await source.get("afterSales", decodePart(parts[1]));
+    if (!ticket) return json(res, 404, { error: "售后工单不存在" });
+    return withOrderMutex(`order:${String(ticket.orderId || "")}`, () => afterSaleActionRouteUnlocked(req, res, parts, session, pathname));
+  }
+  async function afterSaleActionRouteUnlocked(req, res, parts, session, pathname) {
     if (req.method !== "POST") return json(res, 405, { error: "请使用 POST" });
     const ticketId = decodePart(parts[1]);
     if (!ticketId) return json(res, 400, { error: "缺少售后工单 id" });
@@ -3225,7 +3219,6 @@ module.exports = function createApi(source, mode, options = {}) {
       const refundAmount = roundMoney(current.refundAmount);
       if (approved && refundAmount > 0) {
         const refundPhase = String(current.refundPhase || "").trim().toLowerCase();
-        if (!isDepositRefundable(order) && ["deposit", "定金", "deposit_refund"].includes(refundPhase)) return json(res, 409, { error: "派单后订金不可退款" });
         const refundTransactionId = String(body.refundTransactionId || body.externalTransactionId || "").trim().slice(0, 160);
         const refundMethod = String(body.refundMethod || "人工退款").trim().slice(0, 64);
         if (!refundTransactionId) return json(res, 400, { error: "确认人工退款必须填写退款流水号或凭据编号" });
@@ -3261,7 +3254,6 @@ module.exports = function createApi(source, mode, options = {}) {
       if (refundAmount > 0) {
         if (action !== "complete") return json(res, 400, { error: "请在结案操作中提交退款审核申请" });
         const refundPhase = String(current.refundPhase || "").trim().toLowerCase();
-        if (!isDepositRefundable(order) && ["deposit", "定金", "deposit_refund"].includes(refundPhase)) return json(res, 409, { error: "派单后订金不可退款" });
         let allTickets;
         try { allTickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用，无法登记退款" }); }
         const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(allTickets, ticketId), 0));
@@ -3382,6 +3374,13 @@ module.exports = function createApi(source, mode, options = {}) {
       const body = await readBody(req); const target = String(body.shopId || shopId || "");
       if (role === "merchant" && !shopMatches({ shopId: target }, session) && !shopMatches({ id: target }, session)) return forbidden(res, session, pathname, "不能为其他商家生成二维码");
       return json(res, 200, await source.generateMerchantCode({ ...body, shopId: target }));
+    }
+    if (pathname.endsWith("/daily-stats")) {
+      const date = String(parsed.query.date || new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json(res, 400, { error: "日期格式无效" });
+      const stats = await source.merchantCodeStats(shopId, date);
+      const selected = (Array.isArray(stats.daily) ? stats.daily : []).find((entry) => entry.date === date);
+      return json(res, 200, { date, unique: selected ? selected.unique : stats.unique || 0, scans: selected ? selected.scans : 0, anonymousScans: selected ? selected.anonymousScans : 0 });
     }
     if (pathname.endsWith("/stats")) return json(res, 200, await source.merchantCodeStats(shopId));
     return json(res, 200, await source.listMerchantCodes(shopId));

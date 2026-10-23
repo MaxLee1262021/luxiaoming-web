@@ -61,6 +61,7 @@ const state = reactive({
     shelfType: "",
   },
   dashboardDrill: "",
+  dashboardTab: "traffic",
   dashboardCityId: "",
   dashboardShopId: "",
   dashboardProductDetailsOpen: true,
@@ -89,20 +90,6 @@ const state = reactive({
   selectedShelfKeys: [],
   scopeCollapsed: false,
   selectedOrderIds: [],
-  manualOrderDialog: false,
-  manualOrderForm: {
-    customer: "",
-    phone: "",
-    wechat: "",
-    sourceType: "manual",
-    shopId: "",
-    distributorId: "",
-    productId: "",
-    productType: "package",
-    appointmentAt: "",
-    timePeriod: "待客服确",
-    internalNote: "",
-  },
   orderDrawer: false,
   orderReadonly: false,
   orderWorkMode: "service",
@@ -187,7 +174,7 @@ const state = reactive({
   qrGenerating: false,
   qrPreview: null,
   merchantCodes: [],
-  merchantCodeStats: { scans: 0, orders: 0, deals: 0, codeCount: 0 },
+  merchantCodeStats: { scans: 0, unique: 0, dailyUnique: 0, todayUnique: 0, orders: 0, deals: 0, codeCount: 0 },
   tagDialog: false,
   editTag: null,
   tagCategoryFilter: "",
@@ -314,7 +301,7 @@ if (!Array.isArray(state.albumUploadQueue)) state.albumUploadQueue = [];
 if (state.lastShelfBatchResult === undefined) state.lastShelfBatchResult = null;
 
 const contentKeys = ["spots", "series", "albums", "samples", "shelfProducts", "packages", "videoProducts", "contentTags", "addonServices", "peripherals", "guides", "stories", "homeConfig", "cities"];
-const statusDict = LXM_CONFIG.orderStatuses;
+const statusDict = LXM_CONFIG.orderStatuses.filter((status) => ["reserved", "awaiting_shoot", "shooting", "completed", "cancelled"].includes(status.value));
 const serviceStatusDict = computed(() => statusDict.filter((status) => !["completed", "cancelled"].includes(status.value)));
 const roleProfile = computed(() => {
   state.menuRevision;
@@ -390,11 +377,6 @@ function goMenuFromSearch(item) {
 }
 const photographers = computed(() => data.staff.filter((s) => s.role === "photo"));
 const services = computed(() => data.staff.filter((s) => s.role === "service"));
-const manualOrderProducts = computed(() => [
-  ...data.packages.filter((item) => ctx.productStatus(item) === "上架").map((item) => ({ ...item, productType: "package" })),
-  ...data.addonServices.filter((item) => item.enabled !== false).map((item) => ({ ...item, productType: "service" })),
-  ...data.peripherals.filter((item) => ctx.productStatus(item) === "上架").map((item) => ({ ...item, productType: "peripheral" })),
-]);
 const visibleCities = computed(() => {
   if (!(state.role === "agent" && state.loginRole !== "super")) return data.cities;
   const target = String(roleProfile.value.cityId || "");
@@ -436,7 +418,6 @@ const visibleDistributors = computed(() => {
     goMenuFromSearch,
     photographers,
     services,
-    manualOrderProducts,
     visibleCities,
     visibleDistributors
   };

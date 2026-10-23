@@ -100,7 +100,7 @@ window.LXM_DATA = {
   staff: [
     {
       id: "st1",
-      name: "鹿小鸣主理人",
+      name: "麓小鸣主理人",
       account: "admin",
       password: "admin123",
       phone: "13800000001",
@@ -743,7 +743,7 @@ window.LXM_DATA = {
       shopId: "shop3",
       scene: "门店台卡",
       openid: "openid12",
-      orderId: "ord13"
+      orderId: ""
     },
     {
       id: "scan16",
@@ -887,7 +887,7 @@ window.LXM_DATA = {
       shopId: "shop1",
       scene: "门店台卡",
       openid: "openid3",
-      orderId: "ord13"
+      orderId: ""
     },
     {
       id: "scan42",
@@ -1142,8 +1142,8 @@ window.LXM_DATA = {
       wechat: "wx_lxm_2",
       shopId: "shop2",
       distributorId: "",
-      status: "confirmed",
-      customerStatus: "confirmed",
+      status: "deposit_paid",
+      customerStatus: "已预约",
       assigneeId: "st2",
       photographerId: "",
       appointmentAt: "2026-06-13 09:00-10:00",
@@ -1242,8 +1242,8 @@ window.LXM_DATA = {
       wechat: "wx_lxm_6",
       shopId: "shop1",
       distributorId: "",
-      status: "confirmed",
-      customerStatus: "confirmed",
+      status: "deposit_paid",
+      customerStatus: "已预约",
       assigneeId: "st2",
       photographerId: "st4",
       appointmentAt: "2026-06-17 13:00-14:00",
@@ -1485,57 +1485,8 @@ window.LXM_DATA = {
         }
       ],
       deleted: false
-    },
-    {
-      id: "ord13",
-      orderNo: "LS202606113",
-      openid: "openid12",
-      customer: "周女士",
-      phone: "13800001012",
-      wechat: "wx_lxm_13",
-      shopId: "shop3",
-      distributorId: "",
-      status: "pending",
-      customerStatus: "reserved",
-      assigneeId: "st3",
-      photographerId: "st5",
-      appointmentAt: "2026-06-24 12:00-13:00",
-      timePeriod: "上午",
-      totalAmount: 1398,
-      depositPaid: 0,
-      finalPaid: 0,
-      paymentVerify: "未核销",
-      packageSnapshot: {},
-      priceAdjustReason: "客服沟通后优惠或加购调整",
-      customerRemark: "客人预约备注：希望自然一点，可接受客服微信确认时间。",
-      internalNote: "内部备注：微信沟通记录、分账和派单信息仅后台可见。",
-      products: [
-        {
-          id: "pkg3",
-          type: "package",
-          price: 1398
-        }
-      ],
-      addons: [],
-      statusLogs: [
-        {
-          time: "2026-06-26 10:00",
-          operator: "客服小林",
-          action: "客服创建订单"
-        },
-        {
-          time: "2026-06-26 10:30",
-          operator: "客服小林",
-          action: "定金已收。"
-        },
-        {
-          time: "2026-06-26 11:00",
-          operator: "客服阿宁",
-          action: "微信确认拍摄日期、地点和服装需求。"
-        }
-      ],
-      deleted: false
     }
+
   ],
   afterSales: [
     {
@@ -1606,7 +1557,7 @@ window.LXM_DATA = {
     {
       month: "2026-05",
       status: "已关账",
-      operator: "鹿小鸣主理人",
+      operator: "麓小鸣主理人",
       time: "2026-06-03 18:20",
       note: "五月月度分账已完成，数据锁定"
     }
@@ -1773,7 +1724,7 @@ window.LXM_DATA = {
       "成片周期 7 个工作日，企业微信交付"
     ],
     // 隐私政策正文（小程序「隐私政策」页展示，替换原硬编码文案）
-    privacyText: "鹿小鸣旅拍（以下简称“我们”）非常重视你的个人信息和隐私保护。在你使用小程序预约旅拍服务时，我们仅收集完成预约所必需的姓名、手机号与拍摄偏好，用于安排摄影团队与交付成片。我们不会向无关第三方分享你的个人信息，详情可在小程序内查阅完整隐私政策。（运营可在后台编辑完整条款）",
+    privacyText: "麓小鸣旅拍（以下简称“我们”）非常重视你的个人信息和隐私保护。在你使用小程序预约旅拍服务时，我们仅收集完成预约所必需的姓名、手机号与拍摄偏好，用于安排摄影团队与交付成片。我们不会向无关第三方分享你的个人信息，详情可在小程序内查阅完整隐私政策。（运营可在后台编辑完整条款）",
     // 企业微信：小程序「我的」页一键跳转客服使用（corpId 原读 globalData.corpId）
     wechat: {
       corpId: "",

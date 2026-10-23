@@ -24,19 +24,25 @@ const WORKFLOW_STAGES = Object.freeze({
 // while exposing only the five business states requested by the product flow.
 const BUSINESS_STATUSES = Object.freeze({
   PENDING_PAYMENT: "pending_payment",
-  AWAITING_PHOTOGRAPHER: "awaiting_photographer",
-  SHOT: "shot",
-  PAID: "paid",
-  DELIVERED: "delivered",
+  BOOKED: "reserved",
+  AWAITING_SHOOT: "awaiting_shoot",
+  SHOOTING: "shooting",
+  COMPLETED: "completed",
   CANCELLED: "cancelled",
   AFTER_SALE: "after_sale",
+  // Legacy aliases remain import-compatible while public projections use the
+  // revised five-stage vocabulary.
+  AWAITING_PHOTOGRAPHER: "reserved",
+  SHOT: "shooting",
+  PAID: "completed",
+  DELIVERED: "completed",
 });
 const BUSINESS_STATUS_LABELS = Object.freeze({
-  [BUSINESS_STATUSES.PENDING_PAYMENT]: "待支付",
-  [BUSINESS_STATUSES.AWAITING_PHOTOGRAPHER]: "待安排摄影师",
-  [BUSINESS_STATUSES.SHOT]: "已拍摄",
-  [BUSINESS_STATUSES.PAID]: "已支付",
-  [BUSINESS_STATUSES.DELIVERED]: "已交付",
+  [BUSINESS_STATUSES.PENDING_PAYMENT]: "待支付定金",
+  [BUSINESS_STATUSES.BOOKED]: "已预约",
+  [BUSINESS_STATUSES.AWAITING_SHOOT]: "待拍摄",
+  [BUSINESS_STATUSES.SHOOTING]: "拍摄中",
+  [BUSINESS_STATUSES.COMPLETED]: "已完成",
   [BUSINESS_STATUSES.CANCELLED]: "已取消",
   [BUSINESS_STATUSES.AFTER_SALE]: "售后处理中",
 });
@@ -105,11 +111,12 @@ function finalDue(order = {}) {
   const explicit = Number(order.finalDue);
   if (Number.isFinite(explicit) && explicit >= 0) return roundMoney(explicit);
   const discount = roundMoney(order.finalDiscountAmount);
-  const hasDepositSnapshot = order.depositDue !== undefined && order.depositDue !== null
+  const hasDepositSnapshot = order.depositFrozenAmount !== undefined && order.depositFrozenAmount !== null
+    || order.depositDue !== undefined && order.depositDue !== null
     || order.depositAmount !== undefined && order.depositAmount !== null;
   const recordedDeposit = Number(order.depositPaid);
   const depositBase = hasDepositSnapshot
-    ? roundMoney(order.depositDue ?? order.depositAmount)
+    ? roundMoney(order.depositFrozenAmount ?? order.depositDue ?? order.depositAmount)
     : (Number.isFinite(recordedDeposit) && recordedDeposit >= 0 ? roundMoney(recordedDeposit) : 0);
   return roundMoney(Math.max(orderTotal(order) - depositBase - discount, 0));
 }
@@ -137,9 +144,8 @@ function hasConfirmedPayment(order = {}, phase) {
   const due = phase === "deposit" ? depositDue(order) : finalDue(order);
   // A zero final balance is settled only after selection confirmation; a
   // zero-deposit order is immediately eligible for dispatch.
-  if (due <= 0) return phase === "deposit"
-    || String(order.selectionStatus || "").toLowerCase() === "confirmed"
-    || !!order.selectionConfirmedAt;
+  if (due <= 0) return phase === "deposit" || (!!order.completionSource && !!order.completedAt)
+    || recordsFor(order).some((record) => record.phase === "final" && record.provider === "zero_balance" && normalizePaymentStatus(record.status) === "confirmed");
   const paidField = phase === "deposit" ? "depositPaid" : "finalPaid";
   const statusField = phase === "deposit" ? "depositFinanceStatus" : "finalFinanceStatus";
   const fieldAmount = Number(order[paidField]);
@@ -147,6 +153,10 @@ function hasConfirmedPayment(order = {}, phase) {
     && (normalizePaymentStatus(order[statusField]) === "confirmed" || legacyPaymentVerified(order, phase))) return true;
   return recordsFor(order).some((record) => String(record && record.phase || "") === phase
     && normalizePaymentStatus(record.status) === "confirmed" && roundMoney(record.amount) >= due);
+}
+function isUnpaidBooking(order = {}) {
+  return depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")
+    && [WORKFLOW_STAGES.AWAITING_DEPOSIT, WORKFLOW_STAGES.AWAITING_CONFIRMATION].includes(canonicalStage(order));
 }
 function isServiceConfirmed(order = {}) {
   const snapshot = order.confirmationSnapshot;
@@ -178,7 +188,10 @@ function hasEffectiveDispatch(order = {}) {
   );
 }
 function isDepositRefundable(order = {}) {
-  return !hasEffectiveDispatch(order);
+  // Refunds are manual, reviewed exceptions after a confirmed deposit. A
+  // dispatch changes the review lane; it does not permanently prohibit a
+  // finance-approved refund with a reason and external transaction proof.
+  return canonicalStage(order) !== WORKFLOW_STAGES.CANCELLED;
 }
 function hasActiveAfterSale(order = {}) {
   const status = String(order.afterSaleStatus || "").trim().toLowerCase();
@@ -194,31 +207,33 @@ function customerCancellation(order = {}) {
   if (stage === WORKFLOW_STAGES.CANCELLED) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "订单已取消" };
   if (stage === WORKFLOW_STAGES.COMPLETED) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "已完成订单需通过售后处理" };
   if (hasActiveAfterSale(order)) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "订单存在处理中售后" };
-  if (isServiceConfirmed(order)) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "客服联系确认后请通过售后申请处理" };
-  if (hasPaymentIntent(order) || hasConfirmedPayment(order, "deposit") || Number(order.depositPaid || 0) > 0) {
-    return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "已创建或确认订金支付，请通过售后申请处理" };
+  if (hasConfirmedPayment(order, "deposit") || Number(order.depositPaid || 0) > 0) {
+    return { canCancel: false, rule: "before_deposit_payment", reason: "定金已支付，请联系客服申请审核处理" };
   }
   if (![WORKFLOW_STAGES.AWAITING_CONFIRMATION, WORKFLOW_STAGES.AWAITING_DEPOSIT].includes(stage)) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "当前订单不支持自助取消" };
-  return { canCancel: true, rule: "before_service_confirmation_and_payment_intent", reason: "" };
+  return { canCancel: true, rule: "before_deposit_payment", reason: "" };
 }
 function canonicalStage(order = {}) {
   const status = String(order.status || "").trim().toLowerCase();
   if (CANCELLED_STATUSES.has(status) || order.isDeleted || order.deleted) return WORKFLOW_STAGES.CANCELLED;
+  if (order.paymentReviewRequired === true) return order.shootingStartedAt || order.shootingCompletedAt || hasDeliveryRecord(order)
+    ? WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT : hasConfirmedPayment(order, "deposit") ? WORKFLOW_STAGES.AWAITING_DISPATCH : WORKFLOW_STAGES.AWAITING_DEPOSIT;
   if (COMPLETED_STATUSES.has(status)) return WORKFLOW_STAGES.COMPLETED;
-  const selected = selectionConfirmed(order);
   const finalSettled = hasConfirmedPayment(order, "final");
+  if (finalSettled && finalDue(order) > 0) return WORKFLOW_STAGES.COMPLETED;
   // New flow is selection -> final payment -> delivery. A legacy row may have
   // a delivery marker before the final payment; keep it actionable as final
   // payment rather than treating the order as delivered.
   if (DELIVERED_STATUSES.has(status) || hasDeliveryRecord(order)) {
     if (finalDue(order) > 0 && !finalSettled) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
+    if (finalSettled && (order.completedAt || status === "completed")) return WORKFLOW_STAGES.COMPLETED;
     return WORKFLOW_STAGES.DELIVERED;
   }
-  if ((["paid", "final_paid"].includes(status) && finalSettled) || (selected && finalSettled)) return WORKFLOW_STAGES.PAID;
-  // `awaiting_final_payment` is the internal actionable stage after the
-  // offline selection record. The public projection maps it to 已拍摄.
-  if (selected) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
-  if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return WORKFLOW_STAGES.SELECTION_PENDING;
+  if ((["paid", "final_paid"].includes(status) && finalSettled) || (selectionConfirmed(order) && finalSettled)) return WORKFLOW_STAGES.COMPLETED;
+  // `awaiting_final_payment` remains an internal actionable stage after the
+  // shooting completion. The public projection keeps it in 拍摄中 until the
+  // final payment callback atomically completes the order.
+  if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
   if (status === "shooting" || order.shootingStartedAt) return WORKFLOW_STAGES.SHOOTING;
   if (order.dispatchRecord || order.dispatchStatus === "assigned" || order.photographerId || status === "assigned") return WORKFLOW_STAGES.AWAITING_SHOOT;
   if (hasConfirmedPayment(order, "deposit")) return WORKFLOW_STAGES.AWAITING_DISPATCH;
@@ -229,13 +244,15 @@ function canonicalStage(order = {}) {
 function businessStatusForOrder(order = {}) {
   const status = String(order.status || "").trim().toLowerCase();
   if (CANCELLED_STATUSES.has(status) || order.isDeleted || order.deleted) return BUSINESS_STATUSES.CANCELLED;
-  if (hasActiveAfterSale(order)) return BUSINESS_STATUSES.AFTER_SALE;
-  if (COMPLETED_STATUSES.has(status)) return BUSINESS_STATUSES.DELIVERED;
+  if (order.paymentReviewRequired === true) return order.shootingStartedAt || order.shootingCompletedAt || hasDeliveryRecord(order)
+    ? BUSINESS_STATUSES.SHOOTING : hasConfirmedPayment(order, "deposit") ? BUSINESS_STATUSES.BOOKED : BUSINESS_STATUSES.PENDING_PAYMENT;
+  if (COMPLETED_STATUSES.has(status) || order.completedAt) return BUSINESS_STATUSES.COMPLETED;
   const finalSettled = hasConfirmedPayment(order, "final");
-  if (hasDeliveryRecord(order) && (finalSettled || finalDue(order) <= 0)) return BUSINESS_STATUSES.DELIVERED;
-  if ((finalSettled && selectionConfirmed(order)) || (["paid", "final_paid"].includes(status) && selectionConfirmed(order))) return BUSINESS_STATUSES.PAID;
-  if (selectionConfirmed(order) && (order.shootingCompletedAt || finalDue(order) <= 0)) return BUSINESS_STATUSES.SHOT;
-  if (hasConfirmedPayment(order, "deposit") || depositDue(order) <= 0) return BUSINESS_STATUSES.AWAITING_PHOTOGRAPHER;
+  if (finalSettled && (finalDue(order) > 0 || selectionConfirmed(order))) return BUSINESS_STATUSES.COMPLETED;
+  if (order.shootingStartedAt || status === "shooting") return BUSINESS_STATUSES.SHOOTING;
+  if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return BUSINESS_STATUSES.SHOOTING;
+  if (order.dispatchRecord || order.dispatchStatus === "assigned" || order.photographerId || status === "assigned") return BUSINESS_STATUSES.AWAITING_SHOOT;
+  if (hasConfirmedPayment(order, "deposit") || depositDue(order) <= 0) return BUSINESS_STATUSES.BOOKED;
   return BUSINESS_STATUSES.PENDING_PAYMENT;
 }
 function businessStatusLabel(status) {
@@ -247,18 +264,32 @@ function customerStatusForOrder(order = {}) {
 function customerStatusForStage(stage) {
   return {
     [WORKFLOW_STAGES.AWAITING_CONFIRMATION]: "待客服联系确认",
-    [WORKFLOW_STAGES.AWAITING_DEPOSIT]: "待支付订金",
-    [WORKFLOW_STAGES.AWAITING_DISPATCH]: "待安排摄影师",
-    [WORKFLOW_STAGES.AWAITING_SHOOT]: "已安排待拍摄",
+    [WORKFLOW_STAGES.AWAITING_DEPOSIT]: "待支付定金",
+    [WORKFLOW_STAGES.AWAITING_DISPATCH]: "已预约",
+    [WORKFLOW_STAGES.AWAITING_SHOOT]: "待拍摄",
     [WORKFLOW_STAGES.SHOOTING]: "拍摄中",
-    [WORKFLOW_STAGES.SELECTION_PENDING]: "待线下选片确认",
-    [WORKFLOW_STAGES.AWAITING_DELIVERY]: "待发布成片",
-    [WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT]: "待支付尾款",
-    [WORKFLOW_STAGES.PAID]: "已支付待交付",
-    [WORKFLOW_STAGES.DELIVERED]: "已交付",
+    [WORKFLOW_STAGES.SELECTION_PENDING]: "拍摄中",
+    [WORKFLOW_STAGES.AWAITING_DELIVERY]: "拍摄中",
+    [WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT]: "拍摄中",
+    [WORKFLOW_STAGES.PAID]: "已完成",
+    [WORKFLOW_STAGES.DELIVERED]: "已完成",
     [WORKFLOW_STAGES.COMPLETED]: "已完成",
     [WORKFLOW_STAGES.CANCELLED]: "已取消",
   }[stage] || "处理中";
+}
+
+// Compatibility projection for older mini-programs. New clients should use
+// publicStatus/publicStatusText (and businessStatus aliases above).
+function legacyBusinessStatusForOrder(order = {}) {
+  const status = String(order.status || "").trim().toLowerCase();
+  if (CANCELLED_STATUSES.has(status) || order.isDeleted || order.deleted) return "cancelled";
+  if (hasActiveAfterSale(order)) return "after_sale";
+  if (COMPLETED_STATUSES.has(status) || order.completedAt) return "delivered";
+  if (hasDeliveryRecord(order) && hasConfirmedPayment(order, "final")) return "delivered";
+  if (hasConfirmedPayment(order, "final")) return "paid";
+  if (order.shootingCompletedAt || order.shootingStartedAt || status === "shooting") return "shot";
+  if (hasConfirmedPayment(order, "deposit") || depositDue(order) <= 0) return "awaiting_photographer";
+  return "pending_payment";
 }
 
 function safeItem(item = {}) {
@@ -271,6 +302,9 @@ function safeItem(item = {}) {
     title: textValue(item.title),
     productType: textValue(item.productType, textValue(item.type)),
     price: roundMoney(item.price),
+    originalPrice: roundMoney(item.originalPrice ?? item.price),
+    isGift: item.isGift === true || item.gifted === true,
+    gifted: item.isGift === true || item.gifted === true,
     quantity: Math.max(1, Math.min(99, Math.floor(Number(item.quantity || item.qty || item.count || 1) || 1))),
   };
 }
@@ -356,19 +390,23 @@ function publicOrderProjection(order = {}, options = {}) {
   const depositPaymentStatus = paymentStatusFor("deposit");
   const finalPaymentStatus = paymentStatusFor("final");
   const paymentPhase = stage === WORKFLOW_STAGES.AWAITING_DEPOSIT ? "deposit"
-    : [WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED].includes(stage) && !finalConfirmed ? "final" : "";
+    : [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED].includes(stage) && !finalConfirmed ? "final" : "";
   const activePaymentStatus = paymentPhase === "deposit" ? depositPaymentStatus : paymentPhase === "final" ? finalPaymentStatus : "none";
-  const items = Array.isArray(order.productItems) ? order.productItems : (Array.isArray(order.items) ? order.items : []);
+  const items = Array.isArray(order.products) ? order.products : Array.isArray(order.productItems) ? order.productItems : (Array.isArray(order.items) ? order.items : []);
   const snapshot = order.packageSnapshot && typeof order.packageSnapshot === "object" ? order.packageSnapshot : {};
   const cancellation = customerCancellation(order);
   const afterSaleActive = hasActiveAfterSale(order);
   const deliveryPublished = hasDeliveryRecord(order);
-  const deliveryVisible = deliveryPublished && (finalConfirmed || finalDue(order) <= 0);
-  const canPayDeposit = stage === WORKFLOW_STAGES.AWAITING_DEPOSIT && !afterSaleActive && !hasConfirmedPayment(order, "deposit") && depositDue(order) > 0;
-  // Offline selection confirmation is the sole business prerequisite for the
-  // final payment. Delivery is intentionally after payment in this flow.
-  const canPayFinal = selectionConfirmed(order) && !afterSaleActive && !hasConfirmedPayment(order, "final") && finalDue(order) > 0;
+  const deliveryVisible = deliveryPublished && order.deliveryRecord?.visibility !== "internal" && (finalConfirmed || finalDue(order) <= 0);
+  const canPayDeposit = stage === WORKFLOW_STAGES.AWAITING_DEPOSIT && !order.paymentReviewRequired && !afterSaleActive && !hasConfirmedPayment(order, "deposit") && depositDue(order) > 0;
+  // Shooting completion is the final-payment gate. A successful final payment
+  // records the selection acknowledgement in the same atomic update.
+  const canPayFinal = [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage)
+    && !order.paymentReviewRequired && !afterSaleActive && !hasConfirmedPayment(order, "final") && finalDue(order) > 0;
+  const canConfirmCompletion = [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage)
+    && !order.paymentReviewRequired && !afterSaleActive && !hasConfirmedPayment(order, "final") && finalDue(order) === 0;
   const businessStatus = businessStatusForOrder(order);
+  const legacyBusinessStatus = legacyBusinessStatusForOrder(order);
   const output = {
     _id: idOf(order),
     orderNo: String(order.orderNo || ""),
@@ -377,6 +415,9 @@ function publicOrderProjection(order = {}, options = {}) {
     businessStatus,
     businessStatusCode: businessStatus,
     businessStatusText: businessStatusLabel(businessStatus),
+    publicStatus: businessStatus,
+    publicStatusText: businessStatusLabel(businessStatus),
+    legacyBusinessStatus,
     orderStatus: businessStatusLabel(businessStatus),
     statusText: businessStatusLabel(businessStatus),
     customerStatus: businessStatusLabel(businessStatus),
@@ -384,6 +425,8 @@ function publicOrderProjection(order = {}, options = {}) {
     packagePrice: total,
     totalAmount: total,
     productItems: items.map(safeItem),
+    products: items.map(safeItem),
+    addons: (Array.isArray(order.addons) ? order.addons : []).map(safeItem),
     spotName: textValue(order.spotName),
     seriesName: textValue(order.seriesName),
     type: textValue(order.type, textValue(snapshot.serviceType, "photo")),
@@ -397,6 +440,7 @@ function publicOrderProjection(order = {}, options = {}) {
     pendingDepositAmount: pendingDeposit,
     pendingFinalAmount: pendingFinal,
     depositDue: depositDue(order),
+    depositFrozenAmount: roundMoney(order.depositFrozenAmount ?? depositDue(order)),
     depositPaid: deposit,
     finalDue: finalDue(order),
     finalPaid: final,
@@ -412,12 +456,21 @@ function publicOrderProjection(order = {}, options = {}) {
     deliveryPublished,
     canPayDeposit,
     canPayFinal,
+    canConfirmCompletion,
     canPay: canPayDeposit || canPayFinal,
     canCancel: cancellation.canCancel,
     cancelRule: cancellation.rule,
     cancelReason: cancellation.reason,
-    canAfterSale: !afterSaleActive && stage !== WORKFLOW_STAGES.CANCELLED,
+    canAfterSale: false,
     afterSaleActive,
+    paymentReviewRequired: order.paymentReviewRequired === true,
+    completedAt: textValue(order.completedAt),
+    completionSource: textValue(order.completionSource),
+    selectionAcknowledgedAt: textValue(order.selectionAcknowledgedAt, textValue(order.selectionConfirmedAt)),
+    intentDate: textValue(order.intentDate),
+    intentTimePeriod: textValue(order.intentTimePeriod),
+    deliveryRecords: finalConfirmed || finalDue(order) <= 0
+      ? (Array.isArray(order.deliveryRecords) ? order.deliveryRecords : []).filter((row) => row && row.visibility !== "internal").map((row) => publicDeliveryRecord(row)) : [],
     selectionStatus: textValue(order.selectionStatus, order.selectionConfirmedAt ? "confirmed" : "pending"),
     dispatchStatus: textValue(order.dispatchStatus, order.photographerId ? "assigned" : "pending"),
     depositRefundable: isDepositRefundable(order),
@@ -437,12 +490,12 @@ function publicOrderProjection(order = {}, options = {}) {
 
 const AUDIT_FIELDS = [
   "status", "businessStatus", "businessStatusText", "workflowStage", "totalAmount", "totalPrice", "price", "depositRatio", "finalDiscountAmount", "finalDiscountReason", "priceAdjustReason",
-  "depositDue", "depositPaid", "depositFinanceStatus", "finalDue", "finalPaid", "finalFinanceStatus", "photographerId", "assigneeId",
-  "appointmentAt", "timePeriod", "time", "appointmentLocation", "peopleCount", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "selectionStatus", "shootingStartedAt", "shootingCompletedAt",
-  "selectionConfirmedAt", "selectionConfirmedBy", "selectionNote", "deliveryMethod", "deliveredAt", "deliveredBy", "deliveryNote", "deliveryRecord",
+  "depositDue", "depositFrozenAmount", "depositFrozenAt", "depositPaid", "depositFinanceStatus", "finalDue", "finalPaid", "finalFinanceStatus", "photographerId", "assigneeId",
+  "appointmentAt", "intentDate", "intentTimePeriod", "timePeriod", "time", "appointmentLocation", "peopleCount", "dispatchStatus", "taskStatus", "taskAcceptedAt", "taskAcceptedBy", "selectionStatus", "shootingStartedAt", "shootingCompletedAt",
+  "selectionConfirmedAt", "selectionConfirmedBy", "selectionNote", "selectionMethod", "selectionRecord", "completionSource", "completedAt", "deliveryMethod", "deliveredAt", "deliveredBy", "deliveryNote", "deliveryRecord", "deliveryRecords",
   "serviceConfirmedAt", "serviceConfirmedBy", "serviceConfirmReason", "serviceContent", "confirmationSnapshot", "customerCancelIdempotencyKey", "cancelledAt", "cancelledBy",
   "deliveryDraftFileIds", "deliverFiles",
-  "dispatchRecord", "dispatchRecords", "dispatchBaseInfo", "depositRefundable", "confirmedShootAt", "confirmedShootDate", "confirmedShootTime", "confirmedShootLocation", "confirmationMethod", "customerConfirmationNote", "selectionMethod", "selectionRecord", "paymentRecords", "sourceType", "sourceName", "sourceScene", "shopId", "distributorId", "riskBlocked", "riskFlag", "frozen",
+  "dispatchRecord", "dispatchRecords", "dispatchBaseInfo", "depositRefundable", "claimedAt", "claimedBy", "assignmentVersion", "assignmentRecords", "confirmedShootAt", "confirmedShootDate", "confirmedShootTime", "confirmedShootLocation", "confirmationMethod", "customerConfirmationNote", "paymentRecords", "sourceType", "sourceName", "sourceScene", "shopId", "distributorId", "riskBlocked", "riskFlag", "frozen",
   "freezeReason", "riskReason", "settlementObservationReleased", "settlementObservationReleasedAt", "settlementObservationReleasedBy",
 ];
 function auditPaymentRecord(record = {}) {
@@ -474,6 +527,7 @@ function makePaymentId(prefix = "pay") {
 }
 
 module.exports = {
+  isUnpaidBooking,
   WORKFLOW_STAGES,
   BUSINESS_STATUSES,
   BUSINESS_STATUS_LABELS,
@@ -503,6 +557,7 @@ module.exports = {
   normalizePaymentStatus,
   canonicalStage,
   businessStatusForOrder,
+  legacyBusinessStatusForOrder,
   businessStatusLabel,
   customerStatusForOrder,
   customerStatusForStage,

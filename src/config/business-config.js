@@ -9,7 +9,7 @@ window.LXM_CONFIG = {
     { key: "afterSales", label: "售后服务", group: "订单履约" },
     { key: "financeReview", label: "财务审核", group: "财务管理" },
     { key: "reconciliation", label: "月度对账", group: "财务管理" },
-    { key: "tasks", label: "拍摄任务", group: "订单履约" },
+    { key: "tasks", label: "拍摄安排", group: "订单履约" },
     { key: "staff", label: "人员管理", group: "渠道增长" },
     { key: "distributors", label: "分销管理", group: "渠道增长" },
     { key: "shops", label: "商家管理", group: "渠道增长" },
@@ -61,7 +61,7 @@ window.LXM_CONFIG = {
       home: "orders",
       scope: "orders",
       staffId: "st2",
-      menus: ["dashboard", "orders", "afterSales", "addonServices"]
+      menus: ["dashboard", "orders", "tasks", "afterSales", "addonServices"]
     },
     finance: {
       name: "财务",
@@ -75,7 +75,7 @@ window.LXM_CONFIG = {
       home: "tasks",
       scope: "selfTask",
       staffId: "st4",
-      menus: ["tasks"]
+      menus: []
     },
     merchant: {
       name: "商家",
@@ -93,37 +93,33 @@ window.LXM_CONFIG = {
     }
   },
   orderStatuses: [
-    { value: "new", label: "待支付", color: "#F59E0B", customer: "待支付" },
-    { value: "pending", label: "待支付", color: "#F59E0B", customer: "待支付" },
-    { value: "contacted", label: "待支付", color: "#F59E0B", customer: "待支付" },
-    { value: "deposit_pending", label: "待支付", color: "#F97316", customer: "待支付" },
-    { value: "deposit_paid", label: "待安排摄影师", color: "#10B981", customer: "待安排摄影师" },
-    { value: "confirmed", label: "待支付", color: "#F59E0B", customer: "待支付" },
-    { value: "assigned", label: "待安排摄影师", color: "#3B82F6", customer: "待安排摄影师" },
-    { value: "shooting", label: "待安排摄影师", color: "#3B82F6", customer: "待安排摄影师" },
-    { value: "retouching", label: "已拍摄", color: "#F97316", customer: "已拍摄" },
-    { value: "editing", label: "已拍摄", color: "#F97316", customer: "已拍摄" },
-    { value: "delivered", label: "已交付", color: "#10B981", customer: "已交付" },
-    { value: "final_pending", label: "已拍摄", color: "#F97316", customer: "已拍摄" },
-    { value: "paid", label: "已支付", color: "#10B981", customer: "已支付" },
-    { value: "completed", label: "已交付", color: "#10B981", customer: "已交付" },
+    { value: "reserved", label: "已预约", color: "#10B981", customer: "已预约" },
+    { value: "awaiting_shoot", label: "待拍摄", color: "#3B82F6", customer: "待拍摄" },
+    { value: "deposit_paid", label: "已预约", color: "#10B981", customer: "已预约" },
+    { value: "assigned", label: "待拍摄", color: "#3B82F6", customer: "待拍摄" },
+    { value: "shooting", label: "拍摄中", color: "#3B82F6", customer: "拍摄中" },
+    { value: "retouching", label: "已预约", color: "#F97316", customer: "已预约" },
+    { value: "editing", label: "已预约", color: "#F97316", customer: "已预约" },
+    { value: "delivered", label: "已预约", color: "#10B981", customer: "已预约" },
+    { value: "final_pending", label: "已预约", color: "#F97316", customer: "已预约" },
+    { value: "paid", label: "已完成", color: "#10B981", customer: "已完成" },
+    { value: "completed", label: "已完成", color: "#10B981", customer: "已完成" },
     { value: "cancelled", label: "已取消", color: "#6B7280", customer: "已取消" },
     { value: "canceled", label: "已取消", color: "#6B7280", customer: "已取消" }
   ],
   visibleStatus: [
-    { value: "待支付", label: "待支付" },
-    { value: "待安排摄影师", label: "待安排摄影师" },
-    { value: "已拍摄", label: "已拍摄" },
-    { value: "已支付", label: "已支付" },
-    { value: "已交付", label: "已交付" },
-    { value: "reserved", label: "待支付" },
-    { value: "confirmed", label: "待安排摄影师" },
-    { value: "scheduled", label: "待安排摄影师" },
-    { value: "shooting", label: "待安排摄影师" },
-    { value: "retouching", label: "已拍摄" },
-    { value: "editing", label: "已拍摄" },
-    { value: "delivered", label: "已交付" },
-    { value: "done", label: "已交付" }
+    { value: "reserved", label: "已预约" },
+    { value: "awaiting_shoot", label: "待拍摄" },
+    { value: "shooting", label: "拍摄中" },
+    { value: "completed", label: "已完成" },
+    { value: "cancelled", label: "已取消" },
+    // Legacy customerStatus values remain accepted on imported orders; the
+    // display label uses the current business-state vocabulary.
+    { value: "scheduled", label: "待拍摄" },
+    { value: "retouching", label: "已预约" },
+    { value: "editing", label: "已预约" },
+    { value: "delivered", label: "已预约" },
+    { value: "done", label: "已完成" }
   ],
   settlementCycles: ["周结", "月结", "季度结"]
 };

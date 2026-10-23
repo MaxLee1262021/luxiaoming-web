@@ -12,7 +12,7 @@ async function fixture(t) {
   for (const role of ["super", "service", "photo", "finance", "content"]) collections.staff[role] = { id: role, account: role, role, status: "启用" };
   const readyOrder = { status: "paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审",
     shootingCompletedAt: "2026-09-16T09:00:00.000Z", shootingStartedAt: "2026-09-16T08:00:00.000Z", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-16T10:00:00.000Z" };
-  collections.orders.own = { ...readyOrder, id: "own", orderNo: "TEST-OWN", openid: "customer", photographerId: "photo" };
+  collections.orders.own = { ...readyOrder, id: "own", orderNo: "TEST-OWN", openid: "customer", assigneeId: "service", photographerId: "photo" };
   collections.orders.other = { ...readyOrder, id: "other", orderNo: "TEST-OTHER", openid: "other-customer", photographerId: "other-photo" };
   const source = {
     async list(key) { return clone(Object.values(collections[key] || {})); },
@@ -65,17 +65,17 @@ test("file intents enforce verified session, order ownership and live account st
   const input = { purpose: "order-delivery", orderId: "own", fileName: "photo.png", mimeType: "image/png", size: 8, kind: "admin", ownerId: "super" };
   assert.equal((await f.request(null, "/api/files/upload-intent", input)).status, 401);
   assert.equal((await f.request("customer", "/api/files/upload-intent", input)).status, 403);
-  assert.equal((await f.request("photo", "/api/files/upload-intent", { ...input, orderId: "other" })).status, 403);
-  const id = await f.upload("photo", input);
-  assert.equal(f.collections.mediaFiles[id].ownerId, "photo");
-  f.collections.staff.photo.status = "停用";
-  assert.equal((await f.request("photo", `/api/files/${id}/access`, {})).status, 401);
+  assert.equal((await f.request("service", "/api/files/upload-intent", { ...input, orderId: "other" } )).status, 403);
+  const id = await f.upload("service", input);
+  assert.equal(f.collections.mediaFiles[id].ownerId, "service");
+  f.collections.staff.service.status = "停用";
+  assert.equal((await f.request("service", `/api/files/${id}/access`, {})).status, 401);
 });
 
 test("photographer saves drafts but only customer service publishes; paid owner downloads after delivery", async (t) => {
   const f = await fixture(t);
-  const id = await f.upload("photo", { purpose: "order-delivery", orderId: "own" });
-  let response = await f.request("photo", "/api/orders/own/action", { action: "deliverydraft", fileIds: [id] });
+  const id = await f.upload("service", { purpose: "order-delivery", orderId: "own" });
+  let response = await f.request("service", "/api/orders/own/action", { action: "deliverydraft", fileIds: [id] });
   assert.equal(response.status, 200, JSON.stringify(response.body));
   assert.equal(response.body.data.deliveryDraftFiles[0].fileId, id);
   const unpublished = await f.request("customer", "/api/rpc/getOrderDetail", { orderId: "own" });
@@ -83,10 +83,10 @@ test("photographer saves drafts but only customer service publishes; paid owner 
   assert.equal(unpublished.body.data.deliveryDraftFileIds, undefined);
   assert.equal((await f.request("customer", `/api/files/${id}/access`, {})).status, 403);
   const publish = { action: "deliver", fileIds: [id], deliveryMethod: "小程序成片", reason: "确认发布成片" };
-  assert.equal((await f.request("photo", "/api/orders/own/action", publish)).status, 403);
+  assert.equal((await f.request("photo", "/api/orders/own/action", publish)).status, 401);
   response = await f.request("service", "/api/orders/own/action", publish);
   assert.equal(response.status, 200, JSON.stringify(response.body));
-  assert.equal(response.body.data.workflowStage, "delivered");
+  assert.equal(response.body.data.workflowStage, "completed");
   assert.equal(response.body.data.deliverFiles[0].fileId, id);
   const detail = await f.request("customer", "/api/rpc/getOrderDetail", { orderId: "own" });
   assert.equal(detail.body.data.deliverFiles[0].fileId, id);
@@ -94,12 +94,12 @@ test("photographer saves drafts but only customer service publishes; paid owner 
   assert.equal((await f.request("stranger", `/api/files/${id}/access`, {})).status, 403);
   assert.equal((await f.request("finance", `/api/files/${id}/access`, {})).status, 403);
   assert.equal((await f.request(null, `/api/media/${id}`)).status, 404);
-  assert.equal((await f.request("photo", `/api/files/${id}`, undefined, "DELETE")).status, 409);
+  assert.equal((await f.request("service", `/api/files/${id}`, undefined, "DELETE")).status, 409);
 });
 
 test("cross-order and wrong-purpose references cannot be bound; legacy WeCom delivery still works", async (t) => {
   const f = await fixture(t);
-  const otherId = await f.upload("service", { purpose: "order-delivery", orderId: "other" });
+  const otherId = await f.upload("super", { purpose: "order-delivery", orderId: "other" });
   const avatarId = await f.upload("customer", { purpose: "avatar" });
   for (const id of [otherId, avatarId]) assert.equal((await f.request("service", "/api/orders/own/action", { action: "deliver", fileIds: [id], reason: "确认发布", deliveryMethod: "小程序成片" })).status, 403);
   const delivered = await f.request("service", "/api/orders/own/action", { action: "deliver", deliveryMethod: "企业微信", reason: "企业微信交付完成" });
@@ -177,7 +177,7 @@ test("migrated private markers become authorized file descriptors, never loadabl
   assert.match(profile.body.data.avatarUrl, /temporary=yes/);
   assert.ok(!JSON.stringify(profile.body).includes("oss-file:"));
 
-  const deliveryId = await f.upload("photo", { purpose: "order-delivery", orderId: "own" });
+  const deliveryId = await f.upload("service", { purpose: "order-delivery", orderId: "own" });
   const order = f.collections.orders.own;
   order.status = "paid";
   order.finalPaid = 70;
@@ -223,7 +223,7 @@ test("migrated private markers become authorized file descriptors, never loadabl
 
 test("ready files cannot be deleted while a business binding is in flight", async (t) => {
   const f = await fixture(t);
-  const id = await f.upload("photo", { purpose: "order-delivery", orderId: "own" });
+  const id = await f.upload("service", { purpose: "order-delivery", orderId: "own" });
   const originalUpdate = f.source.update.bind(f.source);
   let entered;
   let release;
@@ -233,10 +233,10 @@ test("ready files cannot be deleted while a business binding is in flight", asyn
     if (key === "orders" && patch.deliveryDraftFileIds?.includes(id)) { entered(); await resume; }
     return originalUpdate(key, recordId, patch);
   };
-  const binding = f.request("photo", "/api/orders/own/action", { action: "deliverydraft", fileIds: [id] });
+  const binding = f.request("service", "/api/orders/own/action", { action: "deliverydraft", fileIds: [id] });
   await arrived;
   let deletion;
-  try { deletion = await f.request("photo", `/api/files/${id}`, undefined, "DELETE"); }
+  try { deletion = await f.request("service", `/api/files/${id}`, undefined, "DELETE"); }
   finally { release(); }
   const bound = await binding;
   assert.equal(deletion.status, 409, "a verified object must survive the assertFiles-to-markBound interval");

@@ -41,13 +41,13 @@
     return (ids || []).map((id) => ({ id, name: "成片文件" }));
   }
   function canUploadDelivery(order = ctx.state.currentOrder) {
-    if (!order || ctx.state.orderReadonly && ctx.state.orderDrawer && ctx.state.currentOrder === order || ctx.isOrderAfterSaleLocked(order) || ctx.hasDeliveryRecord(order)) return false;
+    if (!order || ctx.state.orderReadonly && ctx.state.orderDrawer && ctx.state.currentOrder === order) return false;
     const role = ctx.state.role;
-    const own = ["super", "service"].includes(role) || role === "photo" && String(order.photographerId || "") === String(ctx.roleProfile.value.staffId || "");
-    return own && !!(order.shootingCompletedAt || ["selection_pending", "awaiting_final_payment", "paid"].includes(ctx.workflowStageOf(order)));
+    const own = typeof ctx.canManageOrderRecords === "function" ? ctx.canManageOrderRecords(order) : ["super", "service"].includes(role);
+    return own && !!(order.shootingStartedAt || order.shootingCompletedAt || ["shooting", "completed", "selection_pending", "awaiting_final_payment", "paid"].includes(ctx.workflowStageOf(order)));
   }
   function uploadDelivery(order = ctx.state.currentOrder) {
-    if (!canUploadDelivery(order)) return ctx.ElMessage.warning("拍摄完成后可上传本单成片草稿");
+    if (!canUploadDelivery(order)) return ctx.ElMessage.warning("客服领取本单并进入拍摄中后可上传成片；已完成订单仍可补传");
     upload.pick({ purpose: "order-delivery", orderId: order.id || order._id, multiple: true, async onUploaded(file) {
       const fileIds = [...new Set([...deliveryFiles(order).map((item) => item.id), file.fileId || file.id])];
       if (!(await ctx.persistOrderAction(order, "deliverydraft", { fileIds }))) throw new Error("成片草稿尚未写入服务端，请重新登录后重试");
@@ -58,21 +58,28 @@
     try { await upload.single(`draft:${order.id}`, () => ctx.persistOrderAction(order, "deliverydraft", { fileIds: deliveryFiles(order).map((file) => file.id).filter((value) => value !== id) })); }
     catch (_) {}
   }
-  const deliveryDialog = ctx.reactive({ open: false, order: null, publishing: false, selected: [] });
+  const deliveryDialog = ctx.reactive({ open: false, order: null, publishing: false, selected: [], method: "企业微信", note: "", visibility: "customer" });
   function deliverOrder(order = ctx.state.currentOrder) {
-    if (!ctx.canDeliverOrder(order)) return ctx.ElMessage.warning("客服在确认线下选片后可发布成片");
+    if (!ctx.canDeliverOrder(order)) return ctx.ElMessage.warning("客服领取本单并进入拍摄中后可登记交付；完成后仍可继续登记");
     deliveryDialog.order = order;
     deliveryDialog.selected = deliveryFiles(order).map((file) => file.id);
+    deliveryDialog.method = "企业微信";
+    deliveryDialog.note = "";
+    deliveryDialog.visibility = "customer";
     deliveryDialog.open = true;
   }
-  async function publishDelivery(external = false) {
+  async function publishDelivery(external) {
     const order = deliveryDialog.order;
     if (!upload.ready() || deliveryDialog.publishing || !ctx.canDeliverOrder(order)) return;
-    if (!external && !deliveryDialog.selected.length) return ctx.ElMessage.warning("请先上传并选择要发布的成片");
+    const method = external === false ? "小程序成片" : external === true ? "企业微信" : deliveryDialog.method;
+    const visibility = method === "小程序成片" ? deliveryDialog.visibility : "external";
+    const note = String(deliveryDialog.note || "").trim();
+    if (note.length < 2) return ctx.ElMessage.warning("请填写至少 2 个字的交付说明");
+    if (method === "小程序成片" && !deliveryDialog.selected.length) return ctx.ElMessage.warning("请先上传并选择交付的成片");
     deliveryDialog.publishing = true;
     try {
-      await ctx.ElMessageBox.confirm(external ? "确认成片已通过企业微信交付客户？" : "确认将所选成片发布给该订单客户？", "确认交付", { type: "warning", confirmButtonText: "确认交付", cancelButtonText: "取消" });
-      await ctx.persistOrderAction(order, "deliver", { fileIds: external ? [] : deliveryDialog.selected.slice(), deliveryMethod: external ? "企业微信" : "小程序成片", reason: external ? "成片已通过企业微信交付客户" : "客服确认并发布成片" });
+      await ctx.ElMessageBox.confirm(`确认记录本次${method}交付？交付记录不会修改付款或订单主状态。`, "确认交付", { type: "warning", confirmButtonText: "保存交付记录", cancelButtonText: "取消" });
+      await ctx.persistOrderAction(order, "deliveryrecord", { fileIds: deliveryDialog.selected.slice(), visibility, deliveryMethod: method, note, reason: note });
       deliveryDialog.open = false;
       ctx.ElMessage.success("成片已交付");
     } catch (_) {} finally { deliveryDialog.publishing = false; }

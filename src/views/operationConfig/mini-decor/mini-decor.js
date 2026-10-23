@@ -19,7 +19,7 @@ window.LXM_PAGES.register({
       miniPreviewCurrentSeries, miniPreviewCurrentAlbum, miniPreviewCurrentOrder,
       miniPreviewSeriesAlbums, miniPreviewAlbumSamples,
       miniPreviewReset, miniPreviewGo, miniPreviewBack,
-      pageConfigPages, selectPageConfig, togglePageModule, togglePageRelation,
+      pageConfigPages, selectPageConfig, togglePageModule, togglePageRelation, movePageRelation, removePageRelation,
       activePageConfig, activePageConfigMeta, activePageModuleOptions, activePageRelationGroups,
       homeModuleOptions: configuredHomeModuleOptions,
       // scopedOrders 等
@@ -70,6 +70,11 @@ window.LXM_PAGES.register({
     function pageConfigValue() {
       if (activePageConfig && (activePageConfig.__v_isRef || Object.prototype.hasOwnProperty.call(activePageConfig, "value"))) return activePageConfig.value || {};
       return activePageConfig || {};
+    }
+
+    function pageRelationName(id) {
+      const row = (publicMiniPreview && publicMiniPreview.value ? publicMiniPreview.value.samples : []).find((item) => String(item.id || item._id) === String(id));
+      return row ? (row.name || row.title || row.id) : String(id || "未命名样片");
     }
 
     function quickNavPreviewPage(item) {
@@ -219,12 +224,12 @@ window.LXM_PAGES.register({
       miniPreviewCurrentSeries, miniPreviewCurrentAlbum, miniPreviewCurrentOrder,
       miniPreviewSeriesAlbums, miniPreviewAlbumSamples,
       miniPreviewReset, miniPreviewGo, miniPreviewBack,
-      pageConfigPages, selectPageConfig, togglePageModule, togglePageRelation,
+      pageConfigPages, selectPageConfig, togglePageModule, togglePageRelation, movePageRelation, removePageRelation,
       activePageConfig, activePageConfigMeta, activePageModuleOptions, activePageRelationGroups,
       scopedOrders,
       homeModuleOptions, quickNavPresets, homeBannerJumpPresets, exploreBannerJumpPresets,
       firstHomeBanner, quickNavPreviewPage, updateQuickNavLabel, removeQuickNav,
-      addHomeBanner, addExploreBanner, moveHomeBanner, moveExploreBanner,
+      addHomeBanner, addExploreBanner, moveHomeBanner, moveExploreBanner, pageRelationName,
       removeHomeBanner, removeExploreBanner, uploadHomeBannerMedia, uploadExploreBannerMedia,
       addQuickNav, moveQuickNav, addSpotCategory, removeSpotCategory, addSpotSort, removeSpotSort
     };

@@ -52,6 +52,55 @@
   font-size: 12px;
 }
 
+.page-route-permissions .permissions-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.page-route-permissions .permissions-overview-card {
+  display: grid;
+  gap: 7px;
+  min-height: 112px;
+  padding: 16px 18px;
+  border: 1px solid var(--lxm-line, #efe6dd);
+  border-radius: 8px;
+  background: var(--lxm-surface, #fff);
+  box-shadow: var(--lxm-shadow-sm, 0 2px 8px rgba(42, 33, 27, .06));
+  color: var(--lxm-ink, #2a211b);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+
+.page-route-permissions .permissions-overview-card:hover,
+.page-route-permissions .permissions-overview-card:focus-visible {
+  border-color: var(--lxm-brand-soft-2, #f2b08d);
+  box-shadow: 0 6px 18px rgba(42, 33, 27, .1);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.page-route-permissions .permissions-overview-card span,
+.page-route-permissions .permissions-overview-card em {
+  color: var(--lxm-muted, #7c6a5e);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.page-route-permissions .permissions-overview-card strong {
+  font-size: 25px;
+  line-height: 1;
+}
+
+.page-route-permissions .permissions-overview-card--note {
+  background: var(--lxm-cream, #fff7ef);
+}
+
+.page-route-permissions .permissions-overview-card--note strong {
+  font-size: 21px;
+}
+
 .page-route-permissions .permissions-header-actions,
 .page-route-permissions .permissions-filter-actions,
 .page-route-permissions .permissions-list-actions,
@@ -328,6 +377,48 @@
   white-space: nowrap;
 }
 
+.page-route-permissions .permissions-count-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--lxm-line, #efe6dd);
+  border-radius: 999px;
+  background: var(--lxm-cream, #fff7ef);
+  color: var(--lxm-brand-strong, #ee2c2c);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.page-route-permissions .permissions-filter-leading-actions {
+  flex: 0 0 auto;
+  order: -1;
+}
+
+.page-route-permissions .permissions-filter-leading-actions .el-button {
+  min-height: 34px;
+}
+
+.page-route-permissions .permissions-copy-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.page-route-permissions .permissions-copy-cell > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-route-permissions .permissions-copy-cell .el-button {
+  flex: 0 0 auto;
+  padding: 0;
+  font-size: 11px;
+}
+
 .page-route-permissions .permissions-row-actions {
   gap: 4px;
   flex-wrap: nowrap;
@@ -379,6 +470,13 @@
 .permissions-dialog .el-dialog__footer {
   padding: 16px 28px 22px;
   border-top: 1px solid var(--lxm-line, #efe6dd);
+}
+
+.permissions-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
 }
 
 .permissions-role-dialog .permission-check-grid {
@@ -465,6 +563,10 @@
     padding: 14px;
   }
 
+  .page-route-permissions .permissions-overview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .page-route-permissions .permissions-filter-actions,
   .page-route-permissions .permissions-list-toolbar,
   .page-route-permissions .permissions-list-actions {
@@ -494,6 +596,16 @@
   }
 
   .permissions-role-dialog .permission-check-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-route-permissions .permissions-filter-leading-actions {
+    order: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .page-route-permissions .permissions-overview {
     grid-template-columns: 1fr;
   }
 }

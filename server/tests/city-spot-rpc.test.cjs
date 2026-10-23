@@ -4,13 +4,13 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const rpc = require("../lib/rpc.cjs");
 
-function makeSource() {
+function makeSource(overrides = {}) {
   const collections = {
     homeConfig: [{ id: "homeStats", recommendations: { hotSpotIds: ["spot-pending", "spot-active"] } }],
     config: [],
     cities: [
       { id: "city-changsha", name: "长沙", code: "cs", status: "运营中", visible: true, sort: 20, latitude: 28.195, longitude: 112.95, coordType: "gcj02" },
-      { id: "city-yueyang", name: "岳阳", code: "yy", enabled: true, status: "筹备中", visible: true, sort: 10, latitude: 29.357, longitude: 113.129, coordType: "gcj02" },
+      { id: "city-yueyang", name: "岳阳", code: "yy", enabled: false, status: "停用", visible: true, sort: 10, latitude: 29.357, longitude: 113.129, coordType: "gcj02" },
       { id: "city-hidden", name: "隐藏城市", status: "运营中", visible: false }
     ],
     shops: [
@@ -56,6 +56,8 @@ function makeSource() {
     ]
   };
 
+  Object.assign(collections, overrides);
+
   const rows = (key) => collections[key] || [];
   return {
     async list(key) { return rows(key).map((item) => ({ ...item, spotIds: Array.isArray(item.spotIds) ? item.spotIds.slice() : item.spotIds })); },
@@ -68,12 +70,11 @@ test("城市和打卡点公共 RPC 按后台城市配置投影", async () => {
 
   const cities = await rpc(source, "getCities", { data: {} });
   assert.equal(cities.success, true);
-  assert.deepEqual(cities.data.map((item) => item._id), ["city-yueyang", "city-changsha"]);
-  assert.equal(cities.data[0].enabled, false);
-  assert.equal(cities.data[0].spotCount, 1);
-  assert.equal(cities.data[1].enabled, true);
-  assert.equal(cities.data[1].spotCount, 2);
-  assert.equal(cities.data[1].shopsCount, 1);
+  assert.deepEqual(cities.data.map((item) => item._id), ["city-changsha"]);
+  assert.equal(cities.data[0].enabled, true);
+  assert.equal(cities.data[0].spotCount, 2);
+  assert.equal(cities.data.some((item) => item._id === "city-yueyang"), false);
+  assert.equal(cities.data[0].shopsCount, 1);
   assert.equal(cities.data.some((item) => item._id === "city-hidden"), false);
 
   const spots = await rpc(source, "getSpots", { data: {} });
@@ -119,6 +120,17 @@ test("城市和打卡点公共 RPC 按后台城市配置投影", async () => {
   assert.deepEqual(home.data.guides.map((item) => item._id), ["guide-multi"]);
   assert.deepEqual(home.data.guides[0].spotIds, ["spot-active"]);
 
+  const cityHome = await rpc(source, "getHomeData", { data: { cityId: "city-changsha" } });
+  assert.equal(cityHome.success, true);
+  assert.equal(cityHome.data.cityId, "city-changsha");
+  assert.equal(cityHome.data.city, "长沙");
+  assert.deepEqual(cityHome.data.spots.map((item) => item._id), ["spot-active", "spot-legacy"]);
+  assert.deepEqual(cityHome.data.packages.map((item) => item._id).sort(), ["package-active", "package-global"]);
+
+  const pendingHome = await rpc(source, "getHomeData", { data: { city: "岳阳" } });
+  assert.equal(pendingHome.success, true);
+  assert.deepEqual(pendingHome.data.spots, []);
+
   const booking = await rpc(source, "getBookingData", { data: {} });
   assert.equal(booking.success, true);
   assert.deepEqual(booking.data.spots.map((item) => item._id), ["spot-active", "spot-legacy"]);
@@ -138,4 +150,54 @@ test("城市和打卡点公共 RPC 按后台城市配置投影", async () => {
   assert.equal(pendingCollection.success, false);
   const pendingPackage = await rpc(source, "getSeriesDetail", { data: { packageId: "package-inherit-pending" } });
   assert.equal(pendingPackage.success, false);
+});
+
+test("城市 enabled 兼容旧 JSON/MySQL 的显式 false 值", async () => {
+  for (const enabled of [false, 0, "0", "false"]) {
+    const source = makeSource({
+      cities: [
+        { id: "city-active", name: "长沙", code: "cs", status: "启用", enabled: true, visible: true },
+        { id: "city-disabled", name: "停用城市", code: "off", status: "启用", enabled, visible: true }
+      ]
+    });
+    const result = await rpc(source, "getCities", { data: {} });
+    assert.equal(result.success, true);
+    assert.deepEqual(result.data.map((item) => item._id), ["city-active"]);
+  }
+});
+
+test("首页热榜按后台热榜排序展示公开点位并限制前五名", async () => {
+  const source = makeSource({
+    spots: [
+      { id: "hot-5", name: "第五名", cityId: "city-changsha", sort: 5, isShow: true, status: "启用" },
+      { id: "hot-3-z", name: "乙点位", cityId: "city-changsha", sort: 3, hotScore: 999, isShow: true, status: "启用" },
+      { id: "hot-2", name: "第二名", cityId: "city-changsha", sort: 2, isShow: true, status: "启用" },
+      { id: "hot-3-a", name: "甲点位", cityId: "city-changsha", sort: 3, hotScore: 1, isShow: true, status: "启用" },
+      { id: "hot-1", name: "第一名", cityId: "city-changsha", sort: 1, isShow: true, status: "启用" },
+      { id: "hot-6", name: "第六名", cityId: "city-changsha", sort: 6, isShow: true, status: "启用" },
+      { id: "hot-hidden", name: "隐藏点位", cityId: "city-changsha", sort: 0, isShow: false, status: "停用" },
+      { id: "hot-yueyang", name: "其他城市", cityId: "city-yueyang", sort: 1, isShow: true, status: "启用" }
+    ]
+  });
+
+  const home = await rpc(source, "getHomeData", { data: { cityId: "city-changsha" } });
+  assert.equal(home.success, true);
+  assert.deepEqual(home.data.hotSpots.map((item) => item._id), ["hot-1", "hot-2", "hot-3-a", "hot-3-z", "hot-5"]);
+  assert.equal(home.data.hotSpots.length, 5);
+  assert.equal(home.data.hotSpots[0].sort, 1);
+  assert.equal(home.data.hotSpots[2].name, "甲点位");
+});
+
+test("首页热榜将未配置或非正数排序的公开点位放在末尾", async () => {
+  const source = makeSource({
+    spots: [
+      { id: "hot-unset", name: "未配置", cityId: "city-changsha", isShow: true, status: "启用" },
+      { id: "hot-negative", name: "负数", cityId: "city-changsha", sort: -1, isShow: true, status: "启用" },
+      { id: "hot-positive", name: "已配置", cityId: "city-changsha", sort: 8, isShow: true, status: "启用" }
+    ]
+  });
+
+  const home = await rpc(source, "getHomeData", { data: { cityId: "city-changsha" } });
+  assert.equal(home.success, true);
+  assert.deepEqual(home.data.hotSpots.map((item) => item._id), ["hot-positive", "hot-negative", "hot-unset"]);
 });

@@ -1,3 +1,11 @@
+<header class="dashboard-page-head">
+  <div>
+    <span class="eyebrow">经营中心</span>
+    <h2>经营看板</h2>
+    <p>按时间、城市和商家查看扫码、订单转化与收款数据。</p>
+  </div>
+</header>
+
 <div class="filter-card dashboard-filter">
   <div class="dashboard-date-shortcuts">
     <button :class="{active:state.dashboardShortcut==='today'}" @click="dashboardSetDateShortcut('today')">今日</button>
@@ -145,6 +153,15 @@
           </div>
         </div>
       </div>
+      <div class="dashboard-panel recent-scan-source-panel">
+        <div class="dashboard-panel-head"><div><h3>最近扫码来源</h3><span>按最近有效扫码记录展示门店与转化状态</span></div></div>
+        <el-table :data="recentScanSources" size="small" stripe empty-text="暂无扫码记录">
+          <el-table-column prop="date" label="日期" width="110" />
+          <el-table-column prop="shopName" label="门店" min-width="120" />
+          <el-table-column prop="sourceName" label="来源" min-width="150" />
+          <el-table-column label="状态" width="90"><template #default="{row}"><el-tag size="small" :type="row.converted ? 'success' : 'info'">{{ row.converted ? '已转化' : '浏览' }}</el-tag></template></el-table-column>
+        </el-table>
+      </div>
     </div>
   </div>
 </div>
@@ -181,7 +198,7 @@
             <strong>{{ money(row.revenue) }}</strong>
           </button>
           <div v-if="!dashboardHotProducts.length" class="lxm-empty">
-            <div class="lxm-empty__mark">鹿</div>
+            <div class="lxm-empty__mark">麓</div>
             <p class="lxm-empty__title">这里暂时空空如也</p>
             <p class="lxm-empty__desc">当前筛选范围暂无有效商品成交，换个时间或渠道看看</p>
           </div>
@@ -197,7 +214,7 @@
             <em>{{ row.risk }}</em>
           </button>
           <div v-if="!dashboardSlowProducts.length" class="lxm-empty">
-            <div class="lxm-empty__mark">鹿</div>
+            <div class="lxm-empty__mark">麓</div>
             <p class="lxm-empty__title">没有风险商品，很安心</p>
             <p class="lxm-empty__desc">近30天暂无滞销商品，继续保持～</p>
           </div>

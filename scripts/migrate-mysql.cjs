@@ -12,6 +12,7 @@ try { require("dotenv").config({ path: path.join(__dirname, "..", ".env"), quiet
 
 const mysql = require("mysql2/promise");
 const schema = require("../server/lib/mysqlSchema.cjs");
+const mysqlDescriptions = require("../server/lib/mysqlDescriptions.cjs");
 
 const root = path.resolve(__dirname, "..");
 const schemaFile = path.join(root, "server", "migrations", "001_authz.sql");
@@ -792,7 +793,7 @@ async function rollback(conn) {
   const relationTables = Object.values(schema.RELATIONS).map((item) => item.table);
   const authTables = ["lxm_auth_user_permissions", "lxm_auth_role_permissions", "lxm_auth_role_menus", "lxm_auth_users", "lxm_auth_menus", "lxm_auth_roles", "lxm_auth_menu_attributes", "lxm_auth_user_attributes", "lxm_auth_menus_normalized", "lxm_auth_users_normalized"];
   const businessTables = businessKeys.flatMap((key) => [schema.tableName(key), `${schema.tableName(key)}_normalized`]);
-  const tables = ["lxm_schema_version", ...authTables, ...relationTables, ...businessTables, "lxm_business_documents"];
+  const tables = ["lxm_schema_version", "lxm_user_favorites", ...authTables, ...relationTables, ...businessTables, "lxm_business_documents"];
   for (const table of [...new Set(tables)]) await execute(conn, `DROP TABLE IF EXISTS ${quote(table)}`);
   return [...new Set(tables)].length;
 }
@@ -821,6 +822,10 @@ async function verifyNormalizedSchema(conn) {
     lxm_auth_menu_attributes: ["menu_id", "attribute_key", "value_type"],
     lxm_auth_user_attributes: ["user_id", "attribute_key", "value_type"]
   };
+  const favoriteColumns = await tableColumns(conn, "lxm_user_favorites");
+  for (const name of ["openid", "favorite_key", "type", "item_id", "type_label", "title", "cover", "price", "spot", "spot_id", "url", "created_at", "updated_at"]) {
+    if (!favoriteColumns.has(name)) missing.push(`lxm_user_favorites.${name}`);
+  }
   for (const [table, names] of Object.entries(authTables)) {
     const columns = await tableColumns(conn, table);
     for (const name of names) if (!columns.has(name)) missing.push(`${table}.${name}`);
@@ -869,6 +874,7 @@ async function main() {
     await widenAuthCoreColumns(conn);
     await migrateLegacyAuth(conn);
     await ensureAuthTimestampDefaults(conn);
+    const descriptions = await mysqlDescriptions.applyMysqlDescriptions(conn);
     await conn.beginTransaction();
     try {
       let migrated = 0;
@@ -885,7 +891,7 @@ async function main() {
       const materializedDocumentsNormalized = await normalizeMaterializedDocuments(conn);
       const verification = await verifyNormalizedSchema(conn);
       await conn.commit();
-      process.stdout.write(JSON.stringify({ mode, database: cfg.database, migrated, importFixture, legacyConverted, legacyLogSnapshots, siteConfigNormalization, financeNormalization, cityIdsBackfilled, lifecycleFlagsNormalized, orphanAttributesRemoved, materializedDocumentsNormalized, authorization, verification, normalized: true }) + "\n");
+    process.stdout.write(JSON.stringify({ mode, database: cfg.database, migrated, importFixture, legacyConverted, legacyLogSnapshots, descriptions: { tables: descriptions.tables }, siteConfigNormalization, financeNormalization, cityIdsBackfilled, lifecycleFlagsNormalized, orphanAttributesRemoved, materializedDocumentsNormalized, authorization, verification, normalized: true }) + "\n");
     } catch (error) { try { await conn.rollback(); } catch (_) {} throw error; }
   } finally { await conn.end(); }
 }

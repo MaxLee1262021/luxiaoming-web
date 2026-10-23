@@ -9,10 +9,11 @@
 const ALL_KEYS = Object.freeze([
   "cities", "agents", "distributors", "shops", "staff", "spots", "series",
   "albums", "samples", "packages", "addonServices", "peripherals", "tagLibrary",
-  "guides", "stories", "scans", "orders", "afterSales", "reconciliationTransfers",
+  "guides", "stories", "scans", "orders", "bookingRequests", "afterSales", "reconciliationTransfers",
   "financeSettings", "monthlyClosings", "adjustmentRecords", "homeConfig", "logs", "trash",
   "merchantCodes", "siteConfig", "userProfiles", "config", "mediaFiles"
 ]);
+const mysqlDescriptions = require("./mysqlDescriptions.cjs");
 
 const KEY_SET = new Set(ALL_KEYS);
 const TABLES = Object.freeze(Object.fromEntries(ALL_KEYS.map((key) => [key, `lxm_${key}`])));
@@ -77,6 +78,13 @@ function withBase(list, options = {}) {
 // Column names intentionally follow the public document keys. This avoids a
 // lossy alias layer for existing callers; internal audit columns use snake case.
 const COLLECTIONS = {
+  // Checkout drafts are internal. Nested snapshots use typed extension leaves;
+  // a small relation below supplies transactional payment uniqueness/indexing.
+  bookingRequests: withBase([
+    ...columns(["openid", "bookingIdempotencyKey", "confirmedOrderId"], S.key),
+    ...columns(["bookingStatus", "status", "workflowStage"], S.status),
+    ...columns(["totalAmount", "depositDue", "depositPaid"], S.money),
+  ], { indexes: ["UNIQUE KEY uq_booking_request_key (bookingIdempotencyKey)"] }),
   // Internal registry: deliberately absent from api.cjs ALL_KEYS / generic CRUD.
   mediaFiles: withBase([
     ...columns(["purpose", "status", "visibility", "ownerKind"], S.status),
@@ -338,6 +346,12 @@ const COLLECTIONS = {
 };
 
 const RELATIONS = {
+  booking_payment_records: {
+    table: "lxm_booking_payment_records",
+    columns: ["booking_id VARCHAR(128) NOT NULL", "record_no INT NOT NULL", "payment_id VARCHAR(128) NULL", "idempotency_key VARCHAR(128) NULL", "out_trade_no VARCHAR(32) NULL", "external_transaction_id VARCHAR(160) NULL"],
+    primary: "PRIMARY KEY (booking_id, record_no)",
+    indexes: ["UNIQUE KEY uq_booking_payment_id (payment_id)", "UNIQUE KEY uq_booking_payment_key (idempotency_key)", "UNIQUE KEY uq_booking_payment_trade (out_trade_no)", "UNIQUE KEY uq_booking_payment_transaction (external_transaction_id)"],
+  },
   account_permissions: {
     table: "lxm_account_permissions",
     columns: ["collection_name VARCHAR(32) NOT NULL", "account_id VARCHAR(128) NOT NULL", "permission_key VARCHAR(128) NOT NULL", "sort_no INT NOT NULL DEFAULT 0"],
@@ -573,6 +587,7 @@ const RELATION_BY_KEY = {
   addonServices: ["addon_package_defaults"],
   peripherals: ["peripheral_spots", "peripheral_specs", "peripheral_images"],
   orders: ["order_contacts", "order_source", "order_package_snapshot", "order_package_snapshot_tags", "order_products", "order_product_snapshots", "order_product_snapshot_tags", "order_addons", "order_status_logs", "order_follow_records", "order_payment_records"],
+  bookingRequests: ["booking_payment_records"],
   afterSales: ["after_sale_logs"],
   logs: ["log_order_exception_snapshots"],
   reconciliationTransfers: ["transfer_orders"],
@@ -664,23 +679,27 @@ function quoteIdentifier(value) {
 }
 
 function statementForTable(table, defs, options = {}) {
-  const body = defs.columns.slice();
+  const body = defs.columns.map(column => {
+    const text = String(column).trim();
+    const name = text.split(/\s+/, 1)[0];
+    return `${text} COMMENT ${mysqlDescriptions.sqlString(mysqlDescriptions.columnComment(name))}`;
+  });
   if (defs.primary) body.push(defs.primary);
   (defs.indexes || []).forEach((index) => body.push(index));
   if (options.audit !== false) {
     body.push("created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)");
     body.push("updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)");
   }
-  return `CREATE TABLE IF NOT EXISTS ${quoteIdentifier(table)} (\n  ${body.join(",\n  ")}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
+  return `CREATE TABLE IF NOT EXISTS ${quoteIdentifier(table)} (\n  ${body.join(",\n  ")}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT=${mysqlDescriptions.sqlString(mysqlDescriptions.descriptionForTable(table))}`;
 }
 
 function schemaStatements() {
   const statements = ["CREATE TABLE IF NOT EXISTS `lxm_schema_version` (version INT NOT NULL PRIMARY KEY, applied_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"];
   for (const key of ALL_KEYS) {
     const def = definition(key);
-    const cols = def.columns.map((item) => `${quoteIdentifier(item.name)} ${item.type}`);
+    const cols = def.columns.map((item) => `${quoteIdentifier(item.name)} ${item.type} COMMENT ${mysqlDescriptions.sqlString(mysqlDescriptions.columnComment(item.name))}`);
     cols.push("PRIMARY KEY (`id`)", "KEY `idx_updated_at` (`updatedAt`)", ...(def.indexes || []));
-    statements.push(`CREATE TABLE IF NOT EXISTS ${quoteIdentifier(def.table || tableName(key))} (\n  ${cols.join(",\n  ")},\n  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),\n  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    statements.push(`CREATE TABLE IF NOT EXISTS ${quoteIdentifier(def.table || tableName(key))} (\n  ${cols.join(",\n  ")},\n  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT ${mysqlDescriptions.sqlString(mysqlDescriptions.columnComment("created_at"))},\n  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT ${mysqlDescriptions.sqlString(mysqlDescriptions.columnComment("updated_at"))}\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT=${mysqlDescriptions.sqlString(mysqlDescriptions.descriptionForTable(def.table || tableName(key)))}`);
   }
   for (const relation of Object.values(RELATIONS)) {
     statements.push(statementForTable(relation.table, relation, { audit: relation !== RELATIONS.collection_values && relation !== RELATIONS.account_permissions }));
@@ -1142,6 +1161,11 @@ function splitDocument(key, document = {}) {
 function materializeRelations(key, input) {
   const out = {};
   const add = (name, rows) => { if (rows.length) out[name] = (out[name] || []).concat(rows); };
+  if (key === "bookingRequests") add("booking_payment_records", (Array.isArray(input.paymentRecords) ? input.paymentRecords : []).map((payment, index) => ({
+    booking_id: String(input.id || input._id || ""), record_no: index,
+    payment_id: payment.id || payment._id || null, idempotency_key: payment.idempotencyKey || null,
+    out_trade_no: payment.outTradeNo || null, external_transaction_id: payment.externalTransactionId || null,
+  })));
   if (key === "shops") {
     const ids = Array.isArray(input.distributorIds) ? input.distributorIds : [];
     const rates = input.distributorRates && typeof input.distributorRates === "object" ? input.distributorRates : {};

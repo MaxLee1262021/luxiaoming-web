@@ -11,6 +11,7 @@
     adjustmentRecordRows,
     afterSaleRecordRows,
     canEditCurrentOrder,
+    canManageOrderRecords,
     computed,
     contentRows,
     currentOperatorName,
@@ -26,6 +27,7 @@
     log,
     normalizeReviewStatus,
     operationLogRows,
+    orderBusinessStatusMeta,
     persistContentMutation,
     persistTrashRecord,
     productAuditRows,
@@ -44,23 +46,8 @@
     watch
   } = ctx;
 
-const WORKFLOW_STATUS_META = {
-  awaiting_confirmation: { label: "待支付", color: "#F97316" },
-  awaiting_deposit: { label: "待支付", color: "#F97316" },
-  awaiting_dispatch: { label: "待安排摄影师", color: "#F59E0B" },
-  awaiting_shoot: { label: "待安排摄影师", color: "#3B82F6" },
-  shooting: { label: "待安排摄影师", color: "#3B82F6" },
-  selection_pending: { label: "已拍摄", color: "#F97316" },
-  awaiting_delivery: { label: "已拍摄", color: "#F97316" },
-  awaiting_final_payment: { label: "已拍摄", color: "#F97316" },
-  paid: { label: "已支付", color: "#10B981" },
-  delivered: { label: "已交付", color: "#10B981" },
-  completed: { label: "已交付", color: "#10B981" },
-  cancelled: { label: "已取消", color: "#6B7280" }
-};
 function orderWorkflowStatusMeta(row) {
-  const stage = String(row && row.workflowStage || "");
-  return WORKFLOW_STATUS_META[stage] || statusMeta(row && row.status);
+  return orderBusinessStatusMeta(row || {});
 }
 function orderWorkflowStatusLabel(row) { return (orderWorkflowStatusMeta(row) || {}).label || "-"; }
 function isFinanceLocked(order) {
@@ -69,7 +56,7 @@ function isFinanceLocked(order) {
 }
 function canOpenOrderForEdit(order) {
   if (!order) return false;
-  return !isOrderCompletedStatus(order) && !isOrderCancelledStatus(order) && !isFinanceLocked(order);
+  return canManageOrderRecords(order) && !isOrderCancelledStatus(order) && !isFinanceLocked(order);
 }
 // 订单锁定原因汇总：订单抽屉顶部「订单锁定提醒」横幅的数据来源。
 // 汇总财务锁定 / 售后处理中 / 风控冻结 / 已完结已取消四类原因，让客服一眼看清当前为什么不能改。
@@ -92,27 +79,8 @@ function canManageOrderAddons(order) {
   return true;
 }
 // 是否可登记定金：编辑权限 + 定金未在审/已审 + 订单未完结未取消 + 无锁定
-function canRegisterDepositPayment(order) {
-  if (!order) return false;
-  if (!canEditCurrentOrder()) return false;
-  if (["待审", "已审"].includes(normalizeReviewStatus(order.depositFinanceStatus))) return false;
-  if (isOrderTerminalStatus(order)) return false;
-  if (isOrderAfterSaleLocked(order) || isFinanceLocked(order) || hasRiskBlock(order)) return false;
-  return true;
-}
-// 定金登记不可用原因：与 canRegisterDepositPayment 一一对应，用于按钮悬浮提示
-function depositPaymentDisabledReason(order) {
-  if (!order) return "当前没有打开的订单";
-  if (!canEditCurrentOrder()) return "当前角色或订单状态不允许编辑收款";
-  const status = normalizeReviewStatus(order.depositFinanceStatus);
-  if (status === "待审") return "定金已提交财务审核，请等待财务确认";
-  if (status === "已审") return "定金已通过财务审核，如需调整请联系财务处理";
-  if (isOrderTerminalStatus(order)) return "订单已完结或取消，不能再登记定金";
-  if (isOrderAfterSaleLocked(order)) return "售后处理中，收款暂不可修改";
-  if (isFinanceLocked(order)) return "财务已锁定该订单，收款暂不可修改";
-  if (hasRiskBlock(order)) return "订单风控冻结中，请联系管理员核实";
-  return "可填写定金金额并确认登记";
-}
+function canRegisterDepositPayment() { return false; }
+function depositPaymentDisabledReason() { return "定金由支付回调确认，后台不修改收款状态"; }
 function selectedOrderActionDisabledReason(rows, action) {
   const list = Array.isArray(rows) ? rows : [];
   if (!list.length) return `请先选择订单再执行${action || "操作"}`;

@@ -199,7 +199,7 @@ function makeFixture() {
   // Synthetic rows make row-level scope assertions meaningful without storing
   // names, phone numbers, addresses, or any other customer data.
   collections.orders["smoke-order-shop"] = {
-    id: "smoke-order-shop", shopId: "smoke-shop", distributorId: "smoke-distributor",
+    id: "smoke-order-shop", assigneeId: "smoke-service", shopId: "smoke-shop", distributorId: "smoke-distributor",
     photographerId: "smoke-photo", status: "new", totalPrice: 100,
   };
   collections.orders["smoke-order-distributor"] = {
@@ -215,7 +215,7 @@ function makeFixture() {
     photographerId: "smoke-photo-other", status: "new", totalPrice: 400,
   };
   collections.orders["smoke-order-completed"] = {
-    id: "smoke-order-completed", shopId: "smoke-shop", distributorId: "smoke-distributor",
+    id: "smoke-order-completed", assigneeId: "smoke-service", shopId: "smoke-shop", distributorId: "smoke-distributor",
     photographerId: "smoke-photo", status: "completed", customerStatus: "已完成", totalPrice: 100,
   };
   collections.orders["smoke-order-deleted"] = {
@@ -245,9 +245,9 @@ function makeFixture() {
   collections.financeSettings["global"] = { id: "global", settlementObservationDays: 3, largeSettlementThreshold: 5000 };
   collections.siteConfig["customPrice"] = { id: "customPrice", baseHours: 1, singlePersonPrice: 200, perExtraPerson: 100 };
   collections.siteConfig["bookingNotice"] = { id: "bookingNotice", 0: "Synthetic notice" };
-  collections.siteConfig["global"] = {
+  collections.siteConfig["global"] = { bookingNoticeVersion: "smoke-v1",
     id: "global",
-    customPrice: { singlePersonPrice: 200, perExtraPerson: 100 },
+    customPrice: { singlePersonPrice: 200, perExtraPerson: 100, depositRatio: 30 },
     privacyPolicy: {
       title: "Synthetic Privacy", content: "Synthetic legal text",
       sections: [{ title: "Public section", content: "Public body", secretToken: "synthetic-privacy-secret" }],
@@ -340,6 +340,36 @@ function authHeaders(token) {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+async function confirmFixtureBooking(baseUrl, token, response) {
+  const draft = response && (response.data || response);
+  assert.ok(draft && draft.bookingId, "booking must return an independent payment draft");
+  assert.equal(draft.bookingStatus, "pending_payment");
+  assert.equal(Boolean(response.orderId || draft.orderId), false, "unpaid booking must not return an order id");
+  const beforePayment = await requestJson(baseUrl, "/api/rpc/getMyOrders", {
+    method: "POST", headers: authHeaders(token), body: { data: {} },
+  });
+  assert.equal(beforePayment.body && beforePayment.body.success, true);
+  assert.equal(responseRows(beforePayment.body).some((row) => [row.id, row._id, row.bookingId].includes(draft.bookingId)), false,
+    "an unpaid booking must not appear in customer order history");
+  const idempotencyKey = `smoke-booking-payment-${draft.bookingId}`;
+  const paid = await requestJson(baseUrl, "/api/rpc/testPayment", {
+    method: "POST", headers: authHeaders(token),
+    body: { data: { bookingId: draft.bookingId, phase: "deposit", idempotencyKey } },
+  });
+  assert.equal(paid.status, 200);
+  assert.equal(paid.body && paid.body.success, true, `isolated fixture payment: ${JSON.stringify(paid.body)}`);
+  const confirmed = paid.body.data || paid.body;
+  assert.equal(confirmed.bookingStatus, "confirmed");
+  assert.ok(confirmed.orderId, "confirmed deposit must produce a formal order id");
+  const replay = await requestJson(baseUrl, "/api/rpc/testPayment", {
+    method: "POST", headers: authHeaders(token),
+    body: { data: { bookingId: draft.bookingId, phase: "deposit", idempotencyKey } },
+  });
+  assert.equal(replay.body && replay.body.success, true);
+  assert.equal((replay.body.data || replay.body).orderId, confirmed.orderId, "replayed payment must reuse the formal order");
+  return confirmed;
+}
+
 function responseRows(body) {
   if (Array.isArray(body)) return body;
   if (body && Array.isArray(body.data)) return body.data;
@@ -422,6 +452,7 @@ function spawnServer(root, fixtureFile, options = {}) {
     // Explicitly enable the in-process payment stub only for this isolated
     // NODE_ENV=test fixture. Production cannot activate this code path.
     WECHAT_PAY_MOCK_MODE: "true",
+    TEST_PAYMENT_ENABLED: "true",
     ...(fs.existsSync(localNodeModules) ? { NODE_PATH: localNodeModules } : {}),
     ...(options.env || {}),
   });
@@ -511,6 +542,14 @@ async function login(baseUrl, account) {
 async function runRoleMatrix(report, baseUrl, fixture) {
   for (const [role, matrix] of Object.entries(ROLE_MATRIX)) {
     const account = fixture.accounts[role];
+    if (role === "photo") {
+      await check(report, "photographer accounts cannot log in", async () => {
+        const result = await requestJson(baseUrl, "/api/auth/login", { method: "POST", body: { account: account.account, password: account.password } });
+        assert.equal(result.status, 403);
+        assert.equal(result.body.code, "PHOTOGRAPHER_LOGIN_DISABLED");
+      });
+      continue;
+    }
     let token = null;
     const loggedIn = await check(report, `role ${role}: login contract`, async () => {
       token = await login(baseUrl, account);
@@ -625,7 +664,7 @@ async function runSmoke(options = {}) {
       contactPhones: ["13800138000"], wechat: "wx-private", customerWechat: "wx-private",
       source: { codeId: "private-code", distributorId: "private-distributor" }, sourceCodeId: "private-code",
       internalNote: "private note", paymentRecords: [{ amount: 100, operator: "finance" }],
-      customer: { name: "Synthetic User", phone: "13800138000", openid: "nested-openid" },
+      customer: { agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-01-02", expectedTimePeriod: "上午", name: "Synthetic User", phone: "13800138000", openid: "nested-openid" },
       packageSnapshot: { phone: "13800138000", internalNote: "nested-note" },
       items: [{ packageId: "smoke-package", name: "Smoke Package", price: 100, internalCost: 1 }],
       createTime: new Date().toISOString(),
@@ -803,7 +842,7 @@ async function runSmoke(options = {}) {
       assert.ok(publicToken, "public login token is required");
       const forged = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
         method: "POST", headers: authHeaders(publicToken), body: { data: {
-          name: "Synthetic User", phone: "13800000000", date: "2099-01-02", time: "11:00",
+          agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-01-02", expectedTimePeriod: "上午", name: "Synthetic User", phone: "13800000000", date: "2099-01-02", time: "11:00",
           codeId: "not-a-real-code", shopId: "smoke-shop-other", distributorId: "forged-distributor",
           items: [{ packageId: "smoke-package" }]
         } }
@@ -815,23 +854,63 @@ async function runSmoke(options = {}) {
       assert.equal(disabled.body && disabled.body.success, false, "disabled merchant code must not resolve");
       const validWithForgedFields = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
         method: "POST", headers: authHeaders(publicToken), body: { data: {
-          name: "Synthetic User", phone: "13800000000", date: "2099-01-03", time: "11:00",
+          agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-01-02", expectedTimePeriod: "上午", name: "Synthetic User", phone: "13800000000", date: "2099-01-03", time: "11:00",
           codeId: "smoke-code", shopId: "smoke-shop-other", distributorId: "forged-distributor",
           items: [{ packageId: "smoke-package" }]
         } }
       });
       assert.equal(validWithForgedFields.body && validWithForgedFields.body.success, true, "valid code should still allow booking");
+      const confirmed = await confirmFixtureBooking(server.baseUrl, publicToken, validWithForgedFields.body);
       const orders = await requestJson(server.baseUrl, "/api/collection/orders", { headers: authHeaders(superToken) });
-      const created = responseRows(orders.body).find((row) => row && row.id === validWithForgedFields.body.orderId);
+      const created = responseRows(orders.body).find((row) => row && row.id === confirmed.orderId);
       assert.ok(created, "validated booking must be persisted");
       assert.equal(created.shopId, "smoke-shop", "server must use code-owned shop");
       assert.equal(created.distributorId, "smoke-distributor", "server must ignore forged distributor");
+    });
+    await check(report, "admin cannot bypass deposit checkout by creating an unpaid order", async () => {
+      const result = await requestJson(server.baseUrl, "/api/collection/orders", {
+        method: "POST", headers: authHeaders(superToken), body: {
+          orderNo: "SMOKE-UNPAID-BYPASS", status: "deposit_pending", depositDue: 30, totalAmount: 100,
+        },
+      });
+      assert.ok([403, 409].includes(result.status), "direct order creation must be rejected even for an administrator");
+    });
+    await check(report, "customer can safely close an unpaid checkout before editing the booking", async () => {
+      const suffix = crypto.randomBytes(5).toString("hex");
+      const created = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
+        method: "POST", headers: authHeaders(publicToken), body: { data: {
+          agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-03-01", expectedTimePeriod: "上午",
+          name: "Edit User", phone: "13800000000", items: [{ packageId: "smoke-package" }],
+          idempotencyKey: `smoke-edit-booking-${suffix}`,
+        } },
+      });
+      assert.equal(created.body && created.body.success, true);
+      const bookingId = (created.body.data || created.body).bookingId;
+      const payment = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
+        method: "POST", headers: authHeaders(publicToken),
+        body: { data: { bookingId, phase: "deposit", idempotencyKey: `smoke-edit-payment-${suffix}` } },
+      });
+      assert.equal(payment.body && payment.body.success, true);
+      const unauthenticated = await requestJson(server.baseUrl, "/api/rpc/cancelBooking", {
+        method: "POST", body: { data: { bookingId } },
+      });
+      assert.equal(unauthenticated.status, 401);
+      const cancelled = await requestJson(server.baseUrl, "/api/rpc/cancelBooking", {
+        method: "POST", headers: authHeaders(publicToken), body: { data: { bookingId } },
+      });
+      assert.equal(cancelled.body && cancelled.body.success, true, `cancel checkout: ${JSON.stringify(cancelled.body)}`);
+      assert.equal((cancelled.body.data || cancelled.body).bookingStatus, "cancelled");
+      const blocked = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
+        method: "POST", headers: authHeaders(publicToken),
+        body: { data: { bookingId, phase: "deposit", idempotencyKey: `smoke-cancelled-payment-${suffix}` } },
+      });
+      assert.equal(blocked.body && blocked.body.success, false, "a cancelled checkout cannot open another payment");
     });
     await check(report, "public booking enforces package conflicts after product-type alias normalization", async () => {
       assert.ok(publicToken, "public login token is required");
       const result = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
         method: "POST", headers: authHeaders(publicToken), body: { data: {
-          name: "Synthetic User", phone: "13800000000", date: "2099-01-04", time: "11:00", codeId: "smoke-code",
+          agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-01-02", expectedTimePeriod: "上午", name: "Synthetic User", phone: "13800000000", date: "2099-01-04", time: "11:00", codeId: "smoke-code",
           items: [
             { productId: "smoke-package", productType: "video_package" },
             { productId: "smoke-package-conflict", productType: "photo_package" },
@@ -878,7 +957,7 @@ async function runSmoke(options = {}) {
       assert.equal(aliasDashboard.body.orders, 5, "channel scope must follow distributorId relation when account id differs");
     });
       await check(report, "non-super roles cannot read global audit logs", async () => {
-      for (const role of ["service", "finance", "photo", "merchant", "distributor", "content", "agentOnly"]) {
+      for (const role of ["service", "finance", "merchant", "distributor", "content", "agentOnly"]) {
         const token = await login(server.baseUrl, fixture.accounts[role]);
         const result = await requestJson(server.baseUrl, "/api/collection/logs", { headers: authHeaders(token) });
         assert.equal(result.status, 403, `${role} must not read global audit logs`);
@@ -1014,10 +1093,8 @@ async function runSmoke(options = {}) {
       });
       await check(report, "restricted order responses redact contact aliases", async () => {
         const merchantToken = await login(server.baseUrl, fixture.accounts.merchant);
-        const photoToken = await login(server.baseUrl, fixture.accounts.photo);
         const paths = [
           ["merchant", merchantToken, ["phone", "contactPhone", "customerPhone", "contactPhones", "extraPhones"]],
-          ["photo", photoToken, ["phone", "contactPhone", "customerPhone", "contactPhones", "extraPhones"]],
         ];
         const rawPhones = new Set(["13800138000", "13900139000", "13700137000", "13600136000", "13500135000", "13400134000"]);
         for (const [role, token, fields] of paths) {
@@ -1246,7 +1323,7 @@ async function runSmoke(options = {}) {
           headers: authHeaders(publicToken),
           body: {
             data: {
-              name: "Synthetic User",
+              agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-01-02", expectedTimePeriod: "上午", name: "Synthetic User",
               phone: "13800000000",
               date: "2099-01-01",
               time: "10:00",
@@ -1258,15 +1335,16 @@ async function runSmoke(options = {}) {
         });
         assert.equal(result.status, 200);
         assert.equal(result.body && result.body.success, true, "verified public booking must succeed");
+        const confirmed = await confirmFixtureBooking(server.baseUrl, publicToken, result.body);
         const orders = await requestJson(server.baseUrl, "/api/collection/orders", { headers: authHeaders(superToken) });
-        const created = responseRows(orders.body).find((row) => row && (row.id === result.body.orderId || row._id === result.body.orderId));
+        const created = responseRows(orders.body).find((row) => row && (row.id === confirmed.orderId || row._id === confirmed.orderId));
         assert.ok(created, "created booking must be readable by admin");
         assert.equal(created.openid, "dev_openid", "booking identity must come from the verified public session");
         assert.equal(created.sourceCodeId, "smoke-code", "source code must be persisted for attribution");
         assert.equal(created.source && created.source.codeId, "smoke-code", "nested source code must be persisted");
         assert.equal(created.totalPrice, 100, "booking total must be calculated from the server product price");
-        persistedBookingId = result.body.orderId;
-        return result.body.orderId;
+        persistedBookingId = confirmed.orderId;
+        return confirmed.orderId;
       });
 
       await check(report, "public after-sale creates an independent ticket", async () => {
@@ -1307,65 +1385,61 @@ async function runSmoke(options = {}) {
         assert.equal(bypass.status, 403, "generic after-sale PUT must be rejected");
       });
 
-      await check(report, "booking, deposit, offline selection, final payment and delivery persist end to end", async () => {
+      await check(report, "deposit before order creation, claim, service start, final completion and independent delivery persist end to end", async () => {
         assert.ok(publicToken, "public login token is required");
         const suffix = crypto.randomBytes(5).toString("hex");
         const booking = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
           method: "POST", headers: authHeaders(publicToken), body: { data: {
-            name: "Workflow User", phone: "13800000000", items: [{ packageId: "smoke-package" }],
+            agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-02-01", expectedTimePeriod: "上午", name: "Workflow User", phone: "13800000000", items: [{ packageId: "smoke-package" }],
             idempotencyKey: `workflow-booking-${suffix}`,
           } },
         });
         assert.equal(booking.status, 200);
         assert.equal(booking.body && booking.body.success, true);
-        const orderId = booking.body.orderId;
-        assert.ok(orderId, "workflow booking must return an order id");
-
-        const initial = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
-          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
-        });
-        assert.equal(initial.status, 200);
-        assert.equal(initial.body && initial.body.data && initial.body.data.workflowStage, "awaiting_deposit");
-        assert.equal(Number(initial.body && initial.body.data && initial.body.data.depositDue), 30, "default deposit must be 30 percent");
-        assert.equal(initial.body && initial.body.data && initial.body.data.paymentPhase, "deposit");
+        const draft = booking.body.data || booking.body;
+        const bookingId = draft.bookingId;
+        assert.ok(bookingId, "workflow booking must return a payment draft id");
+        assert.equal(draft.bookingStatus, "pending_payment");
+        assert.equal(Boolean(booking.body.orderId || draft.orderId), false, "unpaid booking must not create an order");
+        assert.equal(Number(draft.depositDue), 30, "default deposit must be 30 percent");
 
         const depositIntentKey = `workflow-deposit-intent-${suffix}`;
         const depositIntent = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
-          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
+          method: "POST", headers: authHeaders(publicToken), body: { data: { bookingId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
         });
         assert.equal(depositIntent.status, 200);
         assert.equal(depositIntent.body && depositIntent.body.success, true, "deposit can be initiated without a customer-selected time");
 
         const serviceToken = await login(server.baseUrl, fixture.accounts.service);
         const financeToken = await login(server.baseUrl, fixture.accounts.finance);
-        const photoToken = await login(server.baseUrl, fixture.accounts.photo);
-        const actionPath = `/api/orders/${encodeURIComponent(orderId)}/action`;
+        const photoToken = serviceToken;
         assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.provider, "wechat_pay");
         assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.invokeWeChatPay, true);
         assert.ok(depositIntent.body && depositIntent.body.data && depositIntent.body.data.paymentParams, "test gateway must return signed payment-shaped parameters");
         const duplicateIntent = await requestJson(server.baseUrl, "/api/rpc/createPaymentIntent", {
-          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
+          method: "POST", headers: authHeaders(publicToken), body: { data: { bookingId, phase: "deposit", amount: 30, idempotencyKey: depositIntentKey } },
         });
         assert.equal(duplicateIntent.status, 200, `duplicate deposit intent: ${JSON.stringify(duplicateIntent.body)}`);
         assert.equal(duplicateIntent.body && duplicateIntent.body.data && duplicateIntent.body.data.idempotent, true);
-        const assignBeforeDeposit = await requestJson(server.baseUrl, actionPath, {
+        const assignBeforeDeposit = await requestJson(server.baseUrl, `/api/orders/${encodeURIComponent(bookingId)}/action`, {
           method: "POST", headers: authHeaders(serviceToken), body: { action: "assign", photographerId: "smoke-photo", appointmentAt: "2099-02-01", timePeriod: "10:00", appointmentLocation: "Smoke Studio", peopleCount: 2, reason: "workflow before deposit" },
         });
-        assert.equal(assignBeforeDeposit.status, 409, "dispatch must wait for deposit confirmation");
-
-        const registerDeposit = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(serviceToken), body: { action: "payment", phase: "deposit", paymentStatus: "pending", amount: 30, idempotencyKey: `workflow-deposit-register-${suffix}`, reason: "workflow register deposit" },
+        assert.equal(assignBeforeDeposit.status, 404, "unpaid draft must not be addressable as an order");
+        const pending = await requestJson(server.baseUrl, "/api/rpc/getPaymentStatus", {
+          method: "POST", headers: authHeaders(publicToken), body: { data: { bookingId, phase: "deposit" } },
         });
-        assert.equal(registerDeposit.status, 200, `service must register the public payment placeholder for finance review: ${JSON.stringify(registerDeposit.body)}`);
-        const registeredOrder = await requestJson(server.baseUrl, `/api/collection/orders/${encodeURIComponent(orderId)}`, { headers: authHeaders(superToken) });
-        assert.equal(registeredOrder.status, 200);
-        assert.equal(Number(registeredOrder.body.depositPaid), 30);
-        assert.equal(registeredOrder.body.depositFinanceStatus, "待审");
-
-        const confirmDeposit = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(financeToken), body: { action: "payment", phase: "deposit", paymentStatus: "confirmed", amount: 30, idempotencyKey: `workflow-deposit-confirm-${suffix}`, externalTransactionId: `workflow-deposit-tx-${suffix}`, reason: "workflow confirm deposit" },
+        assert.equal(pending.body && pending.body.data && pending.body.data.bookingStatus, "pending_payment");
+        assert.equal(Boolean(pending.body && pending.body.data && pending.body.data.orderId), false);
+        const confirmed = await confirmFixtureBooking(server.baseUrl, publicToken, booking.body);
+        const orderId = confirmed.orderId;
+        const initial = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
+          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
         });
-        assert.equal(confirmDeposit.status, 200, `finance deposit confirmation: ${JSON.stringify(confirmDeposit.body)}`);
+        assert.equal(initial.body && initial.body.data && initial.body.data.workflowStage, "awaiting_dispatch");
+        assert.equal(initial.body && initial.body.data && initial.body.data.canPayDeposit, false);
+        const actionPath = `/api/orders/${encodeURIComponent(orderId)}/action`;
+        const claimed = await requestJson(server.baseUrl, actionPath, { method: "POST", headers: authHeaders(serviceToken), body: { action: "claim", reason: "workflow claim" } });
+        assert.equal(claimed.status, 200);
         const assigned = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(serviceToken), body: { action: "assign", photographerId: "smoke-photo", appointmentAt: "2099-02-01", timePeriod: "10:00", appointmentLocation: "Smoke Studio", peopleCount: 2, confirmationMethod: "企业微信", customerConfirmationNote: "游客已确认", reason: "workflow assign photographer" },
         });
@@ -1374,12 +1448,11 @@ async function runSmoke(options = {}) {
         assert.equal((assigned.body && assigned.body.data && assigned.body.data.appointmentLocation), "Smoke Studio");
 
         const taskAccepted = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(photoToken), body: { action: "taskaccept", reason: "workflow photographer accepts task" },
+          method: "POST", headers: authHeaders(superToken), body: { action: "taskaccept", reason: "workflow photographer accepts task" },
         });
-        assert.equal(taskAccepted.status, 200, `photographer task acceptance: ${JSON.stringify(taskAccepted.body)}`);
-        assert.equal(taskAccepted.body && taskAccepted.body.data && taskAccepted.body.data.taskStatus, "accepted");
+        assert.equal(taskAccepted.status, 403, "legacy photographer acceptance is not required or permitted for service accounts");
 
-        for (const [action, reason] of [["start", "workflow start shooting"], ["shootComplete", "workflow complete shooting"], ["selectionConfirm", "workflow selection confirm"]]) {
+        for (const [action, reason] of [["start", "workflow start shooting"]]) {
           const response = await requestJson(server.baseUrl, actionPath, { method: "POST", headers: authHeaders(photoToken), body: { action, reason } });
           assert.equal(response.status, 200, `${action} must succeed for assigned photographer: ${JSON.stringify(response.body)}`);
         }
@@ -1387,17 +1460,17 @@ async function runSmoke(options = {}) {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
         });
         assert.equal(beforeFinal.status, 200);
-        assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.workflowStage, "awaiting_final_payment");
+        assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.workflowStage, "shooting");
         assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.paymentPhase, "final");
         assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.deliveryRecord, undefined);
 
         const finalIntent = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
-          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", amount: 70, idempotencyKey: `workflow-final-intent-${suffix}` } },
+          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", selectionAccepted: true, amount: 70, idempotencyKey: `workflow-final-intent-${suffix}` } },
         });
         assert.equal(finalIntent.status, 200, `final intent: ${JSON.stringify(finalIntent.body)}`);
         assert.equal(finalIntent.body && finalIntent.body.data && finalIntent.body.data.invokeWeChatPay, true);
         const confirmFinal = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(financeToken), body: { action: "payment", phase: "final", paymentStatus: "confirmed", amount: 70, idempotencyKey: `workflow-final-confirm-${suffix}`, externalTransactionId: `workflow-final-tx-${suffix}`, reason: "workflow confirm final" },
+          method: "POST", headers: authHeaders(financeToken), body: { action: "payment", phase: "final", selectionAccepted: true, paymentStatus: "confirmed", amount: 70, idempotencyKey: `workflow-final-confirm-${suffix}`, externalTransactionId: `workflow-final-tx-${suffix}`, reason: "workflow confirm final" },
         });
         assert.equal(confirmFinal.status, 200, `finance final confirmation: ${JSON.stringify(confirmFinal.body)}`);
         const delivered = await requestJson(server.baseUrl, actionPath, {
@@ -1409,7 +1482,7 @@ async function runSmoke(options = {}) {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
         });
         assert.equal(finalDetail.status, 200);
-        assert.equal(finalDetail.body && finalDetail.body.data && finalDetail.body.data.workflowStage, "delivered");
+        assert.equal(finalDetail.body && finalDetail.body.data && finalDetail.body.data.workflowStage, "completed");
         assert.equal(finalDetail.body && finalDetail.body.data && finalDetail.body.data.paymentPhase, "");
         assert.equal(Object.prototype.hasOwnProperty.call(finalDetail.body && finalDetail.body.data || {}, "paymentRecords"), false);
         assert.equal(JSON.stringify(finalDetail.body && finalDetail.body.data && finalDetail.body.data.statusTimeline || []).includes("operatorId"), false);
@@ -1417,6 +1490,28 @@ async function runSmoke(options = {}) {
 
       const marker = `smoke-${crypto.randomBytes(10).toString("hex")}`;
       const persistId = `smoke-persist-${crypto.randomBytes(6).toString("hex")}`;
+      const pendingBookingRequest = {
+        agreement: { version: "smoke-v1", current: true }, expectedDate: "2099-02-02", expectedTimePeriod: "上午",
+        name: "Resume User", phone: "13800000000", items: [{ packageId: "smoke-package" }],
+        idempotencyKey: `smoke-resume-${crypto.randomBytes(8).toString("hex")}`,
+      };
+      let pendingBookingId = "";
+      await check(report, "unpaid booking is persisted separately before server restart", async () => {
+        const created = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
+          method: "POST", headers: authHeaders(publicToken), body: { data: pendingBookingRequest },
+        });
+        assert.equal(created.body && created.body.success, true);
+        const draft = created.body.data || created.body;
+        pendingBookingId = draft.bookingId;
+        assert.ok(pendingBookingId);
+        assert.equal(draft.bookingStatus, "pending_payment");
+        const intent = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
+          method: "POST", headers: authHeaders(publicToken),
+          body: { data: { bookingId: pendingBookingId, phase: "deposit", idempotencyKey: `smoke-resume-pay-${pendingBookingId}` } },
+        });
+        assert.equal(intent.body && intent.body.success, true);
+        assert.equal(intent.body && intent.body.data && intent.body.data.status, "pending");
+      });
       await check(report, "JSON write accepted for persistence probe", async () => {
         const result = await requestJson(server.baseUrl, `/api/doc/siteConfig/${encodeURIComponent(persistId)}`, {
           method: "PUT",
@@ -1440,6 +1535,24 @@ async function runSmoke(options = {}) {
         assert.ok(responseRows(orders.body).some((row) => row && (row.id === persistedBookingId || row._id === persistedBookingId)), "created booking must persist after restart");
         const tickets = await requestJson(server.baseUrl, "/api/collection/afterSales", { headers: authHeaders(activeSuperToken) });
         assert.ok(responseRows(tickets.body).some((row) => row && (row.id === persistedTicketId || row._id === persistedTicketId)), "after-sale ticket must persist after restart");
+      });
+      await check(report, "pending deposit checkout resumes after restart and creates only one order", async () => {
+        const session = await requestJson(server.baseUrl, "/api/rpc/login", { method: "POST", body: {} });
+        assert.equal(session.body && session.body.success, true);
+        const resumedToken = session.body.token;
+        const resumed = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
+          method: "POST", headers: authHeaders(resumedToken), body: { data: pendingBookingRequest },
+        });
+        assert.equal(resumed.body && resumed.body.success, true);
+        assert.equal((resumed.body.data || resumed.body).bookingId, pendingBookingId, "same request must resume its persisted checkout");
+        const status = await requestJson(server.baseUrl, "/api/rpc/getPaymentStatus", {
+          method: "POST", headers: authHeaders(resumedToken), body: { data: { bookingId: pendingBookingId, phase: "deposit" } },
+        });
+        assert.equal(status.body && status.body.data && status.body.data.bookingStatus, "pending_payment");
+        const confirmed = await confirmFixtureBooking(server.baseUrl, resumedToken, resumed.body);
+        const orders = await requestJson(server.baseUrl, "/api/collection/orders", { headers: authHeaders(activeSuperToken) });
+        assert.equal(responseRows(orders.body).filter((row) => row.bookingId === pendingBookingId).length, 1);
+        assert.ok(responseRows(orders.body).some((row) => row.id === confirmed.orderId));
       });
 
       await checkOptional(report, "auth/me contract (optional endpoint)", async () => {

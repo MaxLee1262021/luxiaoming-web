@@ -214,6 +214,44 @@
       return !userPhoneError.value;
     }
 
+    function onUserPhoneInput(value) {
+      const digits = text(value).replace(/\D/g, "").slice(0, 11);
+      userForm.phone = digits;
+      if (digits) validateUserPhone(digits);
+      else userPhoneError.value = "";
+    }
+
+    function goPermissionTab(tab) {
+      activeTab.value = tab;
+    }
+
+    function showPermissionPrinciple() {
+      ElMessage.info("按最小授权原则分配菜单权限；停用账号后立即失效。点击菜单、角色或人员统计卡可查看对应明细。");
+    }
+
+    async function copyText(value, label = "文本") {
+      const content = text(value).trim();
+      if (!content || content === "-") return;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(content);
+        } else {
+          const input = document.createElement("textarea");
+          input.value = content;
+          input.setAttribute("readonly", "");
+          input.style.position = "fixed";
+          input.style.opacity = "0";
+          document.body.appendChild(input);
+          input.select();
+          document.execCommand("copy");
+          input.remove();
+        }
+        ElMessage.success(`${label}已复制`);
+      } catch (error) {
+        ElMessage.warning(`复制${label}失败，请手动选择文本`);
+      }
+    }
+
     function normalizeRows(rows, prefix) {
       return unwrapRows(rows).map((row, index) => ({
         ...(row || {}),
@@ -543,7 +581,8 @@
       userPhoneError,
       menuDialog, roleDialog, userDialog, passwordDialog, selectedRoleId,
       applyMenuFilters, resetMenuFilters, selectMenuGroup, applyRoleFilters, resetRoleFilters, applyUserFilters, resetUserFilters,
-      validateUserPhone, openMenu, openChildMenu, changeMenuLevel, saveMenu, toggleMenu, deleteMenu, selectRole, openRole, editSelectedRole, saveRole, toggleRole, deleteRole,
+      validateUserPhone, onUserPhoneInput, copyText, goPermissionTab, showPermissionPrinciple,
+      openMenu, openChildMenu, changeMenuLevel, saveMenu, toggleMenu, deleteMenu, selectRole, openRole, editSelectedRole, saveRole, toggleRole, deleteRole,
       openUser, saveUser, openPassword, savePassword, toggleUser, deleteUser, userRoleName, menuLabel, roleLabel, routeLabel, loadAll
     };
   }

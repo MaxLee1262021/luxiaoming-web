@@ -5,6 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const childProcess = require("child_process");
+const crypto = require("crypto");
 const zlib = require("zlib");
 
 function parseOptions(args) {
@@ -26,7 +27,7 @@ function resolveOutputs(workspace, packageName) {
   const parent = path.resolve(workspace);
   const outputRoot = path.resolve(parent, packageName);
   if (path.dirname(outputRoot) !== parent) throw new Error("Package output must stay inside the workspace.");
-  return { outputRoot, tarFile: outputRoot + ".tar", archiveFile: outputRoot + ".tar.gz" };
+  return { outputRoot, tarFile: outputRoot + ".tar", archiveFile: outputRoot + ".tar.gz", checksumFile: outputRoot + ".tar.gz.sha256" };
 }
 
 function assertOutputsAvailable(outputs) {
@@ -40,7 +41,7 @@ function packageLinux(options) {
   const workspace = path.resolve(root, "..");
   const packageName = options.name;
   const outputs = resolveOutputs(workspace, packageName);
-  const { outputRoot, tarFile, archiveFile } = outputs;
+  const { outputRoot, tarFile, archiveFile, checksumFile } = outputs;
   const tarFileName = path.basename(tarFile);
   const bundledGnuTar = "C:\\Program Files\\Git\\usr\\bin\\tar.exe";
   const tarExecutable = process.env.TAR || (process.platform === "win32" && fs.existsSync(bundledGnuTar) ? bundledGnuTar : "tar");
@@ -53,6 +54,8 @@ function packageLinux(options) {
     "docs/OSS接入与迁移.md",
     "docs/oss-ram-policy.json",
     "docs/微信支付接入说明.md",
+    "docs/最新订单流程与迁移.md",
+    "docs/后台发布打包规范.md",
     ...(options.includeEnv ? [".env"] : [])
   ];
   const includeDirectories = ["public", "src", "server", "scripts", "deploy"];
@@ -93,16 +96,21 @@ function packageLinux(options) {
     });
   }
 
-for (const script of [
-  path.join(outputRoot, "deploy", "linux", "install.sh"),
-  path.join(outputRoot, "deploy", "linux", "start.sh")
-]) {
-  // The source tree is edited on Windows and may carry CRLF. Linux parses the
-  // shebang literally, so normalize release launchers before archiving them.
-  const scriptText = fs.readFileSync(script, "utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  fs.writeFileSync(script, scriptText, { encoding: "utf8" });
-  fs.chmodSync(script, 0o755);
-}
+  const shellScripts = [];
+  function normalizeShellScripts(directory) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const script = path.join(directory, entry.name);
+      if (entry.isDirectory()) normalizeShellScripts(script);
+      else if (entry.isFile() && entry.name.endsWith(".sh")) {
+        // Normalize all deployment scripts, including future update helpers.
+        const scriptText = fs.readFileSync(script, "utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+        fs.writeFileSync(script, scriptText, { encoding: "utf8" });
+        fs.chmodSync(script, 0o755);
+        shellScripts.push(`${packageName}/${path.relative(outputRoot, script).split(path.sep).join("/")}`);
+      }
+    }
+  }
+  normalizeShellScripts(path.join(outputRoot, "deploy", "linux"));
   if (options.includeEnv) fs.chmodSync(path.join(outputRoot, ".env"), 0o600);
 
   function runTar(args) {
@@ -122,8 +130,7 @@ for (const script of [
     tarFileName,
     "--format=gnu",
     `--exclude=${packageName}/.env`,
-    `--exclude=${packageName}/deploy/linux/install.sh`,
-    `--exclude=${packageName}/deploy/linux/start.sh`,
+    ...shellScripts.map((script) => `--exclude=${script}`),
     packageName
   ]);
   // Windows file modes are not portable. Append authoritative POSIX entries so
@@ -134,14 +141,15 @@ for (const script of [
     "--mode=0755",
     "-f",
     tarFileName,
-    `${packageName}/deploy/linux/install.sh`,
-    `${packageName}/deploy/linux/start.sh`
+    ...shellScripts
   ]);
   if (options.includeEnv) runTar(["--append", "--format=gnu", "--mode=0600", "-f", tarFileName, `${packageName}/.env`]);
   fs.writeFileSync(archiveFile, zlib.gzipSync(fs.readFileSync(tarFile), { level: zlib.constants.Z_BEST_COMPRESSION }), { flag: "wx", mode: 0o600 });
   fs.unlinkSync(tarFile);
+  const checksum = crypto.createHash("sha256").update(fs.readFileSync(archiveFile)).digest("hex");
+  fs.writeFileSync(checksumFile, `${checksum}  ${path.basename(archiveFile)}\n`, { flag: "wx", mode: 0o600 });
 
-  return { directory: outputRoot, archive: archiveFile, includesEnv: options.includeEnv };
+  return { directory: outputRoot, archive: archiveFile, checksum: checksumFile, includesEnv: options.includeEnv };
 }
 
 if (require.main === module) {

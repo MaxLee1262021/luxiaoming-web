@@ -36,10 +36,21 @@ window.LXM_PAGES.register({
     }
 
     function dashboardSetDateShortcut(kind) {
-      // 时间快捷：近 7/30/90 天，更新 state.filters.dashboardDate
       if (!state.filters) state.filters = {};
-      const map = { "7d": 7, "30d": 30, "90d": 90 };
-      state.filters.dashboardDays = map[kind] || 30;
+      const now = new Date();
+      const format = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const start = new Date(end);
+      if (kind === "yesterday") {
+        start.setDate(start.getDate() - 1);
+        end.setDate(end.getDate() - 1);
+      } else if (kind === "7") {
+        start.setDate(start.getDate() - 6);
+      } else if (kind === "30") {
+        start.setDate(start.getDate() - 29);
+      }
+      state.filters.dateRange = [format(start), format(end)];
+      state.dashboardShortcut = kind;
       if (typeof ctx.refreshDashboard === "function") ctx.refreshDashboard();
     }
 

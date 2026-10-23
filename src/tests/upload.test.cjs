@@ -127,7 +127,8 @@ function businessFixture(role = "photo") {
     ElMessageBox: { confirm: async () => {} },
     isOrderAfterSaleLocked: () => false, hasDeliveryRecord: (order) => !!order.deliveredAt,
     workflowStageOf: (order) => order.workflowStage,
-    canDeliverOrder: (order) => ["service", "super"].includes(role) && order?.selectionStatus === "confirmed",
+    canManageOrderRecords: (order) => ["service", "super"].includes(role) && (role === "super" || order?.assigneeId === "p1"),
+    canDeliverOrder: (order) => ["service", "super"].includes(role) && ["shooting", "completed"].includes(order?.workflowStage),
     async persistOrderAction(order, action, payload) {
       calls.push({ action, payload });
       if (action === "deliverydraft") { order.deliveryDraftFileIds = payload.fileIds; order.deliveryDraftFiles = payload.fileIds.map((id) => ({ fileId: id, name: id })); }
@@ -139,25 +140,27 @@ function businessFixture(role = "photo") {
   const result = window.LXM_APP_PARTS[0](ctx);
   return { ctx, ui: result, calls, notices, picks };
 }
-test("photographer draft upload checks task ownership and preserves existing draft files", async () => {
-  const f = businessFixture();
-  const order = { id: "o1", photographerId: "p1", shootingCompletedAt: "now", deliveryDraftFileIds: ["old"] };
+test("service can upload and supplement completed order files; photographers cannot upload", async () => {
+  const f = businessFixture("service");
+  const order = { id: "o1", assigneeId: "p1", shootingStartedAt: "now", workflowStage: "completed", deliveryDraftFileIds: ["old"] };
   assert.equal(f.ui.canUploadDelivery(order), true);
-  assert.equal(f.ui.canUploadDelivery({ ...order, photographerId: "p2" }), false);
-  assert.equal(f.ui.canUploadDelivery({ ...order, shootingCompletedAt: "" }), false);
+  assert.equal(f.ui.canUploadDelivery({ ...order, assigneeId: "p2" }), false);
+  assert.equal(f.ui.canUploadDelivery({ ...order, workflowStage: "reserved", shootingStartedAt: "" }), false);
+  assert.equal(businessFixture("photo").ui.canUploadDelivery(order), false);
   f.ui.uploadDelivery(order);
   assert.equal(f.picks[0].purpose, "order-delivery"); assert.equal(f.picks[0].orderId, "o1");
   await f.picks[0].onUploaded({ fileId: "new" });
   assert.deepEqual(Array.from(f.calls[0].payload.fileIds), ["old", "new"]);
-  f.ui.deliverOrder({ ...order, selectionStatus: "confirmed" });
-  assert.equal(f.ui.deliveryDialog.open, false);
+  f.ui.deliverOrder(order);
+  assert.equal(f.ui.deliveryDialog.open, true);
 });
 test("customer service publishes selected draft IDs; uploaded media updates captured editor", async () => {
   const f = businessFixture("service");
-  const order = { id: "o1", selectionStatus: "confirmed", deliveryDraftFileIds: ["f1", "f2"] };
+  const order = { id: "o1", assigneeId: "p1", workflowStage: "completed", deliveryDraftFileIds: ["f1", "f2"] };
   f.ui.deliverOrder(order); f.ui.deliveryDialog.selected = ["f2"];
+  f.ui.deliveryDialog.note = "补充小程序成片";
   await f.ui.publishDelivery(false);
-  assert.equal(f.calls[0].action, "deliver");
+  assert.equal(f.calls[0].action, "deliveryrecord");
   assert.deepEqual(Array.from(f.calls[0].payload.fileIds), ["f2"]);
   assert.equal(f.calls[0].payload.deliveryMethod, "小程序成片");
   const original = { id: "p1", cover: "old" }, other = { id: "p2", cover: "keep" };
@@ -184,7 +187,8 @@ test("changed Vue templates compile with the shipped Vue runtime", () => {
   vm.runInContext(fs.readFileSync(path.join(root, "src/layout/app-shell.js"), "utf8"), sandbox);
   const templates = [sandbox.window.LXM_VIEWS.app, ...[
     "src/views/content/package/package.html", "src/views/content/videoSingle/videoSingle.html",
-    "src/views/finance/reconciliation/reconciliation.html", "src/views/operationConfig/mini-decor/mini-decor.html", "src/views/orders/task/task.html", "src/views/content/photo/photo.html"
+    "src/views/finance/reconciliation/reconciliation.html", "src/views/operationConfig/mini-decor/mini-decor.html", "src/views/orders/task/task.html", "src/views/content/photo/photo.html",
+    "src/views/orders/order-list/order-list.html", "src/views/orders/dispatch/dispatch.html", "src/views/orders/after-sale/after-sale.html", "src/views/operation/dashboard/operation-dashboard.html"
   ].map((name) => fs.readFileSync(path.join(root, name), "utf8"))];
   const entities = { "&lt;": "<", "&gt;": ">", "&amp;": "&", "&quot;": '"', "&#39;": "'" };
   for (const template of templates) assert.equal(typeof sandbox.Vue.compile(template, {

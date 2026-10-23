@@ -1013,3 +1013,33 @@ body::after {
     background: var(--lxm-bg) !important;
   }
 }
+/* Independent delivery and follow-up facts stay readable after payment completion. */
+.order-drawer .delivery-record-row,
+.order-drawer .followup-record-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lxm-border, #e7e2df);
+}
+.order-drawer .delivery-record-row small,
+.order-drawer .followup-record-row small {
+  display: block;
+  color: var(--lxm-text-muted, #766459);
+}
+.order-drawer .followup-record-row > div {
+  flex: 1;
+  min-width: 180px;
+}
+.delivery-record-dialog.el-dialog {
+  max-width: calc(100vw - 32px);
+  background: #fff !important;
+}
+.delivery-record-dialog .el-dialog__body,
+.delivery-record-dialog .el-dialog__footer {
+  background: #fff;
+}
+.delivery-record-dialog .form-grid label.full-width {
+  grid-column: 1 / -1;
+}

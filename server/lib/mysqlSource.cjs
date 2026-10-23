@@ -15,6 +15,7 @@
 const crypto = require("crypto");
 const { isDeepStrictEqual } = require("util");
 const schema = require("./mysqlSchema.cjs");
+const mysqlDescriptions = require("./mysqlDescriptions.cjs");
 const { createLogger, errorCode, recordDatabaseOperation } = require("./observability.cjs");
 
 const {
@@ -30,6 +31,48 @@ const {
   normalizeLogSnapshot,
   logSnapshotRelation,
 } = schema;
+
+const FAVORITE_TABLE = "lxm_user_favorites";
+const FAVORITE_DDL = `CREATE TABLE IF NOT EXISTS \`${FAVORITE_TABLE}\` (
+  \`openid\` VARCHAR(128) NOT NULL,
+  \`favorite_key\` VARCHAR(256) NOT NULL,
+  \`type\` VARCHAR(64) NOT NULL,
+  \`item_id\` VARCHAR(128) NOT NULL,
+  \`type_label\` VARCHAR(255) NULL,
+  \`title\` VARCHAR(255) NULL,
+  \`cover\` TEXT NULL,
+  \`price\` DECIMAL(18,2) NULL,
+  \`spot\` VARCHAR(255) NULL,
+  \`spot_id\` VARCHAR(128) NULL,
+  \`url\` TEXT NULL,
+  \`created_at\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  \`updated_at\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (\`openid\`, \`favorite_key\`),
+  UNIQUE KEY \`uq_user_favorite_item\` (\`openid\`, \`type\`, \`item_id\`),
+  KEY \`idx_user_favorite_created\` (\`openid\`, \`created_at\`),
+  KEY \`idx_user_favorite_type\` (\`openid\`, \`type\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
+
+function favoriteKey(openid, type, itemId) {
+  return `${String(openid || "")}\u0000${String(type || "")}\u0000${String(itemId || "")}`;
+}
+
+function parseFavoriteRow(row) {
+  const snapshot = {};
+  for (const [field, column] of [["typeLabel", "type_label"], ["title", "title"], ["cover", "cover"], ["price", "price"], ["spot", "spot"], ["spotId", "spot_id"], ["url", "url"]]) {
+    if (row && row[column] !== undefined && row[column] !== null && row[column] !== "") snapshot[field] = row[column];
+  }
+  const toIso = (value) => value instanceof Date ? value.toISOString() : String(value || "");
+  return {
+    key: favoriteKey(row && row.openid, row && row.type, row && row.item_id),
+    openid: String(row && row.openid || ""),
+    type: String(row && row.type || ""),
+    itemId: String(row && row.item_id || ""),
+    snapshot,
+    createdAt: toIso(row && row.created_at),
+    updatedAt: toIso(row && row.updated_at)
+  };
+}
 
 function bool(value) { return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true"; }
 function now() { return new Date(); }
@@ -170,7 +213,11 @@ function relationInsertSql(definition, row) {
   const quoted = names.map((name) => `\`${name}\``).join(",");
   const placeholders = names.map(() => "?").join(",");
   const updates = names.slice(1).map((name) => `\`${name}\`=VALUES(\`${name}\`)`);
-  const suffix = updates.length ? ` ON DUPLICATE KEY UPDATE ${updates.join(",")}` : "";
+  // Payment relations are deleted for this owner before being reinserted.
+  // A remaining unique-key collision belongs to another checkout/order and
+  // must roll back the transaction, never mutate that other owner's index.
+  const paymentRelation = ["lxm_order_payment_records", "lxm_booking_payment_records"].includes(definition.table);
+  const suffix = !paymentRelation && updates.length ? ` ON DUPLICATE KEY UPDATE ${updates.join(",")}` : "";
   return { sql: `INSERT INTO \`${definition.table}\` (${quoted}) VALUES (${placeholders})${suffix}`, params: names.map((name) => row[name]) };
 }
 
@@ -505,12 +552,100 @@ module.exports = function createMysqlSource(cfg = {}) {
             if (transactionalUpgrade) { try { await conn.rollback(); } catch (_) {} }
             throw error;
           }
+          if (autoMigrate) await mysqlDescriptions.applyMysqlDescriptions(conn);
           schemaReady = true;
           return true;
         } finally { if (conn !== pool && typeof conn.release === "function") conn.release(); }
       })().finally(() => { ensurePromise = null; });
     }
     return ensurePromise;
+  }
+
+  let favoritesReady = false;
+  let favoritesEnsurePromise = null;
+  async function ensureFavorites() {
+    await ensure();
+    if (favoritesReady) return true;
+    if (!favoritesEnsurePromise) {
+      favoritesEnsurePromise = (async () => {
+        const conn = typeof pool.getConnection === "function" ? await pool.getConnection() : pool;
+        try {
+          const columns = await inspectTable(conn, FAVORITE_TABLE);
+          const requiredColumns = [
+            ["openid", "VARCHAR(128) NOT NULL"], ["favorite_key", "VARCHAR(256) NOT NULL"], ["type", "VARCHAR(64) NOT NULL"],
+            ["item_id", "VARCHAR(128) NOT NULL"], ["type_label", "VARCHAR(255) NULL"], ["title", "VARCHAR(255) NULL"],
+            ["cover", "TEXT NULL"], ["price", "DECIMAL(18,2) NULL"], ["spot", "VARCHAR(255) NULL"], ["spot_id", "VARCHAR(128) NULL"],
+            ["url", "TEXT NULL"], ["created_at", "DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"], ["updated_at", "DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)"],
+          ];
+          if (!columns.size) {
+            if (!autoMigrate) {
+              const error = new Error("收藏数据表尚未就绪，请先执行数据库迁移");
+              error.code = "SCHEMA_MISSING";
+              throw error;
+            }
+            await execute(conn, FAVORITE_DDL);
+          } else {
+            const missing = requiredColumns.filter(([name]) => !columns.has(name));
+            if (missing.length && !autoMigrate) {
+              const error = new Error("收藏数据表结构不完整，请先执行数据库迁移");
+              error.code = "SCHEMA_INCOMPLETE";
+              throw error;
+            }
+            for (const [name, type] of missing) await execute(conn, `ALTER TABLE \`${FAVORITE_TABLE}\` ADD COLUMN \`${name}\` ${type}`);
+          }
+          if (autoMigrate) await mysqlDescriptions.applyMysqlDescriptions(conn);
+          favoritesReady = true;
+          return true;
+        } finally { if (conn !== pool && typeof conn.release === "function") conn.release(); }
+      })().finally(() => { favoritesEnsurePromise = null; });
+    }
+    return favoritesEnsurePromise;
+  }
+
+  async function listFavorites(openid, options = {}) {
+    const owner = String(openid || "").trim();
+    if (!owner) return [];
+    await ensureFavorites();
+    const type = String(options.type || "").trim();
+    const limit = Math.min(Math.max(Number(options.limit || 100), 1), 200);
+    const offset = Math.max(Number(options.offset || 0), 0);
+    const where = type ? "WHERE openid=? AND type=?" : "WHERE openid=?";
+    const params = type ? [owner, type, offset, limit] : [owner, offset, limit];
+    const rows = await query(pool, `SELECT openid,favorite_key,type,item_id,type_label,title,cover,price,spot,spot_id,url,created_at,updated_at FROM \`${FAVORITE_TABLE}\` ${where} ORDER BY created_at DESC LIMIT ?,?`, params);
+    return rows.map(parseFavoriteRow);
+  }
+
+  async function getFavorite(openid, type, itemId) {
+    const owner = String(openid || "").trim();
+    const favoriteType = String(type || "").trim();
+    const id = String(itemId || "").trim();
+    if (!owner || !favoriteType || !id) return null;
+    await ensureFavorites();
+    const rows = await query(pool, `SELECT openid,favorite_key,type,item_id,type_label,title,cover,price,spot,spot_id,url,created_at,updated_at FROM \`${FAVORITE_TABLE}\` WHERE openid=? AND type=? AND item_id=? LIMIT 1`, [owner, favoriteType, id]);
+    return rows.length ? parseFavoriteRow(rows[0]) : null;
+  }
+
+  async function upsertFavorite(openid, input = {}) {
+    const owner = String(openid || "").trim();
+    const type = String(input.type || "").trim();
+    const itemId = String(input.itemId || input.id || "").trim();
+    if (!owner || !type || !itemId) return null;
+    await ensureFavorites();
+    const snapshot = input.snapshot && typeof input.snapshot === "object" && !Array.isArray(input.snapshot) ? input.snapshot : {};
+    const price = snapshot.price === undefined || snapshot.price === null || snapshot.price === "" ? null : Number(snapshot.price);
+    const safePrice = Number.isFinite(price) ? price : null;
+    await execute(pool, `INSERT INTO \`${FAVORITE_TABLE}\` (openid,favorite_key,type,item_id,type_label,title,cover,price,spot,spot_id,url) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE type_label=VALUES(type_label),title=VALUES(title),cover=VALUES(cover),price=VALUES(price),spot=VALUES(spot),spot_id=VALUES(spot_id),url=VALUES(url),updated_at=CURRENT_TIMESTAMP(3)`, [owner, favoriteKey(owner, type, itemId), type, itemId, snapshot.typeLabel || null, snapshot.title || snapshot.name || null, snapshot.cover || snapshot.coverImage || snapshot.coverUrl || null, safePrice, snapshot.spot || snapshot.spotName || null, snapshot.spotId || null, snapshot.url || null]);
+    return getFavorite(owner, type, itemId);
+  }
+
+  async function removeFavorite(openid, type, itemId) {
+    const owner = String(openid || "").trim();
+    const favoriteType = String(type || "").trim();
+    const id = String(itemId || "").trim();
+    if (!owner || !favoriteType || !id) return false;
+    await ensureFavorites();
+    const result = await execute(pool, `DELETE FROM \`${FAVORITE_TABLE}\` WHERE openid=? AND type=? AND item_id=?`, [owner, favoriteType, id]);
+    return Number(result && result.affectedRows || 0) > 0;
   }
 
   function tableFor(key) {
@@ -616,6 +751,16 @@ module.exports = function createMysqlSource(cfg = {}) {
     return readOne("orders", String(rows[0].order_id));
   }
 
+  async function findBookingByPaymentOutTradeNo(outTradeNo) {
+    await ensure();
+    const value = String(outTradeNo || "").trim();
+    if (!value) return null;
+    const relation = RELATIONS.booking_payment_records;
+    const rows = await query(pool, `SELECT booking_id FROM \`${relation.table}\` WHERE out_trade_no=? LIMIT 2`, [value]);
+    if (rows.length !== 1) return null;
+    return readOne("bookingRequests", String(rows[0].booking_id));
+  }
+
   async function deleteRelations(conn, key, id) {
     for (const relationName of RELATION_BY_KEY[key] || []) {
       const relation = RELATIONS[relationName]; const parent = relationParent(relationName);
@@ -689,6 +834,20 @@ module.exports = function createMysqlSource(cfg = {}) {
     const current = await readOne(key, id);
     if (current) return update(key, id, patch);
     return create(key, { ...(patch || {}), id: String(id), _id: String(id) });
+  }
+
+  async function replace(key, id, document = {}) {
+    assertKey(key); await ensure();
+    const stateItem = state.get(key);
+    if (stateItem && (stateItem.legacy || stateItem.missing)) throw Object.assign(new Error("数据结构尚未就绪"), { code: "SCHEMA_MISSING" });
+    const changed = await withTransaction(async conn => {
+      const rows = await query(conn, `SELECT id FROM \`${tableFor(key)}\` WHERE id=? FOR UPDATE`, [String(id)]);
+      if (!rows.length) return false;
+      const empty = Object.fromEntries(COLLECTIONS[key].columns.filter(column => column.name !== "id").map(column => [column.name, null]));
+      await writeRecord(conn, key, String(id), { ...empty, ...schema.normalizeDocumentAliases(key, document), id: String(id), _id: String(id) }, tableFor(key), true);
+      return true;
+    });
+    return changed ? readOne(key, String(id)) : null;
   }
 
   // Migration and file state changes compare under a row lock. Reading a
@@ -783,11 +942,17 @@ module.exports = function createMysqlSource(cfg = {}) {
     list: readMany,
     get: readOne,
     findOrderByPaymentOutTradeNo,
+    findBookingByPaymentOutTradeNo,
     create,
     update,
     compareAndUpdate,
+    replace,
     upsert,
     remove,
+    listFavorites,
+    getFavorite,
+    upsertFavorite,
+    removeFavorite,
     async object(key) { const rows = await readMany(key); return Object.fromEntries(rows.map((row) => [String(row.id || row._id), row])); },
     transaction: withTransaction,
     async ensureSchema() { await ensure(); return { version: 2 }; },

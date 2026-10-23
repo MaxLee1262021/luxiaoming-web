@@ -7,11 +7,13 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { isDeepStrictEqual } = require("util");
+const merchantCodes = require("./merchantCodes.cjs");
+const { isUnpaidBooking } = require("./orderWorkflow.cjs");
 
 const ALL_KEYS = [
   "cities", "agents", "distributors", "shops", "staff", "spots", "series",
   "albums", "samples", "packages", "addonServices", "peripherals", "tagLibrary",
-  "guides", "stories", "scans", "orders", "afterSales", "reconciliationTransfers",
+  "guides", "stories", "scans", "orders", "bookingRequests", "afterSales", "reconciliationTransfers",
   "financeSettings", "monthlyClosings", "adjustmentRecords", "homeConfig", "logs", "trash",
   "merchantCodes", "siteConfig", "userProfiles", "config", "mediaFiles"
 ];
@@ -114,6 +116,29 @@ function makeJson(cfg) {
   function genId(key) {
     return (key || "x").slice(0, 2) + "_" + crypto.randomBytes(6).toString("hex");
   }
+  function favoriteCollection() {
+    const m = load();
+    if (!m.collections.favorites || typeof m.collections.favorites !== "object" || Array.isArray(m.collections.favorites)) m.collections.favorites = {};
+    return m.collections.favorites;
+  }
+  function favoriteKey(openid, type, itemId) {
+    return `${String(openid || "")}\u0000${String(type || "")}\u0000${String(itemId || "")}`;
+  }
+  function favoriteRecord(openid, input = {}) {
+    const type = String(input.type || "").trim();
+    const itemId = String(input.itemId || input.id || "").trim();
+    const key = favoriteKey(openid, type, itemId);
+    const createdAt = String(input.createdAt || new Date().toISOString());
+    return {
+      key,
+      openid: String(openid || ""),
+      type,
+      itemId,
+      snapshot: input.snapshot && typeof input.snapshot === "object" ? clone(input.snapshot) : {},
+      createdAt,
+      updatedAt: String(input.updatedAt || createdAt)
+    };
+  }
   return {
     mode: "json",
     backend: "json",
@@ -137,8 +162,14 @@ function makeJson(cfg) {
     },
     async compareAndUpdate(key, id, expected, patch) {
       const c = col(key);
-      if (!c[id] || !Object.entries(expected || {}).every(([field, value]) => isDeepStrictEqual(c[id][field], value))) return null;
+      if (!c[id] || !Object.entries(expected || {}).every(([field, value]) => isDeepStrictEqual(clone(c[id][field]), clone(value)))) return null;
       c[id] = { ...c[id], ...patch, id, _id: id };
+      persist(); return clone(c[id]);
+    },
+    async replace(key, id, document) {
+      const c = col(key);
+      if (!c[id]) return null;
+      c[id] = { ...clone(document), id, _id: id };
       persist(); return clone(c[id]);
     },
     async remove(key, id) { const c = col(key); if (!(id in c)) return false; delete c[id]; persist(); return true; },
@@ -148,6 +179,42 @@ function makeJson(cfg) {
       persist(); return clone(c[id]);
     },
     async object(key) { return clone(col(key)); },
+    async listFavorites(openid, options = {}) {
+      const owner = String(openid || "").trim();
+      if (!owner) return [];
+      const type = String(options.type || "").trim();
+      const rows = Object.values(favoriteCollection())
+        .filter((row) => row && String(row.openid || "") === owner && (!type || String(row.type || "") === type))
+        .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")))
+        .map((row) => clone(row));
+      const offset = Math.max(Number(options.offset || 0), 0);
+      const limit = Math.min(Math.max(Number(options.limit || 100), 1), 200);
+      return rows.slice(offset, offset + limit);
+    },
+    async getFavorite(openid, type, itemId) {
+      const row = favoriteCollection()[favoriteKey(openid, type, itemId)];
+      return row ? clone(row) : null;
+    },
+    async upsertFavorite(openid, input = {}) {
+      const owner = String(openid || "").trim();
+      const type = String(input.type || "").trim();
+      const itemId = String(input.itemId || input.id || "").trim();
+      if (!owner || !type || !itemId) return null;
+      const key = favoriteKey(owner, type, itemId);
+      const existing = favoriteCollection()[key];
+      const row = favoriteRecord(owner, { ...(existing || {}), ...input, type, itemId, createdAt: existing && existing.createdAt, updatedAt: new Date().toISOString() });
+      favoriteCollection()[key] = row;
+      persist();
+      return clone(row);
+    },
+    async removeFavorite(openid, type, itemId) {
+      const collection = favoriteCollection();
+      const key = favoriteKey(openid, type, itemId);
+      if (!Object.prototype.hasOwnProperty.call(collection, key)) return false;
+      delete collection[key];
+      persist();
+      return true;
+    },
     async health() {
       try {
         load();
@@ -171,7 +238,8 @@ function withComputed(base) {
     async snapshot() {
       const out = {};
       for (const k of ["orders", "shops", "merchantCodes", "spots", "albums", "series", "packages", "peripherals", "afterSales"]) {
-        out[k] = await base.list(k);
+        const rows = await base.list(k);
+        out[k] = k === "orders" ? rows.filter((row) => !isUnpaidBooking(row)) : rows;
       }
       return out;
     },
@@ -182,17 +250,9 @@ function withComputed(base) {
       const db = await this.snapshot();
       return { ...doc, stats: computeDashboard(db) };
     },
-    async generateMerchantCode(body = {}) { return generateMerchantCode(base, body); },
-    async listMerchantCodes(shopId = "") { return listMerchantCodes(base, shopId); },
-    async merchantCodeStats(shopId = "") {
-      const codes = await listMerchantCodes(base, shopId);
-      return {
-        scans: codes.reduce((s, c) => s + (Number(c.scanCount) || 0), 0),
-        orders: codes.reduce((s, c) => s + (Number(c.orderCount) || 0), 0),
-        deals: codes.reduce((s, c) => s + (Number(c.dealCount) || 0), 0),
-        codeCount: codes.length
-      };
-    },
+    async generateMerchantCode(body = {}) { return merchantCodes.generateMerchantCode(base, body); },
+    async listMerchantCodes(shopId = "") { return merchantCodes.listMerchantCodes(base, shopId); },
+    async merchantCodeStats(shopId = "", date) { return merchantCodes.merchantCodeStats(base, shopId, date); },
     async health() {
       if (typeof base.health === "function") return base.health();
       return { backend: base.mode || "unknown", configured: true, ready: true, persistent: false };
@@ -223,66 +283,4 @@ function computeOrderStats(db) {
   const byStatus = {};
   orders.forEach((o) => { const s = o.status || "unknown"; byStatus[s] = (byStatus[s] || 0) + 1; });
   return byStatus;
-}
-
-async function listMerchantCodes(base, shopId) {
-  const list = (await base.list("merchantCodes")).filter(isActiveMerchantCode);
-  const filtered = shopId ? list.filter((c) => String(c.shopId || "") === String(shopId)) : list;
-  const orders = await base.list("orders");
-  return filtered.map((c) => {
-    const os = orders.filter((o) => !o.deleted && (o.sourceCodeId === c._id || (o.source && o.source.codeId === c._id)));
-    const deals = os.filter((o) => ["completed", "final_pending", "delivered"].includes(o.status) || o.customerStatus === "已完成");
-    return { ...c, orderCount: os.length, dealCount: deals.length };
-  });
-}
-function isActiveMerchantCode(code) {
-  return !!code && code.isDeleted !== true && code.deleted !== true
-    && !["disabled", "inactive", "expired", "停用", "失效", "已失效", "下架", "已下架"].includes(String(code.status || "").trim().toLowerCase());
-}
-async function generateMerchantCode(base, body = {}) {
-  const shopId = body.shopId || "";
-  const placementLabel = (body.placementLabel || "").trim();
-  const placementType = ["counter", "table", "menu", "room"].includes(body.placementType) ? body.placementType : "custom";
-  if (!shopId) return { success: false, error: "缺少 shopId" };
-  if (!placementLabel) return { success: false, error: "缺少位置名称" };
-  const codes = await base.list("merchantCodes");
-  const exist = codes.find((c) => String(c.shopId || "") === String(shopId) && (c.placementLabel || "").trim() === placementLabel && isActiveMerchantCode(c));
-  if (exist) return { success: true, existed: true, codeId: exist._id, scene: exist.scene, placementType: exist.placementType, placementLabel: exist.placementLabel, shopId, shopName: exist.shopName, qrImage: exist.qrImage || "" };
-  const codeId = "Q" + Date.now().toString(36) + crypto.randomBytes(3).toString("hex");
-  const scene = "c=" + codeId;
-  const shops = await base.list("shops");
-  const shop = shops.find((s) => String(s.shopId || "") === String(shopId) || String(s.id || s._id || "") === String(shopId));
-  const shopName = (shop && shop.name) || "";
-  const qrImage = buildDemoQr(shopName, placementLabel, codeId);
-  const doc = { _id: codeId, shopId, shopName, placementType, placementLabel, scene, scanCount: 0, orderCount: 0, dealCount: 0, qrImage, status: "active", createTime: new Date().toISOString() };
-  await base.create("merchantCodes", doc);
-  return { success: true, existed: false, codeId, scene, placementType, placementLabel, shopId, shopName, qrImage };
-}
-
-// 演示模式：生成一张「仿真小程序码」占位图（SVG data URI）。正式部署后可换成真实小程序码生成。
-function buildDemoQr(shopName, placementLabel, codeId) {
-  const size = 420, n = 21, cell = size / n;
-  let seed = 0;
-  for (let i = 0; i < codeId.length; i++) seed = (seed * 31 + codeId.charCodeAt(i)) >>> 0;
-  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
-  const isFinder = (r, c) => {
-    const inBox = (br, bc) => r >= br && r < br + 7 && c >= bc && c < bc + 7;
-    return inBox(0, 0) || inBox(0, n - 7) || inBox(n - 7, 0);
-  };
-  let rects = "";
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
-    if (isFinder(r, c)) continue;
-    if (rand() > 0.5) rects += `<rect x="${(c * cell).toFixed(1)}" y="${(r * cell).toFixed(1)}" width="${cell.toFixed(1)}" height="${cell.toFixed(1)}" />`;
-  }
-  const finder = (x, y) =>
-    `<rect x="${x}" y="${y}" width="${(7 * cell).toFixed(1)}" height="${(7 * cell).toFixed(1)}" fill="#2A211B"/>` +
-    `<rect x="${(x + cell).toFixed(1)}" y="${(y + cell).toFixed(1)}" width="${(5 * cell).toFixed(1)}" height="${(5 * cell).toFixed(1)}" fill="#fff"/>` +
-    `<rect x="${(x + 2 * cell).toFixed(1)}" y="${(y + 2 * cell).toFixed(1)}" width="${(3 * cell).toFixed(1)}" height="${(3 * cell).toFixed(1)}" fill="#2A211B"/>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><rect width="${size}" height="${size}" fill="#fff"/><g fill="#2A211B">${rects}</g>${finder(0, 0) + finder((n - 7) * cell, 0) + finder(0, (n - 7) * cell)}<circle cx="${size / 2}" cy="${size / 2}" r="34" fill="#EE2C2C"/><text x="${size / 2}" y="${size / 2 + 7}" font-size="26" fill="#fff" text-anchor="middle" font-family="Microsoft YaHei,Arial">鹿</text></svg>`;
-  const label = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="120"><rect width="420" height="120" fill="#FFFDF9"/><text x="210" y="46" font-size="26" fill="#2A211B" text-anchor="middle" font-family="Microsoft YaHei,Arial">${escapeXml(shopName || "鹿小鸣")} · ${escapeXml(placementLabel || "")}</text><text x="210" y="86" font-size="16" fill="#9C877A" text-anchor="middle" font-family="Microsoft YaHei,Arial">演示码（部署后生成真实小程序码）</text></svg>`;
-  const combined = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="540"><rect width="420" height="540" fill="#FFFDF9"/><g transform="translate(0,0)">${svg.replace(/<\/?svg[^>]*>/g, "")}</g><g transform="translate(0,420)">${label.replace(/<\/?svg[^>]*>/g, "")}</g></svg>`;
-  return "data:image/svg+xml;utf8," + encodeURIComponent(combined);
-}
-function escapeXml(s) {
-  return String(s).replace(/[<>&'"]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[ch]));
 }

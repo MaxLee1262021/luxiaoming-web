@@ -25,6 +25,20 @@ window.LXM_PAGES.register({
       const shops = (ctx.data.shops || []).filter((shop) => shop && !shop.deleted && !shop.isDeleted && belongsToCity(shop, city)).length;
       return { spots, shops };
     }
+    function isCityEnabled(city = {}) {
+      const status = String(city.status || "").trim().toLowerCase();
+      const enabled = city.enabled !== undefined && city.enabled !== null && String(city.enabled).trim() !== ""
+        ? city.enabled
+        : city.isEnabled;
+      if (city.visible === false || city.visible === 0 || String(city.visible || "").trim().toLowerCase() === "false") return false;
+      if (enabled !== undefined && enabled !== null && String(enabled).trim() !== ""
+        && [false, 0, "0", "false", "no", "off"].includes(typeof enabled === "string" ? enabled.trim().toLowerCase() : enabled)) return false;
+      if (["禁用", "停用", "筹备中", "未开通", "未启用", "关闭", "已停用", "disabled", "offline", "closed", "inactive", "unavailable"].includes(status)) return false;
+      return true;
+    }
+    // Keep the old helper available for pages/tests that consumed the initial
+    // city page API while making the new business meaning explicit.
+    const isCityActive = isCityEnabled;
     const cityRows = computed(() => {
       const kw = (cityKeyword.value || "").toLowerCase();
       const sf = cityStatusFilter.value;
@@ -33,8 +47,8 @@ window.LXM_PAGES.register({
         if (c.deleted) return false;
         if (kw && ![c.name, c.code, c.cityId, c.description, c.desc].filter(Boolean).join(" ").toLowerCase().includes(kw)) return false;
         const active = isCityActive(c);
-        if (sf === "运营中" && !active) return false;
-        if (sf === "筹备中" && active) return false;
+        if (["启用", "运营中"].includes(sf) && !active) return false;
+        if (["禁用", "停用", "筹备中"].includes(sf) && active) return false;
         return true;
       }).map((city) => ({ ...city, summary: cityDependencySummary(city) }));
     });
@@ -45,11 +59,8 @@ window.LXM_PAGES.register({
       shops: cityRows.value.reduce((sum, city) => sum + cityShopCount(city), 0)
     }));
 
-    function isCityActive(city = {}) {
-      return city.enabled !== false && city.status !== "筹备中" && city.status !== "停用" && city.visible !== false;
-    }
     function cityStatusType(city) {
-      return isCityActive(city) ? "success" : "info";
+      return isCityEnabled(city) ? "success" : "info";
     }
     function citySpotCount(city) {
       return Number(city && city.summary && city.summary.spots !== undefined ? city.summary.spots : cityDependencySummary(city).spots);
@@ -61,15 +72,17 @@ window.LXM_PAGES.register({
       cityKeyword.value = "";
       cityStatusFilter.value = "";
     }
-    async function toggleCityVisible(city) {
+    async function toggleCityEnabled(city) {
       const source = (ctx.data.cities || []).find((item) => String(item.id || item._id) === String(city.id || city._id));
       if (!source) return;
       const previous = { ...source };
-      const next = !isCityActive(source);
-      source.status = next ? "运营中" : "筹备中";
+      const next = !isCityEnabled(source);
+      source.status = next ? "启用" : "停用";
       source.enabled = next;
-      // 筹备中城市仍下发给小程序并显示“敬请期待”；删除才会完全隐藏。
-      source.visible = true;
+      // visible is kept in sync for older public RPCs that only understand
+      // the visibility field. A disabled city must disappear from the mini
+      // program city picker and from all city-scoped content.
+      source.visible = next;
       const saved = typeof ctx.persistContentMutation === "function"
         ? await ctx.persistContentMutation("cities", source, previous)
         : true;
@@ -77,9 +90,10 @@ window.LXM_PAGES.register({
         Object.assign(source, previous);
         return;
       }
-      if (typeof ctx.log === "function") ctx.log(next ? "开通城市" : "调整城市为筹备中", "城市管理", source.name || source.id);
-      if (ctx.ElMessage) ctx.ElMessage.success(next ? "城市已开通，小程序可按配置开放" : "城市已调整为筹备中");
+      if (typeof ctx.log === "function") ctx.log(next ? "启用城市" : "禁用城市", "城市管理", source.name || source.id);
+      if (ctx.ElMessage) ctx.ElMessage.success(next ? "城市已启用，小程序将展示该城市内容" : "城市已禁用，小程序将隐藏该城市内容");
     }
+    const toggleCityVisible = toggleCityEnabled;
     function viewCitySpots(city) {
       ctx.state.filters.keyword = city.name || city.code || "";
       ctx.state.filters.contentStatus = "";
@@ -96,11 +110,13 @@ window.LXM_PAGES.register({
       cityKeyword,
       cityStatusFilter,
       isCityActive,
+      isCityEnabled,
       cityStatusType,
       citySpotCount,
       cityShopCount,
       resetCityFilters,
       toggleCityVisible,
+      toggleCityEnabled,
       viewCitySpots
     };
   }

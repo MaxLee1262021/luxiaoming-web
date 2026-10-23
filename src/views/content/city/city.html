@@ -3,7 +3,7 @@
     <div>
       <span class="lxm-eyebrow">基础内容 · 第一步</span>
       <h3 class="lxm-page-head__title">城市管理</h3>
-      <p class="lxm-page-head__desc">城市是打卡点、门店和小程序探索页内容的归属根节点。先开通城市，再配置对应的打卡点和拍摄风格。</p>
+      <p class="lxm-page-head__desc">城市是打卡点、门店和小程序探索页内容的归属根节点。先启用城市，再配置对应的打卡点和拍摄风格。</p>
     </div>
     <div class="lxm-page-head__actions">
       <el-button plain @click="openContentLogs('城市管理')">操作日志</el-button>
@@ -13,17 +13,17 @@
   </header>
 
   <div class="lxm-kpi-grid">
-    <div class="lxm-kpi"><span class="lxm-kpi__label">城市总数</span><strong class="lxm-kpi__value">{{ citySummary.total }}</strong><span class="lxm-kpi__hint">含运营中与筹备中</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">运营中</span><strong class="lxm-kpi__value">{{ citySummary.active }}</strong><span class="lxm-kpi__hint">小程序可开放</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">城市总数</span><strong class="lxm-kpi__value">{{ citySummary.total }}</strong><span class="lxm-kpi__hint">含启用与禁用城市</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">已启用</span><strong class="lxm-kpi__value">{{ citySummary.active }}</strong><span class="lxm-kpi__hint">小程序可展示</span></div>
     <div class="lxm-kpi"><span class="lxm-kpi__label">关联打卡点</span><strong class="lxm-kpi__value">{{ citySummary.spots }}</strong><span class="lxm-kpi__hint">城市下的内容资产</span></div>
     <div class="lxm-kpi"><span class="lxm-kpi__label">合作门店</span><strong class="lxm-kpi__value">{{ citySummary.shops }}</strong><span class="lxm-kpi__hint">城市下的渠道门店</span></div>
   </div>
 
   <div class="lxm-toolbar">
     <el-input v-model="cityKeyword" clearable placeholder="搜索城市名称、编码或简介" />
-    <el-select v-model="cityStatusFilter" clearable placeholder="全部上线状态">
-      <el-option label="运营中" value="运营中" />
-      <el-option label="筹备中" value="筹备中" />
+    <el-select v-model="cityStatusFilter" clearable placeholder="全部启用状态">
+      <el-option label="启用" value="启用" />
+      <el-option label="禁用" value="禁用" />
     </el-select>
     <el-button plain @click="resetCityFilters">重置</el-button>
   </div>
@@ -54,8 +54,8 @@
       <el-table-column label="合作门店" width="112" align="center">
         <template #default="{row}"><strong>{{ cityShopCount(row) }}</strong></template>
       </el-table-column>
-      <el-table-column label="上线状态" width="112">
-        <template #default="{row}"><el-tag :type="cityStatusType(row)">{{ isCityActive(row) ? '运营中' : '筹备中' }}</el-tag></template>
+      <el-table-column label="启用状态" width="112">
+        <template #default="{row}"><el-tag :type="cityStatusType(row)">{{ isCityEnabled(row) ? '启用' : '禁用' }}</el-tag></template>
       </el-table-column>
       <el-table-column prop="description" label="运营说明" min-width="240" show-overflow-tooltip>
         <template #default="{row}"><span class="basic-content-muted">{{ row.description || row.desc || '未填写' }}</span></template>
@@ -65,7 +65,7 @@
           <div class="basic-content-actions">
             <el-button link type="primary" @click="viewCitySpots(row)">查看点位</el-button>
             <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
-            <el-button link :type="isCityActive(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleCityVisible(row)">{{ isCityActive(row) ? '筹备' : '开通' }}</el-button>
+            <el-button link :type="isCityEnabled(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleCityEnabled(row)">{{ isCityEnabled(row) ? '禁用' : '启用' }}</el-button>
             <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteCity(row)">删除</el-button>
           </div>
         </template>

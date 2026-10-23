@@ -9,6 +9,7 @@ const createApi = require("../lib/api.cjs");
 const schema = require("../lib/mysqlSchema.cjs");
 const rpc = require("../lib/rpc.cjs");
 const { createWechatPay } = require("../lib/wechatPay.cjs");
+const { withOrderMutex } = require("../lib/orderWorkflow.cjs");
 
 function clone(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
 
@@ -111,6 +112,135 @@ function pendingOrder() {
   };
 }
 
+async function paymentCompletes(promise, message) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), 1000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function recoveryFixture(branch, tradeState, suffix = "") {
+  const keys = makeKeys();
+  const order = pendingOrder();
+  order.id = order._id = `recovery-${branch}-${tradeState.toLowerCase()}${suffix}`;
+  order.orderNo = order.id.toUpperCase();
+  const payment = order.paymentRecords[0];
+  payment.prepayCreatedAt = "2020-01-01T00:00:00.000Z";
+  const source = makeSource(order);
+  const transaction = {
+    appid: keys.config.appId,
+    mchid: keys.config.mchId,
+    out_trade_no: payment.outTradeNo,
+    trade_state: tradeState,
+    ...(tradeState === "SUCCESS" ? {
+      transaction_id: `transaction-${order.id}`,
+      trade_type: "JSAPI",
+      payer: { openid: order.openid },
+      amount: { total: 3000, currency: "CNY" },
+    } : {}),
+  };
+  let queryCount = 0;
+  let beforeResponse = async () => {};
+  const gateway = createWechatPay({
+    config: keys.config,
+    transport: async (request) => {
+      assert.equal(request.method, "GET", "recovery must query the original transaction without creating a second prepay");
+      assert.equal(request.path, `/v3/pay/transactions/out-trade-no/${payment.outTradeNo}?mchid=${keys.config.mchId}`);
+      queryCount += 1;
+      await beforeResponse();
+      const body = JSON.stringify(transaction);
+      return { statusCode: 200, body, headers: signedHeaders(keys.platform.privateKey, keys.config.platformPublicKeyId, body) };
+    },
+  });
+  return {
+    order, source, gateway, transaction,
+    get queryCount() { return queryCount; },
+    setBeforeResponse(callback) { beforeResponse = callback; },
+    createPayment() {
+      return rpc(source, "createPayment", {
+        data: {
+          orderId: order.id,
+          phase: "deposit",
+          idempotencyKey: branch === "existing" ? payment.idempotencyKey : `new-payment-key-${order.id}`,
+        },
+      }, { identity: { kind: "public", openid: order.openid }, wechatPay: gateway });
+    },
+    callback() {
+      const notification = encryptedNotification(keys, transaction);
+      return gateway.confirmTransaction(source, gateway.parseNotification(notification.headers, notification.body));
+    },
+  };
+}
+
+for (const branch of ["existing", "activePending"]) {
+  for (const tradeState of ["SUCCESS", "CLOSED", "PAYERROR", "REVOKED"]) {
+    test(`createPayment recovery finishes for ${branch} payment in ${tradeState}`, { timeout: 5000 }, async () => {
+      const fixture = recoveryFixture(branch, tradeState);
+      const result = await paymentCompletes(fixture.createPayment(), "createPayment recovery held the order mutex while confirming the query result");
+      assert.equal(fixture.queryCount, 1);
+      const saved = await fixture.source.get("orders", fixture.order.id);
+      assert.equal(saved.paymentRecords.length, 1, "recovery must preserve the original payment attempt");
+      assert.equal(saved.paymentRecords[0].idempotencyKey, fixture.order.paymentRecords[0].idempotencyKey);
+      assert.equal(saved.statusLogs.length, 1);
+      assert.equal(saved.followRecords.length, 1);
+      if (tradeState === "SUCCESS") {
+        assert.equal(result.success, true);
+        assert.equal(result.data.status, "confirmed");
+        assert.equal(result.data.idempotent, true);
+        assert.equal(saved.status, "deposit_paid");
+        assert.equal(saved.depositPaid, 30);
+        assert.equal(saved.paymentRecords[0].status, "confirmed");
+        assert.equal(saved.paymentRecords[0].externalTransactionId, fixture.transaction.transaction_id);
+        const duplicate = await paymentCompletes(fixture.callback(), "a callback after recovery could not acquire the order mutex");
+        assert.equal(duplicate.idempotent, true);
+        assert.equal((await fixture.source.list("logs")).length, 1, "a repeated callback must not duplicate the payment audit");
+      } else {
+        assert.equal(result.success, false);
+        assert.match(result.error, /失效|重新发起/);
+        assert.equal(saved.status, "new");
+        assert.equal(saved.depositPaid || 0, 0);
+        assert.equal(saved.paymentRecords[0].status, "failed");
+        assert.equal(saved.paymentRecords[0].tradeState, tradeState);
+      }
+      const next = await paymentCompletes(withOrderMutex(`order:${fixture.order.id}`, () => "available"), "recovery left the order mutex blocked");
+      assert.equal(next, "available");
+      assert.equal((await fixture.source.get("orders", fixture.order.id)).statusLogs.length, 1);
+    });
+  }
+
+  test(`createPayment recovery and a concurrent callback account once for ${branch}`, { timeout: 5000 }, async () => {
+    const fixture = recoveryFixture(branch, "SUCCESS", "-concurrent");
+    let queryStarted;
+    let releaseQuery;
+    const started = new Promise((resolve) => { queryStarted = resolve; });
+    const released = new Promise((resolve) => { releaseQuery = resolve; });
+    fixture.setBeforeResponse(async () => { queryStarted(); await released; });
+    const recovery = fixture.createPayment();
+    await paymentCompletes(started, "recovery did not query the pending payment");
+    const callback = fixture.callback();
+    releaseQuery();
+    const [result] = await paymentCompletes(Promise.all([recovery, callback]), "recovery and callback deadlocked on the same order mutex");
+    assert.equal(result.success, true);
+    assert.equal(result.data.status, "confirmed");
+    const saved = await fixture.source.get("orders", fixture.order.id);
+    assert.equal(saved.depositPaid, 30);
+    assert.equal(saved.paymentRecords.length, 1);
+    assert.equal(saved.paymentRecords[0].externalTransactionId, fixture.transaction.transaction_id);
+    assert.equal(saved.statusLogs.length, 1, "query recovery and callback must record one payment event");
+    assert.equal(saved.followRecords.length, 1);
+    assert.equal((await fixture.source.list("logs")).length, 1);
+    assert.equal((await paymentCompletes(fixture.callback(), "duplicate callback could not finish after recovery")).idempotent, true);
+    assert.equal(await paymentCompletes(withOrderMutex(`order:${fixture.order.id}`, () => true), "concurrent recovery left the order mutex blocked"), true);
+  });
+}
+
 test("JSAPI prepay request is signed and produces mini-program payment parameters", async () => {
   const keys = makeKeys();
   let captured = null;
@@ -201,6 +331,30 @@ test("verified callback decrypts once, confirms the server order, and rejects wr
 
   const invalid = encryptedNotification(keys, { ...transaction, out_trade_no: "LXM0123456789ABCDEF0123456789ABC", transaction_id: "4200000001202609210000000002", amount: { total: 2999, currency: "CNY" } });
   await assert.rejects(() => gateway.confirmTransaction(source, gateway.parseNotification(invalid.headers, invalid.body)), { code: "WECHAT_PAY_AMOUNT_MISMATCH" });
+});
+
+test("final callback atomically acknowledges selection and completes without delivery or shootcomplete", async () => {
+  const keys = makeKeys();
+  const gateway = createWechatPay({ config: keys.config });
+  const order = pendingOrder();
+  Object.assign(order, { status: "shooting", shootingStartedAt: "2026-10-14T01:00:00Z", depositPaid: 30, depositFinanceStatus: "confirmed", selectionStatus: "pending" });
+  Object.assign(order.paymentRecords[0], { phase: "final", amount: 70, selectionAccepted: true });
+  const source = makeSource(order);
+  const raw = { appid: keys.config.appId, mchid: keys.config.mchId, out_trade_no: order.paymentRecords[0].outTradeNo,
+    transaction_id: "final-callback-tx-1", trade_state: "SUCCESS", trade_type: "JSAPI", payer: { openid: order.openid }, amount: { total: 7000, currency: "CNY" } };
+  const envelope = encryptedNotification(keys, raw);
+  const parsed = gateway.parseNotification(envelope.headers, envelope.body);
+  await gateway.confirmTransaction(source, parsed);
+  const saved = await source.get("orders", order.id);
+  assert.equal(saved.status, "completed");
+  assert.equal(saved.workflowStage, "completed");
+  assert.equal(saved.selectionStatus, "confirmed");
+  assert.equal(saved.selectionMethod, "payment_acknowledgement");
+  assert.ok(saved.completedAt);
+  assert.equal(saved.deliveryRecord, undefined);
+  assert.equal(saved.shootingCompletedAt, undefined);
+  assert.equal((await gateway.confirmTransaction(source, parsed)).idempotent, true);
+  assert.equal((await source.get("orders", order.id)).statusLogs.length, 1);
 });
 
 test("stale prepay attempts are closed and made retryable instead of remaining pending", async () => {

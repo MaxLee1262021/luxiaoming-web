@@ -98,9 +98,10 @@
     try { return new URL(raw, window.location.href); } catch (e) { return null; }
   }
 
-  function authError(message, status) {
+  function authError(message, status, code = "") {
     const error = new Error(message || "接口请求失败");
     error.status = status || 0;
+    error.code = code || "";
     error.isLxmHttpError = true;
     return error;
   }
@@ -145,7 +146,7 @@
 
   async function jsonResponse(response) {
     const body = await response.json().catch(() => null);
-    if (!response.ok) throw authError((body && (body.error || body.message)) || `接口返回 ${response.status}`, response.status);
+    if (!response.ok) throw authError((body && (body.error || body.message)) || `接口返回 ${response.status}`, response.status, body && body.code);
     return body;
   }
 
@@ -364,6 +365,13 @@
     return [...new Set(configured.map((item) => String(item || "").trim()).filter((item) => knownDataKeys.has(item)))];
   }
 
+  async function merchantCodeDailyStats(shopId, date = "") {
+    if (!hasSession()) throw authError("需要登录后读取门店扫码统计", 401);
+    const suffix = date ? `&date=${encodeURIComponent(date)}` : "";
+    const response = await request(`${base}/merchant-codes/daily-stats?shopId=${encodeURIComponent(shopId || "")}${suffix}`);
+    return jsonResponse(response);
+  }
+
   function menuModuleFor(menuKey) {
     const key = normalizeMenuKey(menuKey);
     const value = String(menuModules[key] || "").trim();
@@ -529,5 +537,5 @@
 
   window.addEventListener("lxm-auth-changed", () => clearMenuLoadState());
 
-  window.LXM_CLOUD = { getColl, getDoc, getModuleData, create, update, upsertDoc, remove, orderAction, afterSaleAction, merchantCodes, merchantCodeStats, generateMerchantCode, loadMenuData, loadAdminData, clearMenuLoadState, menuKeysFor, menuModuleFor, mode: () => window.LXM_CLOUD_MODE };
+  window.LXM_CLOUD = { getColl, getDoc, getModuleData, create, update, upsertDoc, remove, orderAction, afterSaleAction, merchantCodes, merchantCodeStats, merchantCodeDailyStats, generateMerchantCode, loadMenuData, loadAdminData, clearMenuLoadState, menuKeysFor, menuModuleFor, mode: () => window.LXM_CLOUD_MODE };
 })();

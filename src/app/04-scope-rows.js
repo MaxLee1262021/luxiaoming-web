@@ -12,7 +12,9 @@
     hasTransferRecord,
     inDateRange,
     inRoleScope,
+    isCreatedBooking,
     orderAfterSales,
+    orderBusinessStatus,
     orderDistributorIds,
     orderFinanceStatus,
     orderRefundStatus,
@@ -43,14 +45,15 @@ function orderProducts(order = {}) {
   return [];
 }
 const scopedOrders = computed(() => {
-  let list = data.orders.filter((o) => o && !o.deleted && !o.isDeleted && inRoleScope(o));
+  let list = data.orders.filter((o) => o && isCreatedBooking(o) && !o.deleted && !o.isDeleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
   if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
   if (state.filters.distributorId) list = list.filter((o) => o.distributorId === state.filters.distributorId || orderDistributorIds(o).includes(state.filters.distributorId));
   if (state.filters.shopId) list = list.filter((o) => sameShop(o, state.filters.shopId));
   if (state.filters.sourceType) list = list.filter((o) => orderSourceType(o) === state.filters.sourceType);
-  if (state.filters.status) list = list.filter((o) => o.status === state.filters.status);
+  if (state.filters.status) list = list.filter((o) => ["reserved", "awaiting_shoot", "shooting", "completed", "cancelled"].includes(state.filters.status)
+    ? orderBusinessStatus(o) === state.filters.status : o.status === state.filters.status);
   if (state.filters.financeStatus) list = list.filter((o) => orderFinanceStatus(o) === state.filters.financeStatus);
   if (state.filters.afterSaleStatus) {
     list = list.filter((o) => {
@@ -74,7 +77,7 @@ const scopedOrders = computed(() => {
   return list;
 });
 const reminderBaseOrders = computed(() => {
-  let list = data.orders.filter((o) => o && !o.deleted && !o.isDeleted && inRoleScope(o));
+  let list = data.orders.filter((o) => o && isCreatedBooking(o) && !o.deleted && !o.isDeleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
   if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
@@ -90,7 +93,7 @@ const reminderBaseOrders = computed(() => {
   }
   return list;
 });
-const taskOrders = computed(() => data.orders.filter((o) => o && !o.deleted && !o.isDeleted && o.photographerId === roleProfile.value.staffId));
+const taskOrders = computed(() => data.orders.filter((o) => o && isCreatedBooking(o) && !o.deleted && !o.isDeleted && inRoleScope(o) && o.photographerId));
 function afterSaleOrder(row) {
   return data.orders.find((order) => order && (order.id === row.orderId || order._id === row.orderId)) || {};
 }

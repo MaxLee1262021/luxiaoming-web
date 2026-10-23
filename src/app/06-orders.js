@@ -11,6 +11,7 @@
     afterSaleRows,
     can,
     canEditOrder,
+    canManageOrderRecords,
     clearOrderFilters,
     computed,
     currentOperatorName,
@@ -19,10 +20,10 @@
     dashboard,
     due,
     isOrderAfterSaleLocked,
+    isCreatedBooking,
     isOrderCancelledStatus,
     isOrderCompletedStatus,
     log,
-    manualOrderProducts,
     money,
     normalizeReviewStatus,
     onMounted,
@@ -40,14 +41,14 @@
 function handleMessage(row) {
   if (row.action === "pending") {
     clearOrderFilters();
-    state.filters.status = "pending";
+    state.filters.status = "reserved";
     switchMenu("orders", { preserveFilters: true });
   } else if (row.action === "due") {
     state.dashboardDrill = "due";
     switchMenu("dashboard", { preserveFilters: true });
   } else if (row.action === "unassigned") {
     clearOrderFilters();
-    state.filters.status = "confirmed";
+    state.filters.status = "reserved";
     state.filters.photographerId = "";
     switchMenu("orders", { preserveFilters: true });
   } else if (row.action === "scan") {
@@ -65,7 +66,7 @@ async function refreshOrders() {
   try {
     const response = await window.LXM_CLOUD.getColl("orders");
     const rows = Array.isArray(response) ? response : (response && (response.data || response.rows) || []);
-    data.orders = rows.filter((row) => row && typeof row === "object").map((row) => {
+    data.orders = rows.filter((row) => row && typeof row === "object" && isCreatedBooking(row)).map((row) => {
       const next = { ...row };
       next.id = next.id || next._id || "";
       next._id = next._id || next.id;
@@ -154,11 +155,10 @@ function onOrderPageSizeChange(size) {
   state.orderPage = 1;
 }
 function openOrder(order, options = {}) {
-  if (!order || !order.orderNo) return ElMessage.warning("未找到有效订单数据");
+  if (!order || !order.orderNo || !isCreatedBooking(order)) return ElMessage.warning("未找到有效订单数据");
   if (options && options.type === "selection") return;
-  if (!order.assigneeId && state.role === "service") order.assigneeId = roleProfile.value.staffId || state.currentStaffId || "";
   state.currentOrder = order;
-  state.orderReadonly = !!options.readonly;
+  state.orderReadonly = !!options.readonly || !canManageOrderRecords(order);
   state.orderWorkMode = options.mode || "service";
   state.currentFinanceReview = options.financeReview || null;
   state.moneyEdit = "";
@@ -168,106 +168,18 @@ function openOrder(order, options = {}) {
   state.orderDrawer = true;
   log("查看订单", order.orderNo, order.customer);
 }
-function resetManualOrderForm() {
-  const now = LXMFormat.nowText();
-  const today = now.slice(0, 10);
-  const defaultProduct = manualOrderProducts.value[0] || {};
-  state.manualOrderForm = {
-    customer: "",
-    phone: "",
-    wechat: "",
-    sourceType: "manual",
-    shopId: "",
-    distributorId: "",
-    productId: defaultProduct.id || "",
-    productType: defaultProduct.productType || defaultProduct.type || "package",
-    appointmentAt: "",
-    timePeriod: "",
-    internalNote: "",
-  };
-}
-function createManualOrder() {
-  if (!canEditOrder()) return ElMessage.error("当前角色无权创建订单");
-  resetManualOrderForm();
-  state.manualOrderDialog = true;
-}
-async function confirmCreateManualOrder() {
-  if (!canEditOrder()) return ElMessage.error("当前角色无权创建订单");
-  const form = state.manualOrderForm;
-  if (!String(form.customer || "").trim()) return ElMessage.warning("请填写客户姓");
-  if (!String(form.phone || "").trim()) return ElMessage.warning("请填写客户手机号");
-  if (form.sourceType === "shop" && !form.shopId) return ElMessage.warning("请选择来源商家");
-  if (!form.productId) return ElMessage.warning("请选择下单商品");
-  const now = LXMFormat.nowText();
-  const today = now.slice(0, 10);
-  const selected = manualOrderProducts.value.find((item) => item.id === form.productId) || {};
-  const product = selected.id ? { id: selected.id, type: selected.productType || selected.type || "package", price: Number(selected.specialPrice || selected.price || 0) } : { id: "", type: "package", price: 0 };
-  const rawDepositRatio = Number(selected.depositRatio ?? selected.depositRate ?? 30);
-  const depositRatio = Number.isFinite(rawDepositRatio) ? Math.min(1, Math.max(0, rawDepositRatio > 1 ? rawDepositRatio / 100 : rawDepositRatio)) : 0.3;
-  const totalAmount = Number(product.price || 0);
-  const depositDue = Math.round(totalAmount * depositRatio * 100) / 100;
-  const isShopSource = form.sourceType === "shop";
-  const isHeadquarterSourceValue = form.sourceType === "headquarter";
-  const order = {
-    id: `manual-${Date.now()}`,
-    orderNo: `LS${today.replaceAll("-", "")}${String(data.orders.length + 101).slice(-3)}`,
-    openid: "",
-    customer: form.customer.trim(),
-    phone: form.phone.trim(),
-    wechat: String(form.wechat || "").trim(),
-    shopId: isShopSource ? form.shopId : "",
-    distributorId: isShopSource ? form.distributorId : "",
-    sourceType: form.sourceType,
-    sourceName: isHeadquarterSourceValue ? "总部二维码" : isShopSource ? "商家二维码" : "客服手动创建",
-    sourceScene: isHeadquarterSourceValue ? "总部自有二维" : isShopSource ? "商家铺码转化" : "后台手动录入",
-    status: "deposit_pending",
-    customerStatus: "待支付",
-    workflowStage: depositDue > 0 ? "awaiting_deposit" : "awaiting_dispatch",
-    assigneeId: roleProfile.value.staffId || currentStaff.value?.id || "",
-    photographerId: "",
-    appointmentAt: "",
-    timePeriod: "",
-    totalAmount,
-    depositRatio,
-    depositDue,
-    finalDue: Math.max(totalAmount - depositDue, 0),
-    depositPaid: 0,
-    finalPaid: 0,
-    depositFinanceStatus: "",
-    finalFinanceStatus: "",
-    paymentVerify: "未核销",
-    packageSnapshot: selected.id ? { name: selected.name, price: totalAmount, originalPrice: Number(selected.originalPrice || selected.price || product.price || 0), depositRatio } : {},
-    priceAdjustReason: "",
-    customerRemark: "",
-    internalNote: form.internalNote || "客服后台手动创建订单",
-    products: product.id ? [product] : [],
-    addons: [],
-    statusLogs: [
-      {
-        time: now,
-        operator: currentOperatorName(),
-        action: `客服手动创建订单 ${form.customer.trim()}，来源：${isShopSource ? shopName(form.shopId) : isHeadquarterSourceValue ? "总部二维码" : "后台手动录入"}`
-      }
-    ],
-    deleted: false
-  };
-  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
-  if (connected && window.LXM_CLOUD?.create) {
-    try {
-      const saved = await window.LXM_CLOUD.create("orders", order);
-      if (!saved || saved.error) throw new Error(saved && saved.error ? saved.error : "订单保存失败");
-      Object.assign(order, saved, { id: saved.id || saved._id || order.id, _id: saved._id || saved.id || order.id });
-    } catch (error) {
-      return ElMessage.error((error && error.message) || "订单未保存，请稍后重试");
-    }
+async function claimOrder(order) {
+  if (!order || state.role !== "service" || order.assigneeId) return;
+  const staffId = roleProfile.value.staffId || state.currentStaffId || "";
+  if (!staffId) return ElMessage.error("当前客服账号缺少人员标识，无法领取订单");
+  const original = order.assigneeId;
+  try {
+    await persistOrderAction(order, "claim", { assigneeId: staffId, reason: "客服领取待处理订单" });
+    order.assigneeId = staffId;
+    ElMessage.success("订单已领取，当前客服成为负责人");
+  } catch (_) {
+    order.assigneeId = original;
   }
-  data.orders.unshift(order);
-  state.manualOrderDialog = false;
-  state.filters.status = "";
-  state.filters.keyword = "";
-  log("创建订单", order.orderNo, "客服在订单管理手动创建新订单");
-  openOrder(order, { mode: "service" });
-  ElMessage.success("订单已创建，请先在订单详情登记订金并等待财务确认");
 }
 function openOrderById(id, options = {}) {
   const order = data.orders.find((o) => o.id === id || o.orderNo === id);
@@ -655,7 +567,7 @@ onMounted(() => {
 });
 async function addFollowLog(text) {
   if (!state.currentOrder) return;
-  if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，客服处理信息暂时锁定，请先完成售后处理");
+  if (!canManageOrderRecords(state.currentOrder)) return ElMessage.warning("请先领取订单后添加跟进");
   const detail = (text || state.followText || "").trim();
   if (!detail) return ElMessage.warning("请先填写跟进内容");
   const order = state.currentOrder;
@@ -663,7 +575,13 @@ async function addFollowLog(text) {
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   const connected = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
   try {
-    await persistOrderAction(order, "note", { reason: detail });
+    await persistOrderAction(order, "followup", {
+      type: "service",
+      content: detail,
+      status: "open",
+      reason: detail,
+      followupId: `followup_${Date.now().toString(36)}`
+    });
     if (!connected) addOrderTimeline(order, detail);
   } catch (_) {
     Object.keys(order).forEach((field) => { if (!(field in original)) delete order[field]; });
@@ -672,6 +590,20 @@ async function addFollowLog(text) {
   }
   state.followText = "";
   ElMessage.success("客服跟进记录已添");
+}
+async function completeFollowup(followupId, note = "") {
+  const order = state.currentOrder;
+  if (!order || !followupId || !canManageOrderRecords(order)) return;
+  const row = (order.followRecords || []).find((item) => item.type === "customer_followup" && String(item.id || "") === String(followupId));
+  if (!row || row.status === "completed") return;
+  try {
+    await persistOrderAction(order, "followup", {
+      followupId: String(followupId), type: row.followupType || "service", content: row.content || "", status: "completed", reason: note || "客服完成跟进"
+    });
+    row.status = "completed";
+    row.completedAt = LXMFormat.nowText();
+    ElMessage.success("跟进已完成");
+  } catch (_) {}
 }
 
   return {
@@ -686,9 +618,8 @@ async function addFollowLog(text) {
     confirmBatchNote,
     onOrderPageSizeChange,
     openOrder,
-    resetManualOrderForm,
-    createManualOrder,
-    confirmCreateManualOrder,
+    claimOrder,
+    completeFollowup,
     openOrderById,
     openAfterSalesForOrder,
     openAfterSaleSubmit,

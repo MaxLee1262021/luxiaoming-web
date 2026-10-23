@@ -6,9 +6,11 @@ const rpc = require("../lib/rpc.cjs");
 
 function makeSource() {
   const collections = {
-    homeConfig: [{ id: "homeStats", recommendations: { hotPackageIds: ["pkg-main"] } }],
+    homeConfig: [{ id: "homeStats", recommendations: { hotPackageIds: ["pkg-main"] }, pageModules: { albumDetail: { bannerIds: ["sample-banner"], sampleIds: ["sample-detail"] } } }],
     config: [],
     siteConfig: [],
+    shops: [{ id: "shop-1", name: "长沙门店", cityId: "city-cs", city: "长沙", status: "合作中" }],
+    merchantCodes: [{ id: "code-1", codeId: "code-1", shopId: "shop-1", scene: "c=code-1", status: "启用" }],
     spots: [
       { id: "spot-1", name: "江边", isShow: true, status: "启用" },
       { id: "spot-2", name: "老街", isShow: true, status: "启用" }
@@ -17,9 +19,12 @@ function makeSource() {
       { id: "series-1", name: "夜景", spotIds: ["spot-1", "spot-2"], isShow: true, status: "启用" },
       { id: "series-2", name: "其它系列", spotIds: ["spot-2"], isShow: true, status: "启用" }
     ],
-    albums: [{ id: "album-1", name: "夜景照片留影", seriesId: "series-1", spotId: "spot-1", price: 399, isShow: true, status: "上架" }],
+    albums: [{ id: "album-1", name: "夜景照片留影", seriesId: "series-1", spotId: "spot-1", price: 399, isShow: true, status: "上架", sampleUrls: ["https://images.invalid/album-cover.jpg"], photoCount: 1 }],
     peripherals: [{ id: "peripheral-1", name: "定制相册", price: 99, isShow: true, status: "上架" }],
-    samples: [],
+    samples: [
+      { id: "sample-banner", name: "后台配置轮播", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "image", url: "https://images.invalid/banner.jpg", isShow: true, isShowcase: true },
+      { id: "sample-detail", name: "后台配置样片", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "image", url: "https://images.invalid/detail.jpg", isShow: true }
+    ],
     guides: [],
     packages: [
       {
@@ -82,9 +87,45 @@ test("套餐公共 RPC 投影统一主推、详情和多点位字段", async () 
   assert.equal(collection.data.featuredPackages.some((item) => item._id === "pkg-global-promoted"), false);
   assert.equal(collection.data.featuredPackages.some((item) => item._id === "pkg-other-series-promoted"), false);
   assert.equal(collection.data.spotPackages.some((item) => item._id === "pkg-other-series-promoted"), false);
+  assert.equal(collection.data.collections[0].albumId, "album-1");
+  assert.deepEqual(collection.data.collections[0].sampleUrls, ["https://images.invalid/banner.jpg", "https://images.invalid/detail.jpg"]);
+  assert.equal(collection.data.pageConfig.albumDetail.banners[0]._id, "sample-banner");
+  assert.equal(collection.data.pageConfig.albumDetail.samples[0]._id, "sample-detail");
 
   const missingDetail = await rpc(source, "getSeriesDetail", { data: { seriesId: "series-1", packageId: "pkg-missing", spotId: "spot-1" } });
   assert.deepEqual(missingDetail, { success: false, error: "套餐不存在" });
+});
+
+test("照片留影 RPC 支持仅 albumId，并返回单品字段与装修样片", async () => {
+  const source = makeSource();
+  const result = await rpc(source, "getPhotoCollection", { data: { albumId: "album-1" } });
+  assert.equal(result.success, true, JSON.stringify(result));
+  assert.equal(result.data.collections[0].name, "夜景照片留影");
+  assert.equal(result.data.collections[0].seriesId, "series-1");
+  assert.equal(result.data.collections[0].spotId, "spot-1");
+  assert.equal(result.data.collections[0].spot.name, "江边");
+  assert.equal(result.data.collections[0].price, 399);
+  assert.equal(result.data.pageConfig.samples[0]._id, "sample-detail");
+});
+
+test("照片留影 RPC 对下架单品 fail closed", async () => {
+  const source = makeSource();
+  source.list = async (key) => key === "albums"
+    ? [{ id: "album-hidden", name: "隐藏留影", seriesId: "series-1", spotId: "spot-1", isShow: false, status: "下架" }]
+    : (key === "homeConfig" ? [{ id: "homeStats" }] : (await makeSource().list(key)));
+  source.get = async (key, id) => key === "albums" && id === "album-hidden"
+    ? { id: "album-hidden", name: "隐藏留影", seriesId: "series-1", spotId: "spot-1", isShow: false, status: "下架" }
+    : null;
+  const result = await rpc(source, "getPhotoCollection", { data: { albumId: "album-hidden" } });
+  assert.deepEqual(result, { success: false, error: "照片留影不存在" });
+});
+
+test("扫码来源投影携带后台配置的城市", async () => {
+  const source = makeSource();
+  const result = await rpc(source, "resolveMerchantCode", { data: { c: "code-1" } });
+  assert.equal(result.success, true, JSON.stringify(result));
+  assert.equal(result.cityId, "city-cs");
+  assert.equal(result.city, "长沙");
 });
 
 test("photo and image sample labels both remain visible in photo package details", async () => {

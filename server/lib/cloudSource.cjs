@@ -32,6 +32,11 @@ module.exports = function (cfg) {
     const tcb = getApp();
     return tcb.database().collection(realName(key));
   }
+  function favoriteKey(openid, type, itemId) { return `${String(openid || "")}\u0000${String(type || "")}\u0000${String(itemId || "")}`; }
+  function favoriteProjection(row) {
+    if (!row) return null;
+    return { ...row, key: favoriteKey(row.openid, row.type, row.itemId), itemId: String(row.itemId || "") };
+  }
 
   return {
     mode: "cloud",
@@ -77,6 +82,40 @@ module.exports = function (cfg) {
       delete merged._id;
       await c.doc(id).set(merged);
       return { ...merged, _id: id };
+    },
+    async listFavorites(openid, options = {}) {
+      const owner = String(openid || "").trim();
+      if (!owner) return [];
+      const c = await coll("userFavorites");
+      let condition = { openid: owner };
+      if (options.type) condition.type = String(options.type);
+      const r = await c.where(condition).orderBy("createdAt", "desc").limit(Math.min(Number(options.limit || 100), 200)).skip(Math.max(Number(options.offset || 0), 0)).get();
+      return (r.data || []).map(favoriteProjection);
+    },
+    async getFavorite(openid, type, itemId) {
+      const c = await coll("userFavorites");
+      const r = await c.where({ openid: String(openid || ""), type: String(type || ""), itemId: String(itemId || "") }).limit(1).get();
+      return favoriteProjection(r.data && r.data[0]);
+    },
+    async upsertFavorite(openid, input = {}) {
+      const owner = String(openid || "");
+      const type = String(input.type || "");
+      const itemId = String(input.itemId || input.id || "");
+      const c = await coll("userFavorites");
+      const now = new Date().toISOString();
+      const snapshot = input.snapshot && typeof input.snapshot === "object" ? input.snapshot : {};
+      const existing = await this.getFavorite(owner, type, itemId);
+      const document = { openid: owner, type, itemId, snapshot, createdAt: existing && existing.createdAt || now, updatedAt: now };
+      if (existing && existing._id) await c.doc(existing._id).update(document);
+      else { const added = await c.add(document); document._id = added.id || added._id; }
+      return favoriteProjection(document);
+    },
+    async removeFavorite(openid, type, itemId) {
+      const existing = await this.getFavorite(openid, type, itemId);
+      if (!existing || !existing._id) return false;
+      const c = await coll("userFavorites");
+      await c.doc(existing._id).remove();
+      return true;
     },
     async dashboard() {
       try {

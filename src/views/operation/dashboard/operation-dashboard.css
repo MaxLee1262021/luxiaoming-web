@@ -8,6 +8,43 @@
   --dash-teal: linear-gradient(135deg, #FFE49A, #FFD36A);                             /* 营收：品牌金 */
 }
 
+.page-route-operation-dashboard .dashboard-page-head {
+  display: flex;
+  align-items: center;
+  min-height: 86px;
+  margin-bottom: 16px;
+  padding: 18px 22px;
+  border: 1px solid var(--dash-border);
+  border-left: 4px solid var(--lxm-brand-strong, #ee2c2c);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .04);
+}
+
+.page-route-operation-dashboard .dashboard-page-head h2,
+.page-route-operation-dashboard .dashboard-page-head p {
+  margin: 0;
+}
+
+.page-route-operation-dashboard .dashboard-page-head h2 {
+  margin-top: 4px;
+  color: #1e293b;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.page-route-operation-dashboard .dashboard-page-head p {
+  margin-top: 5px;
+  color: var(--dash-muted);
+  font-size: 12px;
+}
+
+.page-route-operation-dashboard .dashboard-page-head .eyebrow {
+  color: var(--lxm-brand, #d9531e);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .page-route-operation-dashboard .dashboard-filter {
   display: flex;
   flex-wrap: wrap;
@@ -47,6 +84,13 @@
 
 .page-route-operation-dashboard .dashboard-date-shortcuts .el-date-editor {
   margin-left: 4px;
+}
+
+.page-route-operation-dashboard .dashboard-filter .el-input__wrapper.is-focus,
+.page-route-operation-dashboard .dashboard-filter .el-select .el-input.is-focus .el-input__wrapper,
+.page-route-operation-dashboard .dashboard-filter .el-date-editor.el-input__wrapper.is-focus {
+  border-color: var(--dash-border) !important;
+  box-shadow: 0 0 0 1px var(--dash-border) inset !important;
 }
 
 .page-route-operation-dashboard .kpi-delta.flat {

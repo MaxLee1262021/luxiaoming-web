@@ -161,7 +161,9 @@ test("disabled permission account exposes status only after correct credentials"
     // The JSON store emulates the production permission-login path for this API test.
     store.required = true;
     store.backend = "mysql";
-    auth = createAuthStore();
+    // Keep this contract test isolated from a developer Redis instance that
+    // may retain failed-login counters between repeated local runs.
+    auth = createAuthStore({ sessionStore: "memory", lockMs: 1000 });
     const source = makeSource();
     const handler = createApi(source, "json", { auth, permissionStore: store, sourceStatus: { configured: true, ready: true, persistent: false } });
     server = http.createServer((req, res) => handler(req, res, (req.url || "/").split("?")[0]));

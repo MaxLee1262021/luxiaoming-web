@@ -60,9 +60,10 @@ function grantedRouteKeys() {
     .map((menu) => String(menu.routeKey || menu.targetKey || menu.key)));
 }
 function can(action) {
+  if (state.role === "super") return true;
   const routes = grantedRouteKeys();
   if (!routes.size) return false;
-  if (action === "*") return state.role === "super";
+  if (action === "*") return false;
   const capability = action === "content" ? "contentEdit" : action;
   const roleCaps = BUILTIN_ACTION_CAPS[state.role];
   if (roleCaps && !roleCaps.has("*") && !roleCaps.has(capability)) return false;
@@ -81,9 +82,13 @@ function paid(order) {
   return Number(order?.depositPaid || 0) + Number(order?.finalPaid || 0);
 }
 function financePaid(order) {
-  const deposit = normalizeReviewStatus(order?.depositFinanceStatus) === "已审" ? Number(order.depositPaid || 0) : 0;
-  const final = normalizeReviewStatus(order?.finalFinanceStatus) === "已审" ? Number(order.finalPaid || 0) : 0;
+  const deposit = paymentConfirmed(order, "deposit") ? Number(order.depositPaid || 0) : 0;
+  const final = paymentConfirmed(order, "final") ? Number(order.finalPaid || 0) : 0;
   return deposit + final;
+}
+function paymentConfirmed(order = {}, phase = "deposit") {
+  return ["confirmed", "paid", "success", "succeeded"].includes(String(order[`${phase}PaymentStatus`] || "").toLowerCase())
+    || normalizeReviewStatus(order[`${phase}FinanceStatus`]) === "已审";
 }
 function orderDiscount(order) {
   return Number(order?.finalDiscountAmount || 0);
@@ -95,8 +100,8 @@ function finalGap(order) {
   return Math.max(expectedFinalAmount(order) - Number(order?.finalPaid || 0), 0);
 }
 function financePendingAmount(order) {
-  const deposit = normalizeReviewStatus(order?.depositFinanceStatus) === "已审" ? 0 : Number(order?.depositPaid || 0);
-  const final = normalizeReviewStatus(order?.finalFinanceStatus) === "已审" ? 0 : Number(order?.finalPaid || 0);
+  const deposit = paymentConfirmed(order, "deposit") ? 0 : Number(order?.depositPaid || 0);
+  const final = paymentConfirmed(order, "final") ? 0 : Number(order?.finalPaid || 0);
   return deposit + final;
 }
 function due(order) {
@@ -223,33 +228,15 @@ function addOrderTimeline(order, action, operator) {
 async function persistOrderAction(order, action, payload = {}) {
   const id = order && (order.id || order._id);
   if (!id) throw new Error("订单缺少标识，无法保存");
+  if (!isCreatedBooking(order)) throw new Error("该预约尚未创建订单，请客人在小程序提交预约并完成定金支付");
+  if (action === "accept") throw new Error("预约订单由定金支付回调创建，无需后台确认定金");
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   const connected = window.LXM_AUTH && window.LXM_AUTH.hasSession && window.LXM_AUTH.hasSession()
     && window.LXM_CLOUD_MODE !== "mock" && reachable !== false;
   if (!connected || !window.LXM_CLOUD || !window.LXM_CLOUD.orderAction) {
     if (payload && payload.fields && typeof payload.fields === "object") Object.assign(order, payload.fields);
-    if (action === "assign" && payload.photographerId) {
-      order.photographerId = payload.photographerId;
-      if (["pending", "new"].includes(order.status)) { order.status = "confirmed"; order.customerStatus = "confirmed"; }
-    }
-    if (action === "accept") {
-      Object.assign(order, {
-        appointmentAt: payload.appointmentAt || order.appointmentAt || "",
-        timePeriod: payload.timePeriod || order.timePeriod || "",
-        appointmentLocation: payload.appointmentLocation || order.appointmentLocation || "",
-        peopleCount: payload.peopleCount || order.peopleCount || 1,
-        serviceNote: payload.serviceContent || order.serviceNote || "",
-        totalAmount: payload.totalAmount === undefined ? order.totalAmount : payload.totalAmount,
-        depositRatio: payload.depositRatio === undefined ? order.depositRatio : payload.depositRatio,
-        finalDiscountAmount: payload.finalDiscountAmount === undefined ? order.finalDiscountAmount : payload.finalDiscountAmount,
-        priceAdjustReason: payload.priceAdjustReason || order.priceAdjustReason || "",
-        serviceConfirmedAt: LXMFormat.nowText(),
-        status: "confirmed",
-        customerStatus: "confirmed",
-        workflowStage: "awaiting_deposit"
-      });
-    }
-    if (action === "start") { order.status = "shooting"; order.customerStatus = "shooting"; }
+    if (action === "claim") { order.assigneeId = payload.assigneeId || order.assigneeId || ""; }
+    if (action === "start") { order.status = "shooting"; order.businessStatus = "shooting"; order.customerStatus = "shooting"; }
     if (action === "assign") {
       Object.assign(order, {
         photographerId: payload.photographerId || order.photographerId || "",
@@ -260,25 +247,37 @@ async function persistOrderAction(order, action, payload = {}) {
         depositRefundable: false,
         workflowStage: "awaiting_shoot",
         status: "assigned",
-        customerStatus: "待安排摄影师"
+        customerStatus: "待拍摄",
+        businessStatus: "awaiting_shoot"
       });
     }
     if (action === "shootcomplete") {
-      Object.assign(order, { status: "final_pending", workflowStage: "selection_pending", shootingCompletedAt: LXMFormat.nowText(), selectionStatus: "pending", customerStatus: "已拍摄" });
+      Object.assign(order, { status: "final_pending", workflowStage: "selection_pending", shootingCompletedAt: LXMFormat.nowText(), selectionStatus: "pending", customerStatus: "已预约", businessStatus: "reserved" });
     }
     if (action === "selectionconfirm") {
-      Object.assign(order, { status: "final_pending", workflowStage: "awaiting_final_payment", selectionStatus: "confirmed", selectionConfirmedAt: LXMFormat.nowText(), customerStatus: "已拍摄" });
+      Object.assign(order, { status: "final_pending", workflowStage: "awaiting_final_payment", selectionStatus: "confirmed", selectionConfirmedAt: LXMFormat.nowText(), customerStatus: "已预约", businessStatus: "reserved" });
     }
     if (action === "payment" && payload.phase === "deposit" && String(payload.paymentStatus || "") === "confirmed") {
-      Object.assign(order, { status: "deposit_paid", workflowStage: "awaiting_dispatch", customerStatus: "待安排摄影师", depositRefundable: false });
+      Object.assign(order, { status: "deposit_paid", workflowStage: "awaiting_dispatch", customerStatus: "已预约", businessStatus: "reserved", depositRefundable: false });
     }
     if (action === "payment" && payload.phase === "final" && String(payload.paymentStatus || "") === "confirmed") {
-      Object.assign(order, { status: "paid", workflowStage: "paid", customerStatus: "已支付" });
+      Object.assign(order, { status: "paid", workflowStage: "paid", customerStatus: "已完成", businessStatus: "completed" });
     }
-    if (action === "deliver") { order.status = "delivered"; order.workflowStage = "delivered"; order.customerStatus = "已交付"; }
-    if (action === "complete") { order.status = "completed"; order.customerStatus = "done"; }
+    if (action === "deliveryrecord") {
+      const record = { id: payload.deliveryId || `delivery_${Date.now().toString(36)}`, fileIds: Array.isArray(payload.fileIds) ? payload.fileIds.slice() : [], visibility: payload.visibility || "customer", method: payload.deliveryMethod || "企业微信", note: payload.note || payload.reason || "", createdAt: LXMFormat.nowText(), operator: currentOperatorName() };
+      order.deliveryRecords = [...(Array.isArray(order.deliveryRecords) ? order.deliveryRecords : []), record];
+      order.deliveryRecord = record;
+    }
+    if (action === "deliver") { order.status = "delivered"; order.workflowStage = "delivered"; order.customerStatus = "已预约"; order.businessStatus = "reserved"; }
+    if (action === "complete") { order.status = "completed"; order.customerStatus = "已完成"; order.businessStatus = "completed"; }
     if (action === "cancel") { order.status = "cancelled"; order.customerStatus = "已取消"; order.deleted = true; order.isDeleted = true; }
-    if (action === "unassign") { order.photographerId = ""; order.status = "confirmed"; order.customerStatus = "confirmed"; }
+    if (action === "unassign") { order.photographerId = ""; order.status = "deposit_paid"; order.customerStatus = "已预约"; order.businessStatus = "reserved"; order.workflowStage = "awaiting_dispatch"; }
+    if (action === "followup" && payload.content) {
+      const recordId = payload.followupId || `followup_${Date.now().toString(36)}`;
+      const previous = (order.followRecords || []).find((item) => item.id === recordId);
+      const item = { ...previous, id: recordId, type: "customer_followup", followupType: payload.type || "service", content: payload.content, status: payload.status || "pending", reason: payload.reason || payload.content, operator: currentOperatorName(), operatorId: roleProfile.value.staffId || state.currentStaffId || "", createTime: previous?.createTime || LXMFormat.nowText() };
+      order.followRecords = [...(Array.isArray(order.followRecords) ? order.followRecords : []).filter((entry) => entry.id !== recordId), item];
+    }
     if (action === "note" && payload.reason) order.internalNote = [order.internalNote, payload.reason].filter(Boolean).join("\n");
     if (!(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) schedulePersist();
     return null;
@@ -294,7 +293,19 @@ async function persistOrderAction(order, action, payload = {}) {
   }
 }
 function statusMeta(value) {
-  return statusDict.find((s) => s.value === value) || statusDict[0];
+  const item = statusDict.find((s) => s.value === value) || { value: value || "", label: "-", text: "-", customer: "-" };
+  // The customer-facing status deliberately stays compact. Payment and
+  // delivery facts remain visible in the order drawer, while the main list
+  // follows the business statuses for paid reservations.
+  const labels = {
+    reserved: "已预约", awaiting_shoot: "待拍摄",
+    deposit_paid: "已预约", assigned: "待拍摄", shooting: "拍摄中",
+    retouching: "已预约", editing: "已预约", final_pending: "已预约",
+    delivered: "已预约", paid: "已完成", completed: "已完成",
+    done: "已完成", cancelled: "已取消", canceled: "已取消"
+  };
+  const text = labels[String(value || "").trim().toLowerCase()];
+  return text ? { ...item, label: text, text, customer: text } : item;
 }
 const COMPLETED_ORDER_STATUSES = new Set(["completed", "done", "已完成", "已完"]);
 const CANCELLED_ORDER_STATUSES = new Set(["cancelled", "canceled", "terminated", "已取消", "已中止", "中止"]);
@@ -423,13 +434,13 @@ function packagesReferencingPackage(id) {
 }
 function albumOrderRows(id) {
   const packageIds = packagesByAlbum(id).map((item) => item.id);
-  return data.orders.filter((order) => !order.deleted && (order.products || []).some((product) => product.id === id || packageIds.includes(product.id)));
+  return data.orders.filter((order) => isCreatedBooking(order) && !order.deleted && (order.products || []).some((product) => product.id === id || packageIds.includes(product.id)));
 }
 function albumRevenue(id) {
   return albumOrderRows(id).reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
 }
 function peripheralOrderRows(id) {
-  return data.orders.filter((order) => !order.deleted && (order.products || []).some((product) => product.id === id));
+  return data.orders.filter((order) => isCreatedBooking(order) && !order.deleted && (order.products || []).some((product) => product.id === id));
 }
 function peripheralModeText(row) {
   return row?.spotId || (row?.spotIds || []).length ? "定点专属" : "全城通用";
@@ -535,7 +546,7 @@ function spotOrderRows(id) {
     ...albumsBySpot(id).map((item) => item.id),
     ...peripheralsBySpot(id).map((item) => item.id),
   ]);
-  return data.orders.filter((order) => !order.deleted && (order.products || []).some((product) => productIds.has(product.id)));
+  return data.orders.filter((order) => isCreatedBooking(order) && !order.deleted && (order.products || []).some((product) => productIds.has(product.id)));
 }
 function spotRevenue(id) {
   return spotOrderRows(id).reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
@@ -577,12 +588,16 @@ function inDateRange(value) {
   return current >= start && current <= end;
 }
 function inRoleScope(orderOrShop) {
+  if (orderOrShop?.orderNo && !isCreatedBooking(orderOrShop)) return false;
   const scope = roleProfile.value.scope;
   const shop = orderOrShop && (orderOrShop.shopId || orderOrShop.source?.shopId)
     ? orderShop(orderOrShop)
     : (orderOrShop || {});
   if (scope === "all" || scope === "content" || scope === "finance") return true;
-  if (scope === "orders") return orderOrShop.assigneeId === roleProfile.value.staffId || orderOrShop.staffId === roleProfile.value.staffId;
+  // The service desk has a shared claim queue. Once claimed, the order stays
+  // visible to its current owner; unclaimed orders remain visible so they can
+  // be claimed instead of disappearing from every service account.
+  if (scope === "orders") return !orderOrShop.assigneeId || String(orderOrShop.assigneeId) === String(roleProfile.value.staffId);
   if (scope === "agent") return shop.agentId === (state.loginRole === "super" && state.filters.agentId ? state.filters.agentId : roleProfile.value.agentId);
   if (scope === "city") return sameCity(shop, roleProfile.value.cityId);
   if (scope === "distributor") return (orderOrShop.distributorId || orderOrShop.source?.distributorId) === roleProfile.value.distributorId || (shop.distributorIds || []).includes(roleProfile.value.distributorId) || shop.distributorId === roleProfile.value.distributorId;
@@ -621,7 +636,7 @@ function productName(p) {
 }
 function productPrice(p) {
   const item = resolveProduct(p);
-  return Number(p?.price || item.specialPrice || item.price || 0);
+  return Number(p?.price ?? item.specialPrice ?? item.price ?? 0);
 }
 function productStatus(row) {
   if (!row) return "下架";
@@ -649,6 +664,65 @@ function photographerDisplayName(id) {
 }
 function canEditOrder() {
   return can("orderEdit");
+}
+function isServiceQueueOrder(order = {}) {
+  return isCreatedBooking(order) && state.role === "service" && !isOrderTerminalStatus(order)
+    && !order.deleted && !order.isDeleted;
+}
+function isCurrentServiceOrder(order = {}) {
+  return !!order && String(order.assigneeId || order.staffId || "") === String(roleProfile.value.staffId || state.currentStaffId || "");
+}
+function canClaimOrder(order = {}) {
+  return isServiceQueueOrder(order) && state.role === "service" && can("orderEdit")
+    && !String(order.assigneeId || order.staffId || "").trim()
+    && !isOrderAfterSaleLocked(order);
+}
+function serviceQueueLabel(order = {}) {
+  if (!isServiceQueueOrder(order)) return "";
+  if (isCurrentServiceOrder(order)) return "当前负责人";
+  if (!order.assigneeId && !order.staffId) return "待领取";
+  return `负责人：${staffName(order.assigneeId || order.staffId)}`;
+}
+function orderDeliveryRecords(order = {}) {
+  const records = Array.isArray(order.deliveryRecords) ? order.deliveryRecords : [];
+  if (records.length) return records;
+  return order.deliveryRecord ? [order.deliveryRecord] : [];
+}
+function orderFollowRecords(order = {}) {
+  return (Array.isArray(order.followRecords) ? order.followRecords : []).filter((item) => item && item.type === "customer_followup");
+}
+function isCreatedBooking(order = {}) {
+  if (!order || order.bookingDraft || order.isBookingDraft) return false;
+  const status = String(order.status || "").trim().toLowerCase();
+  const legacyUnpaid = ["pending_payment", "awaiting_deposit", "new", "pending", "contacted", "confirmed", "deposit_pending"].includes(status)
+    || order.businessStatus === "pending_payment";
+  const hasDepositDue = order.depositDue !== undefined && order.depositDue !== null && order.depositDue !== "";
+  const depositDue = Number(order.depositDue);
+  const depositPaid = Number(order.depositPaid || 0);
+  if (legacyUnpaid) {
+    if (hasDepositDue && depositDue > 0 && depositPaid + 0.009 < depositDue) return false;
+    return depositPaid > 0 || (hasDepositDue && depositDue === 0);
+  }
+  return ["reserved", "awaiting_shoot", "deposit_paid", "assigned", "shooting", "final_pending", "delivered", "editing", "retouching", "paid", "completed", "done", "cancelled", "canceled", "terminated", "deleted"].includes(status)
+    || ["reserved", "awaiting_shoot", "shooting", "completed", "cancelled"].includes(order.businessStatus);
+}
+function orderBusinessStatus(order = {}) {
+  if (!isCreatedBooking(order)) return "";
+  const explicit = String(order.businessStatus || order.customerStatus || "").trim();
+  if (["reserved", "awaiting_shoot", "shooting", "completed", "cancelled"].includes(explicit)) return explicit;
+  const stage = String(order.workflowStage || order.status || "").trim().toLowerCase();
+  if (isOrderCancelledStatus(order) || stage === "cancelled") return "cancelled";
+  if (isOrderCompletedStatus(order) || ["paid", "completed"].includes(stage)) return "completed";
+  if (["awaiting_shoot", "assigned"].includes(stage)) return "awaiting_shoot";
+  if (stage === "shooting") return "shooting";
+  if (["selection_pending", "awaiting_delivery", "awaiting_final_payment", "delivered", "final_pending", "editing", "retouching"].includes(stage)) return "shooting";
+  if (["awaiting_dispatch", "deposit_paid", "reserved"].includes(stage)) return "reserved";
+  return Number(order.depositPaid || 0) > 0 || Number(order.depositDue) === 0 ? "reserved" : "";
+}
+function orderBusinessStatusMeta(order = {}) {
+  const business = orderBusinessStatus(order);
+  const color = ({ reserved: "#10B981", awaiting_shoot: "#3B82F6", shooting: "#3B82F6", completed: "#10B981", cancelled: "#6B7280" })[business];
+  return { value: business, label: statusMeta(business).label, color: color || "#6B7280" };
 }
 function canViewOrderSource() {
   return !["photo", "merchant"].includes(state.role);
@@ -700,6 +774,19 @@ function commissionRateText(type, id) {
   return `${commissionRateFor(type, id)}%`;
 }
 function orderSplit(order) {
+  const snapshot = order && order.commissionSnapshot && typeof order.commissionSnapshot === "object"
+    ? order.commissionSnapshot : null;
+  if (snapshot && snapshot.version) {
+    const netAmount = Number(snapshot.netAmount ?? netOrderAmount(order));
+    const shopAmount = Number(snapshot.shopAmount || 0);
+    const distributorAmount = Number(snapshot.distributorAmount || 0);
+    const photographerAmount = Number(snapshot.photographerAmount || 0);
+    return {
+      netAmount, shopAmount, distributorAmount, photographerAmount,
+      headquarterAmount: Number(snapshot.headquarterAmount ?? Math.max(netAmount - shopAmount - distributorAmount - photographerAmount, 0)),
+      snapshot: true
+    };
+  }
   const netAmount = netOrderAmount(order);
   const shopAmount = commission(order, "shop");
   const distributorAmount = commission(order, "distributor");
@@ -710,6 +797,7 @@ function orderSplit(order) {
     distributorAmount,
     photographerAmount,
     headquarterAmount: Math.max(netAmount - shopAmount - distributorAmount - photographerAmount, 0),
+    snapshot: false,
   };
 }
 function orderDistributorIds(order) {
@@ -758,8 +846,13 @@ function activeAfterSales(order) {
 function isOrderAfterSaleLocked(order = state.currentOrder) {
   return !!order && activeAfterSales(order).length > 0;
 }
-function canEditCurrentOrder() {
-  return canEditOrder() && !isOrderCompletedStatus(state.currentOrder) && !isOrderCancelledStatus(state.currentOrder) && !isOrderAfterSaleLocked(state.currentOrder);
+function canManageOrderRecords(order = state.currentOrder) {
+  return !!order && isCreatedBooking(order) && canEditOrder() && ["super", "service"].includes(state.role)
+    && (state.role === "super" || String(order.assigneeId || "") === String(roleProfile.value.staffId || ""))
+    && !isOrderCancelledStatus(order) && !order.deleted && !order.isDeleted;
+}
+function canEditCurrentOrder(order = state.currentOrder) {
+  return canManageOrderRecords(order) && !state.orderReadonly && !isOrderCompletedStatus(order) && !isOrderAfterSaleLocked(order);
 }
 function afterSaleBadge(order) {
   const rows = orderAfterSales(order);
@@ -897,11 +990,11 @@ function orderFinanceReviews(order) {
     shopId: order.shopId,
     type: "预约定金",
     amount: Number(order.depositPaid || 0),
-    status: order.depositFinanceStatus || "未提",
+    status: order.depositPaymentStatus || order.depositFinanceStatus || "待支付",
     source: "order",
     field: "depositFinanceStatus",
     createdAt: order.depositPaidAt || order.updatedAt || order.appointmentAt,
-    note: "客服登记定金后，由财务核对微信线下收款记录"
+    note: "定金由微信支付回调确认，保留到账记录"
   });
   if (Number(order.finalPaid || 0) > 0) rows.push({
     id: `final-${order.id}`,
@@ -911,11 +1004,11 @@ function orderFinanceReviews(order) {
     shopId: order.shopId,
     type: "收尾款",
     amount: Number(order.finalPaid || 0),
-    status: order.finalFinanceStatus || "未提",
+    status: order.finalPaymentStatus || order.finalFinanceStatus || "待支付",
     source: "order",
     field: "finalFinanceStatus",
     createdAt: order.finalPaidAt || order.updatedAt || order.appointmentAt,
-    note: "客服登记尾款后，由财务核对尾款到账和订单完成口径"
+    note: "尾款由微信支付回调确认，支付成功后自动完成订单"
   });
   return rows;
 }
@@ -1089,6 +1182,7 @@ function canCompleteOrderPayment(order) {
     money,
     paid,
     financePaid,
+    paymentConfirmed,
     orderDiscount,
     expectedFinalAmount,
     finalGap,
@@ -1174,6 +1268,15 @@ function canCompleteOrderPayment(order) {
     serviceOwnerName,
     photographerDisplayName,
     canEditOrder,
+    isServiceQueueOrder,
+    isCurrentServiceOrder,
+    canClaimOrder,
+    serviceQueueLabel,
+    orderDeliveryRecords,
+    orderFollowRecords,
+    orderBusinessStatus,
+    isCreatedBooking,
+    orderBusinessStatusMeta,
     canViewOrderSource,
     commission,
     commissionRateFor,
@@ -1187,6 +1290,7 @@ function canCompleteOrderPayment(order) {
     activeAfterSales,
     isOrderAfterSaleLocked,
     canEditCurrentOrder,
+    canManageOrderRecords,
     afterSaleBadge,
     orderFinanceStatus,
     orderRefundStatus,

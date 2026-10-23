@@ -200,6 +200,28 @@
           <button v-for="m in activePageModuleOptions" :key="m.key" :class="{active: (activePageConfig.enabledModules || []).includes(m.key)}" :disabled="!can('contentEdit')" @click="togglePageModule(m.key)">{{ m.label }}</button>
         </div>
 
+        <div v-if="activePageConfigMeta.key === 'albumDetail'" class="album-detail-relation-editor">
+          <div class="album-detail-relation-head">
+            <div>
+              <strong>照片留影详情顶部轮播</strong>
+              <span>这里选择并调整顶部轮播与样片顺序，保存装修配置后小程序详情页读取。</span>
+            </div>
+          </div>
+          <div v-for="entry in [{field:'bannerIds',title:'顶部轮播',limit:6},{field:'sampleIds',title:'详情样片',limit:9}]" :key="entry.field" class="album-detail-relation-group">
+            <div class="album-detail-relation-group__head"><strong>{{ entry.title }}</strong><span>最多 {{ entry.limit }} 张</span></div>
+            <div v-if="(activePageConfig[entry.field] || []).length" class="album-detail-relation-list">
+              <div v-for="(id, ri) in (activePageConfig[entry.field] || [])" :key="id" class="album-detail-relation-row">
+                <span class="album-detail-relation-index">{{ ri + 1 }}</span>
+                <span class="album-detail-relation-name">{{ pageRelationName(id) }}</span>
+                <button type="button" @click="movePageRelation(entry.field, ri, -1)" :disabled="!can('contentEdit') || ri === 0" aria-label="上移">↑</button>
+                <button type="button" @click="movePageRelation(entry.field, ri, 1)" :disabled="!can('contentEdit') || ri === (activePageConfig[entry.field].length - 1)" aria-label="下移">↓</button>
+                <button type="button" class="danger" @click="removePageRelation(entry.field, ri)" :disabled="!can('contentEdit')">删除</button>
+              </div>
+            </div>
+            <div v-else class="sf-empty">尚未选择样片，请在下方素材列表中选择。</div>
+          </div>
+        </div>
+
         <!-- 全部打卡点页专属：后台可配的筛选标签 / 排序选项（小程序端 allSpots 已支持读取并回退默认值） -->
         <div v-if="activePageConfigMeta.key === 'spotList'" class="spot-filters-editor">
           <div class="sf-group">
@@ -234,6 +256,7 @@
       <div class="decor-pick-grid page-relation-grid">
         <section v-for="group in activePageRelationGroups" :key="group.field">
           <h4>{{ group.title }}</h4>
+          <p v-if="group.hint" class="page-relation-hint">{{ group.hint }}</p>
           <div class="decor-choice-list">
              <button v-for="item in group.rows.slice(0, 12)" :key="item.id" :class="{active: (activePageConfig[group.field] || []).includes(item.id)}" :disabled="!can('contentEdit')" @click="togglePageRelation(group.field, item.id, group.limit)">
               <span>{{ item.name || item.title }}</span>

@@ -231,7 +231,7 @@ function paymentDescription(order = {}, phase = "") {
   const name = text(order.packageName || order.confirmationSnapshot && (order.confirmationSnapshot.name || order.confirmationSnapshot.packageName) || "旅拍服务")
     .replace(/[\r\n\t]+/g, " ");
   const suffix = phase === "final" ? "尾款" : "订金";
-  return `鹿小鸣旅拍-${name}-${suffix}`.slice(0, 127);
+  return `麓小鸣旅拍-${name}-${suffix}`.slice(0, 127);
 }
 
 function defaultTransport({ hostname, method, path, headers, body, timeoutMs }) {
@@ -265,6 +265,21 @@ function orderedPaymentMatch(order = {}, outTradeNo) {
 }
 
 async function locatePayment(source, outTradeNo) {
+  if (!source.bookingRequestSource) {
+    const bookingSource = require("./bookingRequests.cjs").bookingPaymentSource(source);
+    const booking = await bookingSource.findOrderByPaymentOutTradeNo(outTradeNo);
+    if (booking) {
+      // A promoted order intentionally retains its deposit transaction. An
+      // unrelated order claiming the same trade number must fail closed.
+      const order = typeof source.findOrderByPaymentOutTradeNo === "function"
+        ? await source.findOrderByPaymentOutTradeNo(outTradeNo)
+        : (await source.list("orders") || []).find((candidate) => paymentRecordFor(candidate, outTradeNo));
+      if (order && String(order.bookingId || "") !== itemId(booking)) throw new WechatPayError("Payment trade number conflict", { code: "WECHAT_PAY_PAYMENT_AMBIGUOUS", statusCode: 409 });
+      const match = orderedPaymentMatch(booking, outTradeNo);
+      if (!match) throw new WechatPayError("Payment record ambiguous", { code: "WECHAT_PAY_PAYMENT_AMBIGUOUS", statusCode: 409 });
+      return { ...match, booking: true };
+    }
+  }
   if (source && typeof source.findOrderByPaymentOutTradeNo === "function") {
     const order = await source.findOrderByPaymentOutTradeNo(outTradeNo);
     const match = order ? orderedPaymentMatch(order, outTradeNo) : null;
@@ -280,6 +295,7 @@ async function locatePayment(source, outTradeNo) {
 
 function expectedOrderFields(order = {}) {
   return {
+    ...(order.bookingStatus ? { bookingStatus: order.bookingStatus } : {}),
     paymentRecords: Array.isArray(order.paymentRecords) ? order.paymentRecords : [],
     statusLogs: Array.isArray(order.statusLogs) ? order.statusLogs : [],
     followRecords: Array.isArray(order.followRecords) ? order.followRecords : [],
@@ -302,8 +318,15 @@ async function compareAndUpdate(source, id, expected, patch) {
 function validPaymentPhase(phase) { return phase === "deposit" || phase === "final"; }
 
 function canConfirmPhase(order, phase) {
+  // Cancellation closes future issuance, never erases a provider-verified
+  // payment that arrives late. The amount and payer checks still run first.
+  if (phase === "deposit" && ["cancelled", "cancelling"].includes(order.bookingStatus)) return true;
   if (phase === "deposit") return canonicalStage(order) === WORKFLOW_STAGES.AWAITING_DEPOSIT;
-  return selectionConfirmed(order) && (!depositDue(order) || hasConfirmedPayment(order, "deposit"));
+  // The final payment itself acknowledges the customer's selection. The only
+  // server-side prerequisite is that shooting has been marked complete and
+  // any required deposit has already settled.
+  return [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(canonicalStage(order))
+    && (!depositDue(order) || hasConfirmedPayment(order, "deposit"));
 }
 
 function transactionFromNotification(value = {}) {
@@ -541,6 +564,7 @@ function createWechatPay(options = {}) {
 
   async function markTerminalPayment(source, transaction) {
     const initial = await locatePayment(source, transaction.outTradeNo);
+    if (initial.booking) return markTerminalPayment(require("./bookingRequests.cjs").bookingPaymentSource(source), transaction);
     const orderId = itemId(initial.order);
     return withOrderMutex(`order:${orderId}`, async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -574,6 +598,13 @@ function createWechatPay(options = {}) {
       throw new WechatPayError("Wechat Pay transaction is not successful", { code: "WECHAT_PAY_TRANSACTION_NOT_SUCCESS", statusCode: 409 });
     }
     const initial = await locatePayment(source, transaction.outTradeNo);
+    if (initial.booking) {
+      const { bookingPaymentSource, finalizePaidBooking } = require("./bookingRequests.cjs");
+      const result = await confirmTransaction(bookingPaymentSource(source), transaction);
+      const order = await finalizePaidBooking(source, itemId(initial.order));
+      if (!order) throw new WechatPayError("Paid booking could not be finalized", { code: "WECHAT_PAY_CONCURRENT_UPDATE", statusCode: 503 });
+      return { ...result, order };
+    }
     const orderId = itemId(initial.order);
     return withOrderMutex(`order:${orderId}`, async () => {
       for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -630,6 +661,23 @@ function createWechatPay(options = {}) {
           followRecords: [...(Array.isArray(order.followRecords) ? order.followRecords : []), timeline],
           updateTime: now,
         };
+        if (phase === "final") {
+          const selectionAt = order.selectionConfirmedAt || now;
+          patch.selectionStatus = "confirmed";
+          patch.selectionConfirmedAt = selectionAt;
+          patch.selectionAcknowledgedAt = selectionAt;
+          patch.selectionConfirmedBy = order.selectionConfirmedBy || "wechat_pay";
+          patch.selectionMethod = order.selectionMethod || "payment_acknowledgement";
+          patch.selectionRecord = order.selectionRecord || {
+            method: "payment_acknowledgement",
+            confirmedAt: selectionAt,
+            confirmedBy: order.selectionConfirmedBy || "wechat_pay",
+          };
+          patch.status = "completed";
+          patch.workflowStage = WORKFLOW_STAGES.COMPLETED;
+          patch.completedAt = order.completedAt || now;
+          patch.completionSource = order.completionSource || "wechat_pay_final";
+        }
         const updated = await compareAndUpdate(source, orderId, expectedOrderFields(order), patch);
         if (!updated) continue;
         try {

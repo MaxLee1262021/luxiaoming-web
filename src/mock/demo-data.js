@@ -27,20 +27,6 @@ const LXM_INITIAL_STATE = {
   ],
   orders: [
     {
-      id: "LS202606270018", status: "new", customer: "周女士", phone: "138****6721", wechat: "zhou_photo",
-      product: "古风单人写真", amount: 399, depositRequired: 100, depositPaid: 0, finalPaid: 0,
-      shopId: "shop001", shop: "茶颜悦色橘洲店", spot: "橘子洲头", date: "2026-06-28 上午 10:00",
-      photographer: "", serviceUser: "小林", source: "扫码预约", contactNote: "", deliveryNote: "",
-      logs: ["游客提交预约", "系统锁定来源商家：茶颜悦色橘洲店"]
-    },
-    {
-      id: "LS202606270021", status: "deposit_pending", customer: "陈先生", phone: "186****5290", wechat: "chen908",
-      product: "情侣双人写真", amount: 699, depositRequired: 200, depositPaid: 0, finalPaid: 0,
-      shopId: "shop002", shop: "IFS 文创集合店", spot: "IFS 国金中心", date: "2026-06-28 下午 15:30",
-      photographer: "", serviceUser: "小林", source: "扫码预约", contactNote: "客户确认下午拍摄，待转定金。",
-      deliveryNote: "", logs: ["客服已联系客户", "已说明定金 200 元，等待客户付款"]
-    },
-    {
       id: "LS202606260117", status: "assigned", customer: "李同学", phone: "151****3208", wechat: "lixx",
       product: "短视频打卡", amount: 599, depositRequired: 200, depositPaid: 200, finalPaid: 0,
       shopId: "shop003", shop: "麓山咖啡", spot: "岳麓山", date: "2026-06-27 下午 16:00",
@@ -76,7 +62,7 @@ const LXM_INITIAL_STATE = {
   ],
   roles: [
     { name: "超管", scope: "全部数据", custom: false, allowed: ["*"] },
-    { name: "客服主管", scope: "全部订单", custom: true, allowed: ["orders:查看订单", "orders:联系客户", "orders:记录定金", "orders:确认定金", "orders:派单", "orders:确认尾款", "orders:导出订单"] },
+    { name: "客服主管", scope: "全部订单", custom: true, allowed: ["orders:查看订单", "orders:联系客户", "orders:派单", "orders:确认尾款", "orders:导出订单"] },
     { name: "商家运营", scope: "仅自己渠道", custom: true, allowed: ["dashboard:查看经营数据", "orders:查看订单", "shops:查看经营数据"] },
     { name: "内容运营", scope: "内容与首页装修", custom: true, allowed: ["content:样片上传", "content:攻略管理", "content:故事管理", "content:首页配置"] }
   ],

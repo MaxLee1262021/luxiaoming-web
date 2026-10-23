@@ -8,19 +8,19 @@
     <div class="lxm-page-head__actions">
       <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
         <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
-        <span class="remote-dot"></span>{{ remoteOn ? '数据源：真实后端' : '数据源：演示数据' }}
+        <span class="remote-dot"></span>{{ remoteOn ? '真实数据：已开启' : '演示数据：已开启' }}
       </label>
-      <el-button v-if="state.role==='super' && remoteOn" plain @click="refreshFromServer">刷新真实数据</el-button>
+      <el-button v-if="state.role==='super' && remoteOn" plain :loading="remoteLoading" @click="refreshFromServer">刷新真实数据</el-button>
       <el-button plain @click="openContentLogs('短视频')">操作日志</el-button>
       <el-button type="primary" v-if="can('contentEdit')" @click="openVideoSingle()">新增短视频</el-button>
     </div>
   </header>
 
   <div class="lxm-kpi-grid">
-    <div class="lxm-kpi"><span class="lxm-kpi__label">短视频总数</span><strong class="lxm-kpi__value">{{ videoSingleRows.length }}</strong><span class="lxm-kpi__hint">独立可售短视频</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">在售</span><strong class="lxm-kpi__value">{{ videoSingleRows.filter(v => videoSingleStatus(v) !== '下架').length }}</strong><span class="lxm-kpi__hint">满足货架展示</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">主推</span><strong class="lxm-kpi__value">{{ videoSingleRows.filter(v => v.isMainPush).length }}</strong><span class="lxm-kpi__hint">优先推荐位</span></div>
-    <div class="lxm-kpi warning"><span class="lxm-kpi__label">待处理</span><strong class="lxm-kpi__value">{{ videoSingleRows.filter(v => (v.status || '').includes('待')).length }}</strong><span class="lxm-kpi__hint">审核 / 上下架</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">短视频总数</span><strong class="lxm-kpi__value">{{ videoSingleSummary.total }}</strong><span class="lxm-kpi__hint">当前筛选的独立可售短视频</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">在售</span><strong class="lxm-kpi__value">{{ videoSingleSummary.onSale }}</strong><span class="lxm-kpi__hint">满足货架展示</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">主推</span><strong class="lxm-kpi__value">{{ videoSingleSummary.mainPush }}</strong><span class="lxm-kpi__hint">优先推荐位</span></div>
+    <div class="lxm-kpi warning"><span class="lxm-kpi__label">待处理</span><strong class="lxm-kpi__value">{{ videoSingleSummary.pending }}</strong><span class="lxm-kpi__hint">审核 / 上下架</span></div>
   </div>
 
   <div class="lxm-toolbar">
@@ -58,7 +58,11 @@
             <em>{{ money(item.price||0) }} · {{ videoSingleStatus(item) }} · {{ seriesName(item.seriesId) }}</em>
           </span>
         </button>
-        <div v-if="listSource.length===0" class="empty-state">
+        <div v-if="remoteError" class="empty-state">
+          <strong>短视频加载失败</strong><span>{{ remoteError }}</span>
+          <el-button plain @click="refreshFromServer">重新加载</el-button>
+        </div>
+        <div v-else-if="!remoteLoading && listSource.length===0" class="empty-state">
           <strong>暂无短视频</strong><span>先新增一条短视频成片（带视频文件 / 链接），再关联打卡点与拍摄风格。</span>
         </div>
       </div>
@@ -69,7 +73,7 @@
       <div class="vse-form-head">
         <div>
           <strong>编辑短视频</strong>
-          <p>改完点「保存」；开关类直接切换即时生效。</p>
+          <p>修改内容后点「保存」；下方上下架按钮即时生效。</p>
         </div>
         <div class="vse-form-actions">
           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedVideoSingle">保存</el-button>
@@ -163,7 +167,4 @@
     </aside>
   </div>
 
-  <div v-if="!selectedVideoSingle" class="empty-state">
-    <strong>请选择左侧短视频</strong><span>点击列表项即可在中栏编辑、右栏预览。</span>
-  </div>
 </div>

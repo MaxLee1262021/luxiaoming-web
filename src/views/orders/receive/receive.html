@@ -3,14 +3,14 @@
 </div>
 
 <div class="receive-stat">
-  <div><span>待接单（已派未拍）</span><strong>{{ scopedOrders.filter(o=>o.photographerId && ['已确认','待拍摄'].includes(o.status)).length }}</strong></div>
+  <div><span>待拍摄（已派未拍）</span><strong>{{ scopedOrders.filter(o=>o.photographerId && ['已确认','待拍摄'].includes(o.status)).length }}</strong></div>
   <div><span>拍摄中</span><strong>{{ scopedOrders.filter(o=>o.status==='拍摄中').length }}</strong></div>
   <div><span>已完成</span><strong>{{ scopedOrders.filter(o=>o.status==='completed').length }}</strong></div>
 </div>
 
 <div class="receive-board">
   <div class="receive-card" v-for="o in scopedOrders.filter(x=>x.photographerId && ['已确认','待拍摄','拍摄中'].includes(x.status))" :key="o.id">
-    <div class="rc-badge" :class="o.status==='拍摄中' ? 'shooting' : 'wait'">{{ o.status==='拍摄中' ? '拍摄中' : '待接单' }}</div>
+    <div class="rc-badge" :class="o.status==='拍摄中' ? 'shooting' : 'wait'">{{ o.status==='拍摄中' ? '拍摄中' : '待拍摄' }}</div>
     <div class="rc-body">
       <div class="rc-cust"><strong>{{ o.customer }}</strong><span class="muted">{{ visiblePhone(o) }}</span></div>
       <div class="rc-prod"><el-tag v-for="p in o.products" :key="p.type+p.id" @click="openProduct(p)">{{ productName(p) }}</el-tag></div>

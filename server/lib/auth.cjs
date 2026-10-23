@@ -327,6 +327,9 @@ function createAuthStore(options = {}) {
   if (requestedStore === "redis" && !(redisUrl && String(redisUrl).trim())) {
     return new UnavailableAuthStore("redis_config_missing");
   }
+  // An explicit memory selection is authoritative, even when a developer
+  // machine also has REDIS_URL configured for another local service.
+  if (requestedStore === "memory") return new MemoryAuthStore(common);
   if (productionLike && requestedStore !== "redis" && !(redisUrl && String(redisUrl).trim())) {
     return new UnavailableAuthStore("redis_required_in_production");
   }

@@ -57,13 +57,13 @@ function publicIdentity(openid = "customer-openid") {
 test("booking is payable without a customer-selected shooting time and deposit intent is idempotent", async () => {
   const source = makeSource();
   const booking = await rpc(source, "createBooking", {
-    data: {
+    data: { expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true },
       name: "测试用户", phone: "13800000000", items: [{ packageId: "package-1" }],
       idempotencyKey: "booking-test-0001",
     },
   }, publicIdentity());
   assert.equal(booking.success, true);
-  const order = await source.get("orders", booking.orderId);
+  const order = await source.get("bookingRequests", booking.bookingId);
   assert.equal(order.date, "");
   assert.equal(order.time, "");
   assert.equal(order.depositRatio, 0.3);
@@ -75,14 +75,14 @@ test("booking is payable without a customer-selected shooting time and deposit i
   assert.equal(order.products[0].packageId, "package-1");
 
   const repeatedBooking = await rpc(source, "createBooking", {
-    data: { name: "测试用户", phone: "13800000000", items: [{ packageId: "package-1" }], idempotencyKey: "booking-test-0001" },
+    data: { expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true }, name: "测试用户", phone: "13800000000", items: [{ packageId: "package-1" }], idempotencyKey: "booking-test-0001" },
   }, publicIdentity());
   assert.equal(repeatedBooking.success, true);
   assert.equal(repeatedBooking.idempotent, true);
-  assert.equal(repeatedBooking.orderId, booking.orderId);
+  assert.equal(repeatedBooking.bookingId, booking.bookingId);
 
   const intent = await rpc(source, "createPayment", {
-    data: { orderId: booking.orderId, phase: "deposit", amount: 30, idempotencyKey: "payment-test-0001" },
+    data: { bookingId: booking.bookingId, phase: "deposit", amount: 30, idempotencyKey: "payment-test-0001" },
   }, publicIdentity());
   assert.equal(intent.success, true);
   assert.equal(intent.data.status, "pending");
@@ -91,22 +91,23 @@ test("booking is payable without a customer-selected shooting time and deposit i
   assert.ok(intent.data.paymentParams);
 
   const repeatIntent = await rpc(source, "createPaymentIntent", {
-    data: { orderId: booking.orderId, phase: "deposit", amount: 30, idempotencyKey: "payment-test-0001" },
+    data: { bookingId: booking.bookingId, phase: "deposit", amount: 30, idempotencyKey: "payment-test-0001" },
   }, publicIdentity());
   assert.equal(repeatIntent.success, true);
   assert.equal(repeatIntent.data.idempotent, true);
 
-  const publicDetail = await rpc(source, "getOrderDetail", { data: { orderId: booking.orderId } }, publicIdentity());
-  assert.equal(publicDetail.success, true);
-  assert.equal(publicDetail.data.paymentStatus, "pending");
-  assert.equal(publicDetail.data.paymentPending, true);
-  assert.equal(Object.hasOwn(publicDetail.data, "paymentRecords"), false);
-  assert.equal(Object.hasOwn(publicDetail.data, "bookingIdempotencyKey"), false);
+  assert.equal(booking.bookingStatus, "pending_payment");
+  assert.equal(booking.orderId, undefined);
+  assert.equal(intent.data.orderId, undefined);
+  assert.equal((await source.list("orders")).length, 0);
+  const publicDetail = await rpc(source, "getOrderDetail", { data: { orderId: booking.bookingId } }, publicIdentity());
+  assert.equal(publicDetail.success, false);
+
 });
 
 test("payment relation round-trips all workflow identifiers through normalized MySQL storage", () => {
   const payment = {
-    id: "payment-1", phase: "final", type: "wechat", amount: 70, status: "confirmed", attempt: 2,
+    id: "payment-1", phase: "final", selectionAccepted: true, type: "wechat", amount: 70, status: "confirmed", attempt: 2,
     provider: "manual", idempotencyKey: "payment-test-0002", confirmationIdempotencyKey: "confirm-test-0002",
     externalTransactionId: "wx-transaction-2", operator: "finance", operatorId: "finance-1",
     paidAt: "2026-09-12T10:00:00.000Z", createdAt: "2026-09-12T09:00:00.000Z", updatedAt: "2026-09-12T10:00:00.000Z",
@@ -124,14 +125,14 @@ test("payment relation round-trips all workflow identifiers through normalized M
   assert.deepEqual(restored.paymentRecords[0], { ...payment, paymentType: "wechat" });
 });
 
-test("completed orders remain in the customer-facing delivered state and timeline omits private operators and notes", () => {
+test("completed orders remain in the customer-facing completed state and timeline omits private operators and notes", () => {
   const output = workflow.publicOrderProjection({
     id: "completed-order", status: "completed", totalAmount: 100, depositDue: 30, finalDue: 70,
     depositPaid: 30, finalPaid: 70, depositFinanceStatus: "已审", finalFinanceStatus: "已审",
     statusLogs: [{ type: "后台订单操作", action: "完成订单：内部备注", operator: "admin", operatorId: "staff-1", note: "private", createTime: "2026-09-12T10:00:00.000Z" }],
   }, { detail: true });
   assert.equal(output.workflowStage, workflow.WORKFLOW_STAGES.COMPLETED);
-  assert.equal(output.statusText, "已交付");
+  assert.equal(output.statusText, "已完成");
   assert.equal(output.paymentPhase, "");
   assert.deepEqual(output.statusTimeline, [{ type: "后台订单操作", action: "完成订单", createTime: "2026-09-12T10:00:00.000Z", time: "2026-09-12T10:00:00.000Z" }]);
   assert.equal(JSON.stringify(output).includes("staff-1"), false);
@@ -156,7 +157,7 @@ test("booking rejects a peripheral-only cart even when the client bypasses its f
   const source = makeSource();
   source.collections.peripherals["peripheral-1"] = { id: "peripheral-1", name: "定制相册", price: 50, status: "已上架" };
   const result = await rpc(source, "createBooking", {
-    data: { name: "测试用户", phone: "13800000000", date: "2026-12-20", timePeriod: "上午", items: [{ peripheralId: "peripheral-1" }], idempotencyKey: "booking-test-0003" },
+    data: { expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true }, name: "测试用户", phone: "13800000000", date: "2026-12-20", timePeriod: "上午", items: [{ peripheralId: "peripheral-1" }], idempotencyKey: "booking-test-0003" },
   }, publicIdentity());
   assert.equal(result.success, false);
   assert.equal(result.error, "影像周边需搭配拍摄项目一起预约");
@@ -171,18 +172,18 @@ test("customer order filters and counts use the five business states", async () 
       paymentRecords: [{ id: "dispatch-deposit", phase: "deposit", amount: 30, status: "confirmed" }],
     },
     shot: { id: "shot", openid: "customer-openid", status: "final_pending", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, shootingCompletedAt: "2026-09-12T09:00:00.000Z", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z" },
-    paid: { id: "paid", openid: "customer-openid", status: "paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", paymentRecords: [{ id: "paid-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "paid-final", phase: "final", amount: 70, status: "confirmed" }] },
-    delivered: { id: "delivered", openid: "customer-openid", status: "delivered", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-12T10:00:00.000Z", paymentRecords: [{ id: "delivered-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "delivered-final", phase: "final", amount: 70, status: "confirmed" }] },
+    paid: { id: "paid", openid: "customer-openid", status: "paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", paymentRecords: [{ id: "paid-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "paid-final", phase: "final", selectionAccepted: true, amount: 70, status: "confirmed" }] },
+    delivered: { id: "delivered", openid: "customer-openid", status: "delivered", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-12T10:00:00.000Z", paymentRecords: [{ id: "delivered-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "delivered-final", phase: "final", selectionAccepted: true, amount: 70, status: "confirmed" }] },
   };
-  for (const [status, expected] of [["pending_payment", "pending"], ["awaiting_photographer", "dispatch"], ["shot", "shot"], ["paid", "paid"], ["delivered", "delivered"]]) {
+  for (const [status, expected] of [["pending_payment", []], ["reserved", ["dispatch"]], ["awaiting_shoot", []], ["shooting", ["shot"]], ["completed", ["paid", "delivered"]]]) {
     const result = await rpc(source, "getMyOrders", { data: { status, page: 1, pageSize: 20 } }, publicIdentity());
-    assert.deepEqual(result.data.map((row) => row.id), [expected]);
+    assert.deepEqual(new Set(result.data.map((row) => row.id)), new Set(expected));
   }
   const counts = await rpc(source, "getOrderStatusCount", { data: {} }, publicIdentity());
-  assert.deepEqual(counts.data.businessStatus, { pending_payment: 1, awaiting_photographer: 1, shot: 1, paid: 1, delivered: 1 });
+  assert.deepEqual(counts.data.businessStatus, { pending_payment: 0, reserved: 1, awaiting_shoot: 0, shooting: 1, completed: 2 });
 });
 
-test("manual order creation uses the product-backed deposit stage", async () => {
+test("manual order creation cannot bypass the paid checkout", async () => {
   const source = makeSource();
   source.collections.packages["package-1"].depositRatio = 50;
   const auth = {
@@ -201,30 +202,8 @@ test("manual order creation uses the product-backed deposit stage", async () => 
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer admin-token" },
       body: JSON.stringify({ orderNo: "MANUAL-1", totalAmount: 100, products: [{ id: "package-1", type: "package" }], depositRatio: 1, depositPaid: 100, finalPaid: 100, status: "completed" }),
     });
-    assert.equal(response.status, 201);
-    const body = await response.json();
-    assert.equal(body.status, "new");
-    assert.equal(body.workflowStage, workflow.WORKFLOW_STAGES.AWAITING_DEPOSIT);
-    assert.equal(body.businessStatus, "pending_payment");
-    assert.equal(body.depositDue, 50, "manual orders use the selected product's server-side deposit ratio");
-    assert.equal(body.finalDue, 50);
-    assert.equal(body.depositPaid, 0);
-    assert.equal(body.paymentRecords.some((record) => record.status === "confirmed"), false);
-
-    const adjust = await fetch(`http://127.0.0.1:${address.port}/api/orders/${encodeURIComponent(body.id)}/action`, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer admin-token" },
-      body: JSON.stringify({ action: "update", reason: "调整报价", fields: { totalAmount: 130, finalDiscountAmount: 10, priceAdjustReason: "测试确认报价调整" } }),
-    });
-    assert.equal(adjust.status, 200);
-    const adjusted = await adjust.json();
-    assert.equal(adjusted.data.depositDue, 50);
-    assert.equal(adjusted.data.finalDue, 70);
-    source.collections.orders[body.id].paymentRecords.push({ id: "final-intent", phase: "final", amount: 70, status: "pending", provider: "manual_payment", idempotencyKey: "final-intent-0001" });
-    const blocked = await fetch(`http://127.0.0.1:${address.port}/api/orders/${encodeURIComponent(body.id)}/action`, {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer admin-token" },
-      body: JSON.stringify({ action: "update", reason: "再次改价", fields: { totalAmount: 140 } }),
-    });
-    assert.equal(blocked.status, 409);
+    assert.equal(response.status, 403);
+    assert.equal((await source.list("orders")).length, 0);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
