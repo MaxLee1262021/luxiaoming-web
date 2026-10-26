@@ -12,6 +12,7 @@ const {
   depositDue,
   finalDue,
   hasConfirmedPayment,
+  hasCompletedShooting,
   isUnpaidBooking,
   isServiceConfirmed,
   hasDeliveryRecord,
@@ -20,7 +21,9 @@ const {
   businessStatusForOrder,
   businessStatusLabel,
   customerStatusForOrder,
+  hasEffectiveDispatch,
   isDepositRefundable,
+  refundableDepositAmount,
   normalizePaymentStatus,
   canonicalStage,
   customerStatusForStage,
@@ -96,13 +99,18 @@ function confirmedRefundablePaidAmount(order = {}) {
   const final = hasConfirmedPayment(order, "final") ? Math.max(roundMoney(order.finalPaid), finalDue(order)) : 0;
   return roundMoney(deposit + final);
 }
-function confirmedRefundAmount(tickets = [], excludeTicketId = "") {
+function confirmedRefundAmount(tickets = [], orderId = "", excludeTicketId = "") {
   return roundMoney((Array.isArray(tickets) ? tickets : []).reduce((sum, ticket) => {
-    if (!ticket || String(ticket.id || ticket._id || "") === String(excludeTicketId || "")) return sum;
+    if (!ticket || String(ticket.orderId || "") !== String(orderId)
+      || String(ticket.id || ticket._id || "") === String(excludeTicketId || "")) return sum;
     const financeApproved = ["已审", "approved", "passed"].includes(String(ticket.financeStatus || "").trim().toLowerCase());
     const refunded = ["manual_refunded", "refunded", "已人工退款", "已退款"].includes(String(ticket.refundStatus || "").trim().toLowerCase());
     return financeApproved && refunded ? sum + roundMoney(ticket.refundAmount) : sum;
   }, 0));
+}
+function isMiniPreDispatchDepositRefund(ticket = {}) {
+  return ticket.submitSource === "mini_program" && ticket.reviewLane === "pre_dispatch"
+    && ticket.refundPhase === "deposit" && ticket.type === "定金退款";
 }
 const PASSWORD_KEYS = new Set(["staff", "shops", "distributors", "agents"]);
 const BUILTIN_ADMIN_ACCOUNT = "admin";
@@ -2295,7 +2303,7 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       const refundAmount = Number(body.refundAmount || 0);
       const refundPhase = String(body.refundPhase || body.refundType || "").trim().toLowerCase();
-      const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(tickets), 0));
+      const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(tickets, orderId), 0));
       if (!Number.isFinite(refundAmount) || refundAmount < 0 || refundAmount > refundableLimit) return json(res, 409, { error: "退款金额不能超过已确认到账且未退款金额" });
       const allowedFields = new Set(["id", "_id", "orderId", "orderNo", "customer", "packageName", "type", "reason", "refundAmount", "refundPhase", "submitSource", "assigneeId", "attachmentFileIds", "internalAttachmentFileIds"]);
       Object.keys(body).forEach((field) => { if (!allowedFields.has(field)) delete body[field]; });
@@ -2832,7 +2840,7 @@ module.exports = function createApi(source, mode, options = {}) {
       if (role === "service" && paymentStatus !== "pending") return forbidden(res, session, pathname, "客服只能登记待财务审核的收款");
       if (paymentStatus === "confirmed" && !["super", "finance"].includes(role)) return forbidden(res, session, pathname, "只有财务或超管可以确认到账");
       if (phase === "deposit" && currentStage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return json(res, 409, { error: "当前订单不在待支付订金阶段" });
-      if (phase === "final" && ((depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.AWAITING_DELIVERY].includes(currentStage))) return json(res, 409, { error: "进入拍摄中且定金到账后才能登记尾款" });
+      if (phase === "final" && (!hasCompletedShooting(current) || (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.AWAITING_DELIVERY].includes(currentStage))) return json(res, 409, { error: "拍摄完成且定金到账后才能登记尾款" });
       const due = phase === "deposit" ? depositDue(current) : finalDue(current);
       if (due <= 0) return json(res, 409, { error: "该支付阶段无需收款" });
       const amount = roundMoney(body.amount ?? body.paidAmount ?? due);
@@ -3208,15 +3216,22 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.internalAttachmentFileIds = [...new Set([...(current.internalAttachmentFileIds || []), ...attachedIds])];
     }
     let orderAfterSaleStatus = current.status || "处理";
+    const preDispatchDepositRefund = isMiniPreDispatchDepositRefund(current);
+    let cancelAfterDepositRefund = false;
     if (action === "review") {
       const decisionStatus = normalizeFinanceStatus(body.status);
       const hasDecision = typeof body.approved === "boolean" || ["已审", "已驳"].includes(decisionStatus);
       if (!hasDecision) return json(res, 400, { error: "请明确选择通过或驳回" });
       const approved = body.approved === true || decisionStatus === "已审";
       const currentFinanceStatus = normalizeFinanceStatus(current.financeStatus || "待审");
-      if (role === "finance" && currentFinanceStatus !== "待审") return json(res, 409, { error: "该售后已审核，不能重复处理" });
+      if ((role === "finance" || preDispatchDepositRefund) && currentFinanceStatus !== "待审") return json(res, 409, { error: "该售后已审核，不能重复处理" });
       if (!["待审", "已审", "已驳"].includes(currentFinanceStatus)) return json(res, 409, { error: "该售后当前不在财务审核队列" });
       const refundAmount = roundMoney(current.refundAmount);
+      if (approved && preDispatchDepositRefund && (canonicalStage(order) !== WORKFLOW_STAGES.AWAITING_DISPATCH
+        || hasEffectiveDispatch(order) || order.paymentReviewRequired === true || !hasConfirmedPayment(order, "deposit"))) {
+        return json(res, 409, { error: "订单已安排摄影师或状态发生变化，请重新核实退款申请" });
+      }
+      if (approved && preDispatchDepositRefund && refundAmount <= 0) return json(res, 409, { error: "定金退款金额无效，请重新核实退款申请" });
       if (approved && refundAmount > 0) {
         const refundPhase = String(current.refundPhase || "").trim().toLowerCase();
         const refundTransactionId = String(body.refundTransactionId || body.externalTransactionId || "").trim().slice(0, 160);
@@ -3224,8 +3239,11 @@ module.exports = function createApi(source, mode, options = {}) {
         if (!refundTransactionId) return json(res, 400, { error: "确认人工退款必须填写退款流水号或凭据编号" });
         let allTickets;
         try { allTickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用，无法确认退款" }); }
-        const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(allTickets, ticketId), 0));
+        const remainingTickets = (Array.isArray(allTickets) ? allTickets : []).filter((ticket) => String(ticket && (ticket.id || ticket._id) || "") !== ticketId);
+        const refundableLimit = preDispatchDepositRefund ? refundableDepositAmount(order, remainingTickets)
+          : roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(allTickets, orderId, ticketId), 0));
         if (refundAmount > refundableLimit) return json(res, 409, { error: "退款金额超过已确认到账且未退款金额" });
+        if (preDispatchDepositRefund && refundAmount !== refundableLimit) return json(res, 409, { error: "定金可退余额已变化，请重新核实退款申请" });
         if ((Array.isArray(allTickets) ? allTickets : []).some((ticket) => ticket && String(ticket.id || ticket._id || "") !== ticketId
           && refundTransactionId === String(ticket.refundTransactionId || ""))) return json(res, 409, { error: "退款流水号已被其他售后工单使用" });
         patch.refundStatus = "manual_refunded";
@@ -3234,6 +3252,7 @@ module.exports = function createApi(source, mode, options = {}) {
         patch.refundMethod = refundMethod;
         patch.refundConfirmedAt = now;
         patch.refundConfirmedBy = session.subjectId;
+        cancelAfterDepositRefund = preDispatchDepositRefund;
       } else if (!approved && refundAmount > 0) {
         patch.refundStatus = "rejected";
         patch.refundConfirmed = false;
@@ -3251,12 +3270,15 @@ module.exports = function createApi(source, mode, options = {}) {
     } else {
       const refundAmount = Number(body.refundAmount || 0);
       if (!Number.isFinite(refundAmount) || refundAmount < 0) return json(res, 400, { error: "退款金额无效" });
+      if (preDispatchDepositRefund && refundAmount > 0 && roundMoney(refundAmount) !== roundMoney(current.refundAmount)) {
+        return json(res, 409, { error: "定金退款金额由系统计算，不能直接修改" });
+      }
       if (refundAmount > 0) {
         if (action !== "complete") return json(res, 400, { error: "请在结案操作中提交退款审核申请" });
         const refundPhase = String(current.refundPhase || "").trim().toLowerCase();
         let allTickets;
         try { allTickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用，无法登记退款" }); }
-        const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(allTickets, ticketId), 0));
+        const refundableLimit = roundMoney(Math.max(confirmedRefundablePaidAmount(order) - confirmedRefundAmount(allTickets, orderId, ticketId), 0));
         if (refundAmount > refundableLimit) return json(res, 409, { error: "退款金额不能超过已确认到账且未退款金额" });
         patch.refundAmount = roundMoney(refundAmount);
         patch.refundConfirmed = false;
@@ -3299,6 +3321,17 @@ module.exports = function createApi(source, mode, options = {}) {
         }],
         updateTime: now,
       };
+      if (cancelAfterDepositRefund) {
+        Object.assign(orderPatch, {
+          status: "cancelled", workflowStage: WORKFLOW_STAGES.CANCELLED, customerStatus: "已取消", businessStatus: "cancelled",
+          cancelReason: reason, cancelledAt: now, cancelledBy: session.subjectId,
+          cancellationSource: "pre_dispatch_deposit_refund",
+          statusLogs: [...orderPatch.statusLogs, {
+            type: "定金退款取消", action: "财务确认人工退还定金，订单取消", operator: session.account,
+            operatorId: session.subjectId, from: order.status, to: "cancelled", reason, createTime: now,
+          }],
+        });
+      }
       updatedOrder = await source.update("orders", orderId, orderPatch);
       if (!updatedOrder) throw new Error("关联订单保存失败");
     } catch (error) {

@@ -18,7 +18,7 @@
       <div class="rc-photog">摄影师：{{ staffName(o.photographerId) }}</div>
     </div>
     <div class="rc-actions">
-      <el-button size="small" @click="openOrder(o)">{{ o.status==='拍摄中' ? '更新进度' : '确认档期' }}</el-button>
+      <el-button type="primary" size="small" @click="openOrder(o)">{{ o.status==='拍摄中' ? '更新进度' : '确认档期' }}</el-button>
     </div>
   </div>
   <div v-if="!scopedOrders.filter(x=>x.photographerId && ['已确认','待拍摄','拍摄中'].includes(x.status)).length" class="empty-state">暂无待接任务 🎉</div>

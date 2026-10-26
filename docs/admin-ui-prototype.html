@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>鹿小鸣旅拍 · 管理后台 UI 设计稿 v3（权限边界 + 真实订单中心）</title>
+<title>麓小鸣旅拍 · 管理后台 UI 设计稿 v3（权限边界 + 真实订单中心）</title>
 <style>
   :root{
-    /* 鹿小鸣品牌令牌（暖胶片国风）——后台统一皮肤 */
+    /* 麓小鸣品牌令牌（暖胶片国风）——后台统一皮肤 */
     --lxm-cream:#FFF7EF; --lxm-ink:#2A211B; --lxm-red:#EE2C2C; --lxm-orange:#FF8D52;
     --lxm-gold:#FFD36A; --lxm-surface:#FFFFFF; --lxm-red-ink:#CC1F1F; --lxm-muted:#766459;
     --lxm-gray-50:#FBF7F2; --lxm-gray-100:#F4ECE3; --lxm-gray-200:#E9DDD0; --lxm-gray-300:#D8C7B5;
@@ -309,8 +309,8 @@
 <!-- ============ 登录屏 ============ -->
 <div class="login" id="loginScreen">
   <div class="login-card">
-    <div class="seal">鹿</div>
-    <h2>鹿小鸣旅拍</h2>
+    <div class="seal">麓</div>
+    <h2>麓小鸣旅拍</h2>
     <div class="sub">管理后台 · 运营 / 订单 / 商品 / 财务</div>
     <div class="field"><label>账号</label><input value="admin@luxiaoming.com" /></div>
     <div class="field"><label>密码</label><input type="password" value="••••••••" /></div>
@@ -328,7 +328,7 @@
         <div class="role-btn" onclick="loginAs('content')"><span class="d" style="background:#CC1F1F"></span>内容运营</div>
       </div>
     </div>
-    <div class="foot">© 2026 鹿小鸣旅拍 · 数据自托管</div>
+    <div class="foot">© 2026 麓小鸣旅拍 · 数据自托管</div>
   </div>
 </div>
 
@@ -336,8 +336,8 @@
   <!-- ============ 侧边栏 ============ -->
   <aside class="sidebar">
     <div class="brand">
-      <div class="seal">鹿</div>
-      <div><div class="name">鹿小鸣</div><div class="sub">旅拍管理后台</div></div>
+      <div class="seal">麓</div>
+      <div><div class="name">麓小鸣</div><div class="sub">旅拍管理后台</div></div>
     </div>
     <nav class="nav" id="sideNav"></nav>
   </aside>
@@ -355,7 +355,7 @@
       <div class="search">🔍 搜索</div>
       <div class="role-switch" onclick="logout()" title="切换角色">🔄 <span id="curRole">系统超管</span></div>
       <div class="bell">🔔<span class="n">3</span></div>
-      <div class="avatar" id="curAvatar">鹿</div>
+      <div class="avatar" id="curAvatar">麓</div>
     </div>
     <div class="content" id="content"></div>
   </div>
@@ -383,7 +383,7 @@
 <script>
 /* ===================== 角色与权限配置（对齐工程 roles.js / business-config.js） ===================== */
 const ROLES = {
-  super:      { name:'系统超管', role:'超管', scope:'全部数据', home:'dashboard', avatar:'鹿',
+  super:      { name:'系统超管', role:'超管', scope:'全部数据', home:'dashboard', avatar:'麓',
     menus:['dashboard','orders','afterSales','financeReview','reconciliation','staff','distributors','shops','miniConfig','albums','video','packages','peripherals','spots','samples','miniDecor','guides','cities','roles','logs','trash'],
     actions:['*'] },
   service:    { name:'客服', role:'客服', scope:'全部订单', home:'orders', avatar:'客',
@@ -600,7 +600,7 @@ const VIEWS = {
         <div class="sectitle">📱 小程序首页预览（接收真实配置）</div>
         <div class="phone"><div class="phone-screen">
           <div class="phone-banner">杜甫江阁夜景大片</div>
-          <div style="padding:10px 12px;font-weight:700;font-size:13px;color:#2A211B">鹿小鸣 · 长沙旅拍</div>
+          <div style="padding:10px 12px;font-weight:700;font-size:13px;color:#2A211B">麓小鸣 · 长沙旅拍</div>
           ${previewMods}
           <div style="padding:12px;color:#9a8a7d;font-size:11px;text-align:center">— 真实配置实时同步 —</div>
         </div></div>
@@ -800,7 +800,7 @@ const PACKAGES = [
   ]},
   {id:'p2',name:'城市 Vlog 轻旅拍',series:'长沙城市漫游短片',spotIds:['黄兴路步行街','IFS 国金中心'],cover:'📦',price:469,serviceTags:['横屏成片','含航拍片段','3日交付'],duration:'约 1.5 小时',retouchCount:0,isHotSale:true,isMainPush:false,isHot:false,isShow:true,notes:'边走边拍的城市 Vlog，含一段航拍，适合发朋友圈 / 抖音，年轻人最爱。',includedItems:[
     {type:'video',name:'城市漫游短片',price:399},
-    {type:'peripheral',name:'鹿小鸣钥匙扣',price:39}
+    {type:'peripheral',name:'麓小鸣钥匙扣',price:39}
   ]},
   {id:'p3',name:'闺蜜双人写真套餐',series:'闺蜜轻写真',spotIds:['太平老街'],cover:'📦',price:599,serviceTags:['双人','含妆造','含 20 张精修'],duration:'约 2 小时',retouchCount:20,isHotSale:false,isMainPush:false,isHot:true,isShow:true,notes:'两个人一起更出片，太平老街国风街拍 + 双人精修，闺蜜出游首选。',includedItems:[
     {type:'album',name:'闺蜜轻写真照片单品',price:99},
@@ -1026,7 +1026,7 @@ function toggleVideo(prop){ const p=VIDEOS.find(x=>x.id===VD_SEL); if(p){ p[prop
 /* ===================== 影像周边编辑器 ===================== */
 const PERIPHERALS = [
   {id:'pe1',name:'定制皮质相册',cate:'相册',cover:'🎁',price:129,stock:120,specs:['A4','20页','可定制封面'],isHot:false,isNew:true,isShow:true,description:'头层牛皮封面，可印名字，旅行纪念首选。'},
-  {id:'pe2',name:'鹿小鸣钥匙扣',cate:'文创',cover:'🎁',price:39,stock:300,specs:['金属','夜光'],isHot:true,isNew:false,isShow:true,description:'品牌 IP 钥匙扣，夜光款更可爱。'},
+  {id:'pe2',name:'麓小鸣钥匙扣',cate:'文创',cover:'🎁',price:39,stock:300,specs:['金属','夜光'],isHot:true,isNew:false,isShow:true,description:'品牌 IP 钥匙扣，夜光款更可爱。'},
   {id:'pe3',name:'摆台相框',cate:'相框',cover:'🎁',price:79,stock:60,specs:['木质','8寸'],isHot:false,isNew:false,isShow:true,description:'原木摆台，放桌面刚刚好。'},
   {id:'pe4',name:'旅拍帆布袋',cate:'文创',cover:'🎁',price:49,stock:0,specs:['帆布','大容量'],isHot:false,isNew:false,isShow:false,description:'加厚帆布，印品牌 logo。'}
 ];
@@ -1523,7 +1523,7 @@ const FORM_SCHEMAS = {
   ]},
   package: { title:'新建旅拍套餐', groups:[
     {fields:[{k:'title',label:'套餐名',ph:'如：经典旅拍套餐'}]},
-    {fields:[{k:'combo',label:'组合商品（多选基础商品）',type:'checks',options:['古装庭院写真','城市夜景胶片','城市 Vlog','定制皮质相册','鹿小鸣钥匙扣'],hint:'套餐=多个基础商品组合打包'}]},
+    {fields:[{k:'combo',label:'组合商品（多选基础商品）',type:'checks',options:['古装庭院写真','城市夜景胶片','城市 Vlog','定制皮质相册','麓小鸣钥匙扣'],hint:'套餐=多个基础商品组合打包'}]},
     {fields:[{k:'priceO',label:'原价合计（元）',type:'number',val:1057},{k:'price',label:'组合价（元）',type:'number',val:899}]},
     {fields:[{k:'cover',label:'封面图',type:'upload'}]},
     {toggles:[{k:'sell',label:'上架售卖',on:true,hint:'关掉则客人在小程序看不到、不能预约'}]},

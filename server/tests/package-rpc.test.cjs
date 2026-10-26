@@ -20,7 +20,7 @@ function makeSource() {
       { id: "series-2", name: "其它系列", spotIds: ["spot-2"], isShow: true, status: "启用" }
     ],
     albums: [{ id: "album-1", name: "夜景照片留影", seriesId: "series-1", spotId: "spot-1", price: 399, isShow: true, status: "上架", sampleUrls: ["https://images.invalid/album-cover.jpg"], photoCount: 1 }],
-    peripherals: [{ id: "peripheral-1", name: "定制相册", price: 99, isShow: true, status: "上架" }],
+    peripherals: [{ id: "peripheral-1", name: "定制相册", price: 99, isShow: true, status: "上架", storeProductId: "store-peripheral-1" }],
     samples: [
       { id: "sample-banner", name: "后台配置轮播", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "image", url: "https://images.invalid/banner.jpg", isShow: true, isShowcase: true },
       { id: "sample-detail", name: "后台配置样片", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "image", url: "https://images.invalid/detail.jpg", isShow: true }

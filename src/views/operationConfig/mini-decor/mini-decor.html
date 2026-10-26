@@ -44,12 +44,12 @@
         <div v-for="(q, qi) in (state.homeConfig.quickNav || [])" :key="qi" class="quicknav-row">
           <span class="quicknav-icon">{{ q.icon }}</span>
           <el-input :value="q.label" size="small" :disabled="!can('contentEdit')" @input="(v) => updateQuickNavLabel(qi, v)" />
-          <button class="qn-btn" @click="moveQuickNav(qi, -1)" :disabled="!can('contentEdit') || qi === 0">↑</button>
-          <button class="qn-btn" @click="moveQuickNav(qi, 1)" :disabled="!can('contentEdit') || qi === (state.homeConfig.quickNav.length - 1)">↓</button>
-          <button class="qn-btn danger" @click="removeQuickNav(qi)" :disabled="!can('contentEdit')">✕</button>
+          <button aria-label="上移快捷入口" type="button" class="qn-btn lxm-action lxm-action--neutral lxm-action--link" @click="moveQuickNav(qi, -1)" :disabled="!can('contentEdit') || qi === 0">↑</button>
+          <button aria-label="下移快捷入口" type="button" class="qn-btn lxm-action lxm-action--neutral lxm-action--link" @click="moveQuickNav(qi, 1)" :disabled="!can('contentEdit') || qi === (state.homeConfig.quickNav.length - 1)">↓</button>
+          <button aria-label="移除快捷入口" type="button" class="qn-btn danger lxm-action lxm-action--danger lxm-action--link" @click="removeQuickNav(qi)" :disabled="!can('contentEdit')">✕</button>
         </div>
         <div class="quicknav-presets">
-          <button v-for="p in quickNavPresets" :key="p.targetType" class="preset-btn" @click="addQuickNav(p.targetType)" :disabled="!can('contentEdit')">+ {{ p.label }}</button>
+          <button type="button" v-for="p in quickNavPresets" :key="p.targetType" class="preset-btn lxm-action lxm-action--primary lxm-action--plain" @click="addQuickNav(p.targetType)" :disabled="!can('contentEdit')">+ {{ p.label }}</button>
         </div>
       </div>
     </aside>
@@ -89,13 +89,13 @@
             <video v-else-if="b.type === 'video' && b.url" :src="b.url" class="eb-thumb" controls></video>
             <div v-else class="eb-thumb eb-thumb--empty">未设素材</div>
             <div class="eb-media-actions">
-              <button @click="uploadHomeBannerMedia(bi, 'image')" :disabled="!can('contentEdit')">传图</button>
-              <button @click="uploadHomeBannerMedia(bi, 'video')" :disabled="!can('contentEdit')">传视频</button>
+              <button type="button" class="lxm-action lxm-action--primary lxm-action--plain" @click="uploadHomeBannerMedia(bi, 'image')" :disabled="!can('contentEdit')">传图</button>
+              <button type="button" class="lxm-action lxm-action--primary lxm-action--plain" @click="uploadHomeBannerMedia(bi, 'video')" :disabled="!can('contentEdit')">传视频</button>
             </div>
           </div>
           <div class="eb-fields">
             <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" @change="validateMediaUrl(b,'url')" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
-            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" @change="validateMediaUrl(b,'cover')" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /><el-button link @click="uploadHomeBannerMedia(bi, 'cover')" :disabled="!can('contentEdit')">上传封面</el-button></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" @change="validateMediaUrl(b,'cover')" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /><el-button type="primary" link @click="uploadHomeBannerMedia(bi, 'cover')" :disabled="!can('contentEdit')">上传封面</el-button></label>
             <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在 Banner 上的文案" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>生效时间</span><el-date-picker v-model="b.effectiveTime" type="datetime" placeholder="留空=立即生效" format="YYYY-MM-DD HH:mm" value-format="YYYY-MM-DD HH:mm" style="width:100%" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>跳转类型</span>
@@ -107,12 +107,12 @@
             <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" :disabled="!can('contentEdit')" /></label>
           </div>
           <div class="eb-tools">
-            <button @click="moveHomeBanner(bi, -1)" :disabled="!can('contentEdit') || bi === 0">↑</button>
-            <button @click="moveHomeBanner(bi, 1)" :disabled="!can('contentEdit') || bi === (state.homeConfig.homeBanners.length - 1)">↓</button>
-            <button class="eb-del" @click="removeHomeBanner(bi)" :disabled="!can('contentEdit')">删除</button>
+            <button aria-label="上移首页 Banner" type="button" class="lxm-action lxm-action--neutral lxm-action--link" @click="moveHomeBanner(bi, -1)" :disabled="!can('contentEdit') || bi === 0">↑</button>
+            <button aria-label="下移首页 Banner" type="button" class="lxm-action lxm-action--neutral lxm-action--link" @click="moveHomeBanner(bi, 1)" :disabled="!can('contentEdit') || bi === (state.homeConfig.homeBanners.length - 1)">↓</button>
+            <button type="button" class="eb-del lxm-action lxm-action--danger lxm-action--link" @click="removeHomeBanner(bi)" :disabled="!can('contentEdit')">删除</button>
           </div>
         </div>
-        <button class="eb-add" @click="addHomeBanner" :disabled="!can('contentEdit')">+ 添加首页 Banner</button>
+        <button type="button" class="eb-add lxm-action lxm-action--primary lxm-action--plain" @click="addHomeBanner" :disabled="!can('contentEdit')">+ 添加首页 Banner</button>
         <p v-if="!state.homeConfig.homeBanners || !state.homeConfig.homeBanners.length" class="eb-empty">尚未配置，游客端首页顶部将显示「样片快速选」轮播（如有）或品牌兜底。</p>
       </div>
 
@@ -127,13 +127,13 @@
             <video v-else-if="b.type === 'video' && b.url" :src="b.url" class="eb-thumb" controls></video>
             <div v-else class="eb-thumb eb-thumb--empty">未设素材</div>
             <div class="eb-media-actions">
-              <button @click="uploadExploreBannerMedia(bi, 'image')" :disabled="!can('contentEdit')">传图</button>
-              <button @click="uploadExploreBannerMedia(bi, 'video')" :disabled="!can('contentEdit')">传视频</button>
+              <button type="button" class="lxm-action lxm-action--primary lxm-action--plain" @click="uploadExploreBannerMedia(bi, 'image')" :disabled="!can('contentEdit')">传图</button>
+              <button type="button" class="lxm-action lxm-action--primary lxm-action--plain" @click="uploadExploreBannerMedia(bi, 'video')" :disabled="!can('contentEdit')">传视频</button>
             </div>
           </div>
           <div class="eb-fields">
             <label class="eb-row"><span>素材地址</span><el-input v-model="b.url" @change="validateMediaUrl(b,'url')" placeholder="图片/视频 URL（也可点上方按钮上传）" :disabled="!can('contentEdit')" /></label>
-            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" @change="validateMediaUrl(b,'cover')" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /><el-button link @click="uploadExploreBannerMedia(bi, 'cover')" :disabled="!can('contentEdit')">上传封面</el-button></label>
+            <label class="eb-row"><span>视频封面</span><el-input v-model="b.cover" @change="validateMediaUrl(b,'cover')" placeholder="视频用：封面图 URL（可选）" :disabled="!can('contentEdit')" /><el-button type="primary" link @click="uploadExploreBannerMedia(bi, 'cover')" :disabled="!can('contentEdit')">上传封面</el-button></label>
             <label class="eb-row"><span>轮播标题</span><el-input v-model="b.title" placeholder="显示在轮播上的文案" :disabled="!can('contentEdit')" /></label>
             <label class="eb-row"><span>跳转类型</span>
               <el-select v-model="b.targetType" placeholder="选择跳转" :disabled="!can('contentEdit')">
@@ -144,12 +144,12 @@
             <label v-else-if="b.targetType !== 'none'" class="eb-row"><span>目标 ID</span><el-input v-model="b.targetId" placeholder="对应商品/打卡点 ID" :disabled="!can('contentEdit')" /></label>
           </div>
           <div class="eb-tools">
-            <button @click="moveExploreBanner(bi, -1)" :disabled="!can('contentEdit') || bi === 0">↑</button>
-            <button @click="moveExploreBanner(bi, 1)" :disabled="!can('contentEdit') || bi === (state.homeConfig.exploreBanners.length - 1)">↓</button>
-            <button class="eb-del" @click="removeExploreBanner(bi)" :disabled="!can('contentEdit')">删除</button>
+            <button aria-label="上移探索页轮播" type="button" class="lxm-action lxm-action--neutral lxm-action--link" @click="moveExploreBanner(bi, -1)" :disabled="!can('contentEdit') || bi === 0">↑</button>
+            <button aria-label="下移探索页轮播" type="button" class="lxm-action lxm-action--neutral lxm-action--link" @click="moveExploreBanner(bi, 1)" :disabled="!can('contentEdit') || bi === (state.homeConfig.exploreBanners.length - 1)">↓</button>
+            <button type="button" class="eb-del lxm-action lxm-action--danger lxm-action--link" @click="removeExploreBanner(bi)" :disabled="!can('contentEdit')">删除</button>
           </div>
         </div>
-        <button class="eb-add" @click="addExploreBanner" :disabled="!can('contentEdit')">+ 添加探索页轮播</button>
+        <button type="button" class="eb-add lxm-action lxm-action--primary lxm-action--plain" @click="addExploreBanner" :disabled="!can('contentEdit')">+ 添加探索页轮播</button>
         <p v-if="!state.homeConfig.exploreBanners || !state.homeConfig.exploreBanners.length" class="eb-empty">尚未配置，游客端探索页将显示默认品牌文案。</p>
       </div>
 
@@ -213,9 +213,9 @@
               <div v-for="(id, ri) in (activePageConfig[entry.field] || [])" :key="id" class="album-detail-relation-row">
                 <span class="album-detail-relation-index">{{ ri + 1 }}</span>
                 <span class="album-detail-relation-name">{{ pageRelationName(id) }}</span>
-                <button type="button" @click="movePageRelation(entry.field, ri, -1)" :disabled="!can('contentEdit') || ri === 0" aria-label="上移">↑</button>
-                <button type="button" @click="movePageRelation(entry.field, ri, 1)" :disabled="!can('contentEdit') || ri === (activePageConfig[entry.field].length - 1)" aria-label="下移">↓</button>
-                <button type="button" class="danger" @click="removePageRelation(entry.field, ri)" :disabled="!can('contentEdit')">删除</button>
+                <button class="lxm-action lxm-action--neutral lxm-action--link" type="button" @click="movePageRelation(entry.field, ri, -1)" :disabled="!can('contentEdit') || ri === 0" aria-label="上移当前样片">↑</button>
+                <button class="lxm-action lxm-action--neutral lxm-action--link" type="button" @click="movePageRelation(entry.field, ri, 1)" :disabled="!can('contentEdit') || ri === (activePageConfig[entry.field].length - 1)" aria-label="下移当前样片">↓</button>
+                <button type="button" class="danger lxm-action lxm-action--danger lxm-action--link" @click="removePageRelation(entry.field, ri)" :disabled="!can('contentEdit')">删除</button>
               </div>
             </div>
             <div v-else class="sf-empty">尚未选择样片，请在下方素材列表中选择。</div>
@@ -228,12 +228,12 @@
             <div class="sf-group-head">
               <strong>筛选标签</strong>
               <span class="sf-hint">显示名=客人看到的文字；匹配词=value，需能命中打卡点名称/描述/标签（如"古风"要能匹配到打了古风标签的打卡点）</span>
-              <button class="sf-add" @click="addSpotCategory" :disabled="!can('contentEdit')">+ 添加标签</button>
+              <button type="button" class="sf-add lxm-action lxm-action--primary lxm-action--plain" @click="addSpotCategory" :disabled="!can('contentEdit')">+ 添加标签</button>
             </div>
             <div v-for="(c, ci) in (activePageConfig.categories || [])" :key="ci" class="sf-row">
               <el-input v-model="c.name" placeholder="显示名，如 古风写真" :disabled="!can('contentEdit')" />
               <el-input v-model="c.value" placeholder="匹配词，如 古风" :disabled="!can('contentEdit')" />
-              <button class="sf-del" @click="removeSpotCategory(ci)" :disabled="!can('contentEdit') || ci === 0">删除</button>
+              <button type="button" class="sf-del lxm-action lxm-action--danger lxm-action--link" @click="removeSpotCategory(ci)" :disabled="!can('contentEdit') || ci === 0">删除</button>
             </div>
             <div v-if="!(activePageConfig.categories || []).length" class="sf-empty">暂无标签，点"添加标签"新增</div>
           </div>
@@ -242,12 +242,12 @@
             <div class="sf-group-head">
               <strong>排序选项</strong>
               <span class="sf-hint">显示名可改；匹配词=value 固定为 hot（热门）/ new（最新）/ name（名称），请勿改成其它值</span>
-              <button class="sf-add" @click="addSpotSort" :disabled="!can('contentEdit')">+ 添加排序</button>
+              <button type="button" class="sf-add lxm-action lxm-action--primary lxm-action--plain" @click="addSpotSort" :disabled="!can('contentEdit')">+ 添加排序</button>
             </div>
             <div v-for="(s, si) in (activePageConfig.sortOptions || [])" :key="si" class="sf-row">
               <el-input v-model="s.name" placeholder="显示名，如 热门优先" :disabled="!can('contentEdit')" />
               <el-input v-model="s.value" placeholder="hot / new / name" :disabled="!can('contentEdit')" />
-              <button class="sf-del" @click="removeSpotSort(si)" :disabled="!can('contentEdit')">删除</button>
+              <button type="button" class="sf-del lxm-action lxm-action--danger lxm-action--link" @click="removeSpotSort(si)" :disabled="!can('contentEdit')">删除</button>
             </div>
             <div v-if="!(activePageConfig.sortOptions || []).length" class="sf-empty">暂无排序，点"添加排序"新增</div>
           </div>

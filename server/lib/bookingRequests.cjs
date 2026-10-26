@@ -40,8 +40,8 @@ async function finalizePaidBooking(source, bookingId) {
       const document = {
         ...booking, id: orderId, _id: orderId, bookingId,
         bookingStatus: "confirmed", status: "deposit_paid", workflowStage: "awaiting_dispatch",
-        businessStatus: "reserved", customerStatus: "已预约", businessStatusText: "已预约",
-        publicStatus: "reserved", publicStatusText: "已预约", confirmedAt: now,
+        businessStatus: "reserved", customerStatus: "待确认", businessStatusText: "待确认",
+        publicStatus: "reserved", publicStatusText: "待确认", confirmedAt: now,
         createTime: now, createdAt: now, updateTime: now,
         statusLogs: [...(booking.statusLogs || []), { type: "客户预约", action: "定金支付完成，预约成功", operator: "系统", createTime: now }],
       };

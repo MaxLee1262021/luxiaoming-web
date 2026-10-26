@@ -32,7 +32,7 @@ test("扫码明细使用可筛选的中文状态和空态文案", () => {
 
   assert.match(shell, /no-data-text="暂无位置数据"/);
   assert.match(shell, /empty-text="暂无扫码记录"/);
-  assert.match(shell, /class="metric-filter-reset" type="primary" plain/);
+  assert.match(shell, /class="metric-filter-reset" plain/);
   assert.match(dashboard, /status: s\.orderId \? "已转化" : "浏览未下单"/);
   assert.match(state, /dashboardTab: "traffic"/);
 });

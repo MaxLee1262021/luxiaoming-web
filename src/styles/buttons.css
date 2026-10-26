@@ -1,0 +1,378 @@
+/* Button SSOT: business actions are independent from the red/orange brand.
+ * Loaded after the shared/page styles. Navigation, tabs and preview controls
+ * do not opt into this layer. See docs/后台按钮样式规范.md. */
+:root {
+  --lxm-action-primary: #2563eb;
+  --lxm-action-primary-hover: #1d4ed8;
+  --lxm-action-primary-active: #1e40af;
+  --lxm-action-primary-soft: #eff6ff;
+  --lxm-action-success: #15803d;
+  --lxm-action-success-hover: #166534;
+  --lxm-action-success-active: #14532d;
+  --lxm-action-success-soft: #f0fdf4;
+  --lxm-action-warning: #b45309;
+  --lxm-action-warning-hover: #92400e;
+  --lxm-action-warning-active: #78350f;
+  --lxm-action-warning-soft: #fffbeb;
+  --lxm-action-danger: #dc2626;
+  --lxm-action-danger-hover: #b91c1c;
+  --lxm-action-danger-active: #991b1b;
+  --lxm-action-danger-soft: #fef2f2;
+  --lxm-action-neutral: #374151;
+  --lxm-action-border: #8c95a3;
+  --lxm-action-neutral-hover: #f3f4f6;
+  --lxm-action-neutral-active: #e5e7eb;
+  --lxm-action-disabled-text: #9ca3af;
+  --lxm-action-disabled-bg: #f3f4f6;
+  --lxm-action-disabled-border: #d1d5db;
+  --lxm-action-radius: 6px;
+  --lxm-action-height: 36px;
+}
+
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn) {
+  --lxm-button-tone: var(--lxm-action-neutral);
+  --lxm-button-hover-tone: var(--lxm-action-neutral);
+  --lxm-button-active-tone: var(--lxm-action-neutral);
+  --lxm-button-soft: var(--lxm-action-neutral-hover);
+  --lxm-button-soft-active: var(--lxm-action-neutral-active);
+  --lxm-button-plain-border: var(--lxm-action-border);
+  --lxm-button-plain-hover-border: #6b7280;
+  --lxm-button-plain-active-border: #6b7280;
+  --lxm-button-bg: #fff;
+  --lxm-button-text: var(--lxm-action-neutral);
+  --lxm-button-border: var(--lxm-action-border);
+  --lxm-button-hover-bg: var(--lxm-action-neutral-hover);
+  --lxm-button-hover-text: var(--lxm-action-neutral);
+  --lxm-button-hover-border: #6b7280;
+  --lxm-button-active-bg: var(--lxm-action-neutral-active);
+  --lxm-button-active-text: var(--lxm-action-neutral);
+  --lxm-button-active-border: #6b7280;
+  --el-button-text-color: var(--lxm-button-text);
+  --el-button-bg-color: var(--lxm-button-bg);
+  --el-button-border-color: var(--lxm-button-border);
+  --el-button-hover-text-color: var(--lxm-button-hover-text);
+  --el-button-hover-bg-color: var(--lxm-button-hover-bg);
+  --el-button-hover-border-color: var(--lxm-button-hover-border);
+  --el-button-active-text-color: var(--lxm-button-active-text);
+  --el-button-active-bg-color: var(--lxm-button-active-bg);
+  --el-button-active-border-color: var(--lxm-button-active-border);
+  box-sizing: border-box;
+  appearance: none;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--lxm-action-height);
+  min-height: var(--lxm-action-height);
+  max-width: 100%;
+  padding: 0 16px;
+  border: 1px solid var(--lxm-button-border);
+  border-radius: var(--lxm-action-radius);
+  background: var(--lxm-button-bg);
+  color: var(--lxm-button-text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: normal;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  vertical-align: middle;
+  box-shadow: none;
+  filter: none;
+  transform: none;
+  opacity: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+/* Intent only sets local action tokens, so fields/tags/charts keep their brand. */
+:root :is(.el-button--primary, .lxm-action--primary, .lxm-btn--primary,
+  .primary-btn, .table-link, .text-btn, .mini-text-btn, .upload-btn) {
+  --lxm-button-tone: var(--lxm-action-primary);
+  --lxm-button-hover-tone: var(--lxm-action-primary-hover);
+  --lxm-button-active-tone: var(--lxm-action-primary-active);
+  --lxm-button-soft: var(--lxm-action-primary-soft);
+  --lxm-button-soft-active: var(--lxm-action-primary-soft);
+}
+:root :is(.el-button--success, .lxm-action--success) {
+  --lxm-button-tone: var(--lxm-action-success);
+  --lxm-button-hover-tone: var(--lxm-action-success-hover);
+  --lxm-button-active-tone: var(--lxm-action-success-active);
+  --lxm-button-soft: var(--lxm-action-success-soft);
+  --lxm-button-soft-active: var(--lxm-action-success-soft);
+}
+:root :is(.el-button--warning, .lxm-action--warning) {
+  --lxm-button-tone: var(--lxm-action-warning);
+  --lxm-button-hover-tone: var(--lxm-action-warning-hover);
+  --lxm-button-active-tone: var(--lxm-action-warning-active);
+  --lxm-button-soft: var(--lxm-action-warning-soft);
+  --lxm-button-soft-active: var(--lxm-action-warning-soft);
+}
+:root :is(.el-button--danger, .lxm-action--danger, .danger-btn) {
+  --lxm-button-tone: var(--lxm-action-danger);
+  --lxm-button-hover-tone: var(--lxm-action-danger-hover);
+  --lxm-button-active-tone: var(--lxm-action-danger-active);
+  --lxm-button-soft: var(--lxm-action-danger-soft);
+  --lxm-button-soft-active: var(--lxm-action-danger-soft);
+}
+:root :is(.el-button--primary, .el-button--success, .el-button--warning,
+  .el-button--danger, .lxm-action--primary, .lxm-action--success,
+  .lxm-action--warning, .lxm-action--danger, .lxm-btn--primary,
+  .primary-btn, .danger-btn, .upload-btn) {
+  --lxm-button-plain-border: var(--lxm-button-tone);
+  --lxm-button-plain-hover-border: var(--lxm-button-hover-tone);
+  --lxm-button-plain-active-border: var(--lxm-button-active-tone);
+  --lxm-button-bg: var(--lxm-button-tone);
+  --lxm-button-border: var(--lxm-button-tone);
+  --lxm-button-text: #fff;
+  --lxm-button-hover-bg: var(--lxm-button-hover-tone);
+  --lxm-button-hover-border: var(--lxm-button-hover-tone);
+  --lxm-button-hover-text: #fff;
+  --lxm-button-active-bg: var(--lxm-button-active-tone);
+  --lxm-button-active-border: var(--lxm-button-active-tone);
+  --lxm-button-active-text: #fff;
+}
+
+/* Plain and text actions keep their level when hovered; never turn solid. */
+:root :is(.el-button.is-plain, .lxm-action--plain, .upload-btn) {
+  --lxm-button-bg: #fff;
+  --lxm-button-border: var(--lxm-button-plain-border);
+  --lxm-button-text: var(--lxm-button-tone);
+  --lxm-button-hover-bg: var(--lxm-button-soft);
+  --lxm-button-hover-border: var(--lxm-button-plain-hover-border);
+  --lxm-button-hover-text: var(--lxm-button-hover-tone);
+  --lxm-button-active-bg: var(--lxm-button-soft-active);
+  --lxm-button-active-border: var(--lxm-button-plain-active-border);
+  --lxm-button-active-text: var(--lxm-button-active-tone);
+}
+:root :is(.el-button.is-link, .el-button.is-text, .el-button--text,
+  .lxm-action--link, .lxm-action--text, .table-link, .text-btn, .mini-text-btn) {
+  --lxm-button-bg: transparent;
+  --lxm-button-border: transparent;
+  --lxm-button-text: var(--lxm-button-tone);
+  --lxm-button-hover-bg: var(--lxm-button-soft);
+  --lxm-button-hover-border: transparent;
+  --lxm-button-hover-text: var(--lxm-button-hover-tone);
+  --lxm-button-active-bg: var(--lxm-button-soft-active);
+  --lxm-button-active-border: transparent;
+  --lxm-button-active-text: var(--lxm-button-active-tone);
+  height: 32px;
+  min-height: 32px;
+  min-width: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  background: var(--lxm-button-bg);
+}
+:root :is(.el-button--info, .lxm-action--neutral, .lxm-btn--ghost,
+  .ghost-btn, .icon-btn) {
+  --lxm-button-tone: var(--lxm-action-neutral);
+  --lxm-button-hover-tone: var(--lxm-action-neutral);
+  --lxm-button-active-tone: var(--lxm-action-neutral);
+  --lxm-button-soft: var(--lxm-action-neutral-hover);
+  --lxm-button-soft-active: var(--lxm-action-neutral-active);
+}
+
+/* A MessageBox can retain --primary. Explicit confirmation intent wins. */
+:root .lxm-action-confirm--primary {
+  --lxm-button-tone: var(--lxm-action-primary);
+  --lxm-button-hover-tone: var(--lxm-action-primary-hover);
+  --lxm-button-active-tone: var(--lxm-action-primary-active);
+}
+:root .lxm-action-confirm--success {
+  --lxm-button-tone: var(--lxm-action-success);
+  --lxm-button-hover-tone: var(--lxm-action-success-hover);
+  --lxm-button-active-tone: var(--lxm-action-success-active);
+}
+:root .lxm-action-confirm--warning {
+  --lxm-button-tone: var(--lxm-action-warning);
+  --lxm-button-hover-tone: var(--lxm-action-warning-hover);
+  --lxm-button-active-tone: var(--lxm-action-warning-active);
+}
+:root .lxm-action-confirm--danger {
+  --lxm-button-tone: var(--lxm-action-danger);
+  --lxm-button-hover-tone: var(--lxm-action-danger-hover);
+  --lxm-button-active-tone: var(--lxm-action-danger-active);
+}
+:root :is(.lxm-action-confirm--primary, .lxm-action-confirm--success,
+  .lxm-action-confirm--warning, .lxm-action-confirm--danger) {
+  --lxm-button-bg: var(--lxm-button-tone);
+  --lxm-button-border: var(--lxm-button-tone);
+  --lxm-button-text: #fff;
+  --lxm-button-hover-bg: var(--lxm-button-hover-tone);
+  --lxm-button-hover-border: var(--lxm-button-hover-tone);
+  --lxm-button-hover-text: #fff;
+  --lxm-button-active-bg: var(--lxm-button-active-tone);
+  --lxm-button-active-border: var(--lxm-button-active-tone);
+  --lxm-button-active-text: #fff;
+}
+:root .lxm-action-cancel {
+  --lxm-button-bg: #fff;
+  --lxm-button-border: var(--lxm-action-border);
+  --lxm-button-text: var(--lxm-action-neutral);
+  --lxm-button-hover-bg: var(--lxm-action-neutral-hover);
+  --lxm-button-hover-border: #6b7280;
+  --lxm-button-hover-text: var(--lxm-action-neutral);
+  --lxm-button-active-bg: var(--lxm-action-neutral-active);
+  --lxm-button-active-border: #6b7280;
+  --lxm-button-active-text: var(--lxm-action-neutral);
+}
+
+:root :is(.el-button--small, .lxm-action--small) {
+  height: 32px;
+  min-height: 32px;
+  padding-inline: 12px;
+}
+:root :is(.el-button--large, .lxm-action--large) {
+  height: 40px;
+  min-height: 40px;
+  padding-inline: 20px;
+}
+:root :is(.el-button.is-link, .el-button.is-text, .lxm-action--link, .lxm-action--text) {
+  padding-inline: 6px;
+}
+:root .el-button.is-circle,
+:root .icon-btn {
+  width: var(--lxm-action-height);
+  min-width: var(--lxm-action-height);
+  padding: 0;
+}
+:root .shelf-price-edit .lxm-action {
+  height: 32px;
+  min-height: 32px;
+  padding-inline: 8px;
+}
+
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn)
+  > :is(span, .el-icon) {
+  color: inherit;
+}
+:root .el-button :is(.el-icon, .el-icon > svg) {
+  font-size: 16px;
+}
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn)
+  :is(.el-icon + span, span + .el-icon) { margin-inline: 0; }
+
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn)
+  :is(input[type="file"]) { cursor: inherit; }
+
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn):hover:not(:disabled):not(.is-disabled):not(.is-loading):not([aria-disabled="true"]):not(:has(input:disabled)) {
+  background: var(--lxm-button-hover-bg);
+  border-color: var(--lxm-button-hover-border);
+  color: var(--lxm-button-hover-text);
+  box-shadow: none;
+  filter: none;
+  transform: none;
+}
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn):active:not(:disabled):not(.is-disabled):not(.is-loading):not([aria-disabled="true"]):not(:has(input:disabled)) {
+  background: var(--lxm-button-active-bg);
+  border-color: var(--lxm-button-active-border);
+  color: var(--lxm-button-active-text);
+  box-shadow: none;
+  transform: none;
+}
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn):focus-visible:not(.is-disabled) {
+  outline: 2px solid var(--lxm-action-primary);
+  outline-offset: 2px;
+}
+:root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+  .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn):is(:disabled, .is-disabled, [aria-disabled="true"], :has(input:disabled)):not(.is-loading):not([aria-busy="true"]) {
+  background: var(--lxm-action-disabled-bg);
+  border-color: var(--lxm-action-disabled-border);
+  color: var(--lxm-action-disabled-text);
+  box-shadow: none;
+  opacity: 1;
+  cursor: not-allowed;
+}
+:root :is(.el-button.is-link, .el-button.is-text, .lxm-action--link, .lxm-action--text,
+  .table-link, .text-btn, .mini-text-btn):is(:disabled, .is-disabled, [aria-disabled="true"]):not(.is-loading):not([aria-busy="true"]) {
+  border-color: transparent;
+  background: transparent;
+}
+:root :is(.el-button.is-loading, .lxm-action[aria-busy="true"]) {
+  pointer-events: none;
+  cursor: wait;
+}
+:root .el-button.is-loading::before { display: none; }
+/* Width is locked before loading by action-buttons.js; make room for spinner. */
+:root .el-button.is-loading:not(.is-link):not(.is-text) { padding-inline: 4px; }
+
+:root .el-input-group__append > .el-button {
+  background: var(--lxm-button-bg);
+  color: var(--lxm-button-text);
+}
+
+/* Use one gap source: EP defaults to 12px sibling margins, while most admin
+ * toolbars already have an 8px flex/grid gap. Inline groups still need 8px. */
+.el-button + .el-button { margin-left: 8px; }
+:root :is(.action-buttons, .addon-actions, .addon-toolbar-actions, .af-upload,
+  .album-form-actions, .album-toolbar-actions, .audit-actions, .audit-toolbar-actions,
+  .basic-content-actions, .basic-content-link-list, .bottom-actions, .cfg-row-actions,
+  .contact-add, .dc-assign, .drawer-actions, .edit-actions, .filter-card,
+  .filter-title-actions, .finance-batch-toolbar, .flow-action-row, .follow-quick,
+  .header-actions, .lxm-card__actions, .lxm-file-row, .lxm-page-head__actions,
+  .lxm-toolbar, .package-table-actions, .package-table-filters, .package-table-row-actions,
+  .permissions-dialog-footer, .permissions-filter-actions, .permissions-header-actions,
+  .permissions-list-actions, .permissions-row-actions, .ppl-form-actions,
+  .ppl-toolbar-actions, .product-sales-actions, .recon-actions, .recon-preset-row,
+  .role-report-actions, .scope-actions, .shelf-toolbar-actions, .tag-toolbar-actions,
+  .trash-toolbar-actions, .vse-form-actions, .el-dialog__footer, .el-message-box__btns)
+  > .el-button + .el-button { margin-left: 0; }
+
+/* Dropdown actions are menu items, not solid buttons. */
+:root .el-dropdown-menu__item:is(.lxm-action--primary, .lxm-action--success,
+  .lxm-action--warning, .lxm-action--danger, .lxm-action--neutral) {
+  min-height: 32px;
+  color: var(--lxm-button-tone, var(--lxm-action-neutral));
+  font-size: 14px;
+  font-weight: 500;
+}
+:root .el-dropdown-menu__item:is(.lxm-action--primary, .lxm-action--success,
+  .lxm-action--warning, .lxm-action--danger, .lxm-action--neutral):is(:hover, :focus):not(.is-disabled) {
+  background: var(--lxm-button-soft, var(--lxm-action-neutral-hover));
+  color: var(--lxm-button-hover-tone, var(--lxm-action-neutral));
+}
+:root .el-dropdown-menu__item.is-disabled {
+  color: var(--lxm-action-disabled-text);
+  background: transparent;
+  cursor: not-allowed;
+}
+:root :is(.el-dialog__footer, .el-message-box__btns) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+:root .el-message-box__btns { gap: 12px; }
+:root :is(.el-dialog__footer, .el-message-box__btns) > .el-button {
+  min-width: 80px;
+  margin-left: 0;
+}
+
+@media (pointer: coarse) {
+  :root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+    .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn),
+  :root :is(.el-button.is-link, .el-button.is-text, .el-button.is-circle,
+    .shelf-price-edit .lxm-action) {
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+  :root .el-dropdown-menu__item { min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root :is(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn,
+    .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn) {
+    transition: none;
+  }
+}

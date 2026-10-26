@@ -5,7 +5,7 @@
 // openid：云函数用 cloud.getWXContext().OPENID；自托管由 login 接口下发，小程序每次请求注入 data.openid。
 const crypto = require("crypto");
 const https = require("https");
-const { bookingPaymentSource, finalizePaidBooking, bookingResult } = require("./bookingRequests.cjs");
+const { bookingPaymentSource, finalizePaidBooking, bookingResult, orderIdForBooking } = require("./bookingRequests.cjs");
 const {
   WORKFLOW_STAGES,
   roundMoney,
@@ -13,6 +13,7 @@ const {
   depositDue,
   finalDue,
   hasConfirmedPayment,
+  hasCompletedShooting,
   isUnpaidBooking,
   isServiceConfirmed,
   hasDeliveryRecord,
@@ -20,6 +21,9 @@ const {
   businessStatusForOrder,
   businessStatusLabel,
   hasActiveAfterSale,
+  hasEffectiveDispatch,
+  canRefundDeposit,
+  refundableDepositAmount,
   customerCancellation,
   normalizePaymentStatus,
   canonicalStage,
@@ -243,6 +247,12 @@ function isVisibleSimple(item) {
   if (status && badStatuses.includes(status)) return false;
   if (auditStatus && !passAuditStatuses.includes(auditStatus)) return false;
   return true;
+}
+
+// 微信小店商品卡必须有官方商品 ID。未绑定小店商品的周边继续保留在后台，
+// 但不进入面向小程序的公开商品列表、首页推荐或详情关联数据。
+function isPublicPeripheral(item) {
+  return isVisibleSimple(item) && String(item && item.storeProductId || "").trim() !== "";
 }
 
 function identityValues(value) {
@@ -643,6 +653,10 @@ function normalizePackageIncludedItems(item = {}, context = {}) {
       target.page = target.page || "peripheral";
     }
     return result;
+  }).filter((result, index) => {
+    if (packageItemType(declared[index]) !== "peripheral") return true;
+    const sourcePeripheral = findById(peripherals, result.peripheralId || result.target && (result.target.peripheralId || result.target.id));
+    return !!sourcePeripheral && String(sourcePeripheral.storeProductId || "").trim() !== "";
   });
 
   // Older seeded packages only carry albumId. Materialize one navigable item
@@ -1033,7 +1047,7 @@ const STATUS_GROUPS = {
 };
 const BUSINESS_STATUS_FILTERS = Object.freeze({
   pending_payment: "pending_payment", "待支付定金": "pending_payment", "待支付": "pending_payment", pending: "pending_payment", deposit: "pending_payment",
-  reserved: "reserved", "已预约": "reserved", awaiting_photographer: "reserved", "待安排摄影师": "reserved", confirmed: "reserved",
+  reserved: "reserved", "待确认": "reserved", "已预约": "reserved", awaiting_photographer: "reserved", "待安排摄影师": "reserved", confirmed: "reserved",
   awaiting_shoot: "awaiting_shoot", "待拍摄": "awaiting_shoot",
   shooting: "shooting", "拍摄中": "shooting", shot: "shooting", "已拍摄": "shooting", editing: "shooting", final: "shooting",
   completed: "completed", "已完成": "completed", paid: "completed", "已支付": "completed", delivered: "completed", "已交付": "completed",
@@ -1342,7 +1356,7 @@ async function rpcGetHomeData(source, data = {}) {
       { seriesSpotScopes }
     ).sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0)).slice(0, 100);
     const albums = projectPublicSpotScopedRows((await source.list("albums")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
-    const allPeripherals = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
+    const allPeripherals = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isPublicPeripheral), publicSpotIds, { seriesSpotScopes });
     const configuredAlbums = pickConfiguredList(albums, recommendations.featuredAlbumIds || recommendations.albumIds, 20);
     const packageContext = { albums, videos: rawPackages, peripherals: allPeripherals };
 
@@ -1451,7 +1465,7 @@ async function rpcGetBookingData(source) {
     const allPackages = projectPublicSpotScopedRows((await source.list("packages")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
     const albums = projectPublicSpotScopedRows((await source.list("albums")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
     const photos = projectPublicSpotScopedRows((await source.list("samples")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
-    const peripherals = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
+    const peripherals = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isPublicPeripheral), publicSpotIds, { seriesSpotScopes });
     const packageContext = { albums, videos: allPackages, peripherals };
     const albumCountMap = {};
     albums.forEach(a => { if (a.seriesId) albumCountMap[a.seriesId] = (albumCountMap[a.seriesId] || 0) + 1; });
@@ -1579,7 +1593,7 @@ async function rpcGetSeriesDetail(source, data = {}) {
       .sort((a, b) => (Number(b.hotScore) || 0) - (Number(a.hotScore) || 0));
     const [allVisibleAlbums, allPeripherals] = await Promise.all([
       source.list("albums").then((rows) => projectPublicSpotScopedRows(rows.filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes })),
-      source.list("peripherals").then((rows) => projectPublicSpotScopedRows(rows.filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes }))
+      source.list("peripherals").then((rows) => projectPublicSpotScopedRows(rows.filter(isPublicPeripheral), publicSpotIds, { seriesSpotScopes }))
     ]);
     const packageContext = { albums: allVisibleAlbums, videos: allPackages, peripherals: allPeripherals };
     const packageRows = allPackages.map((item) => normalizePublicPackage(item, packageContext));
@@ -1784,7 +1798,7 @@ async function rpcGetPhotoCollection(source, data = {}) {
 
     const packagesAll = projectPublicSpotScopedRows((await source.list("packages")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
     const albums = projectPublicSpotScopedRows((await source.list("albums")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
-    const peripherals = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
+    const peripherals = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isPublicPeripheral), publicSpotIds, { seriesSpotScopes });
     const packageContext = { albums, videos: packagesAll, peripherals };
     const publicPackages = packagesAll.map((item) => normalizePublicPackage(item, packageContext));
     const configuredPackageIds = new Set((Array.isArray(series.packageIds) ? series.packageIds : []).map(String));
@@ -1829,7 +1843,7 @@ async function rpcGetPeripherals(source, data = {}) {
     const publicSpots = await listPublicSpots(source);
     const publicSpotIds = new Set(publicSpots.map((item) => String(getItemId(item))));
     const seriesSpotScopes = seriesSpotScopeMap(await source.list("series"));
-    let list = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isVisibleSimple), publicSpotIds, { seriesSpotScopes });
+    let list = projectPublicSpotScopedRows((await source.list("peripherals")).filter(isPublicPeripheral), publicSpotIds, { seriesSpotScopes });
     if (cate) list = list.filter(p => p.category === cate || p.cate === cate);
     list.sort((a, b) => String(b.createTime || "").localeCompare(String(a.createTime || "")));
     return { success: true, data: list.map((item) => publicContentRow(item)) };
@@ -1893,15 +1907,19 @@ function projectPublicDeliveryFiles(value) {
     return out;
   }).filter(Boolean);
 }
-function projectPublicOrder(order = {}) {
-  const projected = publicOrderProjection(order, { detail: true });
+function projectPublicOrder(order = {}, afterSales) {
+  const projected = publicOrderProjection(order, { detail: true, afterSales });
+  if (afterSales === null) {
+    projected.canRefundDeposit = false;
+    projected.canAfterSale = false;
+    projected.refundableDepositAmount = 0;
+  }
   const paymentTestModeEnabled = testPaymentEnabled();
   const paymentSimulationEnabled = simulatedPaymentEnabled();
   return {
     ...projected,
     id: projected._id,
     items: projected.productItems,
-    afterSaleStatus: typeof order.afterSaleStatus === "string" ? order.afterSaleStatus : "",
     bookingMode: typeof order.bookingMode === "string" ? order.bookingMode : "consult",
     paymentTestModeEnabled,
     canRunTestPayment: paymentTestModeEnabled && projected.canPay === true,
@@ -1951,7 +1969,9 @@ async function rpcGetMyOrders(source, openid, data = {}, ctx = {}) {
     list.sort((a, b) => String(b.createTime || b.appointmentAt || "").localeCompare(String(a.createTime || a.appointmentAt || "")));
     const total = list.length;
     const start = (page - 1) * pageSize;
-    const paged = await Promise.all(list.slice(start, start + pageSize).map((o) => enrichPublicOrderFiles(projectPublicOrder(o), ctx)));
+    let afterSales = null;
+    try { afterSales = await source.list("afterSales"); } catch (_) {}
+    const paged = await Promise.all(list.slice(start, start + pageSize).map((o) => enrichPublicOrderFiles(projectPublicOrder(o, afterSales), ctx)));
     return { success: true, data: paged, total, page, pageSize };
   } catch (err) {
     return { success: false, error: publicRpcError(err) };
@@ -1974,16 +1994,77 @@ async function findOrder(source, orderId, orderNo) {
   return matched[0] || null;
 }
 
+async function findPaymentRecordOwner(source, collection, indexMethod, outTradeNo) {
+  const rows = typeof source[indexMethod] === "function"
+    ? [await source[indexMethod](outTradeNo)].filter(Boolean)
+    : (await source.list(collection) || []).filter((row) => Array.isArray(row && row.paymentRecords)
+      && row.paymentRecords.some((record) => record && record.outTradeNo === outTradeNo));
+  if (rows.length > 1) throw new Error("支付记录存在冲突，请联系客服");
+  const row = rows[0];
+  if (!row) return null;
+  const records = (Array.isArray(row.paymentRecords) ? row.paymentRecords : [])
+    .filter((record) => record && record.outTradeNo === outTradeNo);
+  if (records.length !== 1) throw new Error("支付记录存在冲突，请联系客服");
+  return records[0].provider === "wechat_pay" ? row : null;
+}
+
+function assertOrderIdentifiers(order, orderId, orderNo) {
+  if ((orderId && String(getItemId(order)) !== String(orderId))
+    || (orderNo && String(order.orderNo || "") !== String(orderNo))) {
+    throw new Error("订单标识与支付记录不一致");
+  }
+}
+
+async function findOrderForPayment(source, openid, outTradeNo, orderId, orderNo) {
+  const order = await findPaymentRecordOwner(source, "orders", "findOrderByPaymentOutTradeNo", outTradeNo);
+  const booking = await findPaymentRecordOwner(source, "bookingRequests", "findBookingByPaymentOutTradeNo", outTradeNo);
+  // A promoted order keeps the original deposit record. Only that linked pair
+  // may share a trade number; unrelated or ambiguous records must fail closed.
+  if (order && booking && (String(order.bookingId || "") !== String(getItemId(booking))
+    || getOrderOpenid(order) !== getOrderOpenid(booking)
+    || (booking.confirmedOrderId && String(booking.confirmedOrderId) !== String(getItemId(order))))) {
+    throw new Error("支付记录存在冲突，请联系客服");
+  }
+  if ((order && getOrderOpenid(order) !== openid) || (booking && getOrderOpenid(booking) !== openid)) {
+    throw new Error("无权限");
+  }
+  if (order) {
+    assertOrderIdentifiers(order, orderId, orderNo);
+    return order;
+  }
+  if (!booking || booking.isDeleted || booking.deleted) return null;
+  assertOrderIdentifiers({ id: orderIdForBooking(getItemId(booking)), orderNo: booking.orderNo }, orderId, orderNo);
+  // Recover an interrupted promotion using the existing confirmed payment
+  // state. A navigation parameter never confirms a payment or exposes a draft.
+  if (!hasConfirmedPayment(booking, "deposit")) return null;
+  return finalizePaidBooking(source, getItemId(booking));
+}
+
 async function rpcGetOrderDetail(source, openid, data = {}, ctx = {}) {
   const { orderId, orderNo = "" } = data;
-  if (!orderId && !orderNo) return { success: false, error: "缺少订单ID" };
+  const hasTradeNo = data.outTradeNo !== undefined || data.out_trade_no !== undefined;
+  if (!orderId && !orderNo && !hasTradeNo) return { success: false, error: "缺少订单ID" };
   try {
     if (!openid) return { success: false, error: "请先完成微信登录" };
-    const order = await findOrder(source, orderId, orderNo);
+    let order;
+    if (hasTradeNo) {
+      const raw = data.outTradeNo !== undefined ? data.outTradeNo : data.out_trade_no;
+      const outTradeNo = typeof raw === "string" ? raw.trim() : "";
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(outTradeNo)) return { success: false, error: "支付订单号无效" };
+      if (data.outTradeNo !== undefined && data.out_trade_no !== undefined
+        && (typeof data.out_trade_no !== "string" || data.out_trade_no.trim() !== outTradeNo)) {
+        return { success: false, error: "支付订单号不一致" };
+      }
+      order = await findOrderForPayment(source, openid, outTradeNo, orderId, orderNo);
+    } else {
+      order = await findOrder(source, orderId, orderNo);
+    }
     if (!order || order.isDeleted || order.deleted || isUnpaidBooking(order)) return { success: false, error: "订单不存在" };
     if (openid && getOrderOpenid(order) !== openid) return { success: false, error: "无权限" };
 
-    const d = await enrichPublicOrderFiles(projectPublicOrder(order), ctx);
+    let afterSales = null;
+    try { afterSales = await source.list("afterSales"); } catch (_) {}
+    const d = await enrichPublicOrderFiles(projectPublicOrder(order, afterSales), ctx);
     return {
       success: true,
       data: { ...d, statusText: d.customerStatus }
@@ -2409,7 +2490,7 @@ async function rpcCreateBookingUnlocked(source, data = {}) {
       price: serverTotalPrice, totalPrice: serverTotalPrice, totalAmount: serverTotalPrice, amountTotal: serverTotalPrice,
       depositRatio, depositDue: depositAmount, depositFrozenAmount: depositAmount, depositFrozenAt: now, finalDue: finalAmount,
       depositPaid: 0, finalPaid: 0, bookingMode: "consult", workflowStage: depositAmount > 0 ? WORKFLOW_STAGES.AWAITING_DEPOSIT : WORKFLOW_STAGES.AWAITING_DISPATCH,
-      status: "new", customerStatus: depositAmount > 0 ? "待支付定金" : "已预约", businessStatus: depositAmount > 0 ? "pending_payment" : "reserved", businessStatusText: depositAmount > 0 ? "待支付定金" : "已预约", publicStatus: depositAmount > 0 ? "pending_payment" : "reserved", publicStatusText: depositAmount > 0 ? "待支付定金" : "已预约", dispatchStatus: "pending", depositRefundable: true, selectionStatus: "not_started",
+      status: "new", customerStatus: depositAmount > 0 ? "待支付定金" : "待确认", businessStatus: depositAmount > 0 ? "pending_payment" : "reserved", businessStatusText: depositAmount > 0 ? "待支付定金" : "待确认", publicStatus: depositAmount > 0 ? "pending_payment" : "reserved", publicStatusText: depositAmount > 0 ? "待支付定金" : "待确认", dispatchStatus: "pending", depositRefundable: true, selectionStatus: "not_started",
       serviceUser: "", serviceUserId: "", photographer: "", photographerId: "", serviceNote: "", deliveryNote: "", participantCount: Number(data.participantCount || firstItem.participantCount || 0) || undefined,
       paymentRecords: [],
       statusLogs: [{ type: "客户预约", action: "提交预约申请", operator: "系统", operatorId: openid, from: "", to: "new", workflowStage: WORKFLOW_STAGES.AWAITING_CONFIRMATION, createTime: now }],
@@ -2763,7 +2844,7 @@ async function rpcCreatePaymentIntent(source, openid, data = {}, ctx = {}) {
       && (!ticket.orderId || String(ticket.orderId) === String(orderKey)))) return { success: false, error: "订单存在处理中售后，暂不能创建支付单" };
     const stage = canonicalStage(order);
     if (phase === "deposit" && stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return { success: false, error: "当前订单不在待支付订金阶段" };
-    if (phase === "final" && (![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "进入拍摄中且定金到账后才能创建尾款支付单" };
+    if (phase === "final" && (!hasCompletedShooting(order) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "拍摄完成且定金到账后才能创建尾款支付单" };
     if (phase === "final" && data.selectionAccepted !== true) return { success: false, error: "请确认已拍摄并同意支付尾款" };
     const due = phase === "deposit" ? depositDue(order) : finalDue(order);
     if (due <= 0) return { success: false, error: "当前支付阶段无需收款" };
@@ -2865,7 +2946,7 @@ async function rpcConfirmZeroBalance(source, openid, data, initial) {
     const existing = (order.paymentRecords || []).find((row) => row.provider === "zero_balance" && row.idempotencyKey === key);
     if (existing && canonicalStage(order) === WORKFLOW_STAGES.COMPLETED) return { success: true, data: { ...publicPaymentSummary(order, "final", existing), invokeWeChatPay: false, provider: "zero_balance", idempotent: true } };
     if (data.selectionAccepted !== true) return { success: false, error: "请确认已拍摄并同意完成订单" };
-    if (order.paymentReviewRequired || hasActiveAfterSale(order) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(canonicalStage(order)) || !hasConfirmedPayment(order, "deposit") || finalDue(order) !== 0) return { success: false, error: "当前订单不能确认拍摄完成" };
+    if (order.paymentReviewRequired || hasActiveAfterSale(order) || !hasCompletedShooting(order) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(canonicalStage(order)) || !hasConfirmedPayment(order, "deposit") || finalDue(order) !== 0) return { success: false, error: "当前订单不能确认拍摄完成" };
     const now = new Date().toISOString();
     const payment = { id: makePaymentId("zero"), phase: "final", amount: 0, status: "confirmed", provider: "zero_balance", idempotencyKey: key, selectionAccepted: true, selectionAcceptedAt: now, confirmedAt: now, createdAt: now };
     const event = { type: "订单完成", action: "游客确认拍摄完成（零尾款）", createTime: now };
@@ -2914,7 +2995,7 @@ async function rpcCreatePaymentIntentLegacy(source, openid, data = {}) {
     if (phase === "deposit" && stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return { success: false, error: "当前订单不在待支付订金阶段" };
     // Offline selection is the final-payment gate. Delivery is performed only
     // after the final payment is confirmed.
-    if (phase === "final" && (![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "进入拍摄中且定金到账后才能创建尾款支付单" };
+    if (phase === "final" && (!hasCompletedShooting(order) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: "拍摄完成且定金到账后才能创建尾款支付单" };
     if (phase === "final" && data.selectionAccepted !== true) return { success: false, error: "请确认已拍摄并同意支付尾款" };
     const due = phase === "deposit" ? depositDue(order) : finalDue(order);
     if (due <= 0) return { success: false, error: "当前支付阶段无需收款" };
@@ -3017,7 +3098,7 @@ async function rpcImmediatePayment(source, openid, data = {}, config = {}) {
         && (!ticket.orderId || String(ticket.orderId) === String(orderKey)))) return { success: false, error: `订单存在处理中售后，暂不能${label}` };
       const stage = canonicalStage(order);
       if (phase === "deposit" && stage !== WORKFLOW_STAGES.AWAITING_DEPOSIT) return { success: false, error: "当前订单不在待支付订金阶段" };
-      if (phase === "final" && (![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: `进入拍摄中且定金到账后才能${label}尾款` };
+      if (phase === "final" && (!hasCompletedShooting(order) || ![WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage) || (depositDue(order) > 0 && !hasConfirmedPayment(order, "deposit")) || hasConfirmedPayment(order, "final"))) return { success: false, error: `拍摄完成且定金到账后才能${label}尾款` };
       if (phase === "final" && data.selectionAccepted !== true) return { success: false, error: "请确认已拍摄并同意支付尾款" };
       const due = phase === "deposit" ? depositDue(order) : finalDue(order);
       if (due <= 0) return { success: false, error: "当前支付阶段无需收款" };
@@ -3247,11 +3328,23 @@ async function rpcSubmitAfterSaleUnlocked(source, openid, data = {}, ctx = {}) {
     // idempotent when the mobile network repeats the request.
     let tickets = [];
     try { tickets = await source.list("afterSales"); } catch (_) { return { success: false, error: "售后数据暂不可用，请稍后重试" }; }
+    const depositRefund = String(data.refundPhase || "").trim().toLowerCase() === "deposit"
+      || ["定金退款", "订金退款"].includes(String(type || "").trim());
     const duplicate = (Array.isArray(tickets) ? tickets : []).find((ticket) =>
       ticket && String(ticket.orderId || "") === String(orderKey) &&
       !isAfterSaleTerminalStatus(ticket.status)
     );
-    if (duplicate) return { success: true, data: { status: duplicate.status || "pending", ticketId: getItemId(duplicate), existed: true } };
+    if (duplicate) {
+      if (depositRefund && (duplicate.refundPhase !== "deposit" || duplicate.type !== "定金退款")) {
+        return { success: false, error: "订单已有处理中售后，请先联系客服处理现有申请" };
+      }
+      return { success: true, data: { status: duplicate.status || "pending", ticketId: getItemId(duplicate), existed: true } };
+    }
+    if (depositRefund && !canRefundDeposit(order, tickets)) {
+      return { success: false, error: hasEffectiveDispatch(order)
+        ? "摄影师已安排，请联系客服审核退款事宜"
+        : "当前订单没有可申请退还的定金，请联系客服" };
+    }
     const attachmentFileIds = data.attachmentFileIds === undefined ? [] : data.attachmentFileIds;
     if (!Array.isArray(attachmentFileIds) || attachmentFileIds.length > 9 || attachmentFileIds.some((id) => typeof id !== "string" || !id)) return { success: false, error: "售后凭证列表无效，最多上传 9 张图片" };
     if (attachmentFileIds.length) {
@@ -3266,12 +3359,20 @@ async function rpcSubmitAfterSaleUnlocked(source, openid, data = {}, ctx = {}) {
       orderId: orderKey,
       orderNo: order.orderNo || orderNo || "",
       openid,
-      type: String(type || "退款申请").trim() || "退款申请",
+      type: depositRefund ? "定金退款" : String(type || "退款申请").trim() || "退款申请",
       status: "pending",
       customerVisibleStatus: "处理中",
       reason: normalizedReason,
       packageName: packageName || order.packageName || "",
       submitSource: "mini_program",
+      ...(depositRefund ? {
+        refundPhase: "deposit",
+        refundAmount: refundableDepositAmount(order, tickets),
+        refundStatus: "pending_review",
+        refundConfirmed: false,
+        financeStatus: "待审",
+        reviewLane: "pre_dispatch",
+      } : {}),
       attachmentFileIds: [...new Set(attachmentFileIds)],
       logs: [],
       createdAt: now,

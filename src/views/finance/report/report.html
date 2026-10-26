@@ -7,7 +7,7 @@
     </div>
     <div class="role-report-actions">
       <span class="role-chip">{{ roleName(state.role) }}</span>
-      <el-button type="primary" @click="openExportDialog('reconciliation')">导出月度核对表</el-button>
+      <el-button @click="openExportDialog('reconciliation')">导出月度核对表</el-button>
     </div>
   </div>
 
@@ -68,7 +68,7 @@
       <el-table-column prop="rateText" label="分成比例" width="130" />
       <el-table-column label="应计" min-width="110" align="right"><template #default="{row}">{{ money(row.commission) }}</template></el-table-column>
       <el-table-column label="结算状态" min-width="140"><template #default="{row}"><el-tag :type="row.transferStatus==='已结算' ? 'success' : row.transferStatus==='待结算' ? 'warning' : 'info'">{{ row.transferStatus }}</el-tag><div class="muted">{{ row.transferText }}</div></template></el-table-column>
-      <el-table-column v-if="canUseHeadquarterReconciliation" fixed="right" label="操作" width="110"><template #default="{row}"><el-button link type="primary" :disabled="row.transferStatus==='已结算' || Number(row.commission||0)<=0" @click="confirmSettlementBatch(row)">确认结算</el-button></template></el-table-column>
+      <el-table-column v-if="canUseHeadquarterReconciliation" fixed="right" label="操作" width="110"><template #default="{row}"><el-button type="warning" link :disabled="row.transferStatus==='已结算' || Number(row.commission||0)<=0" @click="confirmSettlementBatch(row)">确认结算</el-button></template></el-table-column>
     </el-table>
     <div class="table-pager" v-if="visibleReconciliationSettlementRows.length > 0">
       <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="visibleReconciliationSettlementRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconSettlement').size" :current-page="pager('reconSettlement').page" @current-change="pager('reconSettlement').page = $event" @size-change="onListPageSizeChange('reconSettlement', $event)" />

@@ -1,5 +1,5 @@
 /* ============================================================
-   鹿小鸣旅拍 · 后台「年轻活力渐变玻璃」主题层
+   麓小鸣旅拍 · 后台「年轻活力渐变玻璃」主题层
    UI Designer · 方案 C 落地（第一批）
    ------------------------------------------------------------
    本文件在 index.html 中最后加载，专门把后台从「暖白扁平」
@@ -246,7 +246,6 @@ body::after {
 /* 装修：左栏列表按钮 / 模块开关 */
 .decor-page-list button,
 .decor-module-list button,
-.quicknav-presets .preset-btn,
 .page-config-tabs button {
   border: 1px solid rgba(255, 255, 255, .55) !important;
   background: rgba(255, 255, 255, .55) !important;
@@ -323,29 +322,13 @@ body::after {
 .eb-thumb--empty { display: flex; align-items: center; justify-content: center; color: #8a766a; font-size: 12px; }
 .eb-media-actions { display: flex; gap: 6px; margin-top: 6px; }
 .eb-media-actions button {
-  flex: 1; padding: 5px 0; font-size: 12px; cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, .6) !important;
-  background: rgba(255, 255, 255, .6) !important; color: #3a2f27 !important;
-  border-radius: 8px;
+  flex: 1;
 }
 .eb-fields { display: grid; gap: 8px; }
 .eb-row { display: grid; gap: 4px; }
 .eb-row > span { font-size: 12px; color: #6b5a4d; }
 .eb-tools { display: flex; flex-direction: column; gap: 6px; }
-.eb-tools button,
-.eb-add {
-  padding: 6px 10px; font-size: 13px; cursor: pointer;
-  border-radius: 10px; border: 1px solid rgba(255, 255, 255, .6) !important;
-  background: rgba(255, 255, 255, .6) !important; color: #3a2f27 !important;
-}
-.eb-add {
-  border-style: dashed !important;
-  background: rgba(255, 255, 255, .35) !important;
-  color: var(--lxm-brand) !important;
-}
-.eb-del, .qn-btn.danger, .cfg-list-del, .sf-del {
-  color: #c0392b !important;
-}
+
 .eb-empty, .quicknav-empty, .cfg-empty, .sf-empty { color: #8a766a !important; }
 
 /* 首页推荐位选择卡 */
@@ -512,27 +495,8 @@ body::after {
 .page-route-peripheral .pli-main strong,
 .page-route-videoSingle .vli-main strong { color: #2A211B !important; }
 
-/* ============ 6. 按钮 / Element Plus 玻璃化 ============ */
-.el-button--primary {
-  background: var(--lxm-brand-grad) !important;
-  border-color: transparent !important;
-  color: #fff !important;
-  box-shadow: 0 8px 18px rgba(238, 44, 44, .32) !important;
-  border-radius: 10px !important;
-}
-.el-button--primary:hover { filter: brightness(1.06) !important; }
-.el-button--primary:active { filter: brightness(.96) !important; }
-.el-button:not(.el-button--primary):not(.el-button--danger):not(.el-button--success):not(.el-button--warning) {
-  background: rgba(255, 255, 255, .66) !important;
-  border-color: rgba(255, 255, 255, .7) !important;
-  color: #3a2f27 !important;
-  border-radius: 10px !important;
-  backdrop-filter: blur(8px);
-}
-.el-button.is-plain {
-  background: rgba(255, 255, 255, .5) !important;
-  backdrop-filter: blur(8px);
-}
+/* ============ 6. Element Plus 输入与表格 ============ */
+
 .el-input__wrapper,
 .el-textarea__inner,
 .el-select__wrapper {
@@ -558,7 +522,7 @@ body::after {
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* ============ 7. 顶栏 message / 角色选择 在玻璃下可读 ============ */
-.top-actions .el-button { color: #3a2f27 !important; }
+
 .message-panel { background: #fff !important; color: #2A211B !important; border-radius: 12px; }
 .message-row { border-bottom: 1px solid var(--lxm-line) !important; color: #2A211B !important; }
 .empty-mini { color: #6b5a4d !important; }
@@ -715,7 +679,7 @@ body::after {
   -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
 }
 
-/* ============ 顶栏用户菜单（鹿小鸣·玻璃主题） ============ */
+/* ============ 顶栏用户菜单（麓小鸣·玻璃主题） ============ */
 .user-menu { margin-left: 6px; }
 .user-trigger {
   display: inline-flex;

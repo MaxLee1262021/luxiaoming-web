@@ -77,8 +77,8 @@
         </div>
         <div class="vse-form-actions">
           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedVideoSingle">保存</el-button>
-          <el-button v-if="can('contentEdit')" @click="openVideoSingle(selectedVideoSingle)">高级编辑</el-button>
-          <el-button type="danger" v-if="can('contentEdit')" @click="deleteVideoSingle(selectedVideoSingle)">删除</el-button>
+          <el-button v-if="can('contentEdit')" type="primary" plain @click="openVideoSingle(selectedVideoSingle)">高级编辑</el-button>
+          <el-button type="danger" plain v-if="can('contentEdit')" @click="deleteVideoSingle(selectedVideoSingle)">删除</el-button>
         </div>
       </div>
 
@@ -103,7 +103,7 @@
             <span class="vf-upload__hint">MP4 最大 500 MiB。上传成功后保存；右下角可查看进度和重试。</span>
           </span>
         </label>
-        <label class="vf-field"><span>封面图 <el-button link @click="uploadVideoCover" :disabled="!can('contentEdit')">上传图片</el-button></span><el-input v-model="selectedVideoSingle.cover" @change="validateMediaUrl(selectedVideoSingle,'cover')" placeholder="封面图 URL（留空将用占位图）" :disabled="!can('contentEdit')" /></label>
+        <label class="vf-field"><span>封面图 <el-button type="primary" link @click="uploadVideoCover" :disabled="!can('contentEdit')">上传图片</el-button></span><el-input v-model="selectedVideoSingle.cover" @change="validateMediaUrl(selectedVideoSingle,'cover')" placeholder="封面图 URL（留空将用占位图）" :disabled="!can('contentEdit')" /></label>
         <div class="vf-row">
           <label class="vf-field"><span>时长</span><el-input v-model="selectedVideoSingle.durationText" placeholder="如 60秒" :disabled="!can('contentEdit')" /></label>
           <label class="vf-field"><span>价格（元）</span><el-input-number v-model="selectedVideoSingle.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>

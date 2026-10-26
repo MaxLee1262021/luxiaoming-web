@@ -110,6 +110,11 @@ test("service starts its assigned order, frozen deposit survives price adjustmen
 test("zero final balance acknowledges completion without a fabricated WeChat transaction", async () => {
   const source = fixture();
   source.collections.orders.o = { id: "o", openid: "customer", status: "shooting", totalAmount: 100, depositDue: 100, depositPaid: 100, depositFinanceStatus: "confirmed", finalDue: 0, paymentRecords: [], statusLogs: [], followRecords: [] };
+  assert.equal(workflow.publicOrderProjection(source.collections.orders.o).canConfirmCompletion, false);
+  const premature = await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "zero-premature-0001" } }, { identity: identity.identity });
+  assert.equal(premature.success, false);
+  assert.equal(source.collections.orders.o.status, "shooting");
+  source.collections.orders.o.shootingCompletedAt = "2026-10-26T01:00:00Z";
   assert.equal(workflow.publicOrderProjection(source.collections.orders.o).canConfirmCompletion, true);
   const result = await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "zero-complete-0001" } }, { identity: identity.identity });
   assert.equal(result.success, true, JSON.stringify(result));
@@ -118,6 +123,20 @@ test("zero final balance acknowledges completion without a fabricated WeChat tra
   assert.equal(source.collections.orders.o.status, "completed");
   assert.equal(source.collections.orders.o.paymentRecords[0].externalTransactionId, undefined);
   assert.equal((await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "zero-complete-0001" } }, { identity: identity.identity })).data.idempotent, true);
+});
+
+test("an independent delivery record cannot open final payment before shooting is completed", async () => {
+  const source = fixture();
+  source.collections.orders.o = { id: "o", openid: "customer", status: "shooting", shootingStartedAt: "2026-10-26T01:00:00Z", totalAmount: 100,
+    depositDue: 30, depositPaid: 30, depositFinanceStatus: "confirmed", finalDue: 70, paymentRecords: [],
+    deliveryRecord: { method: "现场补充交付" }, deliveryRecords: [{ method: "现场补充交付" }] };
+  const projected = workflow.publicOrderProjection(source.collections.orders.o);
+  assert.equal(projected.workflowStage, "shooting");
+  assert.equal(projected.shootingCompleted, false);
+  assert.equal(projected.canPayFinal, false);
+  const premature = await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "delivery-premature-final" } }, identity);
+  assert.equal(premature.success, false);
+  assert.deepEqual(source.collections.orders.o.paymentRecords, []);
 });
 
 test("public projection returns current gifts and intent and excludes internal deliveries", () => {

@@ -44,7 +44,7 @@
       </el-table-column>
       <el-table-column fixed="right" label="配置操作" width="170">
         <template #default="{row}">
-          <el-button link @click="openQr(row)">二维码物料</el-button>
+          <el-button link type="primary" @click="openQr(row)">二维码物料</el-button>
           <el-button v-if="canManageShopBinding()" link type="primary" @click="openShop(row)">编辑配置</el-button>
         </template>
       </el-table-column>

@@ -1,5 +1,5 @@
 /* ============================================================
-   鹿小鸣旅拍 · Web 管理后台 · 通用视觉统一层（lxm-polish.css）
+   麓小鸣旅拍 · Web 管理后台 · 通用视觉统一层（lxm-polish.css）
    UI Designer · 2026-08-14
    ------------------------------------------------------------
    作用：对「全局共享基元」做品牌化收口，使所有尚未单独精修的模块
@@ -111,7 +111,7 @@
   width: 180px;
 }
 
-/* 表格空态：与品牌风格统一（鹿小鸣暖色调，替代默认灰色“暂无数据”） */
+/* 表格空态：与品牌风格统一（麓小鸣暖色调，替代默认灰色“暂无数据”） */
 .el-table__empty-block {
   padding: 18px 0;
 }
@@ -202,14 +202,7 @@
 }
 
 /* ---------- 表内链接 / 次要文字 ---------- */
-.table-link {
-  color: var(--lxm-brand);
-  font-weight: 600;
-  cursor: pointer;
-}
-.table-link:hover {
-  text-decoration: underline;
-}
+
 .muted {
   color: var(--lxm-muted);
 }
@@ -242,36 +235,12 @@
    UI Designer · 2026-08-14
    ------------------------------------------------------------
    目标：让尚未单独精修的模块（订单列表 / 渠道 / 配置中心 /
-   系统设置 / 售后 / 任务 …）的按钮、输入、选择、分页、标签、
+   系统设置 / 售后 / 任务 …）的输入、选择、分页、标签、
    勾选、标签页也呈现品牌色，与已精修模块（audit /
    reconciliation / dashboard）保持同一套视觉语言。
    策略：仅覆盖「EP 默认蓝」的全局单类名；页面级
    .page-route-x .xxx 特异性更高，仍优先生效，互不影响。
    ============================================================ */
-
-/* ---------- 主按钮：品牌橙(#D9531E) → 悬停红(#EE2C2C) ---------- */
-.el-button--primary {
-  --el-button-bg-color: var(--lxm-brand);
-  --el-button-border-color: var(--lxm-brand);
-  --el-button-hover-bg-color: var(--lxm-brand-strong);
-  --el-button-hover-border-color: var(--lxm-brand-strong);
-  --el-button-active-bg-color: var(--lxm-brand-strong);
-  --el-button-active-border-color: var(--lxm-brand-strong);
-  --el-button-disabled-bg-color: var(--lxm-brand-soft-2);
-  --el-button-disabled-border-color: var(--lxm-brand-soft-2);
-  --el-button-disabled-text-color: var(--lxm-muted);
-  color: #fff;
-}
-.el-button--primary.is-plain {
-  --el-button-text-color: var(--lxm-brand);
-  --el-button-bg-color: var(--lxm-brand-soft);
-  --el-button-border-color: var(--lxm-brand-soft-2);
-  --el-button-hover-text-color: #fff;
-  --el-button-hover-bg-color: var(--lxm-brand);
-  --el-button-hover-border-color: var(--lxm-brand);
-  --el-button-active-bg-color: var(--lxm-brand-strong);
-  --el-button-active-border-color: var(--lxm-brand-strong);
-}
 
 /* ---------- 输入框 / 文本域 / 下拉 / 日期范围：聚焦品牌描边 ---------- */
 .el-input__wrapper.is-focus,

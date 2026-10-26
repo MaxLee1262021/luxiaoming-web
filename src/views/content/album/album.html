@@ -75,9 +75,9 @@
         </div>
         <div class="album-form-actions">
            <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedAlbum">保存</el-button>
-           <el-button v-if="can('contentEdit')" @click="openContent(selectedAlbum)">高级编辑</el-button>
+           <el-button v-if="can('contentEdit')" type="primary" plain @click="openContent(selectedAlbum)">高级编辑</el-button>
           <el-button @click="previewContent(selectedAlbum)">预览</el-button>
-          <el-button type="danger" v-if="can('contentEdit')" @click="requestDeleteAlbum(selectedAlbum)">删除</el-button>
+          <el-button type="danger" plain v-if="can('contentEdit')" @click="requestDeleteAlbum(selectedAlbum)">删除</el-button>
         </div>
       </div>
 
@@ -110,9 +110,9 @@
         </div>
 
         <div class="af-upload" v-if="can('contentEdit')">
-          <el-button link type="success" @click="uploadAlbumSample(selectedAlbum,'photo')">上传图片</el-button>
-          <el-button link type="warning" @click="uploadAlbumSample(selectedAlbum,'video')">上传视频</el-button>
-          <el-button link @click="openAlbumReplace(selectedAlbum)">替换引用</el-button>
+          <el-button link type="primary" @click="uploadAlbumSample(selectedAlbum,'photo')">上传图片</el-button>
+          <el-button link type="primary" @click="uploadAlbumSample(selectedAlbum,'video')">上传视频</el-button>
+          <el-button link type="primary" @click="openAlbumReplace(selectedAlbum)">替换引用</el-button>
         </div>
       </div>
     </section>

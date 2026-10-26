@@ -422,7 +422,7 @@
     async function deleteMenu(row) {
       if (!ensureWriteAccess()) return;
       try {
-        await ElMessageBox.confirm(`删除菜单“${row.name || row.label || row.key}”后，已授权该菜单的角色需要重新配置。`, "删除菜单", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
+        await window.LXMActionConfirm.confirm(ElMessageBox, `删除菜单“${row.name || row.label || row.key}”后，已授权该菜单的角色需要重新配置。`, "删除菜单", { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "暂不删除", confirmButtonClass: "lxm-action-confirm--danger", cancelButtonClass: "lxm-action-cancel", autofocus: false });
         await requireRemoteWrite("deleteMenu")(row.id);
         await loadAll();
         ElMessage.success("菜单已删除");
@@ -483,7 +483,7 @@
     async function deleteRole(row) {
       if (!ensureWriteAccess()) return;
       try {
-        await ElMessageBox.confirm(`删除角色“${row.name}”后无法恢复。请先将该角色下的人员调整到其他角色。`, "删除角色", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
+        await window.LXMActionConfirm.confirm(ElMessageBox, `删除角色“${row.name}”后无法恢复。请先将该角色下的人员调整到其他角色。`, "删除角色", { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "暂不删除", confirmButtonClass: "lxm-action-confirm--danger", cancelButtonClass: "lxm-action-cancel", autofocus: false });
         await requireRemoteWrite("deleteRole")(row.id);
         await loadAll();
         ElMessage.success("角色已删除");
@@ -563,7 +563,7 @@
     async function deleteUser(row) {
       if (!ensureWriteAccess()) return;
       try {
-        await ElMessageBox.confirm(`删除人员“${row.name || row.account}”会同时删除其后台登录账号，且无法恢复。`, "删除人员", { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" });
+        await window.LXMActionConfirm.confirm(ElMessageBox, `删除人员“${row.name || row.account}”会同时删除其后台登录账号，且无法恢复。`, "删除人员", { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "暂不删除", confirmButtonClass: "lxm-action-confirm--danger", cancelButtonClass: "lxm-action-cancel", autofocus: false });
         await requireRemoteWrite("deleteUser")(row.id);
         await loadAll();
         ElMessage.success("人员已删除");

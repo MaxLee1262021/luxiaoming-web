@@ -1809,7 +1809,7 @@
     "page": "allSpots",
     "file": "allSpots/allSpots.wxml",
     "line": 7,
-    "value": "鹿小鸣"
+    "value": "麓小鸣"
   },
   {
     "page": "allSpots",
@@ -2511,7 +2511,7 @@
     "page": "index",
     "file": "index/index.wxml",
     "line": 6,
-    "value": "鹿"
+    "value": "麓"
   },
   {
     "page": "index",
@@ -2529,7 +2529,7 @@
     "page": "index",
     "file": "index/index.wxml",
     "line": 13,
-    "value": "鹿小鸣旅拍"
+    "value": "麓小鸣旅拍"
   },
   {
     "page": "index",
@@ -2769,7 +2769,7 @@
     "page": "launch",
     "file": "launch/launch.wxml",
     "line": 16,
-    "value": "鹿 小 鸣 旅 拍"
+    "value": "麓 小 鸣 旅 拍"
   },
   {
     "page": "launch",
@@ -2895,7 +2895,7 @@
     "page": "my",
     "file": "my/my.js",
     "line": 116,
-    "value": "鹿小鸣·长沙旅拍，专注长沙本地旅拍服务。覆盖橘子洲、岳麓山、IFS等热门打卡点，提供拍照和短视频服务。"
+    "value": "麓小鸣·长沙旅拍，专注长沙本地旅拍服务。覆盖橘子洲、岳麓山、IFS等热门打卡点，提供拍照和短视频服务。"
   },
   {
     "page": "my",

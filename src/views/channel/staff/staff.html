@@ -46,8 +46,8 @@
       <el-table-column fixed="right" label="账号操作" width="230">
         <template #default="{row}">
           <el-button link type="primary" @click="openStaff(row)">编辑账号</el-button>
-          <el-button v-if="isAdminAccount" link @click="resetPassword(row)">重置密码</el-button>
-          <el-button link :type="row.status === '停用' ? 'success' : 'danger'" @click="toggleStaffStatus(row)">{{ row.status === '停用' ? '启用' : '停用' }}</el-button>
+          <el-button v-if="isAdminAccount" link type="primary" @click="resetPassword(row)">重置密码</el-button>
+          <el-button link :type="row.status === '停用' ? 'success' : 'warning'" @click="toggleStaffStatus(row)">{{ row.status === '停用' ? '启用' : '停用' }}</el-button>
         </template>
       </el-table-column>
     </el-table>

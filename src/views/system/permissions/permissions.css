@@ -395,10 +395,6 @@
   order: -1;
 }
 
-.page-route-permissions .permissions-filter-leading-actions .el-button {
-  min-height: 34px;
-}
-
 .page-route-permissions .permissions-copy-cell {
   display: inline-flex;
   align-items: center;
@@ -415,8 +411,6 @@
 
 .page-route-permissions .permissions-copy-cell .el-button {
   flex: 0 0 auto;
-  padding: 0;
-  font-size: 11px;
 }
 
 .page-route-permissions .permissions-row-actions {

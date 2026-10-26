@@ -2,7 +2,7 @@
   "name": "luxiaoming-admin",
   "version": "1.0.0",
   "private": true,
-  "description": "鹿小鸣长沙旅拍 Web 管理后台",
+  "description": "麓小鸣长沙旅拍 Web 管理后台",
   "scripts": {
     "dev": "node scripts/serve.cjs",
     "start": "node scripts/serve.cjs",

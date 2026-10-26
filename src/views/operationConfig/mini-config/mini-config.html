@@ -37,10 +37,10 @@
           <div v-for="(line, i) in state.siteConfig.bookingNotice" :key="i" class="cfg-list-row">
             <span class="cfg-list-idx">{{ i + 1 }}</span>
             <el-input v-model="state.siteConfig.bookingNotice[i]" placeholder="须知条目" :disabled="!can('contentEdit')" />
-            <button v-if="can('contentEdit')" class="cfg-list-del" @click="removeNoticeLine(i)">✕</button>
+            <button aria-label="移除须知条目" type="button" v-if="can('contentEdit')" class="cfg-list-del lxm-action lxm-action--danger lxm-action--link" @click="removeNoticeLine(i)">✕</button>
           </div>
           <div v-if="!state.siteConfig.bookingNotice.length" class="cfg-empty">暂无须知，点下方添加</div>
-          <el-button v-if="can('contentEdit')" size="small" plain @click="addNoticeLine">+ 添加须知条目</el-button>
+          <el-button type="primary" v-if="can('contentEdit')" size="small" plain @click="addNoticeLine">+ 添加须知条目</el-button>
         </div>
       </section>
 
@@ -55,7 +55,7 @@
             <el-input v-model="state.siteConfig.privacyText" type="textarea" :rows="5" placeholder="完整隐私政策条款" :disabled="!can('contentEdit')" />
           </label>
           <div class="cfg-row-actions">
-            <el-button v-if="can('contentEdit')" size="small" plain @click="resetPrivacy">恢复默认政策</el-button>
+            <el-button type="primary" v-if="can('contentEdit')" size="small" plain @click="resetPrivacy">恢复默认政策</el-button>
           </div>
         </div>
       </section>
@@ -82,7 +82,7 @@
         <div class="cfg-sub-head">搜索热词</div>
         <div class="cfg-chips">
           <span v-for="(w, i) in state.siteConfig.search.hotwords" :key="i" class="cfg-chip">
-             {{ w }}<button v-if="can('contentEdit')" @click="removeHotword(i)">✕</button>
+             {{ w }}<button aria-label="移除搜索热词" type="button" class="lxm-action lxm-action--danger lxm-action--link" v-if="can('contentEdit')" @click="removeHotword(i)">✕</button>
           </span>
           <span v-if="!state.siteConfig.search.hotwords.length" class="cfg-empty">暂无热词</span>
         </div>

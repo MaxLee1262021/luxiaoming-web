@@ -583,7 +583,6 @@
 .page-route-peripheral .peripheral-toolbar-actions .el-button,
 .page-route-addon-service .addon-toolbar-actions .el-button {
   margin-left: 0;
-  border-radius: 6px;
 }
 
 .page-route-spot .spot-overview-grid,
@@ -809,14 +808,14 @@
 
 .page-route-shelf-products .shelf-price-edit {
   display: grid;
-  grid-template-columns: minmax(92px, 1fr) 44px;
+  grid-template-columns: minmax(0, 88px) max-content;
   gap: 6px;
   align-items: center;
-  max-width: 158px;
+  max-width: 160px;
 }
 
 .page-route-shelf-products .shelf-price-edit .el-input-number {
-  width: 92px;
+  width: 88px;
 }
 
 .page-route-shelf-products .shelf-price-edit .el-input__wrapper {
@@ -829,18 +828,6 @@
   height: 30px;
   text-align: left;
   font-size: 12px;
-}
-
-.page-route-shelf-products .shelf-price-edit button {
-  width: 44px;
-  height: 30px;
-  border: 0;
-  border-radius: 6px;
-  color: #fff;
-  background: var(--cp-accent);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
 }
 
 .page-route-shelf-products .shelf-display-switch .el-switch__label {
@@ -1150,8 +1137,8 @@
   font-size: 12px;
 }
 
-button:disabled,
-button[disabled] {
+button:disabled:not(:where(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn, .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn)),
+button[disabled]:not(:where(.el-button, .lxm-action, .lxm-btn, .table-link, .primary-btn, .danger-btn, .ghost-btn, .text-btn, .icon-btn, .mini-text-btn, .upload-btn)) {
   cursor: not-allowed;
   color: #a8b0bb !important;
   background: #eef1f5 !important;
@@ -1181,19 +1168,7 @@ button[disabled] {
 
 .table-link {
   display: block;
-  padding: 0;
   margin: 0 0 4px;
-  border: 0;
-  background: transparent;
-  color: var(--brand);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 18px;
-  cursor: pointer;
-}
-
-.table-link:hover {
-  text-decoration: underline;
 }
 
 .top-actions {
@@ -1768,19 +1743,6 @@ button[disabled] {
   line-height: 1.45;
 }
 
-.map-picker-field__row .el-button--primary.is-plain {
-  background: #fff7f1 !important;
-  border-color: #f0b79b !important;
-  box-shadow: none !important;
-  color: #ad441e !important;
-}
-
-.map-picker-field__row .el-button--primary.is-plain:hover {
-  background: #ffeadf !important;
-  border-color: #dc7448 !important;
-  color: #8d3212 !important;
-}
-
 .amap-picker-dialog .el-dialog {
   width: min(820px, calc(100vw - 24px)) !important;
   border-radius: 8px;
@@ -2026,17 +1988,6 @@ button[disabled] {
   align-items: center;
   justify-content: center;
   width: fit-content;
-  padding: 7px 14px;
-  border: 1px solid var(--lxm-brand-soft);
-  border-radius: 6px;
-  background: var(--lxm-brand-soft, var(--lxm-brand-soft));
-  color: var(--lxm-brand);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.upload-btn:hover {
-  border-color: var(--lxm-brand-soft-2);
 }
 
 .upload-tip {
@@ -3254,11 +3205,6 @@ body {
   max-width: 100%;
 }
 
-.el-table .el-button {
-  min-height: 24px;
-  padding: 4px 7px;
-}
-
 .el-table .el-tag {
   height: auto;
   min-height: 22px;
@@ -3274,10 +3220,6 @@ body {
 /* 弹窗宽度四档规范：460 / 620 / 860 / 1120；小屏下不超出视口 */
 .el-dialog {
   max-width: calc(100vw - 32px);
-}
-
-.el-button {
-  --el-font-size-base: 12px;
 }
 
 .el-input,
@@ -3460,23 +3402,6 @@ body {
 .panel-title-row span {
   color: var(--muted);
   font-size: 12px;
-}
-
-.mini-text-btn {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 5px 10px;
-  background: #fff;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 12px;
-  transition: color .16s ease, border-color .16s ease, background .16s ease;
-}
-
-.mini-text-btn:hover {
-  color: var(--primary);
-  border-color: rgba(255, 107, 107, .45);
-  background: #fff7f5;
 }
 
 .heat-panel {
@@ -5406,10 +5331,6 @@ body {
   color: #64748b;
   font-style: normal;
   font-weight: 900;
-}
-
-.recon-preset-row .el-button {
-  border-radius: 6px;
 }
 
 .recon-compact .recon-title-block p,
@@ -7909,48 +7830,6 @@ button {
   z-index: 10;
 }
 
-.icon-btn,
-.ghost-btn,
-.primary-btn,
-.danger-btn,
-.text-btn {
-  border: 0;
-  border-radius: 6px;
-  min-height: 34px;
-  padding: 0 14px;
-}
-
-.icon-btn {
-  width: 36px;
-  padding: 0;
-  background: #f1f4f8;
-}
-
-.ghost-btn {
-  color: var(--text);
-  background: #f4f6f9;
-}
-
-.primary-btn {
-  color: #fff;
-  background: var(--brand);
-}
-
-.primary-btn:hover {
-  background: var(--brand-dark);
-}
-
-.danger-btn {
-  color: #fff;
-  background: #ef4444;
-}
-
-.text-btn {
-  color: var(--brand);
-  background: transparent;
-  padding: 0 6px;
-}
-
 .page-title {
   font-size: 19px;
   font-weight: 750;
@@ -9040,20 +8919,7 @@ tbody tr:hover {
   border: 1px solid #eef2f7;
   box-shadow: 0 6px 16px rgba(15, 23, 42, .06);
 }
-.upload-btn {
-  background: linear-gradient(135deg, var(--lxm-brand-strong, #EE2C2C) 0%, var(--lxm-brand-vivid, #FF8D52) 100%);
-  color: #fff;
-  border: none;
-  font-weight: 600;
-  box-shadow: 0 6px 16px rgba(238, 44, 44, .22);
-  transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
-}
-.upload-btn:hover {
-  filter: brightness(1.04);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(238, 44, 44, .28);
-  border-color: transparent;
-}
+
 .page-route-package .package-product-card:hover,
 .page-route-album .album-card:hover,
 .page-route-peripherals .peripheral-card:hover,

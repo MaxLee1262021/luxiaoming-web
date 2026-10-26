@@ -47,7 +47,8 @@ function makeSource(overrides = {}) {
     ],
     peripherals: [
       { id: "peripheral-pending", name: "筹备点位周边", spotId: "spot-pending", isShow: true, status: "上架" },
-      { id: "peripheral-global", name: "全城周边", isShow: true, status: "上架" }
+      { id: "peripheral-global", name: "全城周边", isShow: true, status: "上架", storeProductId: "store-global" },
+      { id: "peripheral-unlinked", name: "未绑定小店周边", isShow: true, status: "上架" }
     ],
     guides: [
       { id: "guide-multi", name: "多点攻略", spotIds: ["spot-active", "spot-pending"], isShow: true, status: "启用" },
@@ -117,6 +118,10 @@ test("城市和打卡点公共 RPC 按后台城市配置投影", async () => {
   assert.deepEqual(home.data.packages.map((item) => item._id).sort(), ["package-active", "package-global"]);
   assert.deepEqual(home.data.albums.map((item) => item._id), ["album-active"]);
   assert.deepEqual(home.data.peripherals.map((item) => item._id), ["peripheral-global"]);
+  const peripherals = await rpc(source, "getPeripherals", { data: {} });
+  assert.equal(peripherals.success, true);
+  assert.deepEqual(peripherals.data.map((item) => item._id), ["peripheral-global"]);
+  assert.equal(peripherals.data[0].storeProductId, "store-global");
   assert.deepEqual(home.data.guides.map((item) => item._id), ["guide-multi"]);
   assert.deepEqual(home.data.guides[0].spotIds, ["spot-active"]);
 

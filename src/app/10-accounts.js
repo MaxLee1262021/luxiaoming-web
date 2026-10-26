@@ -99,7 +99,10 @@ async function resetPassword(row) {
   if (!isAdminAccount.value) return ElMessage.warning("仅 admin 账号可以修改人员密码");
   const tempPwd = generateTempPassword();
   try {
-    await ElMessageBox.confirm(`将「${row.name}」的密码重置为随机临时密码（重置后仅显示一次，请转达对方尽快登录修改）。确认重置吗？`, "重置密码", { type: "warning", confirmButtonText: "确认重置", cancelButtonText: "取消" });
+    await window.LXMActionConfirm.confirm(ElMessageBox, `将「${row.name}」的密码重置为随机临时密码（重置后仅显示一次，请转达对方尽快登录修改）。确认重置吗？`, "重置密码", {
+      confirmButtonClass: "lxm-action-confirm--warning",
+      cancelButtonClass: "lxm-action-cancel",
+      type: "warning", confirmButtonText: "确认重置", cancelButtonText: "取消" });
   } catch (e) { return; }
   // 联网模式：临时密码经服务端哈希落库后立即生效；失败则不落地，避免「提示已重置但服务端还是旧密码」。
   const key = accountCollectionOf(row);
@@ -113,7 +116,7 @@ async function resetPassword(row) {
   }
   row.password = tempPwd; // 本地同步（离线演示模式直接生效；联网模式刷新后由服务端下发剥离态）
   log("重置密码", row.name, "已重置为随机临时密码，请转达尽快登录修改", currentOperatorName(), { level: "中" });
-  ElMessageBox.alert(`「${row.name}」的新密码：${tempPwd}`, "重置成功", { confirmButtonText: "我已记下", type: "success" });
+  ElMessageBox.alert(`「${row.name}」的新密码：${tempPwd}`, "重置成功", { confirmButtonClass: "lxm-action-cancel", confirmButtonText: "我已记下", type: "success" });
 }
 // 停用/启用人员账号：停用后该账号立即无法登录后台（服务端与离线兜底登录均已拦截）。
 // 专业决策：账号不做物理删除——订单、分成、对账、审计日志都关联人员 id，删人会断追溯链；
@@ -135,12 +138,14 @@ async function toggleStaffStatus(row) {
   }
   const verb = disabling ? "停用" : "启用";
   try {
-    await ElMessageBox.confirm(
+    await window.LXMActionConfirm.confirm(ElMessageBox,
       disabling
         ? `停用后「${target.name}」将立即无法登录后台（不影响其历史订单与分成记录）。确认停用吗？`
         : `启用后「${target.name}」可凭原密码正常登录后台。确认启用吗？`,
-      `${verb}账号`,
-      { type: "warning", confirmButtonText: `确认${verb}`, cancelButtonText: "取消" }
+      `${verb}账号`, {
+      confirmButtonClass: disabling ? "lxm-action-confirm--warning" : "lxm-action-confirm--success",
+      cancelButtonClass: "lxm-action-cancel",
+      type: "warning", confirmButtonText: `确认${verb}`, cancelButtonText: "取消" }
     );
   } catch (e) { return; }
   const previousStatus = target.status;

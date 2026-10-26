@@ -28,6 +28,7 @@
     log,
     money,
     normalizeReviewStatus,
+    orderBusinessStatus,
     orderSourceName,
     orderSourceType,
     orderSourceTypeText,
@@ -57,7 +58,7 @@ const WORKFLOW_STAGES = Object.freeze({
 });
 
 const serviceFlowSteps = [
-  { key: "reserved", label: "已预约", note: "定金已支付，等待客服安排摄影师" },
+  { key: "reserved", label: "待确认", note: "定金已支付，等待客服安排摄影师；安排前可申请退定金" },
   { key: "dispatch", label: "待拍摄", note: "人工确认时间、地点后填写派单记录" },
   { key: "shoot", label: "拍摄中", note: "客服在确认摄影师到场后登记开始拍摄" },
   { key: "completed", label: "已完成", note: "尾款支付回调后自动完成，可继续补充交付记录" },
@@ -82,14 +83,8 @@ function isPhaseConfirmed(order = {}, phase = "deposit") {
 }
 
 function workflowStageOf(order = {}) {
-  if (!isCreatedBooking(order)) return "";
-  const status = String(order.status || "").trim().toLowerCase();
-  if (["cancelled", "canceled", "terminated", "deleted"].includes(status)) return WORKFLOW_STAGES.CANCELLED;
-  if (status === "completed" || status === "paid" || order.businessStatus === "completed") return WORKFLOW_STAGES.COMPLETED;
-  if (["shooting", "final_pending", "editing", "retouching"].includes(status) || order.shootingStartedAt || order.shootingCompletedAt) return WORKFLOW_STAGES.SHOOTING;
-  if (status === "assigned" || order.dispatchRecord || order.dispatchStatus === "assigned" || order.photographerId) return WORKFLOW_STAGES.AWAITING_SHOOT;
-  if (["deposit_paid", "reserved"].includes(status) || order.businessStatus === "reserved" || order.workflowStage === "awaiting_dispatch" || order.workflowStage === "reserved") return WORKFLOW_STAGES.AWAITING_DISPATCH;
-  return isPhaseConfirmed(order, "deposit") || Number(order.depositPaid || 0) > 0 ? WORKFLOW_STAGES.AWAITING_DISPATCH : "";
+  return ({ reserved: WORKFLOW_STAGES.AWAITING_DISPATCH, awaiting_shoot: WORKFLOW_STAGES.AWAITING_SHOOT,
+    shooting: WORKFLOW_STAGES.SHOOTING, completed: WORKFLOW_STAGES.COMPLETED, cancelled: WORKFLOW_STAGES.CANCELLED })[orderBusinessStatus(order)] || "";
 }
 
 function serviceFlowIndex(order) {
@@ -102,7 +97,11 @@ function serviceFlowIndex(order) {
 }
 
 function serviceFlowCurrent(order) {
-  return serviceFlowSteps[serviceFlowIndex(order)] || { key: "", label: "-", note: "" };
+  const step = serviceFlowSteps[serviceFlowIndex(order)] || { key: "", label: "-", note: "" };
+  if (step.key === "shoot") return { ...step, note: isShootingCompleted(order)
+    ? "拍摄已完成，等待游客支付尾款，到账后自动完成订单"
+    : "客服登记开始拍摄；拍摄结束后登记完成，游客才可支付尾款" };
+  return step;
 }
 
 function serviceFlowClass(index, order) {
@@ -118,19 +117,7 @@ function serviceInternalStatusLabel(order) {
 }
 
 function serviceCustomerStatusLabel(order) {
-  if (!order) return "-";
-  if (!isCreatedBooking(order)) return "-";
-  const customerStatus = String(order.customerStatus || "").trim();
-  if (["已预约", "待拍摄", "拍摄中", "已完成", "已取消"].includes(customerStatus)) return customerStatus;
-  const stage = workflowStageOf(order);
-  if (isOrderCompletedStatus(order) || order.businessStatus === "completed") return "已完成";
-  if (stage === WORKFLOW_STAGES.SHOOTING) return "拍摄中";
-  if (isSelectionConfirmed(order) || order.shootingCompletedAt || hasDeliveryRecord(order)) return "已预约";
-  if (isPhaseConfirmed(order, "deposit") || [WORKFLOW_STAGES.AWAITING_DISPATCH, WORKFLOW_STAGES.AWAITING_SHOOT].includes(stage)) return stage === WORKFLOW_STAGES.AWAITING_SHOOT ? "待拍摄" : "已预约";
-  return (LXM_CONFIG.visibleStatus.find((item) => item.value === customerStatus) || {}).label
-    || customerStatus
-    || statusMeta(order.status).customer
-    || "-";
+  return serviceInternalStatusLabel(order);
 }
 
 function canAcceptOrder() { return false; }
@@ -159,8 +146,8 @@ function canRescheduleOrder(order = state.currentOrder) {
 }
 function defaultCustomerStatusForOrderStatus(status) {
   const map = {
-    reserved: "已预约", deposit_paid: "已预约", assigned: "待拍摄",
-    awaiting_shoot: "待拍摄", shooting: "拍摄中", retouching: "拍摄中",
+    reserved: "待确认", deposit_paid: "待确认", assigned: "待拍摄",
+    awaiting_shoot: "待拍摄", shooting: "拍摄中", retouching: "拍摄中", editing: "拍摄中",
     delivered: "拍摄中", final_pending: "拍摄中", paid: "已完成",
     completed: "已完成", cancelled: "已取消", canceled: "已取消",
   };
@@ -344,7 +331,7 @@ function depositPaymentActionDisabledReason() { return "定金由游客支付，
 function canRegisterFinalPayment(order = state.currentOrder) {
   return false;
 }
-function finalPaymentDisabledReason() { return "拍摄中游客可支付尾款，回调后自动完成订单"; }
+function finalPaymentDisabledReason() { return "客服登记拍摄完成后，游客可支付尾款，到账后订单自动完成"; }
 function hasDeliveryRecord(order = state.currentOrder) {
   return !!order && (!!order.deliveryRecord || !!order.deliveredAt || !!order.deliveryRecords?.length);
 }
@@ -627,14 +614,32 @@ async function startShooting(order = state.currentOrder) {
 }
 
 async function completeShooting(order = state.currentOrder) {
-  return ElMessage.info("拍摄完成由客服在交付/跟进记录中维护，支付回调负责完成订单主状态");
+  if (!canCompleteShooting(order)) return ElMessage.warning("当前订单不能登记拍摄完成，请先开始拍摄或核实处理状态");
+  try {
+    await window.LXMActionConfirm.confirm(ElMessageBox, "确认现场拍摄已经结束？登记后游客可支付尾款，到账后订单自动完成。", "登记拍摄完成", {
+      confirmButtonClass: "lxm-action-confirm--primary",
+      cancelButtonClass: "lxm-action-cancel",
+      type: "warning", confirmButtonText: "确认拍摄完成", cancelButtonText: "暂不登记",
+    });
+    await persistOrderAction(order, "shootcomplete", { reason: "客服确认现场拍摄完成，开放游客支付尾款" });
+    log("拍摄完成", order.orderNo, "现场拍摄完成，等待游客支付尾款");
+    ElMessage.success("拍摄完成已登记，等待游客支付尾款");
+  } catch (_) {}
+}
+function canCompleteShooting(order = state.currentOrder) {
+  return !!order && ["service", "super"].includes(state.role) && canManageOrderRecords(order)
+    && !state.orderReadonly && !isOrderAfterSaleLocked(order) && !isShootingCompleted(order)
+    && workflowStageOf(order) === WORKFLOW_STAGES.SHOOTING;
+}
+function isShootingCompleted(order = {}) {
+  return !!order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(String(order.status || "").toLowerCase());
 }
 
 function canConfirmOfflineSelection(order = state.currentOrder) {
   return false;
 }
 
-function confirmOfflineSelection() { return ElMessage.info("本版无需选片确认，尾款从拍摄中开放"); }
+function confirmOfflineSelection() { return ElMessage.info("本版无需选片确认，客服登记拍摄完成后开放尾款"); }
 function canDeliverOrder(order = state.currentOrder) {
   return canManageOrderRecords(order) && !state.orderReadonly
     && [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.COMPLETED].includes(workflowStageOf(order));
@@ -678,7 +683,9 @@ function canRejectTask(order) {
 function rejectTask(order) {
   if (!can("shootUpdate")) return ElMessage.error("当前角色无权处理拍摄任务");
   if (!canRejectTask(order)) return ElMessage.warning("当前任务不能标记无法履约，售后中、已开拍或非本人任务不可操作");
-  ElMessageBox.prompt(`请说明无法履约原因。订单 ${order.orderNo} 会退回客服待重新安排摄影师，不会取消客户订单。`, "标记无法履约", {
+  window.LXMActionConfirm.prompt(ElMessageBox, `请说明无法履约原因。订单 ${order.orderNo} 会退回客服待重新安排摄影师，不会取消客户订单。`, "标记无法履约", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
     confirmButtonText: "确认无法履约",
     cancelButtonText: "暂不提交",
@@ -698,7 +705,11 @@ function cancelOrder(order) {
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单售后处理中，暂不能取消订单");
   if (!can("cancelOrder")) return ElMessage.error("当前角色无权取消订单");
   if (isOrderCompletedStatus(order)) return ElMessage.warning("已完成订单不能取");
-  ElMessageBox.confirm("取消订单后进入回收站。客服不能永久删除，只有超管可在回收站处理。是否继续？", "二次确认", { type: "warning", confirmButtonText: "确认取消订单", cancelButtonText: "暂不取消" }).then(async () => {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认取消订单 ${order.orderNo}？取消后进入回收站，不会自动执行退款。客服不能永久删除，只有超管可在回收站处理。`, "取消订单", {
+    confirmButtonClass: "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: false,
+    type: "warning", confirmButtonText: "确认取消订单", cancelButtonText: "暂不取消" }).then(async () => {
     try {
       await persistOrderAction(order, "cancel", { reason: "客服取消订单" });
       ctx.addTrashLocal?.({ id: `trash-${order.id}-${Date.now()}`, refId: order.id, type: "订单", name: order.orderNo, reason: "取消订单", time: LXMFormat.nowText(), operator: roleProfile.value.name, restorable: true });
@@ -776,6 +787,7 @@ function cancelOrder(order) {
     acceptTask,
     startShooting,
     completeShooting,
+    canCompleteShooting,
     canStartTask,
     canCompleteTask,
     canRejectTask,

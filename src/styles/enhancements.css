@@ -1,28 +1,10 @@
 /* ============================================================
-   鹿小鸣旅拍 · Web 管理后台 增强层（微交互 / 无障碍 / 复用组件）
+   麓小鸣旅拍 · Web 管理后台 增强层（微交互 / 无障碍 / 复用组件）
    UI Designer · 2026-07-18
    在 tokens.css 之后加载。只做「增量增强」，不重写既有布局。
    ============================================================ */
 
-/* ---------- 1. 按钮微交互：点击缩放 + 品牌 hover ---------- */
-.el-button,
-.lxm-btn {
-  transition: transform var(--lxm-t-fast), box-shadow var(--lxm-t-normal),
-    background-color var(--lxm-t-fast), border-color var(--lxm-t-fast);
-}
-.el-button:active,
-.lxm-btn:active {
-  transform: scale(.97);
-}
-.el-button--primary:hover:not(.is-disabled),
-.lxm-btn--primary:hover:not(:disabled) {
-  box-shadow: var(--lxm-shadow-md);
-}
-/* 链接型按钮 hover 变色（原偏蓝，现品牌橙） */
-.el-button.is-link:hover,
-.el-button--text:hover {
-  color: var(--lxm-brand-strong) !important;
-}
+/* ---------- 1. 操作按钮样式与焦点统一由 buttons.css 管理 ---------- */
 
 /* ---------- 2. 全局聚焦环（键盘可达性，WCAG 2.4.7） ---------- */
 :focus-visible {
@@ -30,11 +12,9 @@
   outline-offset: 2px;
   border-radius: var(--lxm-r-sm);
 }
-.el-button:focus-visible,
 .el-input__wrapper:focus-visible,
 .el-select__wrapper:focus-visible,
 .el-textarea__inner:focus-visible,
-.lxm-btn:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--lxm-brand-strong);
   outline-offset: 2px;
@@ -85,7 +65,7 @@ a:focus-visible {
    6. 复用组件：品牌空状态 .lxm-empty
    用法：
    <div class="lxm-empty">
-     <div class="lxm-empty__mark">鹿</div>
+     <div class="lxm-empty__mark">麓</div>
      <p class="lxm-empty__title">这里还空空如也</p>
      <p class="lxm-empty__desc">添加第一个打卡点，让客人看见长沙的美</p>
      <button class="lxm-btn lxm-btn--primary">去添加</button>
@@ -171,40 +151,9 @@ a:focus-visible {
   100% { background-position: -100% 0; }
 }
 
-/* ---------- 8. 通用按钮基样式（与小程序 .lxm-btn 同源语义） ---------- */
+/* ---------- 8. 原生操作按钮布局（视觉统一在 buttons.css） ---------- */
 .lxm-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--lxm-space-2);
-  padding: 0 var(--lxm-space-5);
-  height: 36px;
-  border: 1px solid transparent;
-  border-radius: var(--lxm-r-md);
-  font-size: var(--lxm-fz-base);
-  font-weight: 500;
-  cursor: pointer;
-  user-select: none;
-  text-decoration: none;
-}
-.lxm-btn--primary {
-  background: linear-gradient(135deg, var(--lxm-brand-vivid), var(--lxm-brand-strong));
-  color: #fff;
-}
-.lxm-btn--primary:hover:not(:disabled) {
-  filter: brightness(1.04);
-}
-.lxm-btn--ghost {
-  background: #fff;
-  border-color: var(--lxm-line-strong);
-  color: var(--lxm-ink-2);
-}
-.lxm-btn--ghost:hover:not(:disabled) {
-  border-color: var(--lxm-brand);
-  color: var(--lxm-brand-strong);
-}
-.lxm-btn:disabled {
-  opacity: .55;
-  cursor: not-allowed;
-  pointer-events: none;
 }

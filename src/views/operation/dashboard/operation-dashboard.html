@@ -58,10 +58,10 @@
       <span>{{ item.label }}</span><strong>{{ item.count }}</strong>
     </button>
   </div>
-  <button class="risk-strip-more" @click="switchMenu('reconciliation')">查看全部 ›</button>
+  <button type="button" class="risk-strip-more lxm-action lxm-action--primary lxm-action--link" @click="switchMenu('reconciliation')">查看全部 ›</button>
 </div>
 
-<div class="dashboard-scope-bar refined"><strong>{{ dashboardScopeLabel }}</strong><span>{{ state.role==='merchant' ? '当前仅展示本店扫码、订单与对账数据。' : '点击商家排行切换商家；点击指标卡可查看对应明细。' }}</span><button v-if="state.role!=='merchant'" class="mini-text-btn" @click="clearDashboardScope()">全部</button></div>
+<div class="dashboard-scope-bar refined"><strong>{{ dashboardScopeLabel }}</strong><span>{{ state.role==='merchant' ? '当前仅展示本店扫码、订单与对账数据。' : '点击商家排行切换商家；点击指标卡可查看对应明细。' }}</span><button type="button" v-if="state.role!=='merchant'" class="mini-text-btn lxm-action lxm-action--neutral lxm-action--link" @click="clearDashboardScope()">全部</button></div>
 
 <div class="dashboard-todo-strip">
   <div class="todo-strip-head">
@@ -176,7 +176,7 @@
       </div>
       <div class="product-sales-actions">
         <el-button plain @click="state.dashboardProductDetailsOpen=!state.dashboardProductDetailsOpen">{{ state.dashboardProductDetailsOpen ? '收拢明细' : '展开明细' }}</el-button>
-        <el-button type="primary" plain @click="exportDashboardProductSales">导出商品售卖明细</el-button>
+        <el-button plain @click="exportDashboardProductSales">导出商品售卖明细</el-button>
       </div>
     </div>
 
@@ -306,7 +306,7 @@
       <div class="dashboard-panel dashboard-reminders">
         <div class="dashboard-panel-head">
           <div><h3>月度对账建议预览</h3><span>按当前筛选范围预判本月入账、暂缓与分成风险</span></div>
-          <button class="mini-text-btn" @click="switchMenu('reconciliation')">去对账</button>
+          <button type="button" class="mini-text-btn lxm-action lxm-action--primary lxm-action--link" @click="switchMenu('reconciliation')">去对账</button>
         </div>
         <div class="reconcile-advice-grid">
           <button class="reconcile-advice-card primary" @click="openReconciliationDetail('eligible','实际可分账净额')">
@@ -334,13 +334,13 @@
 
     <div class="dash-main-col dash-main-col-right">
       <div v-if="state.role!=='merchant'" class="dashboard-panel">
-        <div class="dashboard-panel-head"><div><h3>商家来源排行</h3><span>点击商家联动热力范围</span></div><button class="mini-text-btn" @click="clearDashboardScope('shop')">全部</button></div>
+        <div class="dashboard-panel-head"><div><h3>商家来源排行</h3><span>点击商家联动热力范围</span></div><button type="button" class="mini-text-btn lxm-action lxm-action--neutral lxm-action--link" @click="clearDashboardScope('shop')">全部</button></div>
         <div class="merchant-rank-list">
           <div v-for="(s,index) in shopRank" :key="s.id" class="merchant-rank-item" :class="{active:state.dashboardShopId===s.id}" @click="selectDashboardShop(s)">
             <span class="rank-num" :class="{gold:index===0,silver:index===1,bronze:index===2}">{{ index + 1 }}</span>
             <div><strong>{{ s.name }}</strong><em>扫码 {{ s.scanCount }} · 订单 {{ s.orderCount }}</em></div>
             <b>{{ money(s.amount) }}</b>
-            <button @click.stop="openRankPreview('shop',s)">详情</button>
+            <button type="button" class="lxm-action lxm-action--primary lxm-action--link" @click.stop="openRankPreview('shop',s)">详情</button>
           </div>
         </div>
       </div>

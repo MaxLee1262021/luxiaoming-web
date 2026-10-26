@@ -577,7 +577,7 @@ function openContent(row = null) {
     samples: { name: "", type: "photo", spotId: defaultSpotId, seriesId: defaultSeriesId, albumId: defaultAlbumId, status: "启用", url: contentCover("新样", "上传预览") },
     packages: { name: "", type: "photo", spotId: defaultSpotId, seriesId: defaultSeriesId, albumId: defaultAlbumId, originalPrice: 999, price: 699, specialPrice: 699, isMainPush: false, isShow: true, status: "上架", intro: "", description: "", serviceTags: ["精修9"], cover: contentCover("新套", "套餐封面") },
     addonServices: { name: "", category: "修图", price: 199, enabled: true, intro: "增值服务，仅客服处理订单时添加" },
-    peripherals: { name: "", category: "相册", price: 99, enabled: true, isShow: true, intro: "", specs: [], isNew: false, images: [], cover: contentCover("新周", "摄影周边") },
+    peripherals: { name: "", category: "相册", price: 99, enabled: true, isShow: true, intro: "", specs: [], isNew: false, images: [], cover: contentCover("新周", "摄影周边"), storeProductId: "", storeProductPromotionLink: "" },
     guides: { name: "", title: "", description: "", targetPackageId: "", status: "草稿", tag: "攻略", isHot: false, readCount: 0, score: "4.9", spotId: defaultSpotId, seriesId: defaultSeriesId, cover: contentCover("新攻", "内容运营") },
     stories: { name: "", title: "", subtitle: "", status: "草稿", tag: "故事", spotId: defaultSpotId, cover: contentCover("新故", "品牌故事") },
     cities: { name: "", mode: "直营", status: "启用", enabled: true, visible: true, latitude: null, longitude: null, coordType: "gcj02" },
@@ -661,6 +661,8 @@ function openContent(row = null) {
       deliveryCycle: state.editContent.deliveryCycle || "3-5天发",
       scheduledOnAt: state.editContent.scheduledOnAt || "",
       scheduledOffAt: state.editContent.scheduledOffAt || "",
+      storeProductId: state.editContent.storeProductId || "",
+      storeProductPromotionLink: state.editContent.storeProductPromotionLink || "",
       auditStatus: state.editContent.auditStatus || (productStatus(state.editContent) === "上架" ? "已上" : "已下"),
     });
   }

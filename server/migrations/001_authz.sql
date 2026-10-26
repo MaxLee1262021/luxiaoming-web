@@ -364,6 +364,8 @@ CREATE TABLE IF NOT EXISTS `lxm_peripherals` (
   `cover` TEXT NULL,
   `mode` VARCHAR(255) NULL,
   `spotId` VARCHAR(255) NULL,
+  `storeProductId` VARCHAR(255) NULL,
+  `storeProductPromotionLink` TEXT NULL,
   `stock` INT NULL,
   `stockQty` INT NULL,
   `isHot` TINYINT(1) NULL,

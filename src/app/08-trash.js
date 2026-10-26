@@ -161,7 +161,10 @@ async function restoreTrash(row) {
 async function restoreAllTrash() {
   if (state.role !== "super") return ElMessage.error("只有总部超管可以恢复回收站数");
   if (!state.trash.length) return ElMessage.warning("回收站暂无可恢复数据");
-  ElMessageBox.confirm(`确认恢复回收站内 ${state.trash.length} 条数据？订单将回到待确认状态。`, "全部恢复", { type: "warning", confirmButtonText: "确认恢复", cancelButtonText: "暂不恢复" }).then(async () => {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认恢复回收站内 ${state.trash.length} 条数据？订单将回到待确认状态。`, "全部恢复", {
+    confirmButtonClass: "lxm-action-confirm--success",
+    cancelButtonClass: "lxm-action-cancel",
+    type: "warning", confirmButtonText: "确认恢复", cancelButtonText: "暂不恢复" }).then(async () => {
     const rows = [...state.trash];
     let restored = 0;
     for (const row of rows) if (await restoreTrash(row)) restored += 1;
@@ -175,7 +178,11 @@ async function restoreAllTrash() {
 }
 async function purgeTrash(row) {
   if (state.role !== "super") return ElMessage.error("只有总部超管可以彻底删除");
-  ElMessageBox.confirm("彻底删除后演示数据中也不再显示，正式版需后端二次确认。是否继续？", "彻底删除", { type: "warning" }).then(async () => {
+  window.LXMActionConfirm.confirm(ElMessageBox, `记录「${row.name || row.id}」将永久删除，删除后无法在后台恢复。`, "永久删除记录", {
+    confirmButtonClass: "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: false,
+    type: "warning", confirmButtonText: "永久删除", cancelButtonText: "暂不删除" }).then(async () => {
     try { await removeTrashRecordRemote(row); }
     catch (error) { return ElMessage.error((error && error.message) || "回收站删除失败，请稍后重试"); }
     const index = state.trash.indexOf(row);
@@ -187,7 +194,11 @@ async function purgeTrash(row) {
 async function clearTrash() {
   if (state.role !== "super") return ElMessage.error("只有总部超管可以清空回收");
   if (!state.trash.length) return ElMessage.warning("回收站已经是空的");
-  ElMessageBox.confirm(`确认清空回收站内 ${state.trash.length} 条数据？清空后不可在后台恢复。`, "清空回收", { type: "warning", confirmButtonText: "确认清空", cancelButtonText: "暂不清空" }).then(async () => {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认清空回收站内 ${state.trash.length} 条数据？清空后不可在后台恢复。`, "清空回收站", {
+    confirmButtonClass: "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: false,
+    type: "warning", confirmButtonText: "确认清空", cancelButtonText: "暂不清空" }).then(async () => {
     const count = state.trash.length;
     const rows = [...state.trash];
     try { for (const row of rows) await removeTrashRecordRemote(row); }

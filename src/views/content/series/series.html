@@ -94,8 +94,15 @@
           <div class="basic-content-actions">
             <el-button link type="primary" @click="goToAlbums(row)">照片单品</el-button>
             <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
-            <el-button link :type="isSeriesVisible(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleSeriesVisible(row)">{{ isSeriesVisible(row) ? '停用' : '启用' }}</el-button>
-            <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteSeries(row)">删除</el-button>
+            <el-dropdown v-if="can('contentEdit')" trigger="click" placement="bottom-end">
+              <el-button link>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :class="isSeriesVisible(row) ? 'lxm-action--warning' : 'lxm-action--success'" @click="toggleSeriesVisible(row)">{{ isSeriesVisible(row) ? '停用' : '启用' }}</el-dropdown-item>
+                  <el-dropdown-item class="lxm-action--danger" @click="requestDeleteSeries(row)">删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </template>
       </el-table-column>

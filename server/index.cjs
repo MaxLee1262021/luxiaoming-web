@@ -1,4 +1,4 @@
-// 鹿小鸣管理后台集成服务器（同一进程：托管后台网页 + 提供 /api 接口）
+// 麓小鸣管理后台集成服务器（同一进程：托管后台网页 + 提供 /api 接口）
 // Runtime API data is always served from MySQL. JSON is restricted to
 // isolated Node test fixtures and cannot be selected by this server.
 // 启动：node server/index.cjs  （或 npm run server）

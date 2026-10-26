@@ -39,7 +39,7 @@ const BUSINESS_STATUSES = Object.freeze({
 });
 const BUSINESS_STATUS_LABELS = Object.freeze({
   [BUSINESS_STATUSES.PENDING_PAYMENT]: "待支付定金",
-  [BUSINESS_STATUSES.BOOKED]: "已预约",
+  [BUSINESS_STATUSES.BOOKED]: "待确认",
   [BUSINESS_STATUSES.AWAITING_SHOOT]: "待拍摄",
   [BUSINESS_STATUSES.SHOOTING]: "拍摄中",
   [BUSINESS_STATUSES.COMPLETED]: "已完成",
@@ -179,13 +179,52 @@ function hasDeliveryRecord(order = {}) {
 function selectionConfirmed(order = {}) {
   return String(order.selectionStatus || "").toLowerCase() === "confirmed" || !!order.selectionConfirmedAt;
 }
+function hasCurrentPhotographerAssignment(order = {}) {
+  if (["pending_reassignment", "unassigned", "unable"].includes(String(order.dispatchStatus || "").toLowerCase())) return false;
+  const record = order.dispatchRecord;
+  return !!(textValue(order.photographerId).trim()
+    || textValue(record && (record.next?.photographerId || record.photographerId)).trim());
+}
+function hasCompletedShooting(order = {}) {
+  return !!order.shootingCompletedAt || order.shootingCompleted === true
+    || ["final_pending", "editing", "retouching", "delivered", "已交付"].includes(String(order.status || "").toLowerCase());
+}
 function hasEffectiveDispatch(order = {}) {
   // `depositRefundable=false` is persisted at the first valid dispatch and is
   // deliberately not cleared by an unassign/reassign operation.
-  return order.depositRefundable === false || !!(
-    order.dispatchRecord
-    && (order.photographerId || order.dispatchRecord.photographerId || order.dispatchRecord.next?.photographerId)
-  );
+  const records = [order.dispatchRecord, ...(Array.isArray(order.dispatchRecords) ? order.dispatchRecords : [])];
+  return order.depositRefundable === false || hasCurrentPhotographerAssignment(order)
+    || ["accepted", "pending_reassignment", "unassigned", "unable"].includes(String(order.dispatchStatus || "").toLowerCase())
+    || ["shooting", "editing", "retouching", "final_pending", "paid", "final_paid", "delivered", "completed", "done", "已完成", "已完", "已交付"].includes(String(order.status || "").toLowerCase())
+    || !!(order.shootingStartedAt || order.shootingCompletedAt || order.completedAt || hasDeliveryRecord(order))
+    || records.some((record) => record && (record.photographerId || record.next?.photographerId || record.previous?.photographerId));
+}
+function confirmedDepositAmount(order = {}) {
+  if (!hasConfirmedPayment(order, "deposit")) return 0;
+  const confirmedField = normalizePaymentStatus(order.depositFinanceStatus) === "confirmed" || legacyPaymentVerified(order, "deposit")
+    ? roundMoney(order.depositPaid) : 0;
+  return Math.max(confirmedField, ...recordsFor(order)
+    .filter((record) => record && record.phase === "deposit" && normalizePaymentStatus(record.status) === "confirmed")
+    .map((record) => roundMoney(record.amount)));
+}
+function refundableDepositAmount(order = {}, tickets = []) {
+  const paid = confirmedDepositAmount(order);
+  const refunded = (Array.isArray(tickets) ? tickets : []).reduce((sum, ticket) => {
+    if (!ticket || String(ticket.orderId || "") !== idOf(order)) return sum;
+    // Before dispatch the only confirmed funds are the deposit. Count all
+    // refunds even when a legacy ticket has an incorrect phase label.
+    const approved = ["已审", "approved", "passed"].includes(String(ticket.financeStatus || "").trim().toLowerCase());
+    const confirmed = ["manual_refunded", "refunded", "已人工退款", "已退款"].includes(String(ticket.refundStatus || "").trim().toLowerCase());
+    return approved && confirmed ? sum + roundMoney(ticket.refundAmount) : sum;
+  }, 0);
+  return roundMoney(Math.max(paid - refunded, 0));
+}
+function canRefundDeposit(order = {}, tickets = []) {
+  return canonicalStage(order) === WORKFLOW_STAGES.AWAITING_DISPATCH
+    && !hasEffectiveDispatch(order) && !order.paymentReviewRequired && !hasActiveAfterSale(order)
+    && !(Array.isArray(tickets) ? tickets : []).some((ticket) => ticket && String(ticket.orderId || "") === idOf(order)
+      && hasActiveAfterSale({ afterSaleStatus: ticket.status || "pending" }))
+    && refundableDepositAmount(order, tickets) > 0;
 }
 function isDepositRefundable(order = {}) {
   // Refunds are manual, reviewed exceptions after a confirmed deposit. A
@@ -224,7 +263,7 @@ function canonicalStage(order = {}) {
   // New flow is selection -> final payment -> delivery. A legacy row may have
   // a delivery marker before the final payment; keep it actionable as final
   // payment rather than treating the order as delivered.
-  if (DELIVERED_STATUSES.has(status) || hasDeliveryRecord(order)) {
+  if ((DELIVERED_STATUSES.has(status) || hasDeliveryRecord(order)) && hasCompletedShooting(order)) {
     if (finalDue(order) > 0 && !finalSettled) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
     if (finalSettled && (order.completedAt || status === "completed")) return WORKFLOW_STAGES.COMPLETED;
     return WORKFLOW_STAGES.DELIVERED;
@@ -235,7 +274,7 @@ function canonicalStage(order = {}) {
   // final payment callback atomically completes the order.
   if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
   if (status === "shooting" || order.shootingStartedAt) return WORKFLOW_STAGES.SHOOTING;
-  if (order.dispatchRecord || order.dispatchStatus === "assigned" || order.photographerId || status === "assigned") return WORKFLOW_STAGES.AWAITING_SHOOT;
+  if (hasCurrentPhotographerAssignment(order)) return WORKFLOW_STAGES.AWAITING_SHOOT;
   if (hasConfirmedPayment(order, "deposit")) return WORKFLOW_STAGES.AWAITING_DISPATCH;
   if (depositDue(order) <= 0) return WORKFLOW_STAGES.AWAITING_DISPATCH;
   return WORKFLOW_STAGES.AWAITING_DEPOSIT;
@@ -251,7 +290,7 @@ function businessStatusForOrder(order = {}) {
   if (finalSettled && (finalDue(order) > 0 || selectionConfirmed(order))) return BUSINESS_STATUSES.COMPLETED;
   if (order.shootingStartedAt || status === "shooting") return BUSINESS_STATUSES.SHOOTING;
   if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return BUSINESS_STATUSES.SHOOTING;
-  if (order.dispatchRecord || order.dispatchStatus === "assigned" || order.photographerId || status === "assigned") return BUSINESS_STATUSES.AWAITING_SHOOT;
+  if (hasCurrentPhotographerAssignment(order)) return BUSINESS_STATUSES.AWAITING_SHOOT;
   if (hasConfirmedPayment(order, "deposit") || depositDue(order) <= 0) return BUSINESS_STATUSES.BOOKED;
   return BUSINESS_STATUSES.PENDING_PAYMENT;
 }
@@ -265,7 +304,7 @@ function customerStatusForStage(stage) {
   return {
     [WORKFLOW_STAGES.AWAITING_CONFIRMATION]: "待客服联系确认",
     [WORKFLOW_STAGES.AWAITING_DEPOSIT]: "待支付定金",
-    [WORKFLOW_STAGES.AWAITING_DISPATCH]: "已预约",
+    [WORKFLOW_STAGES.AWAITING_DISPATCH]: "待确认",
     [WORKFLOW_STAGES.AWAITING_SHOOT]: "待拍摄",
     [WORKFLOW_STAGES.SHOOTING]: "拍摄中",
     [WORKFLOW_STAGES.SELECTION_PENDING]: "拍摄中",
@@ -369,7 +408,7 @@ function publicOrderProjection(order = {}, options = {}) {
   const total = orderTotal(order);
   const depositConfirmed = hasConfirmedPayment(order, "deposit");
   const finalConfirmed = hasConfirmedPayment(order, "final");
-  const deposit = depositConfirmed ? roundMoney(order.depositPaid) : 0;
+  const deposit = confirmedDepositAmount(order);
   const final = finalConfirmed ? roundMoney(order.finalPaid) : 0;
   const hasIntentIdentity = (record) => !!(record && (record.idempotencyKey || record.provider || record.externalTransactionId));
   const pendingAmount = (phase) => recordsFor(order)
@@ -390,20 +429,23 @@ function publicOrderProjection(order = {}, options = {}) {
   const depositPaymentStatus = paymentStatusFor("deposit");
   const finalPaymentStatus = paymentStatusFor("final");
   const paymentPhase = stage === WORKFLOW_STAGES.AWAITING_DEPOSIT ? "deposit"
-    : [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED].includes(stage) && !finalConfirmed ? "final" : "";
+    : hasCompletedShooting(order) && [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT, WORKFLOW_STAGES.DELIVERED].includes(stage) && !finalConfirmed ? "final" : "";
   const activePaymentStatus = paymentPhase === "deposit" ? depositPaymentStatus : paymentPhase === "final" ? finalPaymentStatus : "none";
   const items = Array.isArray(order.products) ? order.products : Array.isArray(order.productItems) ? order.productItems : (Array.isArray(order.items) ? order.items : []);
   const snapshot = order.packageSnapshot && typeof order.packageSnapshot === "object" ? order.packageSnapshot : {};
   const cancellation = customerCancellation(order);
-  const afterSaleActive = hasActiveAfterSale(order);
+  const afterSaleTickets = Array.isArray(options.afterSales) ? options.afterSales : [];
+  const afterSaleActive = hasActiveAfterSale(order) || afterSaleTickets.some((ticket) => ticket && String(ticket.orderId || "") === idOf(order)
+    && hasActiveAfterSale({ afterSaleStatus: ticket.status || "pending" }));
+  const depositRefundAllowed = canRefundDeposit(order, afterSaleTickets);
   const deliveryPublished = hasDeliveryRecord(order);
   const deliveryVisible = deliveryPublished && order.deliveryRecord?.visibility !== "internal" && (finalConfirmed || finalDue(order) <= 0);
   const canPayDeposit = stage === WORKFLOW_STAGES.AWAITING_DEPOSIT && !order.paymentReviewRequired && !afterSaleActive && !hasConfirmedPayment(order, "deposit") && depositDue(order) > 0;
   // Shooting completion is the final-payment gate. A successful final payment
   // records the selection acknowledgement in the same atomic update.
-  const canPayFinal = [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage)
+  const canPayFinal = hasCompletedShooting(order) && [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage)
     && !order.paymentReviewRequired && !afterSaleActive && !hasConfirmedPayment(order, "final") && finalDue(order) > 0;
-  const canConfirmCompletion = [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage)
+  const canConfirmCompletion = hasCompletedShooting(order) && [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(stage)
     && !order.paymentReviewRequired && !afterSaleActive && !hasConfirmedPayment(order, "final") && finalDue(order) === 0;
   const businessStatus = businessStatusForOrder(order);
   const legacyBusinessStatus = legacyBusinessStatusForOrder(order);
@@ -461,18 +503,24 @@ function publicOrderProjection(order = {}, options = {}) {
     canCancel: cancellation.canCancel,
     cancelRule: cancellation.rule,
     cancelReason: cancellation.reason,
-    canAfterSale: false,
+    canAfterSale: depositRefundAllowed,
+    canRefundDeposit: depositRefundAllowed,
+    refundableDepositAmount: depositRefundAllowed ? refundableDepositAmount(order, afterSaleTickets) : 0,
     afterSaleActive,
+    afterSaleStatus: afterSaleActive ? "pending" : (order.afterSaleStatus ? "completed" : ""),
     paymentReviewRequired: order.paymentReviewRequired === true,
     completedAt: textValue(order.completedAt),
     completionSource: textValue(order.completionSource),
     selectionAcknowledgedAt: textValue(order.selectionAcknowledgedAt, textValue(order.selectionConfirmedAt)),
+    shootingCompleted: hasCompletedShooting(order),
+    shootingCompletedAt: textValue(order.shootingCompletedAt),
     intentDate: textValue(order.intentDate),
     intentTimePeriod: textValue(order.intentTimePeriod),
     deliveryRecords: finalConfirmed || finalDue(order) <= 0
       ? (Array.isArray(order.deliveryRecords) ? order.deliveryRecords : []).filter((row) => row && row.visibility !== "internal").map((row) => publicDeliveryRecord(row)) : [],
     selectionStatus: textValue(order.selectionStatus, order.selectionConfirmedAt ? "confirmed" : "pending"),
-    dispatchStatus: textValue(order.dispatchStatus, order.photographerId ? "assigned" : "pending"),
+    dispatchStatus: hasCurrentPhotographerAssignment(order) ? "assigned"
+      : ["pending_reassignment", "unassigned", "unable"].includes(String(order.dispatchStatus || "").toLowerCase()) ? order.dispatchStatus : "pending",
     depositRefundable: isDepositRefundable(order),
     statusTimeline: publicStatusTimeline(order.statusLogs),
     date: textValue(order.date, textValue(order.appointmentAt)),
@@ -549,7 +597,11 @@ module.exports = {
   isServiceConfirmed,
   hasDeliveryRecord,
   selectionConfirmed,
+  hasCurrentPhotographerAssignment,
+  hasCompletedShooting,
   hasEffectiveDispatch,
+  refundableDepositAmount,
+  canRefundDeposit,
   isDepositRefundable,
   hasActiveAfterSale,
   hasPaymentIntent,

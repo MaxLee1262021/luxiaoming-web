@@ -1436,6 +1436,9 @@ async function runSmoke(options = {}) {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
         });
         assert.equal(initial.body && initial.body.data && initial.body.data.workflowStage, "awaiting_dispatch");
+        assert.equal(initial.body.data.businessStatus, "reserved");
+        assert.equal(initial.body.data.statusText, "待确认");
+        assert.equal(initial.body.data.canRefundDeposit, true);
         assert.equal(initial.body && initial.body.data && initial.body.data.canPayDeposit, false);
         const actionPath = `/api/orders/${encodeURIComponent(orderId)}/action`;
         const claimed = await requestJson(server.baseUrl, actionPath, { method: "POST", headers: authHeaders(serviceToken), body: { action: "claim", reason: "workflow claim" } });
@@ -1461,8 +1464,25 @@ async function runSmoke(options = {}) {
         });
         assert.equal(beforeFinal.status, 200);
         assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.workflowStage, "shooting");
-        assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.paymentPhase, "final");
+        assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.paymentPhase, "");
+        assert.equal(beforeFinal.body.data.canPayFinal, false);
         assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.deliveryRecord, undefined);
+
+        const prematureFinal = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
+          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", selectionAccepted: true, idempotencyKey: `workflow-premature-final-${suffix}` } },
+        });
+        assert.equal(prematureFinal.body.success, false, "shooting must finish before final payment can be created");
+        const shootComplete = await requestJson(server.baseUrl, actionPath, {
+          method: "POST", headers: authHeaders(serviceToken), body: { action: "shootcomplete", reason: "workflow service records completed shooting" },
+        });
+        assert.equal(shootComplete.status, 200, JSON.stringify(shootComplete.body));
+        const afterShooting = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
+          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
+        });
+        assert.equal(afterShooting.body.data.businessStatus, "shooting");
+        assert.equal(afterShooting.body.data.statusText, "拍摄中");
+        assert.equal(afterShooting.body.data.paymentPhase, "final");
+        assert.equal(afterShooting.body.data.canPayFinal, true);
 
         const finalIntent = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", selectionAccepted: true, amount: 70, idempotencyKey: `workflow-final-intent-${suffix}` } },

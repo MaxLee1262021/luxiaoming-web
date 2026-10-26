@@ -60,9 +60,16 @@
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{row}">
             <el-button link type="primary" v-if="can('contentEdit')" @click="openTag(row)">编辑</el-button>
-            <el-button link v-if="can('contentEdit')" @click="replaceTagUsage(row)">批量替换</el-button>
-            <el-button v-if="row.lastReplaceSnapshot && can('contentEdit')" link type="success" @click="undoTagReplacement(row)">回溯</el-button>
             <el-button link :type="row.status==='停用' ? 'success' : 'warning'" v-if="can('contentEdit')" @click="toggleTagStatus(row)">{{ row.status==='停用' ? '启用' : '停用' }}</el-button>
+            <el-dropdown v-if="can('contentEdit')" trigger="click" placement="bottom-end">
+              <el-button link>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item class="lxm-action--primary" @click="replaceTagUsage(row)">批量替换</el-dropdown-item>
+                  <el-dropdown-item v-if="row.lastReplaceSnapshot" class="lxm-action--success" @click="undoTagReplacement(row)">回溯</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>

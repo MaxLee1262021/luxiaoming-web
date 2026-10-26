@@ -40,7 +40,7 @@
         <p class="ov-card__desc">{{ card.desc }}</p>
         <div class="ov-card__foot">
           <el-button v-if="card.count === 0" type="primary" size="small" @click="goManage(card.key)">去创建</el-button>
-          <el-button v-else size="small" @click="goManage(card.key)">去管理</el-button>
+          <el-button plain type="primary" v-else size="small" @click="goManage(card.key)">去管理</el-button>
         </div>
       </article>
     </div>

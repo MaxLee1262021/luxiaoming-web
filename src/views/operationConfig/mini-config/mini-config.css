@@ -1,4 +1,4 @@
-/* ===== 小程序全局配置页 · 鹿小鸣暖胶片品牌 ===== */
+/* ===== 小程序全局配置页 · 麓小鸣暖胶片品牌 ===== */
 .page-route-mini-config { --lxm-cream:#FFF7EF; --lxm-ink:#2A211B; --lxm-red:#EE2C2C; --lxm-orange:#FF8D52; --lxm-gold:#FFD36A; --lxm-soft:#FFF1E6; }
 .cfg-workbench { display:grid; grid-template-columns:1fr 360px; gap:20px; align-items:start; }
 .cfg-content { display:flex; flex-direction:column; gap:16px; }
@@ -23,12 +23,10 @@
 .cfg-list { display:flex; flex-direction:column; gap:8px; }
 .cfg-list-row { display:flex; align-items:center; gap:8px; }
 .cfg-list-idx { width:22px; height:22px; flex:0 0 22px; border-radius:50%; background:var(--lxm-soft); color:var(--lxm-orange); font-size:12px; display:flex; align-items:center; justify-content:center; font-weight:600; }
-.cfg-list-del, .cfg-chip button { border:none; background:#fbe9e0; color:var(--lxm-red); width:26px; height:26px; border-radius:8px; cursor:pointer; font-size:12px; }
-.cfg-list-del:hover, .cfg-chip button:hover { background:var(--lxm-red); color:#fff; }
 
 .cfg-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
 .cfg-chip { display:inline-flex; align-items:center; gap:6px; background:var(--lxm-soft); color:var(--lxm-ink); border-radius:999px; padding:5px 8px 5px 12px; font-size:13px; }
-.cfg-chip button { width:20px; height:20px; font-size:11px; }
+
 .cfg-inline-add { display:flex; gap:8px; align-items:center; }
 .cfg-inline-add .el-input { max-width:240px; }
 

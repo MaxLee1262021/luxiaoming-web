@@ -78,7 +78,10 @@
     if (method === "小程序成片" && !deliveryDialog.selected.length) return ctx.ElMessage.warning("请先上传并选择交付的成片");
     deliveryDialog.publishing = true;
     try {
-      await ctx.ElMessageBox.confirm(`确认记录本次${method}交付？交付记录不会修改付款或订单主状态。`, "确认交付", { type: "warning", confirmButtonText: "保存交付记录", cancelButtonText: "取消" });
+      await window.LXMActionConfirm.confirm(ctx.ElMessageBox, `确认记录本次${method}交付？交付记录不会修改付款或订单主状态。`, "确认交付", {
+        confirmButtonClass: "lxm-action-confirm--primary",
+        cancelButtonClass: "lxm-action-cancel",
+        type: "warning", confirmButtonText: "保存交付记录", cancelButtonText: "取消" });
       await ctx.persistOrderAction(order, "deliveryrecord", { fileIds: deliveryDialog.selected.slice(), visibility, deliveryMethod: method, note, reason: note });
       deliveryDialog.open = false;
       ctx.ElMessage.success("成片已交付");

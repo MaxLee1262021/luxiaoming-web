@@ -39,7 +39,7 @@
     <el-table-column prop="type" label="类型" width="100" />
     <el-table-column label="订单/客户" min-width="180">
       <template #default="{row}">
-        <button class="table-link" @click="openOrderById(row.orderId,{readonly:true})">{{ row.orderNo }}</button>
+        <button type="button" class="table-link lxm-action lxm-action--primary lxm-action--link" @click="openOrderById(row.orderId,{readonly:true})">{{ row.orderNo }}</button>
         <strong>{{ row.customer }}</strong>
         <div class="muted">{{ shopName(row.shopId) }}</div>
       </template>
@@ -70,7 +70,7 @@
         <el-button link type="primary" @click="openAfterSaleProcess(row)">售后处理</el-button>
         <el-tooltip :content="isAfterSaleProcessReadonly(row) ? '该售后已完成或待财务审核，不能重复处理' : '确认售后处理完成'" placement="top" :disabled="!isAfterSaleProcessReadonly(row)">
           <span class="disabled-tip-wrap">
-            <el-button link :disabled="isAfterSaleProcessReadonly(row)" @click="completeAfterSale(row)">处理完成</el-button>
+            <el-button link type="success" :disabled="isAfterSaleProcessReadonly(row)" @click="completeAfterSale(row)">处理完成</el-button>
           </span>
         </el-tooltip>
       </template>
@@ -94,7 +94,7 @@
     <el-table-column prop="type" label="类型" width="100" />
     <el-table-column label="订单/客户" min-width="180">
       <template #default="{row}">
-        <button class="table-link" @click="openOrderById(row.orderId,{readonly:true})">{{ row.orderNo }}</button>
+        <button type="button" class="table-link lxm-action lxm-action--primary lxm-action--link" @click="openOrderById(row.orderId,{readonly:true})">{{ row.orderNo }}</button>
         <strong>{{ row.customer }}</strong>
       </template>
     </el-table-column>

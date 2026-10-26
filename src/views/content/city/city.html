@@ -65,8 +65,15 @@
           <div class="basic-content-actions">
             <el-button link type="primary" @click="viewCitySpots(row)">查看点位</el-button>
             <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
-            <el-button link :type="isCityEnabled(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleCityEnabled(row)">{{ isCityEnabled(row) ? '禁用' : '启用' }}</el-button>
-            <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteCity(row)">删除</el-button>
+            <el-dropdown v-if="can('contentEdit')" trigger="click" placement="bottom-end">
+              <el-button link>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :class="isCityEnabled(row) ? 'lxm-action--warning' : 'lxm-action--success'" @click="toggleCityEnabled(row)">{{ isCityEnabled(row) ? '禁用' : '启用' }}</el-dropdown-item>
+                  <el-dropdown-item class="lxm-action--danger" @click="requestDeleteCity(row)">删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </template>
       </el-table-column>

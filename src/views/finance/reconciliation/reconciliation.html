@@ -10,14 +10,14 @@
       <span class="role-chip">{{ roleName(state.role) }}</span>
       <el-button @click="state.reconciliationCompactMode=!state.reconciliationCompactMode">{{ state.reconciliationCompactMode ? '标准模式' : '极简模式' }}</el-button>
       <el-button @click="resetReconciliationFilters">重置筛选</el-button>
-      <el-button type="primary" @click="openExportDialog('reconciliation')">导出报表</el-button>
+      <el-button @click="openExportDialog('reconciliation')">导出报表</el-button>
       <el-dropdown v-if="canCloseReconciliationMonth()" trigger="click">
         <el-button>更多操作</el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item v-if="!isReconciliationClosed" @click="closeReconciliationMonth">封存月度快照</el-dropdown-item>
-            <el-dropdown-item v-if="isReconciliationClosed" @click="unlockReconciliationMonth">解锁月份</el-dropdown-item>
-            <el-dropdown-item @click="switchMenu('logs')">操作日志</el-dropdown-item>
+            <el-dropdown-item v-if="!isReconciliationClosed" class="lxm-action--warning" @click="closeReconciliationMonth">封存月度快照</el-dropdown-item>
+            <el-dropdown-item v-if="isReconciliationClosed" class="lxm-action--danger" @click="unlockReconciliationMonth">解锁月份</el-dropdown-item>
+            <el-dropdown-item class="lxm-action--neutral" @click="switchMenu('logs')">操作日志</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -89,7 +89,7 @@
         {{ preset.name }}
         <i @click.stop="removeReconciliationFilterPreset(preset)">×</i>
       </button>
-      <el-button size="small" plain @click="saveReconciliationFilterPreset">保存当前筛选</el-button>
+      <el-button type="primary" size="small" plain @click="saveReconciliationFilterPreset">保存当前筛选</el-button>
     </div>
     <div v-if="reconciliationFilterTags.length" class="recon-filter-tags">
       <span>已选条件</span>
@@ -243,7 +243,7 @@
         </div>
         <div v-if="canUseHeadquarterReconciliation" class="finance-batch-toolbar">
           <span>已选 {{ selectedReconciliationRows.length }} 个对象</span>
-          <el-button size="small" type="primary" plain @click="batchConfirmSettlement">批量确认结算</el-button>
+          <el-button type="warning" size="small" plain @click="batchConfirmSettlement">批量确认结算</el-button>
           <el-button size="small" type="warning" plain @click="batchSealSettlement">批量封存账单</el-button>
         </div>
         <el-table :data="pagedList('reconSettlement', visibleReconciliationSettlementRows)" stripe @selection-change="onReconciliationSelectionChange">
@@ -256,7 +256,7 @@
           <el-table-column prop="settlementCycle" label="周期" width="80" />
           <el-table-column prop="settlementPeriod" label="结算范围" width="190" />
           <el-table-column label="结算状态" width="160"><template #default="{row}"><el-tag :type="row.transferStatus==='已封存' ? 'success' : row.transferStatus==='已结算' ? 'primary' : row.transferStatus==='待结算' ? 'warning' : 'info'">{{ row.transferStatus }}</el-tag><div class="muted">{{ row.transferText }}</div></template></el-table-column>
-          <el-table-column fixed="right" label="操作" width="260"><template #default="{row}"><el-button link @click="openReconciliationDetail(row.type, row.name + '关联订单')">查看订单</el-button><el-button v-if="row.transferRecord" link type="primary" @click="openSettlementRecordOrders(row.transferRecord)">结算记录</el-button><el-button v-if="canUseHeadquarterReconciliation && row.transferStatus==='待结算'" link type="primary" :disabled="isReconciliationClosed || Number(row.commission||0)<=0" @click="confirmSettlementBatch(row)">确认结算</el-button><el-button v-if="canUseHeadquarterReconciliation && row.transferStatus==='已结算'" link type="warning" :disabled="isReconciliationClosed" @click="closeSettlementBatch(row)">封存账单</el-button><el-button v-if="state.role==='super' && row.transferStatus==='已封存'" link type="danger" @click="unlockSettlementBatch(row)">解封</el-button></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="260"><template #default="{row}"><el-button type="primary" link @click="openReconciliationDetail(row.type, row.name + '关联订单')">查看订单</el-button><el-button v-if="row.transferRecord" link type="primary" @click="openSettlementRecordOrders(row.transferRecord)">结算记录</el-button><el-button type="warning" v-if="canUseHeadquarterReconciliation && row.transferStatus==='待结算'" link :disabled="isReconciliationClosed || Number(row.commission||0)<=0" @click="confirmSettlementBatch(row)">确认结算</el-button><el-button v-if="canUseHeadquarterReconciliation && row.transferStatus==='已结算'" link type="warning" :disabled="isReconciliationClosed" @click="closeSettlementBatch(row)">封存账单</el-button><el-button v-if="state.role==='super' && row.transferStatus==='已封存'" link type="danger" @click="unlockSettlementBatch(row)">解封</el-button></template></el-table-column>
         </el-table>
         <div class="table-pager" v-if="visibleReconciliationSettlementRows.length > 0">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="visibleReconciliationSettlementRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconSettlement').size" :current-page="pager('reconSettlement').page" @current-change="pager('reconSettlement').page = $event" @size-change="onListPageSizeChange('reconSettlement', $event)" />
@@ -300,7 +300,7 @@
           <el-table-column label="订单金额" width="115" align="right"><template #default="{row}">{{ money(row.totalAmount) }}</template></el-table-column>
           <el-table-column label="静置期截止" width="165"><template #default="{row}">{{ settlementObservationText(row) }}</template></el-table-column>
           <el-table-column prop="holdReason" label="暂缓原因" min-width="260" />
-          <el-table-column fixed="right" label="操作" width="150"><template #default="{row}"><el-button link @click="openOrder(row,{readonly:true})">查看</el-button><el-button v-if="canReleaseSettlementObservation(row)" link type="warning" @click.stop="releaseSettlementObservation(row)">结束静置期</el-button></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="150"><template #default="{row}"><el-button type="primary" link @click="openOrder(row,{readonly:true})">查看</el-button><el-button type="danger" v-if="canReleaseSettlementObservation(row)" link @click.stop="releaseSettlementObservation(row)">结束静置期</el-button></template></el-table-column>
         </el-table>
         <div class="table-pager" v-if="reconciliationHoldRows.length > 0">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="reconciliationHoldRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconHold').size" :current-page="pager('reconHold').page" @current-change="pager('reconHold').page = $event" @size-change="onListPageSizeChange('reconHold', $event)" />
@@ -326,7 +326,7 @@
           <el-table-column label="实结分成金额" width="135" align="right"><template #default="{row}">{{ money(row.amount) }}</template></el-table-column>
           <el-table-column label="账单状态" width="170"><template #default="{row}"><el-tag :type="settlementRecordStageType(row)">{{ settlementRecordStage(row) }}</el-tag><div v-if="row.paidAt" class="muted">打款：{{ row.paidBy }} · {{ row.paidAt }}</div><div v-if="settlementRecordStage(row)==='已封存'" class="muted">封存：{{ row.sealedBy }} · {{ row.sealedAt }}</div></template></el-table-column>
           <el-table-column label="付款/凭证" width="150"><template #default="{row}"><span>{{ row.method || '-' }}</span><div class="muted">{{ row.voucherNo || '无凭证号' }}</div></template></el-table-column>
-          <el-table-column fixed="right" label="操作" width="220"><template #default="{row}"><el-button link type="primary" @click="openSettlementRecordOrders(row)">批次详情</el-button><el-button v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已确认待打款'" link type="warning" @click="markSettlementPaid(row)">确认打款</el-button><el-button v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已打款待复核'" link type="success" @click="sealSettlementRecord(row)">复核封存</el-button></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="220"><template #default="{row}"><el-button link type="primary" @click="openSettlementRecordOrders(row)">批次详情</el-button><el-button v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已确认待打款'" link type="warning" @click="markSettlementPaid(row)">确认打款</el-button><el-button type="warning" v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已打款待复核'" link @click="sealSettlementRecord(row)">复核封存</el-button></template></el-table-column>
         </el-table>
         <div class="table-pager" v-if="reconciliationTransferRows.length > 0">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="reconciliationTransferRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconTransfer').size" :current-page="pager('reconTransfer').page" @current-change="pager('reconTransfer').page = $event" @size-change="onListPageSizeChange('reconTransfer', $event)" />
@@ -377,8 +377,8 @@
           <el-table-column prop="approvalStatus" label="审批状态" width="110" />
           <el-table-column label="抵扣状态" width="160"><template #default="{row}">{{ row.offsetStatus || '优先抵扣下一期待结算' }}</template></el-table-column>
           <el-table-column prop="note" label="备注" min-width="220" />
-          <el-table-column label="凭证附件" min-width="160"><template #default="{row}"><span>{{ row.attachment }}</span><el-button v-for="fileId in row.attachmentFileIds || []" :key="fileId" link @click="openStoredFile(fileId)">查看文件</el-button></template></el-table-column>
-          <el-table-column fixed="right" label="操作" width="120"><template #default="{row}"><el-button v-if="state.role==='super' && row.approvalStatus!=='已审批'" link type="primary" @click="approveAdjustmentRecord(row)">审批</el-button><el-button link @click="openAdjustmentDialog(row)">复制发起</el-button></template></el-table-column>
+          <el-table-column label="凭证附件" min-width="160"><template #default="{row}"><span>{{ row.attachment }}</span><el-button type="primary" v-for="fileId in row.attachmentFileIds || []" :key="fileId" link @click="openStoredFile(fileId)">查看文件</el-button></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="120"><template #default="{row}"><el-button type="success" v-if="state.role==='super' && row.approvalStatus!=='已审批'" link @click="approveAdjustmentRecord(row)">审批</el-button><el-button type="primary" link @click="openAdjustmentDialog(row)">复制发起</el-button></template></el-table-column>
         </el-table>
         <div class="table-pager" v-if="adjustmentRecordRows.length > 0">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="adjustmentRecordRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconAdjustments').size" :current-page="pager('reconAdjustments').page" @current-change="pager('reconAdjustments').page = $event" @size-change="onListPageSizeChange('reconAdjustments', $event)" />

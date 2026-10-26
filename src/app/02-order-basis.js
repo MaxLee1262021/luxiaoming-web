@@ -76,7 +76,11 @@ function roleName(key) {
   return (LXM_CONFIG.roles[key] || {}).name || key;
 }
 function money(n) {
-  return "¥" + Math.round(Number(n || 0)).toLocaleString("zh-CN");
+  const amount = Number(n || 0);
+  return "¥" + (Number.isFinite(amount) ? amount : 0).toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 function paid(order) {
   return Number(order?.depositPaid || 0) + Number(order?.finalPaid || 0);
@@ -236,8 +240,12 @@ async function persistOrderAction(order, action, payload = {}) {
   if (!connected || !window.LXM_CLOUD || !window.LXM_CLOUD.orderAction) {
     if (payload && payload.fields && typeof payload.fields === "object") Object.assign(order, payload.fields);
     if (action === "claim") { order.assigneeId = payload.assigneeId || order.assigneeId || ""; }
-    if (action === "start") { order.status = "shooting"; order.businessStatus = "shooting"; order.customerStatus = "shooting"; }
+    if (action === "start") {
+      if (!hasOrderPhotographerAssignment(order)) throw new Error("请先安排摄影师，再登记开始拍摄");
+      Object.assign(order, { status: "shooting", workflowStage: "shooting", shootingStartedAt: LXMFormat.nowText(), businessStatus: "shooting", customerStatus: "拍摄中" });
+    }
     if (action === "assign") {
+      if (!String(payload.photographerId || order.photographerId || "").trim()) throw new Error("请选择摄影师");
       Object.assign(order, {
         photographerId: payload.photographerId || order.photographerId || "",
         appointmentAt: payload.appointmentAt || order.appointmentAt || "",
@@ -252,26 +260,32 @@ async function persistOrderAction(order, action, payload = {}) {
       });
     }
     if (action === "shootcomplete") {
-      Object.assign(order, { status: "final_pending", workflowStage: "selection_pending", shootingCompletedAt: LXMFormat.nowText(), selectionStatus: "pending", customerStatus: "已预约", businessStatus: "reserved" });
+      Object.assign(order, { status: "shooting", workflowStage: "shooting", shootingCompletedAt: LXMFormat.nowText(), selectionStatus: "pending", customerStatus: "拍摄中", businessStatus: "shooting" });
     }
     if (action === "selectionconfirm") {
-      Object.assign(order, { status: "final_pending", workflowStage: "awaiting_final_payment", selectionStatus: "confirmed", selectionConfirmedAt: LXMFormat.nowText(), customerStatus: "已预约", businessStatus: "reserved" });
+      Object.assign(order, { status: "shooting", workflowStage: "shooting", selectionStatus: "confirmed", selectionConfirmedAt: LXMFormat.nowText(), customerStatus: "拍摄中", businessStatus: "shooting" });
     }
     if (action === "payment" && payload.phase === "deposit" && String(payload.paymentStatus || "") === "confirmed") {
-      Object.assign(order, { status: "deposit_paid", workflowStage: "awaiting_dispatch", customerStatus: "已预约", businessStatus: "reserved", depositRefundable: false });
+      const depositRefundable = order.depositRefundable !== false && !order.photographerId && !order.dispatchRecord
+        && !(Array.isArray(order.dispatchRecords) && order.dispatchRecords.length);
+      const businessStatus = orderBusinessStatus(order);
+      Object.assign(order, { depositRefundable, depositFinanceStatus: "confirmed", depositPaymentStatus: "confirmed" });
+      if (!["awaiting_shoot", "shooting", "completed", "cancelled"].includes(businessStatus)) {
+        Object.assign(order, { status: "deposit_paid", workflowStage: "awaiting_dispatch", customerStatus: "待确认", businessStatus: "reserved" });
+      }
     }
     if (action === "payment" && payload.phase === "final" && String(payload.paymentStatus || "") === "confirmed") {
-      Object.assign(order, { status: "paid", workflowStage: "paid", customerStatus: "已完成", businessStatus: "completed" });
+      Object.assign(order, { status: "completed", workflowStage: "completed", customerStatus: "已完成", businessStatus: "completed", finalPaid: Number(payload.amount ?? order.finalPaid ?? 0), finalFinanceStatus: "confirmed", finalPaymentStatus: "confirmed", completedAt: LXMFormat.nowText() });
     }
     if (action === "deliveryrecord") {
       const record = { id: payload.deliveryId || `delivery_${Date.now().toString(36)}`, fileIds: Array.isArray(payload.fileIds) ? payload.fileIds.slice() : [], visibility: payload.visibility || "customer", method: payload.deliveryMethod || "企业微信", note: payload.note || payload.reason || "", createdAt: LXMFormat.nowText(), operator: currentOperatorName() };
       order.deliveryRecords = [...(Array.isArray(order.deliveryRecords) ? order.deliveryRecords : []), record];
       order.deliveryRecord = record;
     }
-    if (action === "deliver") { order.status = "delivered"; order.workflowStage = "delivered"; order.customerStatus = "已预约"; order.businessStatus = "reserved"; }
+    if (action === "deliver") { order.deliveredAt = LXMFormat.nowText(); }
     if (action === "complete") { order.status = "completed"; order.customerStatus = "已完成"; order.businessStatus = "completed"; }
     if (action === "cancel") { order.status = "cancelled"; order.customerStatus = "已取消"; order.deleted = true; order.isDeleted = true; }
-    if (action === "unassign") { order.photographerId = ""; order.status = "deposit_paid"; order.customerStatus = "已预约"; order.businessStatus = "reserved"; order.workflowStage = "awaiting_dispatch"; }
+    if (action === "unassign") { order.photographerId = ""; order.dispatchRecord = null; order.dispatchStatus = "pending_reassignment"; order.status = "deposit_paid"; order.customerStatus = "待确认"; order.businessStatus = "reserved"; order.workflowStage = "awaiting_dispatch"; }
     if (action === "followup" && payload.content) {
       const recordId = payload.followupId || `followup_${Date.now().toString(36)}`;
       const previous = (order.followRecords || []).find((item) => item.id === recordId);
@@ -298,10 +312,10 @@ function statusMeta(value) {
   // delivery facts remain visible in the order drawer, while the main list
   // follows the business statuses for paid reservations.
   const labels = {
-    reserved: "已预约", awaiting_shoot: "待拍摄",
-    deposit_paid: "已预约", assigned: "待拍摄", shooting: "拍摄中",
-    retouching: "已预约", editing: "已预约", final_pending: "已预约",
-    delivered: "已预约", paid: "已完成", completed: "已完成",
+    reserved: "待确认", awaiting_shoot: "待拍摄",
+    deposit_paid: "待确认", assigned: "待拍摄", shooting: "拍摄中",
+    retouching: "拍摄中", editing: "拍摄中", final_pending: "拍摄中",
+    delivered: "拍摄中", paid: "已完成", completed: "已完成",
     done: "已完成", cancelled: "已取消", canceled: "已取消"
   };
   const text = labels[String(value || "").trim().toLowerCase()];
@@ -708,16 +722,22 @@ function isCreatedBooking(order = {}) {
 }
 function orderBusinessStatus(order = {}) {
   if (!isCreatedBooking(order)) return "";
-  const explicit = String(order.businessStatus || order.customerStatus || "").trim();
-  if (["reserved", "awaiting_shoot", "shooting", "completed", "cancelled"].includes(explicit)) return explicit;
-  const stage = String(order.workflowStage || order.status || "").trim().toLowerCase();
+  const status = String(order.status || "").trim().toLowerCase();
+  const stage = String(order.workflowStage || status).trim().toLowerCase();
   if (isOrderCancelledStatus(order) || stage === "cancelled") return "cancelled";
-  if (isOrderCompletedStatus(order) || ["paid", "completed"].includes(stage)) return "completed";
-  if (["awaiting_shoot", "assigned"].includes(stage)) return "awaiting_shoot";
-  if (stage === "shooting") return "shooting";
-  if (["selection_pending", "awaiting_delivery", "awaiting_final_payment", "delivered", "final_pending", "editing", "retouching"].includes(stage)) return "shooting";
-  if (["awaiting_dispatch", "deposit_paid", "reserved"].includes(stage)) return "reserved";
+  const finalAmount = Number(order.finalDue ?? expectedFinalAmount(order));
+  const finalConfirmed = finalAmount > 0 && Number(order.finalPaid || 0) >= finalAmount && paymentConfirmed(order, "final");
+  if (isOrderCompletedStatus(order) || finalConfirmed) return "completed";
+  const shootingStages = ["shooting", "selection_pending", "awaiting_delivery", "awaiting_final_payment", "delivered", "final_pending", "editing", "retouching", "paid", "final_paid"];
+  if (shootingStages.includes(status) || shootingStages.includes(stage) || order.shootingStartedAt || order.shootingCompletedAt) return "shooting";
+  if (hasOrderPhotographerAssignment(order)) return "awaiting_shoot";
+  if (["awaiting_dispatch", "deposit_paid", "reserved"].includes(stage) || ["deposit_paid", "reserved", "assigned", "awaiting_shoot"].includes(status)) return "reserved";
   return Number(order.depositPaid || 0) > 0 || Number(order.depositDue) === 0 ? "reserved" : "";
+}
+function hasOrderPhotographerAssignment(order = {}) {
+  if (["pending_reassignment", "unassigned", "unable"].includes(String(order.dispatchStatus || "").toLowerCase())) return false;
+  const record = order.dispatchRecord || {};
+  return !!String(order.photographerId || record.next?.photographerId || record.photographerId || "").trim();
 }
 function orderBusinessStatusMeta(order = {}) {
   const business = orderBusinessStatus(order);
@@ -1103,7 +1123,10 @@ function reconciliationBlockReasons(order, options = {}) {
 function releaseSettlementObservation(order) {
   if (ctx.isReconciliationClosed.value) return ElMessage.warning("当前月份已关账，不能提前结束订单静置");
   if (!canReleaseSettlementObservation(order)) return ElMessage.warning("当前订单不符合提前结束静置期条件");
-  ElMessageBox.confirm(`确认提前结束订单 ${order.orderNo} 的订单静置期？确认后若收款已审核且无未结案售后，将立即进入实际可分账口径。`, "提前结束订单静置", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认提前结束订单 ${order.orderNo} 的订单静置期？确认后若收款已审核且无未结案售后，将立即进入实际可分账口径。`, "提前结束订单静置", {
+    confirmButtonClass: "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: false,
     type: "warning",
     confirmButtonText: "确认结束静置",
     cancelButtonText: "暂不处理",
@@ -1275,6 +1298,7 @@ function canCompleteOrderPayment(order) {
     orderDeliveryRecords,
     orderFollowRecords,
     orderBusinessStatus,
+    hasOrderPhotographerAssignment,
     isCreatedBooking,
     orderBusinessStatusMeta,
     canViewOrderSource,

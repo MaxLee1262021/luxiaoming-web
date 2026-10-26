@@ -8,7 +8,7 @@
     <el-table-column label="摄影师" width="140"><template #default="{row}">{{ staffName(row.photographerId) }}</template></el-table-column>
     <el-table-column label="地点" min-width="170"><template #default="{row}">{{ row.appointmentLocation || row.shootLocation || '未填写' }}</template></el-table-column>
     <el-table-column label="状态" width="140"><template #default="{row}">{{ orderWorkflowStatusLabel(row) }}<div v-if="afterSaleBadge(row)" class="after-sale-badge">{{ afterSaleBadge(row) }}</div></template></el-table-column>
-    <el-table-column fixed="right" label="操作" width="210"><template #default="{row}"><el-button link @click.stop="openOrder(row,{readonly:!canOpenOrderForEdit(row)})">查看安排</el-button><el-button v-if="canStartTask(row)" link type="primary" @click.stop="startShooting(row)">登记拍摄中</el-button></template></el-table-column>
+    <el-table-column fixed="right" label="操作" width="210"><template #default="{row}"><el-button type="primary" link @click.stop="openOrder(row,{readonly:!canOpenOrderForEdit(row)})">查看安排</el-button><el-button v-if="canStartTask(row)" link type="primary" @click.stop="startShooting(row)">登记拍摄中</el-button></template></el-table-column>
   </el-table>
   <div class="table-pager" v-if="taskOrders.length"><el-pagination background layout="total, sizes, prev, pager, next" :total="taskOrders.length" :page-sizes="[12,20,50,100]" :page-size="pager('tasks').size" :current-page="pager('tasks').page" @current-change="pager('tasks').page=$event" @size-change="onListPageSizeChange('tasks',$event)" /></div>
 </div>

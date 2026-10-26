@@ -171,16 +171,41 @@ test("customer order filters and counts use the five business states", async () 
       id: "dispatch", openid: "customer-openid", status: "deposit_paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70,
       paymentRecords: [{ id: "dispatch-deposit", phase: "deposit", amount: 30, status: "confirmed" }],
     },
+    assigned: {
+      id: "assigned", openid: "customer-openid", status: "assigned", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70,
+      photographerId: "photographer-1", dispatchStatus: "assigned", dispatchRecord: { id: "assignment-1", next: { photographerId: "photographer-1" } },
+      paymentRecords: [{ id: "assigned-deposit", phase: "deposit", amount: 30, status: "confirmed" }],
+    },
+    shooting: {
+      id: "shooting", openid: "customer-openid", status: "shooting", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70,
+      photographerId: "photographer-1", shootingStartedAt: "2026-09-12T08:00:00.000Z",
+      paymentRecords: [{ id: "shooting-deposit", phase: "deposit", amount: 30, status: "confirmed" }],
+    },
     shot: { id: "shot", openid: "customer-openid", status: "final_pending", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, shootingCompletedAt: "2026-09-12T09:00:00.000Z", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z" },
     paid: { id: "paid", openid: "customer-openid", status: "paid", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", paymentRecords: [{ id: "paid-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "paid-final", phase: "final", selectionAccepted: true, amount: 70, status: "confirmed" }] },
     delivered: { id: "delivered", openid: "customer-openid", status: "delivered", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70, finalPaid: 70, finalFinanceStatus: "已审", selectionStatus: "confirmed", selectionConfirmedAt: "2026-09-12T09:30:00.000Z", deliveryRecord: { method: "wechat" }, deliveredAt: "2026-09-12T10:00:00.000Z", paymentRecords: [{ id: "delivered-deposit", phase: "deposit", amount: 30, status: "confirmed" }, { id: "delivered-final", phase: "final", selectionAccepted: true, amount: 70, status: "confirmed" }] },
+    cancelled: { id: "cancelled", openid: "customer-openid", status: "cancelled", totalAmount: 100, depositDue: 30, depositPaid: 30, depositFinanceStatus: "已审", finalDue: 70 },
   };
-  for (const [status, expected] of [["pending_payment", []], ["reserved", ["dispatch"]], ["awaiting_shoot", []], ["shooting", ["shot"]], ["completed", ["paid", "delivered"]]]) {
-    const result = await rpc(source, "getMyOrders", { data: { status, page: 1, pageSize: 20 } }, publicIdentity());
-    assert.deepEqual(new Set(result.data.map((row) => row.id)), new Set(expected));
-  }
   const counts = await rpc(source, "getOrderStatusCount", { data: {} }, publicIdentity());
-  assert.deepEqual(counts.data.businessStatus, { pending_payment: 0, reserved: 1, awaiting_shoot: 0, shooting: 1, completed: 2 });
+  assert.equal(counts.success, true);
+  const seen = new Set();
+  for (const [status, expected] of [["pending_payment", []], ["reserved", ["dispatch"]], ["awaiting_shoot", ["assigned"]], ["shooting", ["shooting", "shot"]], ["completed", ["paid", "delivered"]]]) {
+    const result = await rpc(source, "getMyOrders", { data: { status, page: 1, pageSize: 20 } }, publicIdentity());
+    assert.equal(result.success, true);
+    assert.deepEqual(new Set(result.data.map((row) => row.id)), new Set(expected));
+    assert.equal(result.total, counts.data.businessStatus[status], `${status} list and badge count agree`);
+    assert.equal(counts.data[status], result.total, `${status} top-level counter agrees`);
+    for (const row of result.data) {
+      assert.equal(seen.has(row.id), false, `${row.id} appears in only one status filter`);
+      assert.equal(row.businessStatus, status);
+      seen.add(row.id);
+    }
+  }
+  assert.deepEqual(counts.data.businessStatus, { pending_payment: 0, reserved: 1, awaiting_shoot: 1, shooting: 2, completed: 2 });
+  assert.equal(counts.data.canceled, 1);
+  assert.equal(seen.size, 6);
+  assert.equal(seen.has("pending"), false);
+  assert.equal(seen.has("cancelled"), false);
 });
 
 test("manual order creation cannot bypass the paid checkout", async () => {

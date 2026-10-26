@@ -397,20 +397,6 @@
   font-style: normal;
 }
 
-.page-route-album .sample-group-head button,
-.page-route-album .sample-tile button {
-  border: 0;
-  border-radius: 6px;
-  background: var(--lxm-brand-soft);
-  color: var(--lxm-brand);
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.page-route-album .sample-group-head button {
-  padding: 5px 8px;
-}
-
 .page-route-album .sample-tile {
   display: grid;
   gap: 6px;
@@ -445,15 +431,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-}
-
-.page-route-album .sample-tile button {
-  padding: 4px 6px;
-}
-
-.page-route-album .sample-tile button.danger {
-  background: #fef2f2;
-  color: #b91c1c;
 }
 
 @media (max-width: 1280px) {

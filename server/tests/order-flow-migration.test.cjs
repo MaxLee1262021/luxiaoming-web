@@ -9,6 +9,14 @@ const schema = require("../lib/mysqlSchema.cjs");
 const createSource = require("../lib/dbSource.cjs");
 const { spawnSync } = require("node:child_process");
 
+test("migration keeps paid orders with empty assignment records pending confirmation", () => {
+  const paid = { id: "empty-dispatch", status: "deposit_paid", totalAmount: 100, depositDue: 30, finalDue: 70, depositPaid: 30, depositFinanceStatus: "confirmed", dispatchRecord: {} };
+  const patch = migrationPatch(paid);
+  assert.equal(patch.workflowStage, "awaiting_dispatch");
+  assert.equal(patch.businessStatus, "reserved");
+  assert.equal(patch.customerStatus, "待确认");
+});
+
 test("historical migration preserves canceled facts and flags delivered orders without inventing payment", () => {
   assert.deepEqual(migrationPatch({ status: "cancelled", deleted: true }), { orderFlowVersion: "onsite-payment-v2" });
   const patch = migrationPatch({ status: "delivered", totalAmount: 100, depositDue: 30, finalDue: 70, depositPaid: 30, depositFinanceStatus: "confirmed", deliveredAt: "2026-09-10" });

@@ -1,5 +1,5 @@
 /**
- * 鹿小鸣后台 · 菜单线性图标体系
+ * 麓小鸣后台 · 菜单线性图标体系
  * 统一 24×24 viewBox / stroke currentColor / stroke-width 1.8 / round cap
  * 用法：menuIcon('orders') 返回 SVG 字符串，模板中 v-html 注入 menu-mini 芯片
  */

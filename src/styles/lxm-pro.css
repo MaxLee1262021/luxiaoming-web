@@ -1,5 +1,5 @@
 /* ============================================================
-   鹿小鸣旅拍 · 管理后台「专业润色」层（UI Designer · 2026-08-13）
+   麓小鸣旅拍 · 管理后台「专业润色」层（UI Designer · 2026-08-13）
    ------------------------------------------------------------
    本文件在 admin-content.css 之后加载，做三件事且不改动任何功能代码：
    1) 把内容屏残留的冷灰蓝（--content-* / --cp-*）统一收口到暖胶片品牌中性色；
@@ -113,24 +113,10 @@
   outline-offset: 2px;
   border-radius: 6px;
 }
-.el-button:focus-visible,
 .el-input__wrapper:focus-within,
 .menu-btn:focus-visible { outline: 2px solid var(--lxm-brand-vivid); outline-offset: 2px; }
 
 ::selection { background: var(--lxm-brand-soft); color: var(--lxm-brand-strong); }
-
-/* ---------- 主按钮品牌渐变 ---------- */
-.el-button--primary {
-  background: linear-gradient(135deg, var(--lxm-brand-strong), var(--lxm-brand-vivid));
-  border: 0;
-  box-shadow: 0 6px 16px rgba(238, 44, 44, .22);
-}
-.el-button--primary:hover {
-  background: linear-gradient(135deg, #D92626, #FF9D66);
-  box-shadow: 0 8px 20px rgba(238, 44, 44, .30);
-  transform: translateY(-1px);
-}
-.el-button--primary:active { transform: translateY(0); }
 
 /* 卡片悬浮统一暖光 */
 .page-route-album .album-card:hover,

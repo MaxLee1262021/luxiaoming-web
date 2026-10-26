@@ -118,14 +118,14 @@ function dashboardSetDateShortcut(range) {
 }
 function handleDashboardRiskAlert(alert) {
   if (!alert) return;
-  ElMessageBox.alert(alert.detail || alert.message || "检测到风险预警，请关注。", alert.title || "风控提醒", { type: "warning" });
+  ElMessageBox.alert(alert.detail || alert.message || "检测到风险预警，请关注。", alert.title || "风控提醒", { confirmButtonClass: "lxm-action-cancel", confirmButtonText: "关闭", type: "warning" });
 }
 function logSnapshotSummary(snapshot) {
   if (!snapshot) return "暂无快照";
   return `${snapshot.operator || "系统"} 于 ${snapshot.time || snapshot.createdAt || "-"} 操作 ${snapshot.action || ""}`;
 }
 function showLogSnapshot(snapshot) {
-  ElMessageBox.alert(logSnapshotSummary(snapshot), "操作快照", { type: "info" });
+  ElMessageBox.alert(logSnapshotSummary(snapshot), "操作快照", { confirmButtonClass: "lxm-action-cancel", confirmButtonText: "关闭", type: "info" });
 }
 function trashRestoreCheck(item) {
   if (!item) return "回收项不存在";
@@ -147,7 +147,7 @@ function openSpotRelation(spot) {
     `关联商品：${summary.products || 0}`,
     `关联订单：${summary.orders || 0}`,
   ];
-  ElMessageBox.alert(lines.join("<br>"), `打卡点「${spot.name}」关联关系`, { dangerouslyUseHTMLString: true, type: "info" });
+  ElMessageBox.alert(lines.join("<br>"), `打卡点「${spot.name}」关联关系`, { confirmButtonClass: "lxm-action-cancel", confirmButtonText: "关闭", dangerouslyUseHTMLString: true, type: "info" });
 }
 function shelfVisibilityState(item) {
   if (!item) return { label: "未知", color: "#94a3b8" };
@@ -230,7 +230,7 @@ function auditChangeSummary(audit) {
   return `${audit.operator || "系统"} 于 ${audit.time || "-"} ${audit.action || "审核"}：${audit.detail || ""}`;
 }
 function showProductAuditCompare(audit) {
-  ElMessageBox.alert(auditChangeSummary(audit), "商品审核变更对比", { type: "info" });
+  ElMessageBox.alert(auditChangeSummary(audit), "商品审核变更对比", { confirmButtonClass: "lxm-action-cancel", confirmButtonText: "关闭", type: "info" });
 }
 
 // 通用列表分页：每张主列表一个 key，pagedList 给表格切片；筛选结果行数变化时自动回到第 1 页

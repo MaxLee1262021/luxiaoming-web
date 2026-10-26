@@ -93,22 +93,22 @@ window.LXM_CONFIG = {
     }
   },
   orderStatuses: [
-    { value: "reserved", label: "已预约", color: "#10B981", customer: "已预约" },
+    { value: "reserved", label: "待确认", color: "#10B981", customer: "待确认" },
     { value: "awaiting_shoot", label: "待拍摄", color: "#3B82F6", customer: "待拍摄" },
-    { value: "deposit_paid", label: "已预约", color: "#10B981", customer: "已预约" },
+    { value: "deposit_paid", label: "待确认", color: "#10B981", customer: "待确认" },
     { value: "assigned", label: "待拍摄", color: "#3B82F6", customer: "待拍摄" },
     { value: "shooting", label: "拍摄中", color: "#3B82F6", customer: "拍摄中" },
-    { value: "retouching", label: "已预约", color: "#F97316", customer: "已预约" },
-    { value: "editing", label: "已预约", color: "#F97316", customer: "已预约" },
-    { value: "delivered", label: "已预约", color: "#10B981", customer: "已预约" },
-    { value: "final_pending", label: "已预约", color: "#F97316", customer: "已预约" },
+    { value: "retouching", label: "拍摄中", color: "#F97316", customer: "拍摄中" },
+    { value: "editing", label: "拍摄中", color: "#F97316", customer: "拍摄中" },
+    { value: "delivered", label: "拍摄中", color: "#10B981", customer: "拍摄中" },
+    { value: "final_pending", label: "拍摄中", color: "#F97316", customer: "拍摄中" },
     { value: "paid", label: "已完成", color: "#10B981", customer: "已完成" },
     { value: "completed", label: "已完成", color: "#10B981", customer: "已完成" },
     { value: "cancelled", label: "已取消", color: "#6B7280", customer: "已取消" },
     { value: "canceled", label: "已取消", color: "#6B7280", customer: "已取消" }
   ],
   visibleStatus: [
-    { value: "reserved", label: "已预约" },
+    { value: "reserved", label: "待确认" },
     { value: "awaiting_shoot", label: "待拍摄" },
     { value: "shooting", label: "拍摄中" },
     { value: "completed", label: "已完成" },
@@ -116,9 +116,9 @@ window.LXM_CONFIG = {
     // Legacy customerStatus values remain accepted on imported orders; the
     // display label uses the current business-state vocabulary.
     { value: "scheduled", label: "待拍摄" },
-    { value: "retouching", label: "已预约" },
-    { value: "editing", label: "已预约" },
-    { value: "delivered", label: "已预约" },
+    { value: "retouching", label: "拍摄中" },
+    { value: "editing", label: "拍摄中" },
+    { value: "delivered", label: "拍摄中" },
     { value: "done", label: "已完成" }
   ],
   settlementCycles: ["周结", "月结", "季度结"]

@@ -77,7 +77,8 @@ const LXM_ELEMENT_LOCALE = {
     Object.entries(window.LXM_PAGES.components()).forEach(([name, component]) => app.component(name, component));
   }
 
-  app.use(ElementPlus, { locale: LXM_ELEMENT_LOCALE });
+  app.use(ElementPlus, { locale: LXM_ELEMENT_LOCALE, button: { autoInsertSpace: false } });
+  window.LXMActionButtons?.install(app);
   app.mount("#app");
 }
 

@@ -73,19 +73,19 @@
     </div>
     <div>
       <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
-        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('on')">批量上架</el-button></span>
+        <span><el-button plain type="success" size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('on')">批量上架</el-button></span>
       </el-tooltip>
       <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
-        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('off')">批量下架</el-button></span>
+        <span><el-button plain type="warning" size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('off')">批量下架</el-button></span>
       </el-tooltip>
       <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
-        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('main')">批量设主推</el-button></span>
+        <span><el-button plain type="primary" size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('main')">批量设主推</el-button></span>
       </el-tooltip>
       <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
-        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('tag')">批量打标签</el-button></span>
+        <span><el-button plain type="primary" size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('tag')">批量打标签</el-button></span>
       </el-tooltip>
       <el-tooltip :disabled="state.selectedShelfKeys.length>0" content="请先在表格中选择商品" placement="top">
-        <span><el-button size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('schedule')">定时配置</el-button></span>
+        <span><el-button plain type="primary" size="small" :disabled="state.selectedShelfKeys.length===0" v-if="can('contentEdit')" @click="applyShelfBatchAction('schedule')">定时配置</el-button></span>
       </el-tooltip>
       <el-button v-if="(state.lastShelfBatchResult && state.lastShelfBatchResult.failures.length) && can('contentEdit')" size="small" type="warning" plain @click="retryShelfBatchFailures">重试失败项</el-button>
     </div>
@@ -156,11 +156,11 @@
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column label="货架价格" width="145">
+      <el-table-column label="货架价格" width="180">
         <template #default="{row}">
           <div class="shelf-price-edit">
             <el-input-number v-model="row.shelfPrice" :min="0" :controls="false" />
-            <button v-if="can('contentEdit')" @click="syncShelfPrice(row)">保存</button>
+            <button type="button" class="lxm-action lxm-action--primary lxm-action--link" v-if="can('contentEdit')" @click="syncShelfPrice(row)">保存</button>
           </div>
         </template>
       </el-table-column>

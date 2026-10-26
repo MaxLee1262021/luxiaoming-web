@@ -6,8 +6,8 @@
       <p class="lxm-page-head__desc">打卡点归属到城市，是拍摄风格、照片单品、套餐和短视频的共同挂载点。列表统一展示下游资产与删除保护状态。</p>
     </div>
     <div class="lxm-page-head__actions">
-      <el-button plain v-if="can('contentEdit')" @click="batchSetSpotVisible(true, spotTableRows)">批量展示</el-button>
-      <el-button plain v-if="can('contentEdit')" @click="batchSetSpotVisible(false, spotTableRows)">批量隐藏</el-button>
+      <el-button type="success" plain v-if="can('contentEdit')" @click="batchSetSpotVisible(true, spotTableRows)">批量展示</el-button>
+      <el-button type="warning" plain v-if="can('contentEdit')" @click="batchSetSpotVisible(false, spotTableRows)">批量隐藏</el-button>
       <el-button plain @click="openContentLogs('打卡点设置')">操作日志</el-button>
       <el-button plain @click="openContentTrash">回收站</el-button>
       <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('spots')">新增打卡点</el-button>
@@ -89,8 +89,15 @@
           <div class="basic-content-actions">
             <el-button link type="primary" @click="openSpotRelation(row)">关系</el-button>
             <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
-            <el-button link :type="isSpotVisible(row) ? 'warning' : 'success'" v-if="can('contentEdit')" @click="toggleSpotVisible(row)">{{ isSpotVisible(row) ? '隐藏' : '展示' }}</el-button>
-            <el-button link type="danger" v-if="can('contentEdit')" @click="requestDeleteSpot(row)">删除</el-button>
+            <el-dropdown v-if="can('contentEdit')" trigger="click" placement="bottom-end">
+              <el-button link>更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item :class="isSpotVisible(row) ? 'lxm-action--warning' : 'lxm-action--success'" @click="toggleSpotVisible(row)">{{ isSpotVisible(row) ? '隐藏' : '展示' }}</el-dropdown-item>
+                  <el-dropdown-item class="lxm-action--danger" @click="requestDeleteSpot(row)">删除</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </template>
       </el-table-column>

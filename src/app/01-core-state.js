@@ -244,7 +244,7 @@ const data = reactive({
   adjustmentRecords: LXM_DATA.adjustmentRecords || [],
 });
 
-// === 接入真实数据（鹿小鸣云环境 / 演示模式，由 server 决定） ===
+// === 接入真实数据（麓小鸣云环境 / 演示模式，由 server 决定） ===
 // 后台启动后逐键从 /api 拉取数据写入响应式数据池；拉取失败则保留本地默认值。
 // 顶栏「连接状态」徽标：监听 cloud.js 健康探测结果（/api/health 返回 mode），
 // 把 mode 同步进响应式 state，使徽标实时反映「已连真实库 / 演示模式」，避免运营误以为改动没保存。

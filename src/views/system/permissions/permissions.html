@@ -243,9 +243,16 @@
                 <template #default="{row}">
                   <div class="permissions-row-actions">
                     <el-button link type="primary" :disabled="readOnly" @click="openUser(row)">编辑</el-button>
-                    <el-button v-if="isAdminAccount" link type="primary" :disabled="readOnly" @click="openPassword(row)">修改密码</el-button>
                     <el-button link :type="row.status === '停用' ? 'success' : 'warning'" :disabled="readOnly" @click="toggleUser(row)">{{ row.status === '停用' ? '启用' : '停用' }}</el-button>
-                    <el-button link type="danger" :disabled="readOnly" @click="deleteUser(row)">删除</el-button>
+                    <el-dropdown trigger="click" placement="bottom-end">
+                      <el-button link>更多</el-button>
+                      <template #dropdown>
+                        <el-dropdown-menu>
+                          <el-dropdown-item v-if="isAdminAccount" class="lxm-action--primary" :disabled="readOnly" @click="openPassword(row)">修改密码</el-dropdown-item>
+                          <el-dropdown-item class="lxm-action--danger" :disabled="readOnly" @click="deleteUser(row)">删除</el-dropdown-item>
+                        </el-dropdown-menu>
+                      </template>
+                    </el-dropdown>
                   </div>
                 </template>
               </el-table-column>

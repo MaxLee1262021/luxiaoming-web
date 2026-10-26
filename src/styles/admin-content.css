@@ -1,5 +1,5 @@
 /* ============================================================
-   鹿小鸣旅拍 · Web 管理后台 · 内容管理通用设计层（admin-content.css）
+   麓小鸣旅拍 · Web 管理后台 · 内容管理通用设计层（admin-content.css）
    UI Designer · 2026-07-25
    ------------------------------------------------------------
    本文件是「内容 / 旅拍商品管理」所有页面的通用设计基底。
@@ -89,7 +89,6 @@
 }
 .lxm-page-head__actions .el-button {
   margin-left: 0;
-  border-radius: var(--lxm-r-sm);
 }
 
 /* ---------- 筛选 / 工具条 ---------- */
@@ -516,7 +515,6 @@
 
 .basic-content-link-list .el-button + .el-button::before {
   margin-right: 6px;
-  color: var(--lxm-line);
   content: "/";
 }
 

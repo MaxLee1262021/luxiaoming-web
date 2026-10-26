@@ -6,7 +6,7 @@
       <p>覆盖订单、打卡点、照片单品、摄影周边等关键业务数据。删除后默认保留 30 天，支持超管恢复或永久清除。</p>
     </div>
     <div class="trash-toolbar-actions">
-      <el-button plain @click="restoreAllTrash">全部恢复</el-button>
+      <el-button type="success" plain @click="restoreAllTrash">全部恢复</el-button>
       <el-button type="danger" plain @click="clearTrash">清空回收站</el-button>
     </div>
   </div>
@@ -76,7 +76,7 @@
         <template #default="{row}">
           <el-tooltip :content="trashRestoreCheck(row).reason" placement="top" :disabled="trashRestoreCheck(row).ok">
             <span>
-              <el-button link type="primary" :disabled="!trashRestoreCheck(row).ok" @click="restoreTrash(row)">恢复</el-button>
+              <el-button link type="success" :disabled="!trashRestoreCheck(row).ok" @click="restoreTrash(row)">恢复</el-button>
             </span>
           </el-tooltip>
           <el-button link type="danger" @click="purgeTrash(row)">永久删除</el-button>

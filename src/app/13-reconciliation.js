@@ -149,7 +149,9 @@ function closeReconciliationMonth() {
   if (!canCloseReconciliationMonth()) return ElMessage.warning("只有超管可以执行月度关账");
   const month = reconciliationTransferMonth();
   if (currentClosingRecord()?.status === "已关") return ElMessage.warning("当前月份已关");
-  ElMessageBox.confirm(`确认封存 ${month} 的对账期数据？封存后，本对账期内已经确认的结算记录、实际分账金额和静置期处理都会锁定，避免财务确认后又被改动。仍在订单静置期内的订单不会计入本期实际结算，等静置期满且审核通过后，进入对应商家/摄影"分销员的下一次结算周期。`, "封存对账", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认封存 ${month} 的对账期数据？封存后，本对账期内已经确认的结算记录、实际分账金额和静置期处理都会锁定，避免财务确认后又被改动。仍在订单静置期内的订单不会计入本期实际结算，等静置期满且审核通过后，进入对应商家/摄影"分销员的下一次结算周期。`, "封存对账", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "先不封存",
@@ -166,7 +168,10 @@ function unlockReconciliationMonth() {
   if (state.role !== "super") return ElMessage.warning("只有超管可以解锁月份");
   const record = currentClosingRecord();
   if (!record || record.status !== "已关") return ElMessage.warning("当前月份未关");
-  ElMessageBox.confirm(`确认解锁 ${record.month} 月度对账？请仅在财务调账审批后操作。`, "月度解锁确认", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认解锁 ${record.month} 月度对账？请仅在财务调账审批后操作。`, "月度解锁确认", {
+    confirmButtonClass: "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: false,
     type: "warning",
     confirmButtonText: "确认解锁",
     cancelButtonText: "取消",
@@ -465,7 +470,9 @@ function openRetentionAdjustment(row) {
 function approveAdjustmentRecord(row) {
   if (state.role !== "super") return ElMessage.warning("只有超管可以审批冲正调账");
   if (!row || row.approvalStatus === "已审") return;
-  ElMessageBox.confirm(`确认审批 ${row.orderNo} 的冲正调"${money(Math.abs(Number(row.amount || 0)))}？`, "冲正审批确认", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认审批 ${row.orderNo} 的冲正调"${money(Math.abs(Number(row.amount || 0)))}？`, "冲正审批确认", {
+    confirmButtonClass: "lxm-action-confirm--success",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
     confirmButtonText: "确认审批",
     cancelButtonText: "取消",
@@ -552,9 +559,11 @@ const settlementDueReminderRows = computed(() => visibleReconciliationSettlement
 function markSettlementPaid(row) {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以确认打");
   if (!row || row.status === "已封") return ElMessage.warning("已封存账单不能重复确认打");
-  ElMessageBox.confirm(`确认 ${row.objectType}「${row.objectName}」${row.period} 已完成打款？`, "确认打款", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认 ${row.objectType}「${row.objectName}」${row.period} 已完成打款？`, "确认打款登记", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
-    confirmButtonText: "确认已打",
+    confirmButtonText: "确认打款登记",
     cancelButtonText: "取消",
   }).then(async () => {
     const original = JSON.parse(JSON.stringify(row));
@@ -571,7 +580,9 @@ function sealSettlementRecord(row) {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以封存账");
   if (!row) return;
   if (row.status === "已封") return ElMessage.warning("该结算记录已封存");
-  ElMessageBox.confirm(`确认复核并封存 ${row.objectType}「${row.objectName}」${row.period}？封存后金额、订单范围和凭证记录锁定。`, "复核封存", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认复核并封存 ${row.objectType}「${row.objectName}」${row.period}？封存后金额、订单范围和凭证记录锁定。`, "复核封存", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "取消",
@@ -626,7 +637,9 @@ function reconciliationFilterSnapshot() {
   }, {});
 }
 function saveReconciliationFilterPreset() {
-  ElMessageBox.prompt("给当前筛选条件起一个名字，方便下次快速套用", "保存筛选模", {
+  window.LXMActionConfirm.prompt(ElMessageBox, "给当前筛选条件起一个名字，方便下次快速套用", "保存筛选模", {
+    confirmButtonClass: "lxm-action-confirm--primary",
+    cancelButtonClass: "lxm-action-cancel",
     confirmButtonText: "保存模板",
     cancelButtonText: "取消",
     inputPlaceholder: "例如：本周待结算商家",
@@ -767,7 +780,9 @@ function batchConfirmSettlement() {
   if (!rows.length) return ElMessage.warning("请先勾选待结算对象");
   const largeRows = rows.filter((row) => Number(row.commission || 0) >= largeSettlementThreshold() && largeSettlementThreshold() > 0);
   if (largeRows.length) return ElMessage.warning(`已选对象包含 ${largeRows.length} 个大额结算，请逐个打开确认结算并填写凭证与备注`);
-  ElMessageBox.confirm(`确认批量结算 ${rows.length} 个对象？系统会为每个对象生成独立结算记录。`, "批量确认结算", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认批量结算 ${rows.length} 个对象？系统会为每个对象生成独立结算记录。`, "批量确认结算", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
     confirmButtonText: "确认批量结算",
     cancelButtonText: "取消",
@@ -788,7 +803,9 @@ function batchSealSettlement() {
   if (isReconciliationClosed.value) return ElMessage.warning("当前月份已整体封存，不能批量封存单个账单");
   const rows = selectedReconciliationRows.value.filter((row) => row.transferStatus === "已结" && row.transferRecord);
   if (!rows.length) return ElMessage.warning("请先勾选已结算但未封存的对");
-  ElMessageBox.confirm(`确认批量封存 ${rows.length} 个结算对象账单？封存后原始结算记录锁定，后续调整走冲正台账。`, "批量封存账单", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认批量封存 ${rows.length} 个结算对象账单？封存后原始结算记录锁定，后续调整走冲正台账。`, "批量封存账单", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "取消",
@@ -861,7 +878,9 @@ function closeSettlementBatch(row) {
   const record = settlementBatchRecord(row);
   if (!record) return ElMessage.warning("请先确认该对象本周期结算，再封存账单");
   if (record.status === "已封") return ElMessage.warning("该对象本周期账单已封");
-  ElMessageBox.confirm(`确认封存 ${row.typeName}「${row.name}」${row.settlementPeriod} 的结算账单？封存后该批次的实结金额、订单范围和凭证记录将锁定。仍在订单静置期内的订单不会进入本批次，静置期满且审核通过后会自动进入下一次可结算周期。`, "封存结算账单", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认封存 ${row.typeName}「${row.name}」${row.settlementPeriod} 的结算账单？封存后该批次的实结金额、订单范围和凭证记录将锁定。仍在订单静置期内的订单不会进入本批次，静置期满且审核通过后会自动进入下一次可结算周期。`, "封存结算账单", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
     confirmButtonText: "确认封存",
     cancelButtonText: "暂不封存",
@@ -881,7 +900,10 @@ function unlockSettlementBatch(row) {
   if (state.role !== "super") return ElMessage.warning("只有超管可以解封单主体账");
   const record = settlementBatchRecord(row);
   if (!record || record.status !== "已封") return ElMessage.warning("当前账单未封存，无需解封");
-  ElMessageBox.prompt(`请输入解封 ${row.typeName}「${row.name}」${row.settlementPeriod} 账单的审批说明。解封后必须完成调整并重新封存。`, "解封结算账单", {
+  window.LXMActionConfirm.prompt(ElMessageBox, `请输入解封 ${row.typeName}「${row.name}」${row.settlementPeriod} 账单的审批说明。解封后必须完成调整并重新封存。`, "解封结算账单", {
+    confirmButtonClass: "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: false,
     type: "warning",
     inputType: "textarea",
     inputPlaceholder: "填写审批单号、审批人或调整原",

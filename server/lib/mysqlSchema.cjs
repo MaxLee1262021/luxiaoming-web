@@ -193,6 +193,7 @@ const COLLECTIONS = {
     { name: "price", type: S.money }, { name: "enabled", type: S.bool }, { name: "isShow", type: S.bool },
     { name: "intro", type: S.text }, { name: "description", type: S.text }, { name: "image", type: S.text },
     { name: "cover", type: S.text }, { name: "mode", type: S.short }, { name: "spotId", type: S.short },
+    { name: "storeProductId", type: S.short }, { name: "storeProductPromotionLink", type: S.text },
     { name: "stock", type: S.integer }, { name: "stockQty", type: S.integer }, { name: "isHot", type: S.bool },
     { name: "isNew", type: S.bool }, { name: "deliveryCycle", type: S.short }, { name: "scheduledOnAt", type: S.time },
     { name: "scheduledOffAt", type: S.time }, { name: "auditStatus", type: S.short }, { name: "auditType", type: S.short },

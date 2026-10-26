@@ -49,7 +49,7 @@
       <el-table-column prop="createdAt" label="最近提交" width="150" />
       <el-table-column label="订单/客户" min-width="180">
         <template #default="{row}">
-          <button class="table-link" @click="openFinanceReview(row)">{{ row.orderNo }}</button>
+          <button type="button" class="table-link lxm-action lxm-action--primary lxm-action--link" @click="openFinanceReview(row)">{{ row.orderNo }}</button>
           <strong>{{ row.customer }}</strong>
           <div class="muted">{{ shopName(row.shopId) }}</div>
         </template>
@@ -92,7 +92,7 @@
       <el-table-column prop="type" label="审核类型" width="110" />
       <el-table-column label="订单/客户" min-width="180">
         <template #default="{row}">
-          <button class="table-link" @click="openFinanceReview(row)">{{ row.orderNo }}</button>
+          <button type="button" class="table-link lxm-action lxm-action--primary lxm-action--link" @click="openFinanceReview(row)">{{ row.orderNo }}</button>
           <strong>{{ row.customer }}</strong>
         </template>
       </el-table-column>

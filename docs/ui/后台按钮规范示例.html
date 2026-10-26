@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" style="color-scheme:light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>后台按钮样式规范 · 可交互示例</title>
+<style>body{margin:0 auto;padding:24px;max-width:784px;background:transparent} @media(max-width:560px){body{padding:12px}}</style>
+</head>
+<body>
+<div id="lxm-button-specimen" lang="zh-CN" data-theme="light">
+  <style>
+    #lxm-button-specimen { --lxm-blue:#2563EB; --lxm-blue-hover:#1D4ED8; --lxm-blue-active:#1E40AF; --lxm-blue-soft:#EFF6FF; --lxm-green:#15803D; --lxm-green-hover:#166534; --lxm-green-active:#14532D; --lxm-green-soft:#F0FDF4; --lxm-orange:#B45309; --lxm-orange-hover:#92400E; --lxm-orange-active:#78350F; --lxm-orange-soft:#FFFBEB; --lxm-red:#DC2626; --lxm-red-hover:#B91C1C; --lxm-red-active:#991B1B; --lxm-red-soft:#FEF2F2; --lxm-neutral:#374151; --lxm-neutral-hover:#F3F4F6; --lxm-neutral-active:#E5E7EB; --lxm-neutral-border:#8C95A3; --lxm-text:#111827; --lxm-secondary:#4B5563; --lxm-line:#E5E7EB; --lxm-surface:#FFFFFF; --lxm-surface-muted:#F9FAFB; --lxm-focus:#2563EB; color-scheme:light; box-sizing:border-box; width:100%; max-width:736px; margin:0 auto; color:var(--lxm-text); background:transparent; font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif; font-size:14px; font-weight:400; line-height:1.5; text-align:left; }
+    #lxm-button-specimen *, #lxm-button-specimen *::before, #lxm-button-specimen *::after { box-sizing:border-box; }
+    #lxm-button-specimen [hidden] { display:none !important; }
+    #lxm-button-specimen h2, #lxm-button-specimen h3, #lxm-button-specimen p { margin:0; }
+    #lxm-button-specimen .lxm-surface { background:var(--lxm-surface); border:1px solid var(--lxm-line); border-radius:12px; overflow:hidden; }
+    #lxm-button-specimen .lxm-header { padding:24px 24px 20px; border-bottom:1px solid var(--lxm-line); }
+    #lxm-button-specimen .lxm-eyebrow { color:var(--lxm-secondary); font-size:12px; letter-spacing:.08em; margin-bottom:6px; }
+    #lxm-button-specimen .lxm-header h2 { font-size:24px; line-height:1.35; font-weight:500; letter-spacing:-.02em; }
+    #lxm-button-specimen .lxm-header p { color:var(--lxm-secondary); margin-top:8px; }
+    #lxm-button-specimen .lxm-section { padding:20px 24px; border-bottom:1px solid var(--lxm-line); }
+    #lxm-button-specimen .lxm-section:last-of-type { border-bottom:0; }
+    #lxm-button-specimen .lxm-section-heading { display:flex; align-items:baseline; justify-content:space-between; gap:8px 16px; flex-wrap:wrap; margin-bottom:14px; }
+    #lxm-button-specimen .lxm-section h3 { font-size:16px; line-height:1.5; font-weight:500; }
+    #lxm-button-specimen .lxm-caption { color:var(--lxm-secondary); font-size:12px; }
+    #lxm-button-specimen .lxm-matrix { display:grid; grid-template-columns:minmax(104px,1.05fr) repeat(3,minmax(0,1fr)); gap:0 12px; }
+    #lxm-button-specimen .lxm-matrix-head { color:var(--lxm-secondary); font-size:12px; padding:0 0 10px; }
+    #lxm-button-specimen .lxm-matrix-row { display:contents; }
+    #lxm-button-specimen .lxm-semantic, #lxm-button-specimen .lxm-matrix-cell { min-width:0; display:flex; align-items:center; min-height:62px; border-top:1px solid var(--lxm-line); }
+    #lxm-button-specimen .lxm-semantic { gap:8px; }
+    #lxm-button-specimen .lxm-semantic strong { display:block; font-weight:500; }
+    #lxm-button-specimen .lxm-semantic small { display:block; color:var(--lxm-secondary); font-size:12px; }
+    #lxm-button-specimen .lxm-dot { flex:0 0 7px; width:7px; height:7px; border-radius:50%; background:var(--lxm-tone); }
+    #lxm-button-specimen .lxm-blue { --lxm-tone:var(--lxm-blue); --lxm-hover:var(--lxm-blue-hover); --lxm-active:var(--lxm-blue-active); --lxm-soft:var(--lxm-blue-soft); }
+    #lxm-button-specimen .lxm-green { --lxm-tone:var(--lxm-green); --lxm-hover:var(--lxm-green-hover); --lxm-active:var(--lxm-green-active); --lxm-soft:var(--lxm-green-soft); }
+    #lxm-button-specimen .lxm-orange { --lxm-tone:var(--lxm-orange); --lxm-hover:var(--lxm-orange-hover); --lxm-active:var(--lxm-orange-active); --lxm-soft:var(--lxm-orange-soft); }
+    #lxm-button-specimen .lxm-red { --lxm-tone:var(--lxm-red); --lxm-hover:var(--lxm-red-hover); --lxm-active:var(--lxm-red-active); --lxm-soft:var(--lxm-red-soft); }
+    #lxm-button-specimen .lxm-neutral { --lxm-tone:var(--lxm-neutral); --lxm-hover:var(--lxm-neutral); --lxm-active:var(--lxm-neutral); --lxm-soft:var(--lxm-neutral-hover); }
+    #lxm-button-specimen .lxm-button { -webkit-appearance:none; appearance:none; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; gap:6px; min-width:64px; min-height:36px; height:36px; margin:0; padding:0 16px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--lxm-tone); font:inherit; font-size:14px; font-weight:500; line-height:20px; text-decoration:none; white-space:nowrap; vertical-align:middle; transition:background-color .12s ease,color .12s ease,border-color .12s ease; -webkit-tap-highlight-color:transparent; }
+    #lxm-button-specimen .lxm-solid { background:var(--lxm-tone); border-color:var(--lxm-tone); color:var(--lxm-surface); }
+    #lxm-button-specimen .lxm-solid:hover:not(:disabled), #lxm-button-specimen .lxm-solid.lxm-is-hover { background:var(--lxm-hover); border-color:var(--lxm-hover); color:var(--lxm-surface); }
+    #lxm-button-specimen .lxm-solid:active:not(:disabled), #lxm-button-specimen .lxm-solid.lxm-is-active { background:var(--lxm-active); border-color:var(--lxm-active); color:var(--lxm-surface); }
+    #lxm-button-specimen .lxm-outline { background:var(--lxm-surface); border-color:var(--lxm-tone); }
+    #lxm-button-specimen .lxm-text { min-width:24px; padding:0 8px; background:transparent; border-color:transparent; }
+    #lxm-button-specimen .lxm-outline:hover:not(:disabled), #lxm-button-specimen .lxm-text:hover:not(:disabled), #lxm-button-specimen .lxm-outline.lxm-is-hover, #lxm-button-specimen .lxm-text.lxm-is-hover { background:var(--lxm-soft); color:var(--lxm-hover); }
+    #lxm-button-specimen .lxm-outline:hover:not(:disabled), #lxm-button-specimen .lxm-outline.lxm-is-hover { border-color:var(--lxm-hover); }
+    #lxm-button-specimen .lxm-outline:active:not(:disabled), #lxm-button-specimen .lxm-text:active:not(:disabled), #lxm-button-specimen .lxm-outline.lxm-is-active, #lxm-button-specimen .lxm-text.lxm-is-active { background:var(--lxm-soft); color:var(--lxm-active); }
+    #lxm-button-specimen .lxm-outline:active:not(:disabled), #lxm-button-specimen .lxm-outline.lxm-is-active { border-color:var(--lxm-active); }
+    #lxm-button-specimen .lxm-neutral.lxm-outline { border-color:var(--lxm-neutral-border); }
+    #lxm-button-specimen .lxm-neutral.lxm-outline:hover:not(:disabled), #lxm-button-specimen .lxm-neutral.lxm-text:hover:not(:disabled), #lxm-button-specimen .lxm-neutral.lxm-outline.lxm-is-hover, #lxm-button-specimen .lxm-neutral.lxm-text.lxm-is-hover { background:var(--lxm-neutral-hover); color:var(--lxm-neutral); }
+    #lxm-button-specimen .lxm-neutral.lxm-outline:active:not(:disabled), #lxm-button-specimen .lxm-neutral.lxm-text:active:not(:disabled), #lxm-button-specimen .lxm-neutral.lxm-outline.lxm-is-active, #lxm-button-specimen .lxm-neutral.lxm-text.lxm-is-active { background:var(--lxm-neutral-active); color:var(--lxm-neutral); }
+    #lxm-button-specimen .lxm-neutral.lxm-outline:hover:not(:disabled), #lxm-button-specimen .lxm-neutral.lxm-outline:active:not(:disabled), #lxm-button-specimen .lxm-neutral.lxm-outline.lxm-is-hover, #lxm-button-specimen .lxm-neutral.lxm-outline.lxm-is-active { border-color:#6B7280; }
+    #lxm-button-specimen .lxm-button:focus-visible, #lxm-button-specimen .lxm-select:focus-visible, #lxm-button-specimen .lxm-input:focus-visible, #lxm-button-specimen .lxm-button.lxm-is-focus { outline:2px solid var(--lxm-focus); outline-offset:2px; }
+    #lxm-button-specimen .lxm-button:disabled:not(.lxm-loading) { background:#F3F4F6; border-color:#D1D5DB; color:#9CA3AF; cursor:not-allowed; }
+    #lxm-button-specimen .lxm-button.lxm-loading { cursor:wait; }
+    #lxm-button-specimen .lxm-small { height:32px; min-height:32px; padding:0 12px; }
+    #lxm-button-specimen .lxm-large { height:40px; min-height:40px; padding:0 20px; }
+    #lxm-button-specimen .lxm-touch { height:44px; min-height:44px; padding:0 16px; }
+    #lxm-button-specimen .lxm-button[data-action="save"], #lxm-button-specimen .lxm-button[data-action="register"] { min-width:calc(4em + 54px); }
+    #lxm-button-specimen .lxm-spinner { display:inline-block; flex:0 0 14px; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:lxm-button-spin .8s linear infinite; }
+    #lxm-button-specimen .lxm-note { margin-top:12px; color:var(--lxm-secondary); font-size:12px; }
+    #lxm-button-specimen .lxm-select-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-bottom:16px; }
+    #lxm-button-specimen .lxm-select-row label { color:var(--lxm-secondary); }
+    #lxm-button-specimen .lxm-select { height:36px; min-width:168px; max-width:100%; padding:0 32px 0 12px; border:1px solid var(--lxm-neutral-border); border-radius:6px; background:var(--lxm-surface); color:var(--lxm-text); font:inherit; font-size:14px; }
+    #lxm-button-specimen .lxm-demo { border:1px solid var(--lxm-line); border-radius:8px; background:var(--lxm-surface); }
+    #lxm-button-specimen .lxm-demo-toolbar { display:flex; justify-content:space-between; align-items:center; gap:8px 12px; padding:14px 16px; flex-wrap:wrap; }
+    #lxm-button-specimen .lxm-demo-title { font-weight:500; }
+    #lxm-button-specimen .lxm-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    #lxm-button-specimen .lxm-actions .lxm-text { height:32px; min-height:32px; padding:0 5px; }
+    #lxm-button-specimen .lxm-more { min-width:0; flex:0 0 auto; }
+    #lxm-button-specimen .lxm-more[open] { width:100%; flex-basis:100%; }
+    #lxm-button-specimen .lxm-more-summary { width:max-content; min-width:24px; min-height:32px; padding:0 5px; border-radius:6px; color:var(--lxm-neutral); font-size:14px; font-weight:500; line-height:32px; list-style-position:inside; }
+    #lxm-button-specimen .lxm-more-summary:hover { background:var(--lxm-neutral-hover); }
+    #lxm-button-specimen .lxm-more-summary:active { background:var(--lxm-neutral-active); }
+    #lxm-button-specimen .lxm-more-summary:focus-visible { outline:2px solid var(--lxm-focus); outline-offset:2px; }
+    #lxm-button-specimen .lxm-more-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; padding-top:8px; border-top:1px solid var(--lxm-line); }
+    #lxm-button-specimen .lxm-records { width:100%; table-layout:fixed; border-collapse:collapse; font-size:14px; }
+    #lxm-button-specimen .lxm-records th { padding:10px 16px; background:var(--lxm-surface-muted); color:var(--lxm-secondary); font-size:12px; font-weight:400; text-align:left; }
+    #lxm-button-specimen .lxm-records th:nth-child(1) { width:25%; }
+    #lxm-button-specimen .lxm-records th:nth-child(2) { width:17%; }
+    #lxm-button-specimen .lxm-records td { padding:12px 16px; border-top:1px solid var(--lxm-line); overflow-wrap:anywhere; vertical-align:top; }
+    #lxm-button-specimen .lxm-records td:last-child { padding-left:11px; }
+    #lxm-button-specimen .lxm-status { display:inline-flex; align-items:center; gap:6px; color:var(--lxm-secondary); font-size:12px; min-height:32px; }
+    #lxm-button-specimen .lxm-status::before { content:""; display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--lxm-neutral-border); flex:0 0 5px; }
+    #lxm-button-specimen .lxm-confirm, #lxm-button-specimen .lxm-registration { margin-top:14px; padding:16px; border:1px solid var(--lxm-line); border-radius:8px; background:var(--lxm-surface); }
+    #lxm-button-specimen .lxm-confirm { border-left:3px solid var(--lxm-red); }
+    #lxm-button-specimen .lxm-confirm-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; font-weight:500; }
+    #lxm-button-specimen .lxm-example-tag { display:inline-flex; align-items:center; height:22px; padding:0 7px; border-radius:4px; color:var(--lxm-secondary); background:var(--lxm-neutral-hover); font-size:12px; font-weight:400; }
+    #lxm-button-specimen .lxm-confirm p, #lxm-button-specimen .lxm-registration p { color:var(--lxm-secondary); margin-bottom:14px; }
+    #lxm-button-specimen .lxm-confirm .lxm-actions, #lxm-button-specimen .lxm-registration .lxm-actions { justify-content:flex-end; gap:12px; }
+    #lxm-button-specimen .lxm-registration label { display:block; margin-bottom:6px; }
+    #lxm-button-specimen .lxm-input { width:100%; height:36px; padding:0 10px; margin-bottom:12px; border:1px solid var(--lxm-neutral-border); border-radius:6px; color:var(--lxm-text); background:var(--lxm-surface); font:inherit; font-size:14px; }
+    #lxm-button-specimen .lxm-state-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px 12px; }
+    #lxm-button-specimen .lxm-state { display:flex; flex-direction:column; align-items:flex-start; gap:7px; min-width:0; }
+    #lxm-button-specimen .lxm-state-label { color:var(--lxm-secondary); font-size:12px; }
+    #lxm-button-specimen .lxm-size-row { display:flex; flex-wrap:wrap; align-items:flex-end; gap:16px 20px; margin-top:20px; padding-top:18px; border-top:1px solid var(--lxm-line); }
+    #lxm-button-specimen .lxm-feedback { min-height:44px; padding:12px 24px; color:var(--lxm-secondary); background:var(--lxm-surface-muted); border-top:1px solid var(--lxm-line); font-size:12px; overflow-wrap:anywhere; }
+    @keyframes lxm-button-spin { to { transform:rotate(360deg); } }
+    @media (prefers-reduced-motion:reduce) { #lxm-button-specimen .lxm-button { transition:none; } #lxm-button-specimen .lxm-spinner { animation:none; } }
+    @media (max-width:560px) {
+      #lxm-button-specimen .lxm-header { padding:20px 16px 16px; }
+      #lxm-button-specimen .lxm-header h2 { font-size:22px; }
+      #lxm-button-specimen .lxm-section { padding:18px 16px; }
+      #lxm-button-specimen .lxm-matrix { display:block; }
+      #lxm-button-specimen .lxm-matrix-head { display:none; }
+      #lxm-button-specimen .lxm-matrix-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px 6px; padding:14px 0; border-top:1px solid var(--lxm-line); }
+      #lxm-button-specimen .lxm-semantic { grid-column:1 / -1; min-height:0; border:0; }
+      #lxm-button-specimen .lxm-semantic small { display:inline; margin-left:6px; }
+      #lxm-button-specimen .lxm-semantic strong { display:inline; }
+      #lxm-button-specimen .lxm-matrix-cell { min-height:0; border:0; flex-direction:column; align-items:flex-start; gap:5px; }
+      #lxm-button-specimen .lxm-matrix-cell::before { content:attr(data-variant); font-size:12px; color:var(--lxm-secondary); }
+      #lxm-button-specimen .lxm-records, #lxm-button-specimen .lxm-records tbody, #lxm-button-specimen .lxm-records tr, #lxm-button-specimen .lxm-records td { display:block; width:100%; }
+      #lxm-button-specimen .lxm-records thead { display:none; }
+      #lxm-button-specimen .lxm-records tr { padding:10px 14px; border-top:1px solid var(--lxm-line); }
+      #lxm-button-specimen .lxm-records td, #lxm-button-specimen .lxm-records td:last-child { display:grid; grid-template-columns:56px minmax(0,1fr); align-items:start; gap:8px; padding:4px 0; border:0; }
+      #lxm-button-specimen .lxm-records td::before { content:attr(data-label); color:var(--lxm-secondary); font-size:12px; padding-top:6px; }
+      #lxm-button-specimen .lxm-records td:first-child::before { padding-top:0; }
+      #lxm-button-specimen .lxm-feedback { padding:12px 16px; }
+      #lxm-button-specimen .lxm-state-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      #lxm-button-specimen .lxm-size-row { gap:14px 20px; }
+    }
+    @media (max-width:420px) { #lxm-button-specimen .lxm-matrix-row { grid-template-columns:1fr 1fr; } #lxm-button-specimen .lxm-matrix-cell:last-child { grid-column:1 / -1; } #lxm-button-specimen .lxm-demo-toolbar { padding:12px 14px; } #lxm-button-specimen .lxm-confirm, #lxm-button-specimen .lxm-registration { padding:12px; } }
+    @media (pointer:coarse) { #lxm-button-specimen .lxm-button, #lxm-button-specimen .lxm-actions .lxm-text { min-height:44px; min-width:44px; height:44px; } #lxm-button-specimen .lxm-more-summary { min-height:44px; min-width:44px; line-height:44px; } #lxm-button-specimen .lxm-select, #lxm-button-specimen .lxm-input { min-height:44px; height:44px; font-size:16px; } }
+  </style>
+  <div class="lxm-surface">
+    <header class="lxm-header">
+      <div class="lxm-eyebrow">管理后台 · BUTTON SYSTEM</div>
+      <h2>后台按钮规范</h2>
+      <p>以操作语义定色，以实底、描边、文字区分操作层级。</p>
+    </header>
+
+    <section class="lxm-section" aria-labelledby="lxm-semantic-heading">
+      <div class="lxm-section-heading"><h3 id="lxm-semantic-heading">颜色与操作层级</h3><span class="lxm-caption">默认 36 px · 圆角 6 px</span></div>
+      <div class="lxm-matrix" aria-label="五种操作语义与按钮层级">
+        <div class="lxm-matrix-head">操作语义</div><div class="lxm-matrix-head">实底 · 高强调</div><div class="lxm-matrix-head">描边 · 次强调</div><div class="lxm-matrix-head">文字 · 行内操作</div>
+        <div class="lxm-matrix-row">
+          <div class="lxm-semantic lxm-blue"><span class="lxm-dot" aria-hidden="true"></span><div><strong>常规主操作</strong><small>蓝色 · #2563EB</small></div></div>
+          <div class="lxm-matrix-cell" data-variant="实底"><button type="button" class="lxm-button lxm-solid lxm-blue cursor-interaction" data-action="save">保存修改</button></div>
+          <div class="lxm-matrix-cell" data-variant="描边"><button type="button" class="lxm-button lxm-outline lxm-blue cursor-interaction" data-action="notify">编辑商品</button></div>
+          <div class="lxm-matrix-cell" data-variant="文字"><button type="button" class="lxm-button lxm-text lxm-blue cursor-interaction" data-action="notify">查看</button></div>
+        </div>
+        <div class="lxm-matrix-row">
+          <div class="lxm-semantic lxm-green"><span class="lxm-dot" aria-hidden="true"></span><div><strong>正向状态</strong><small>绿色 · #15803D</small></div></div>
+          <div class="lxm-matrix-cell" data-variant="实底"><button type="button" class="lxm-button lxm-solid lxm-green cursor-interaction" data-action="notify">审核通过</button></div>
+          <div class="lxm-matrix-cell" data-variant="描边"><button type="button" class="lxm-button lxm-outline lxm-green cursor-interaction" data-action="notify">上架</button></div>
+          <div class="lxm-matrix-cell" data-variant="文字"><button type="button" class="lxm-button lxm-text lxm-green cursor-interaction" data-action="notify">启用</button></div>
+        </div>
+        <div class="lxm-matrix-row">
+          <div class="lxm-semantic lxm-orange"><span class="lxm-dot" aria-hidden="true"></span><div><strong>谨慎变更</strong><small>橙色 · #B45309</small></div></div>
+          <div class="lxm-matrix-cell" data-variant="实底"><button type="button" class="lxm-button lxm-solid lxm-orange cursor-interaction" data-action="amount">核对金额</button></div>
+          <div class="lxm-matrix-cell" data-variant="描边"><button type="button" class="lxm-button lxm-outline lxm-orange cursor-interaction" data-action="notify">下架</button></div>
+          <div class="lxm-matrix-cell" data-variant="文字"><button type="button" class="lxm-button lxm-text lxm-orange cursor-interaction" data-action="notify">改期</button></div>
+        </div>
+        <div class="lxm-matrix-row">
+          <div class="lxm-semantic lxm-red"><span class="lxm-dot" aria-hidden="true"></span><div><strong>破坏性操作</strong><small>红色 · #DC2626</small></div></div>
+          <div class="lxm-matrix-cell" data-variant="实底"><button type="button" class="lxm-button lxm-solid lxm-red cursor-interaction" data-action="danger" data-danger="delete-product">删除商品</button></div>
+          <div class="lxm-matrix-cell" data-variant="描边"><button type="button" class="lxm-button lxm-outline lxm-red cursor-interaction" data-action="danger" data-danger="reject">驳回申请</button></div>
+          <div class="lxm-matrix-cell" data-variant="文字"><button type="button" class="lxm-button lxm-text lxm-red cursor-interaction" data-action="danger" data-danger="cancel-order">取消订单</button></div>
+        </div>
+        <div class="lxm-matrix-row">
+          <div class="lxm-semantic lxm-neutral"><span class="lxm-dot" aria-hidden="true"></span><div><strong>辅助操作</strong><small>中性 · #374151</small></div></div>
+          <div class="lxm-matrix-cell" data-variant="辅助 · 使用描边"><button type="button" class="lxm-button lxm-outline lxm-neutral cursor-interaction" data-action="notify">重置</button></div>
+          <div class="lxm-matrix-cell" data-variant="描边"><button type="button" class="lxm-button lxm-outline lxm-neutral cursor-interaction" data-action="notify">导出</button></div>
+          <div class="lxm-matrix-cell" data-variant="文字"><button type="button" class="lxm-button lxm-text lxm-neutral cursor-interaction" data-action="notify">返回</button></div>
+        </div>
+      </div>
+      <p class="lxm-note">每个操作区优先保留一个实底主入口；中性辅助操作使用描边或文字。</p>
+    </section>
+
+    <section class="lxm-section" aria-labelledby="lxm-scene-heading">
+      <div class="lxm-section-heading"><h3 id="lxm-scene-heading">业务场景示例</h3><span class="lxm-caption">可切换 · 仅本地演示</span></div>
+      <div class="lxm-select-row"><label for="lxm-scene-select">业务场景</label><select id="lxm-scene-select" class="lxm-select cursor-interaction"><option value="products">商品运营</option><option value="orders">订单履约</option><option value="refunds">售后财务</option><option value="permissions">权限管理</option></select></div>
+      <div class="lxm-demo" id="lxm-scene-content"></div>
+      <p class="lxm-note" id="lxm-scene-note"></p>
+      <section class="lxm-registration" id="lxm-registration" aria-labelledby="lxm-registration-title" hidden>
+        <div class="lxm-confirm-heading"><span id="lxm-registration-title">登记退款凭据</span><span class="lxm-example-tag">示例</span></div>
+        <p>记录已有退款结果，不执行退款支付。</p>
+        <label for="lxm-receipt-note">凭据说明</label><input class="lxm-input" id="lxm-receipt-note" placeholder="示例：渠道流水 / 凭据备注" maxlength="120" autocomplete="off">
+        <div class="lxm-actions"><button type="button" class="lxm-button lxm-outline lxm-neutral cursor-interaction" data-action="registration-close">返回</button><button type="button" class="lxm-button lxm-solid lxm-orange cursor-interaction" data-action="register">确认登记退款结果</button></div>
+      </section>
+      <section class="lxm-confirm" id="lxm-danger-confirm" role="region" aria-labelledby="lxm-danger-title" hidden>
+        <div class="lxm-confirm-heading"><span id="lxm-danger-title">商品移入回收站</span><span class="lxm-example-tag">示例</span></div>
+        <p id="lxm-danger-description"></p>
+        <div class="lxm-actions"><button type="button" class="lxm-button lxm-outline lxm-neutral cursor-interaction" id="lxm-danger-back" data-action="danger-back">暂不移除</button><button type="button" class="lxm-button lxm-solid lxm-red cursor-interaction" id="lxm-danger-accept" data-action="danger-accept">移入回收站</button></div>
+      </section>
+    </section>
+
+    <section class="lxm-section" aria-labelledby="lxm-state-heading">
+      <div class="lxm-section-heading"><h3 id="lxm-state-heading">状态与尺寸</h3><span class="lxm-caption">键盘 Tab 可查看真实焦点</span></div>
+      <div class="lxm-state-grid">
+        <div class="lxm-state"><span class="lxm-state-label">默认 · Default</span><button type="button" class="lxm-button lxm-solid lxm-blue cursor-interaction" data-action="save">保存修改</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">悬停 · Hover</span><button type="button" class="lxm-button lxm-solid lxm-blue lxm-is-hover cursor-interaction" data-action="save">保存修改</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">按下 · Pressed</span><button type="button" class="lxm-button lxm-solid lxm-blue lxm-is-active cursor-interaction" data-action="save">保存修改</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">禁用 · Disabled</span><button type="button" class="lxm-button lxm-solid lxm-blue" disabled>保存修改</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">加载 · Loading</span><button type="button" class="lxm-button lxm-solid lxm-blue lxm-loading" disabled aria-busy="true"><span class="lxm-spinner" aria-hidden="true"></span>保存中…</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">聚焦 · Focus visible</span><button type="button" class="lxm-button lxm-solid lxm-blue lxm-is-focus cursor-interaction" data-action="save">保存修改</button></div>
+      </div>
+      <div class="lxm-size-row" aria-label="按钮尺寸示例">
+        <div class="lxm-state"><span class="lxm-state-label">紧凑 32 px</span><button type="button" class="lxm-button lxm-outline lxm-neutral lxm-small cursor-interaction" data-action="notify">导出</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">默认 36 px</span><button type="button" class="lxm-button lxm-outline lxm-neutral cursor-interaction" data-action="notify">导出</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">大号 40 px</span><button type="button" class="lxm-button lxm-outline lxm-neutral lxm-large cursor-interaction" data-action="notify">导出</button></div>
+        <div class="lxm-state"><span class="lxm-state-label">触屏 44 px</span><button type="button" class="lxm-button lxm-outline lxm-neutral lxm-touch cursor-interaction" data-action="notify">导出</button></div>
+      </div>
+      <p class="lxm-note">常规按钮间距 8 px，确认区间距 12 px；触屏环境点击高度至少 44 px。</p>
+    </section>
+    <div class="lxm-feedback" id="lxm-button-feedback" role="status" aria-live="polite" aria-atomic="true">所有交互均为示例，不连接业务数据。</div>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('lxm-button-specimen');
+      if (!root) return;
+      const sceneSelect = root.querySelector('#lxm-scene-select');
+      const sceneContent = root.querySelector('#lxm-scene-content');
+      const sceneNote = root.querySelector('#lxm-scene-note');
+      const feedback = root.querySelector('#lxm-button-feedback');
+      const confirmRegion = root.querySelector('#lxm-danger-confirm');
+      const confirmTitle = root.querySelector('#lxm-danger-title');
+      const confirmDescription = root.querySelector('#lxm-danger-description');
+      const confirmBack = root.querySelector('#lxm-danger-back');
+      const confirmAccept = root.querySelector('#lxm-danger-accept');
+      const registration = root.querySelector('#lxm-registration');
+      const receiptNote = root.querySelector('#lxm-receipt-note');
+      let pendingDanger = null;
+      let dangerTrigger = null;
+      let registrationTrigger = null;
+      const button = (label, tone, variant = 'text', action = 'notify', danger = '') => `<button type="button" class="lxm-button lxm-${variant} lxm-${tone} cursor-interaction" data-action="${action}"${danger ? ` data-danger="${danger}"` : ''}>${label}</button>`;
+      const more = content => `<details class="lxm-more"><summary class="lxm-more-summary cursor-interaction">更多</summary><div class="lxm-more-list">${content}</div></details>`;
+      const scenes = {
+        products: { title:'商品管理', toolbar:button('新增商品','blue','solid') + button('导出','neutral','outline'), note:'更多内可查看状态与危险操作；商品删除后进入回收站。', rows:[['演示商品 A','已上架',button('查看','blue')+button('编辑','blue')+more(button('下架','orange')+button('删除','red','text','danger','delete-product'))],['演示商品 B','待上架',button('查看','blue')+button('编辑','blue')+more(button('上架','green')+button('删除','red','text','danger','delete-product'))]] },
+        orders: { title:'订单管理', toolbar:button('查询','blue','solid') + button('重置','neutral','outline'), note:'更多内包含已确认预约的改期、同步支付状态与取消操作。', rows:[['演示订单','已确认预约',button('查看','blue')+button('派单','blue')+more(button('改期','orange')+button('同步支付状态','blue')+button('取消订单','red','text','danger','cancel-order'))]] },
+        refunds: { title:'售后与退款记录', toolbar:'', note:'确认金额仅做核对；更多内登记凭据与审核，不执行退款支付。', rows:[['演示退款记录','待审核',button('查看凭证','blue')+button('确认金额','orange','outline','amount')+more(button('登记退款凭据','blue','text','registration-open')+button('审核通过','green')+button('驳回','red','text','danger','reject'))]] },
+        permissions: { title:'人员与权限', toolbar:button('新增人员','blue','solid'), note:'授权用蓝色，启用用绿色，停用用橙色；更多内可查看删除操作。', rows:[['演示人员 A','已启用',button('授权','blue')+button('停用','orange')+more(button('删除','red','text','danger','delete-person'))],['演示人员 B','已停用',button('授权','blue')+button('启用','green')+more(button('删除','red','text','danger','delete-person'))]] }
+      };
+      const dangers = {
+        'delete-product': { title:'商品移入回收站', description:'演示商品将移入回收站，可在回收站恢复。', back:'暂不移除', accept:'移入回收站' },
+        'cancel-order': { title:'取消订单', description:'演示订单将进入已取消状态。本示例不触发自动退款。', back:'返回', accept:'确认取消订单' },
+        reject: { title:'驳回申请', description:'“演示退款申请”将记录为驳回结果。请先核对申请内容与驳回原因。', back:'返回', accept:'确认驳回' },
+        'delete-person': { title:'删除人员', description:'删除“演示人员”后，将移除该人员的后台访问资格。请核对操作对象。', back:'暂不删除', accept:'确认删除' }
+      };
+      const announce = message => { feedback.textContent = message; };
+      const closeDanger = () => { confirmRegion.hidden = true; pendingDanger = null; };
+      const renderScene = value => {
+        const key = Object.prototype.hasOwnProperty.call(scenes,value) ? value : 'products';
+        const scene = scenes[key];
+        sceneSelect.value = key;
+        sceneContent.innerHTML = `<div class="lxm-demo-toolbar"><span class="lxm-demo-title">${scene.title}</span><div class="lxm-actions">${scene.toolbar}</div></div><table class="lxm-records" aria-label="${scene.title}示例"><thead><tr><th scope="col">演示对象</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>${scene.rows.map(row => `<tr><td data-label="对象">${row[0]}</td><td data-label="状态"><span class="lxm-status">${row[1]}</span></td><td data-label="操作"><div class="lxm-actions">${row[2]}</div></td></tr>`).join('')}</tbody></table>`;
+        sceneNote.textContent = scene.note;
+        registration.hidden = true;
+        closeDanger();
+      };
+      const stateScene = state => {
+        const value = state && state.privateContent && state.privateContent.scene || state && state.modelContent && state.modelContent.scene;
+        return Object.prototype.hasOwnProperty.call(scenes,value) ? value : null;
+      };
+      const persistScene = () => {
+        try {
+          if (window.openai && typeof window.openai.setWidgetState === 'function') {
+            Promise.resolve(window.openai.setWidgetState({ modelContent:{ scene:sceneSelect.value, specimen:'admin-button-spec', version:1 }, privateContent:{ scene:sceneSelect.value } })).catch(() => {});
+          }
+        } catch (_) {}
+      };
+      let initialScene = 'products';
+      try { initialScene = stateScene(window.openai && window.openai.widgetState) || initialScene; } catch (_) {}
+      renderScene(initialScene);
+      sceneSelect.addEventListener('change', () => { renderScene(sceneSelect.value); announce(`已切换到${sceneSelect.options[sceneSelect.selectedIndex].text}示例。`); persistScene(); });
+      window.addEventListener('openai:set_globals', event => {
+        const state = event.detail && event.detail.globals && event.detail.globals.widgetState;
+        const savedScene = stateScene(state);
+        if (savedScene && savedScene !== sceneSelect.value) renderScene(savedScene);
+      });
+      const simulateSaving = (target, completeMessage) => {
+        if (target.disabled || target.getAttribute('aria-busy') === 'true') return;
+        const original = target.innerHTML;
+        const originalWidth = target.style.width;
+        const reservedWidth = Math.ceil(target.getBoundingClientRect().width);
+        target.style.width = `${reservedWidth}px`;
+        target.disabled = true;
+        target.classList.add('lxm-loading');
+        target.setAttribute('aria-busy','true');
+        target.innerHTML = '<span class="lxm-spinner" aria-hidden="true"></span>保存中…';
+        announce('示例保存中…');
+        window.setTimeout(() => {
+          target.innerHTML = original;
+          target.style.width = originalWidth;
+          target.disabled = false;
+          target.classList.remove('lxm-loading');
+          target.removeAttribute('aria-busy');
+          announce(completeMessage || '示例已完成。');
+        },800);
+      };
+      root.addEventListener('click', event => {
+        const target = event.target.closest('button[data-action]');
+        if (!target || !root.contains(target) || target.disabled) return;
+        const action = target.dataset.action;
+        if (action === 'save') { simulateSaving(target); return; }
+        if (action === 'danger') {
+          const danger = dangers[target.dataset.danger];
+          if (!danger) return;
+          pendingDanger = danger;
+          dangerTrigger = target;
+          registration.hidden = true;
+          confirmTitle.textContent = danger.title;
+          confirmDescription.textContent = danger.description;
+          confirmBack.textContent = danger.back;
+          confirmAccept.textContent = danger.accept;
+          confirmRegion.hidden = false;
+          announce(`已打开${danger.title}确认示例，请核对对象与影响。`);
+          confirmBack.focus();
+          return;
+        }
+        if (action === 'danger-back') { closeDanger(); announce('已返回，未执行示例操作。'); if (dangerTrigger && dangerTrigger.isConnected) dangerTrigger.focus(); return; }
+        if (action === 'danger-accept') { const name = pendingDanger ? pendingDanger.title : '操作'; closeDanger(); announce(`${name}示例已完成；未更改业务数据。`); if (dangerTrigger && dangerTrigger.isConnected) dangerTrigger.focus(); return; }
+        if (action === 'registration-open') { registrationTrigger = target; closeDanger(); registration.hidden = false; announce('已打开退款凭据登记示例；不执行退款支付。'); receiptNote.focus(); return; }
+        if (action === 'registration-close') { registration.hidden = true; announce('已返回退款记录示例。'); if (registrationTrigger && registrationTrigger.isConnected) registrationTrigger.focus(); return; }
+        if (action === 'register') { simulateSaving(target,'示例已完成：已演示登记退款结果，未执行退款支付。'); return; }
+        if (action === 'amount') { announce('金额核对示例已完成；仅核对退款金额，不执行退款支付。'); return; }
+        announce(`“${target.textContent.trim()}”示例已完成；未更改业务数据。`);
+      });
+    })();
+  </script>
+</div>
+
+</body>
+</html>

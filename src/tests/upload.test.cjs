@@ -101,13 +101,21 @@ test("private preview embeds signed image/video and removes URL when closed", as
     assert.equal(f.upload.preview.url, ""); assert.equal(f.upload.preview.open, false);
   }
 });
-test("album and video editors unwrap computed lists and expose first loaded item", () => {
+test("album and video editors expose first loaded item from their current list sources", () => {
   for (const [file, rowsKey, selectedKey] of [["album/album.js", "albumRows", "selectedAlbum"], ["videoSingle/videoSingle.js", "videoSingleRows", "selectedVideoSingle"]]) {
     let definition;
-    const Vue = { ref: (value) => ({ value }), computed: (fn) => ({ get value() { return fn(); } }), unref: (value) => value?.value ?? value };
+    const Vue = {
+      ref: (value) => ({ value }), computed: (fn) => ({ get value() { return fn(); } }), unref: (value) => value?.value ?? value,
+      onMounted: (callback) => callback(), onBeforeUnmount() {}, watch() {}
+    };
     const window = { Vue, LXM_PAGES: { register: (value) => { definition = value; } } };
     vm.runInNewContext(fs.readFileSync(path.join(root, "src/views/content", file), "utf8"), { window, LXM_API: { remoteOn: () => false } });
-    const result = definition.setup({ [rowsKey]: { value: [{ id: "loaded-record" }] } });
+    const rows = [{ id: "loaded-record" }];
+    const result = definition.setup({
+      [rowsKey]: Vue.computed(() => rows),
+      state: { authSource: "demo" }, data: { packages: rows },
+      filterVideoSingleRows: (packages) => packages, isServerConnected: () => false
+    });
     assert.equal(result[selectedKey].value.id, "loaded-record");
   }
 });
@@ -136,6 +144,7 @@ function businessFixture(role = "photo") {
     }
   };
   const window = { LXM_APP_PARTS: [], LXM_UPLOAD: { jobs: [], busy: () => false, ready: () => true, pick: (options) => picks.push(options), temporary: () => false, single: async (key, action) => action() } };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "src/utils/action-confirm.js"), "utf8"), { window });
   vm.runInNewContext(fs.readFileSync(path.join(root, "src/app/18-files.js"), "utf8"), { window });
   const result = window.LXM_APP_PARTS[0](ctx);
   return { ctx, ui: result, calls, notices, picks };

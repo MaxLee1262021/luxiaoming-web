@@ -11,7 +11,7 @@
 <div class="dispatch-board">
   <div class="dispatch-card" v-for="o in scopedOrders.filter(x=>!x.photographerId && ['awaiting_dispatch','deposit_paid','confirmed'].includes(x.workflowStage || x.status) && !['completed','cancelled','已取消','done'].includes(x.status))" :key="o.id">
     <div class="dc-head">
-      <button class="table-link" @click="openOrder(o)">{{ o.orderNo }}</button>
+      <button type="button" class="table-link lxm-action lxm-action--primary lxm-action--link" @click="openOrder(o)">{{ o.orderNo }}</button>
       <span class="status-dot" :style="{background: orderWorkflowStatusMeta(o).color}"></span>
       <span>{{ orderWorkflowStatusLabel(o) }}</span>
     </div>
@@ -20,7 +20,7 @@
     <div class="dc-time"><span>拍摄安排</span>{{ o.appointmentAt || '待人工确认时间' }}<small v-if="o.appointmentLocation"> · {{ o.appointmentLocation }}</small></div>
     <div class="dc-assign">
       <el-button type="primary" size="small" @click="openDispatchDialog(o)">填写派单信息</el-button>
-      <el-button plain size="small" @click="openOrder(o)">查看订单</el-button>
+      <el-button type="primary" plain size="small" @click="openOrder(o)">查看订单</el-button>
     </div>
   </div>
   <div v-if="!scopedOrders.filter(x=>!x.photographerId && ['awaiting_dispatch','deposit_paid','confirmed'].includes(x.workflowStage || x.status) && !['completed','cancelled','已取消','done'].includes(x.status)).length" class="empty-state">当前没有待派单的订单</div>

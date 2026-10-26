@@ -1,6 +1,6 @@
 "use strict";
 
-const { depositDue, finalDue, hasConfirmedPayment, businessStatusLabel } = require("./orderWorkflow.cjs");
+const { depositDue, finalDue, hasConfirmedPayment, hasCurrentPhotographerAssignment, businessStatusLabel } = require("./orderWorkflow.cjs");
 const VERSION = "onsite-payment-v2";
 const cancelled = (order) => order.deleted || order.isDeleted || ["canceled", "cancelled", "terminated", "deleted", "已取消"].includes(String(order.status || "").toLowerCase());
 
@@ -34,7 +34,7 @@ function migrationPatch(order) {
       patch.paymentReviewRequired = true;
     }
     const stage = order.shootingStartedAt || order.shootingCompletedAt || ["shooting", "final_pending", "editing", "retouching"].includes(String(order.status).toLowerCase()) ? "shooting"
-      : order.photographerId || order.dispatchRecord ? "awaiting_shoot" : paidDeposit ? "awaiting_dispatch" : "awaiting_deposit";
+      : hasCurrentPhotographerAssignment(order) ? "awaiting_shoot" : paidDeposit ? "awaiting_dispatch" : "awaiting_deposit";
     patch.workflowStage = stage;
     patch.businessStatus = stage === "awaiting_dispatch" ? "reserved" : stage === "awaiting_deposit" ? "pending_payment" : stage;
     patch.customerStatus = businessStatusLabel(patch.businessStatus);

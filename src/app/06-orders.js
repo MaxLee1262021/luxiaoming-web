@@ -98,7 +98,11 @@ function batchCancelOrders() {
   if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订");
   if (selectedOrders.value.some((order) => isOrderAfterSaleLocked(order))) return ElMessage.warning("选中的订单包含售后处理中订单，请先完成售后处");
    if (selectedOrders.value.some((order) => isOrderCompletedStatus(order))) return ElMessage.warning("选中的订单包含已完成订单，已完成订单不能取消");
-  ElMessageBox.confirm(`确认取消已"${selectedOrders.value.length} 个订单？取消后进入回收站。`, "批量取消订单", { type: "warning", confirmButtonText: "确认取消", cancelButtonText: "暂不取消" }).then(async () => {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认取消已选 ${selectedOrders.value.length} 个订单？取消后进入回收站，不会自动执行退款。`, "批量取消订单", {
+    confirmButtonClass: "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: false,
+    type: "warning", confirmButtonText: "确认取消", cancelButtonText: "暂不取消" }).then(async () => {
     let changed = 0;
     for (const order of selectedOrders.value) {
       try {
@@ -284,9 +288,11 @@ function confirmAfterSaleRefundAmount() {
   if (isAfterSaleProcessReadonly(source)) return ElMessage.warning("该售后已处理完成，退款金额不能再修改");
   const amount = Number(state.afterSaleProcessForm.refundAmount || 0);
   if (amount <= 0) return ElMessage.warning("无退款金额时不需要确认退");
-  ElMessageBox.confirm(`确认本次售后退款金额为 ${money(amount)}？确认后本次处理内金额会锁定，处理完成后进入财务审核。`, "确认退款金", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认本次售后退款金额为 ${money(amount)}？确认后本次处理内金额会锁定，处理完成后进入财务审核。`, "确认退款金额", {
+    confirmButtonClass: "lxm-action-confirm--warning",
+    cancelButtonClass: "lxm-action-cancel",
     type: "warning",
-    confirmButtonText: "确认退款金",
+    confirmButtonText: "确认退款金额",
     cancelButtonText: "再核对一下",
   }).then(() => {
     state.afterSaleProcessForm.refundConfirmed = true;
@@ -314,7 +320,9 @@ async function saveAfterSaleProcess(complete = false, confirmed = false) {
     const message = hasRefundAmount
       ? `确认"${row.orderNo} 标记为售后处理完成，并提交退款金"${money(refundAmount)} 到财务审核？财务审核前订单仍会保持售后锁定。`
       : `确认"${row.orderNo} 的售后处理标记为完成？完成后该订单客服处理锁定会解除，并进入售后记录。`;
-    return ElMessageBox.confirm(message, "确认处理完成", {
+    return window.LXMActionConfirm.confirm(ElMessageBox, message, "确认处理完成", {
+      confirmButtonClass: "lxm-action-confirm--success",
+      cancelButtonClass: "lxm-action-cancel",
       type: "warning",
       confirmButtonText: "确认处理完成",
       cancelButtonText: "暂不完成",
@@ -439,7 +447,10 @@ function reviewFinanceItem(row, approved = true) {
   if (approved && normalizeReviewStatus(row.status) === "已审") return ElMessage.warning("该记录已审核通过，不能重复通过");
   if (!approved && row.status === "已驳") return ElMessage.warning("该记录已驳回，不能重复驳");
   const actionText = approved ? "审核通过" : "审核驳回";
-  ElMessageBox.confirm(`确认 ${row.orderNo} 的「${row.type}${actionText}」？金额：${money(row.amount)}。`, `确认${approved ? "通过" : "驳回"}财务审核`, {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认 ${row.orderNo} 的「${row.type}${actionText}」？金额：${money(row.amount)}。`, `确认${approved ? "通过" : "驳回"}财务审核`, {
+    confirmButtonClass: approved ? "lxm-action-confirm--success" : "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: approved,
     type: approved ? "warning" : "error",
     confirmButtonText: approved ? "确认通过" : "确认驳回",
     cancelButtonText: "再核对一下",
@@ -502,7 +513,10 @@ function reviewRefund(row, approved = true) {
   if (approved && normalizeReviewStatus(row.status) === "已审") return ElMessage.warning("该记录已审核通过，不能重复通过");
   if (!approved && row.status === "已驳") return ElMessage.warning("该记录已驳回，不能重复驳");
   const actionText = approved ? "审核通过" : "审核驳回";
-  ElMessageBox.confirm(`确认 ${row.orderNo} 的「退款审核${actionText}」？金额：${money(row.amount || row.refundAmount || 0)}。`, `确认${approved ? "通过" : "驳回"}退款审核`, {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认 ${row.orderNo} 的「退款审核${actionText}」？金额：${money(row.amount || row.refundAmount || 0)}。`, `确认${approved ? "通过" : "驳回"}退款审核`, {
+    confirmButtonClass: approved ? "lxm-action-confirm--success" : "lxm-action-confirm--danger",
+    cancelButtonClass: "lxm-action-cancel",
+    autofocus: approved,
     type: approved ? "warning" : "error",
     confirmButtonText: approved ? "确认通过" : "确认驳回",
     cancelButtonText: "再核对一下",
@@ -512,8 +526,31 @@ async function applyRefundReview(row, approved = true) {
   const source = data.afterSales.find((item) => item.id === (row.afterSaleId || row.id));
   const order = data.orders.find((item) => item.id === row.orderId);
   if (!source || !order) return;
+  let refundTransactionId = "";
+  if (approved && Number(source.refundAmount || source.amount || 0) > 0) {
+    try {
+      const result = await window.LXMActionConfirm.prompt(ElMessageBox, "请填写已实际退款的流水号或凭据编号。本操作仅登记退款凭据并提交审核结论，不会向支付渠道执行退款。", "确认登记退款凭据", {
+        confirmButtonClass: "lxm-action-confirm--warning",
+        cancelButtonClass: "lxm-action-cancel",
+        confirmButtonText: "确认登记并通过",
+        cancelButtonText: "暂不审核",
+        inputPlaceholder: "退款流水号 / 凭据编号",
+        inputValidator: (value) => {
+          const reference = String(value || "").trim();
+          return reference.length > 0 && reference.length <= 160 || "请填写 1–160 个字符的退款流水号或凭据编号";
+        },
+      });
+      refundTransactionId = String(result.value || "").trim();
+      if (!refundTransactionId || refundTransactionId.length > 160) return ElMessage.warning("请填写有效的退款流水号或凭据编号");
+    } catch (_) {
+      return;
+    }
+  }
   const beforeSource = JSON.parse(JSON.stringify(source));
   const beforeOrder = JSON.parse(JSON.stringify(order));
+  const beforeRowStatus = row.status;
+  const beforeCurrentReviewStatus = state.currentFinanceReview?.status;
+  if (refundTransactionId) Object.assign(source, { refundTransactionId, refundMethod: "人工退款" });
   source.financeStatus = approved ? "已审" : "已驳";
   row.status = source.financeStatus;
   if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = source.financeStatus;
@@ -532,14 +569,19 @@ async function applyRefundReview(row, approved = true) {
       const saved = await window.LXM_CLOUD.afterSaleAction(source.id || source._id, "review", {
         approved,
         reason: approved ? "退款审核通过" : "退款审核驳回",
+        ...(refundTransactionId ? { refundTransactionId, refundMethod: "人工退款" } : {}),
       });
       const serverTicket = saved && (saved.ticket || saved);
       if (!serverTicket || serverTicket.error) throw new Error(serverTicket && serverTicket.error ? serverTicket.error : "退款审核保存失败");
       Object.assign(source, serverTicket);
       if (saved && saved.order) Object.assign(order, saved.order);
     } catch (error) {
+      Object.keys(source).forEach((key) => { if (!(key in beforeSource)) delete source[key]; });
+      Object.keys(order).forEach((key) => { if (!(key in beforeOrder)) delete order[key]; });
       Object.assign(source, beforeSource);
       Object.assign(order, beforeOrder);
+      row.status = beforeRowStatus;
+      if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = beforeCurrentReviewStatus;
       return ElMessage.error((error && error.message) || "退款审核未保存，请稍后重试");
     }
   }

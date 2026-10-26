@@ -369,7 +369,11 @@ async function requestDeleteAlbum(album) {
   const summary = albumDependencySummary(album);
   if (!summary.canDelete) return ElMessage.warning(`该照片单品仍被 ${summary.packages} 个套餐引用，且有关联订单 ${summary.orders} 单，不能直接删除`);
   try {
-    await ElMessageBox.confirm(`删除后「${album.name}」将进入回收站，30 天内可在回收站恢复。确认删除吗？`, "删除照片单品", { type: "warning", confirmButtonText: "确认删除", cancelButtonText: "再想想", confirmButtonClass: "el-button--danger" });
+    await window.LXMActionConfirm.confirm(ElMessageBox, `删除后「${album.name}」将进入回收站，30 天内可在回收站恢复。确认删除吗？`, "删除照片单品", {
+      confirmButtonClass: "lxm-action-confirm--danger",
+      cancelButtonClass: "lxm-action-cancel",
+      autofocus: false,
+      type: "warning", confirmButtonText: "确认删除", cancelButtonText: "再想想" });
   } catch (e) { return; }
   const source = data.albums.find((item) => item.id === album.id) || album;
   const previous = { ...source };
