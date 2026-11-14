@@ -31,7 +31,7 @@ The default release excludes `.env`. Set MySQL, Redis, WeChat and OSS configurat
 
 For WeChat Pay, configure the API v3 merchant fields from `.env.example`, including the merchant private key, APIv3 key, platform verification key/certificate and a public HTTPS `WECHAT_PAY_NOTIFY_URL`. Keep both old and new platform verifiers during key rotation. Reverse-proxy `/api/payments/wechat/notify` directly to this Node service without modifying the request body. See [WeChat Pay integration](../../docs/微信支付接入说明.md).
 
-Production uses real WeChat Pay only. `PAYMENT_MODE=mock` and `PAYMENT_MODE=test` are limited to isolated JSON test environments; they must not be enabled in a release deployment. New payments use JSAPI/prepay, callback verification and transaction-query confirmation.
+Runtime uses real MySQL and real WeChat Pay only. Demo/JSON fallback, payment simulation flags and the `testPayment` RPC are removed. Missing payment configuration fails without confirming funds. Synthetic adapters and provider callbacks live exclusively under tests and are excluded from release archives. Payments use JSAPI/prepay, callback verification and transaction-query confirmation.
 
 Use one private bucket. Public catalog media is served through stable application `/api/media/:fileId` redirects; avatars, customer evidence, delivery files and finance attachments require authenticated access. Forward `/api/media/` and `/api/files/` to the Node service. Configure browser CORS and WeChat request/uploadFile/downloadFile domains as documented in [OSS setup and migration](../../docs/OSS接入与迁移.md). The required RAM template is included at `docs/oss-ram-policy.json`; no bucket ACL change is required.
 

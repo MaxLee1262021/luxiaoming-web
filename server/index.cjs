@@ -1,6 +1,6 @@
 // 麓小鸣管理后台集成服务器（同一进程：托管后台网页 + 提供 /api 接口）
-// Runtime API data is always served from MySQL. JSON is restricted to
-// isolated Node test fixtures and cannot be selected by this server.
+// Runtime API and authorization data always come from MySQL.
+// Test adapters are separate files excluded from release packages.
 // 启动：node server/index.cjs  （或 npm run server）
 // Runtime does not load demo data.
 // 管理 API 使用 server-side Bearer sessions；Redis 通过 REDIS_URL 可选启用。
@@ -26,7 +26,6 @@ const wechatPay = require("./lib/wechatPay.cjs").createWechatPay();
 const auth = createAuthStore();
 const permissionStore = createPermissionStore({
   backend: mode,
-  jsonFile: process.env.DB_FILE,
   dbHost: process.env.DB_HOST,
   dbPort: Number(process.env.DB_PORT || 3306),
   dbUser: process.env.DB_USER,
@@ -58,7 +57,7 @@ async function bootstrap() {
     };
     try {
       const result = runWithRequestContext(req, () => {
-        if (p === "/api" || p.startsWith("/api/")) return apiHandler(req, res, p);
+        if (p === "/api" || p.startsWith("/api/") || p.startsWith("/admin/share/") || p.startsWith("/internal/share/")) return apiHandler(req, res, p);
         if (amapRuntime.handlesRuntimeConfig(p)) return amapRuntime.handleRuntimeConfig(req, res);
         if (amapRuntime.handlesProxy(p)) return amapRuntime.handleProxy(req, res);
         return staticHandler(req, res, p);
@@ -83,18 +82,31 @@ async function bootstrap() {
       logger.warn("payment.configuration.incomplete", { missing: wechatPay.configurationErrors() });
     }
   });
+  const shareWorker = require("./lib/shareWorker.cjs").createShareWorker(source,{wechatPay,logger});
+  if (shareWorker) shareWorker.start();
+  const photoWorker = require("./lib/photoWorker.cjs").createPhotoWorker(source,{logger});
+  if (photoWorker) photoWorker.start();
+  const svcWorker = require('./lib/customerService.cjs').createWorker(source,{logger});
+  svcWorker.start();
   let shuttingDown = false;
   const shutdown = async (signal = "shutdown") => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info("service.shutdown.started", { signal });
+    const serverClosed = new Promise(resolve => server.close(resolve));
+    if (typeof server.closeIdleConnections === "function") server.closeIdleConnections();
+    const workerStopped = shareWorker ? shareWorker.stop() : Promise.resolve();
+    const photoWorkerStopped = photoWorker ? photoWorker.stop() : Promise.resolve();
+    await serverClosed;
+    await require("./lib/wechatPay.cjs").drainMerchantShare(source);
+    await workerStopped;
+    await photoWorkerStopped;
+    await svcWorker.stop();
     try { await auth.close(); } catch (_) {}
     try { await permissionStore.close(); } catch (_) {}
     try { if (source && typeof source.close === "function") await source.close(); } catch (_) {}
-    server.close(() => {
-      logger.info("service.shutdown.completed", { signal });
-      process.exit(0);
-    });
+    logger.info("service.shutdown.completed", { signal });
+    process.exit(0);
   };
   process.once("SIGINT", () => shutdown("SIGINT"));
   process.once("SIGTERM", () => shutdown("SIGTERM"));

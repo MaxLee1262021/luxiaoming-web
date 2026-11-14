@@ -1,119 +1,173 @@
-<div class="package-table-page">
-  <div class="package-table-head">
+<div class="catalog-page package-page">
+  <header class="package-head">
     <div>
-      <span class="package-table-eyebrow">内容商品</span>
-      <h3>旅拍套餐</h3>
-      <p>维护小程序展示的名称、封面、价格、说明、服务内容、适用点位和主推状态。</p>
+      <h2>旅拍套餐管理</h2>
+      <p>按城市与打卡点批量添加照片、视频，跨地点组合套餐，独立多选影像周边。</p>
     </div>
-    <div class="package-table-actions">
-      <el-button plain :loading="loading" @click="refreshPackages">刷新</el-button>
-      <el-button type="primary" v-if="canEdit()" @click="openCreate">新增套餐</el-button>
+    <div class="package-head-actions">
+      <div class="package-stats" aria-label="套餐数量统计">
+        <div><strong>{{ summary.total }}</strong><span>全部套餐</span></div>
+        <div class="is-visible"><strong>{{ summary.visible }}</strong><span>显示中</span></div>
+        <div class="is-hidden"><strong>{{ summary.hidden }}</strong><span>已隐藏</span></div>
+      </div>
+      <div class="catalog-actions">
+        <el-button plain :loading="loading" @click="refreshPackages">刷新</el-button>
+        <el-button plain @click="openContentTrash">回收站</el-button>
+        <el-button v-if="canEdit()" type="primary" @click="openCreate">＋ 创建套餐</el-button>
+      </div>
     </div>
-  </div>
+  </header>
 
-  <div class="package-table-summary" aria-label="套餐概览">
-    <span><b>{{ summary.total }}</b> 个套餐</span>
-    <span><b>{{ summary.visible }}</b> 个小程序可见</span>
-    <span><b>{{ summary.mainPush }}</b> 个首页主推</span>
-  </div>
-
-  <div class="package-table-filters">
-    <el-input v-model="keyword" clearable placeholder="搜索套餐名称、说明或服务内容" />
-    <el-select v-model="spotFilter" clearable filterable placeholder="全部打卡点">
-      <el-option v-for="spot in (data.spots || []).filter(Boolean)" :key="spot.id || spot._id" :label="spot.name" :value="spot.id || spot._id" />
-    </el-select>
-    <el-select v-model="visibilityFilter" clearable placeholder="全部状态">
-      <el-option label="小程序可见" value="visible" />
-      <el-option label="已下架" value="hidden" />
+  <div class="package-toolbar">
+    <el-input v-model="keyword" clearable aria-label="搜索套餐" placeholder="搜索套餐名称 / 标签 / 商品" />
+    <div class="package-segment" role="group" aria-label="筛选套餐显示状态">
+      <button type="button" :class="{'is-active':!visibilityFilter}" :aria-pressed="!visibilityFilter" @click="visibilityFilter=''">全部</button>
+      <button type="button" :class="{'is-active':visibilityFilter==='visible'}" :aria-pressed="visibilityFilter==='visible'" @click="visibilityFilter='visible'">显示中</button>
+      <button type="button" :class="{'is-active':visibilityFilter==='hidden'}" :aria-pressed="visibilityFilter==='hidden'" @click="visibilityFilter='hidden'">已隐藏</button>
+    </div>
+    <el-select v-model="spotFilter" clearable filterable aria-label="按打卡点筛选套餐" placeholder="全部打卡点">
+      <el-option v-for="spot in (data.spots || []).filter(i=>i && !i.deleted && !i.isDeleted)" :key="spot.id || spot._id" :label="spot.name" :value="spot.id || spot._id" />
     </el-select>
     <el-button plain @click="resetFilters">重置</el-button>
+    <span class="package-result-count">共 {{ tableRows.length }} 个结果</span>
   </div>
 
-  <div class="package-table-wrap" v-loading="loading" element-loading-text="正在刷新套餐…">
-    <el-table :data="tableRows" row-key="id" empty-text="暂无旅拍套餐，点击“新增套餐”开始维护。">
-      <el-table-column label="套餐" min-width="250">
-        <template #default="{ row }">
-          <div class="package-cell-title">
-            <img v-if="row.cover" :src="row.cover" alt="" />
-            <span v-else class="package-cover-placeholder">套</span>
-            <div>
-              <strong>{{ row.name || '未命名套餐' }}</strong>
-              <p>{{ row.description || '未填写套餐说明' }}</p>
+  <div class="package-grid" v-loading="loading">
+    <article v-for="row in tableRows" :key="row.id" class="package-card" :class="{'is-hidden':statusText(row)==='已下架'}">
+      <div class="package-card-top">
+        <div class="package-card-title">
+          <h3>{{ row.name || '未命名套餐' }}</h3>
+          <div class="package-tags">
+            <span v-if="row.isMainPush" class="package-tag is-featured">首页主推</span>
+            <span v-for="(tag,index) in (row.tags || [])" :key="tag" class="package-tag" :class="'tone-'+(index % 6)">{{ tag }}</span>
+            <span v-if="!row.isMainPush && !(row.tags || []).length" class="package-muted">未设置标签</span>
+          </div>
+        </div>
+        <span class="package-status" :class="{'is-off':statusText(row)==='已下架'}">{{ statusText(row)==='已上架' ? '显示中' : '已隐藏' }}</span>
+      </div>
+      <p class="package-description">{{ row.description || '暂无套餐说明' }}</p>
+      <div class="package-item-groups">
+        <section v-for="group in groupItems(row)" :key="group.key" class="package-item-group" :class="{'is-peripheral':group.peripheral}">
+          <h4>{{ group.label }}</h4>
+          <div class="package-item-chips">
+            <span v-for="(item,index) in group.items" :key="item.type+':'+item.productId+':'+index" class="package-item-chip">
+              <span class="package-type" :class="'type-'+item.type">{{ item.typeLabel }}</span>
+              <span>{{ item.name || '未选择商品' }}<small v-if="item.quantity>1"> ×{{ item.quantity }}</small></span>
+            </span>
+          </div>
+        </section>
+        <p v-if="!(row.includedItems || []).length" class="package-muted">尚未配置组合商品</p>
+      </div>
+      <div class="package-card-price"><span>套餐价 <strong>{{ money(row.price || 0) }}</strong></span><span>原价 <del>{{ money(row.originalPrice || 0) }}</del><b v-if="packageSaving(row)>0">省 {{ money(packageSaving(row)) }}</b></span></div>
+      <p v-if="visibilityHint(row)" class="package-visibility-hint">{{ visibilityHint(row) }}</p>
+      <footer class="package-card-footer">
+        <span class="package-muted">{{ (row.includedItems || []).length }} 种商品</span>
+        <div class="package-card-actions">
+          <el-button plain size="small" :disabled="pendingIds.includes(row.id)" @click="openEdit(row)">{{ canEdit() ? '编辑' : '查看' }}</el-button>
+          <el-tooltip v-if="canEdit()" :content="manualVisible(row) ? '点击隐藏套餐' : '点击显示套餐'" placement="top">
+            <el-switch :model-value="manualVisible(row)" :loading="pendingIds.includes(row.id)" :disabled="pendingIds.includes(row.id)" :aria-label="'在小程序显示套餐：'+row.name" @change="toggleVisible(row)" />
+          </el-tooltip>
+          <el-button v-if="state.role==='super'" plain size="small" type="danger" :disabled="pendingIds.includes(row.id)" @click="requestDeletePackage(row)">删除</el-button>
+        </div>
+      </footer>
+    </article>
+    <div v-if="!tableRows.length" class="package-empty">
+      <strong>{{ summary.total ? '没有找到匹配的套餐' : '还没有旅拍套餐' }}</strong>
+      <p>{{ summary.total ? '试试其他关键词，或重置筛选条件。' : '选择照片、视频与影像周边，创建第一个组合套餐。' }}</p>
+      <el-button v-if="summary.total" plain @click="resetFilters">重置筛选</el-button>
+      <el-button v-else-if="canEdit()" type="primary" @click="openCreate">＋ 创建套餐</el-button>
+    </div>
+  </div>
+
+  <el-dialog v-model="dialogVisible" class="package-dialog" width="min(1020px, calc(100vw - 32px))" top="4vh" append-to-body :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" :before-close="beforeDialogClose" @closed="resetEditor">
+    <template #header>
+      <div class="package-dialog-title">
+        <h2>{{ !canEdit() ? '查看旅拍套餐' : (form && form.id ? '编辑旅拍套餐' : '创建旅拍套餐') }}</h2>
+        <p>选择城市 → 打卡点 → 多选商品并添加，可跨地点分批组合；影像周边独立多选。</p>
+      </div>
+    </template>
+    <el-form v-if="form" class="package-editor-form" :disabled="!canEdit() || saving" @submit.prevent>
+      <section class="package-form-section">
+        <div class="package-section-head"><h3>基本信息</h3><span>套餐名称、标签与说明</span></div>
+        <div class="package-basic-grid">
+          <label class="package-field"><span>套餐名称 <em>*</em></span><el-input v-model="form.name" maxlength="50" show-word-limit aria-label="套餐名称" placeholder="例如：西湖晨光 · 留影 + 航拍套餐" /></label>
+          <div class="package-display-card"><span>小程序端展示</span><div><el-switch v-model="form.isShow" aria-label="在小程序显示此套餐" /><span>{{ !form.isShow ? '隐藏（小程序不可见）' : (previewVisible(form) ? '显示（小程序可见）' : '已开启，关联内容隐藏时暂不展示') }}</span></div></div>
+        </div>
+        <div class="package-field">
+          <span>套餐标签 <small>最多 6 个，可自定义</small></span>
+          <div class="package-tags package-edit-tags">
+            <span v-for="(tag,index) in formTags" :key="tag" class="package-tag" :class="'tone-'+(index % 6)">{{ tag }}<button type="button" :disabled="!canEdit() || saving" :aria-label="'移除标签：'+tag" @click="removeTag(index)">×</button></span>
+            <span v-if="!formTags.length" class="package-muted">暂未添加标签</span>
+          </div>
+          <div class="package-tag-input"><el-input v-model="tagInput" maxlength="8" aria-label="自定义套餐标签" placeholder="输入自定义标签后按回车添加" @keydown.enter.prevent="addTag()" /><el-button plain :disabled="!tagInput.trim() || formTags.length>=6" @click="addTag()">添加</el-button></div>
+          <div class="package-tag-presets"><span>常用标签：</span><button v-for="tag in tagPresets" :key="tag" type="button" :class="{'is-used':formTags.includes(tag)}" :aria-pressed="formTags.includes(tag)" :disabled="!canEdit() || saving" @click="formTags.includes(tag) ? removeTag(formTags.indexOf(tag)) : addTag(tag)">{{ tag }}</button></div>
+        </div>
+        <label class="package-field"><span>套餐说明</span><el-input v-model="form.description" type="textarea" :rows="3" maxlength="1000" show-word-limit aria-label="套餐说明" placeholder="描述套餐包含的服务内容、拍摄时长、交付时间、注意事项等" /></label>
+      </section>
+
+      <section class="package-form-section">
+        <div class="package-section-head"><h3>套餐商品 <em>*</em></h3><span>一次多选，跨城市与打卡点分批添加</span></div>
+        <div v-if="canEdit()" class="package-add-panel">
+          <div class="package-add-line">
+            <div class="package-add-line-head"><span class="package-line-label">打卡点商品</span><span>照片留影 / 视频摄像</span></div>
+            <div class="package-picker-fields">
+              <div class="package-picker-field"><span><b>1</b> 选择城市</span><el-select v-model="picker.city" clearable filterable aria-label="第一步，选择商品所属城市" placeholder="全部城市" @change="changePickerCity"><el-option v-for="city in cityOptions" :key="city.value" :label="city.label" :value="city.value" /></el-select></div>
+              <div class="package-picker-field"><span><b>2</b> 选择打卡点</span><el-select v-model="picker.spotId" clearable filterable aria-label="第二步，选择商品所属打卡点" placeholder="选择打卡点" @change="changePickerSpot"><el-option v-for="spot in pickerSpots" :key="spot.id" :label="spot.name" :value="spot.id" /></el-select></div>
+              <div class="package-picker-field is-product-picker"><span><b>3</b> 选择一个或多个商品</span><el-select v-model="picker.productKeys" multiple clearable filterable collapse-tags collapse-tags-tooltip :max-collapse-tags="2" popper-class="package-product-popper" aria-label="第三步，多选照片或视频商品" :placeholder="!picker.spotId ? '请先选择打卡点' : (spotProductOptions.length ? '可同时选择照片、视频' : '暂无可选照片或视频')" :disabled="!spotProductOptions.length"><el-option v-for="product in spotProductOptions" :key="product.key" :value="product.key" :label="product.name+'（'+money(product.price)+'）'"><div class="package-product-option"><span class="package-option-type">{{ itemTypeLabel(product.type) }}</span><span class="package-option-name">{{ product.name }}</span><span class="package-option-price">{{ money(product.price) }}</span><span v-if="isProductIncluded(product.type,product.id)" class="package-option-included">已添加</span></div></el-option></el-select></div>
+              <el-button type="primary" :disabled="!picker.productKeys.length" @click="addSpotProducts">添加所选（{{ picker.productKeys.length }}）</el-button>
             </div>
           </div>
-        </template>
-      </el-table-column>
-      <el-table-column label="适用打卡点" min-width="150">
-        <template #default="{ row }"><span class="table-muted">{{ packageSpotNames(row) }}</span></template>
-      </el-table-column>
-      <el-table-column label="套餐内容" min-width="180">
-        <template #default="{ row }">
-          <div class="package-tag-list">
-            <el-tag v-for="tag in row.serviceTags.slice(0, 3)" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
-            <span v-if="!row.serviceTags.length" class="table-muted">未填写</span>
+          <div class="package-add-line is-peripheral">
+            <div class="package-add-line-head"><span class="package-line-label">通用影像周边</span><span>独立多选，不受城市与打卡点限制</span></div>
+            <div class="package-peripheral-fields">
+              <el-select v-model="picker.peripheralIds" multiple clearable filterable collapse-tags collapse-tags-tooltip :max-collapse-tags="2" popper-class="package-product-popper" aria-label="多选通用影像周边，可跨城市搭配" :placeholder="peripheralOptions.length ? '选择一个或多个影像周边' : '暂无可选影像周边'" :disabled="!peripheralOptions.length"><el-option v-for="product in peripheralOptions" :key="product.id" :label="product.name+'（'+money(product.price)+'）'" :value="product.id"><div class="package-product-option"><span class="package-option-name">{{ product.name }}</span><span class="package-option-price">{{ money(product.price) }}</span><span v-if="isProductIncluded('peripheral',product.id)" class="package-option-included">已添加</span></div></el-option></el-select>
+              <el-button plain type="primary" :disabled="!picker.peripheralIds.length" @click="addPeripheralProducts">添加所选（{{ picker.peripheralIds.length }}）</el-button>
+            </div>
           </div>
-        </template>
-      </el-table-column>
-      <el-table-column label="照片留影" min-width="130">
-        <template #default="{ row }"><span class="table-muted">{{ packageAlbumName(row) }}</span></template>
-      </el-table-column>
-      <el-table-column label="售价" width="128" align="right">
-        <template #default="{ row }">
-          <div class="package-price"><b>{{ priceText(row).price }}</b><del v-if="priceText(row).original">{{ priceText(row).original }}</del></div>
-        </template>
-      </el-table-column>
-      <el-table-column label="订金比例" width="110" align="right">
-        <template #default="{ row }"><span class="table-muted">{{ Number(row.depositRatio || 0) }}%</span></template>
-      </el-table-column>
-      <el-table-column label="小程序展示" width="116" align="center">
-        <template #default="{ row }"><el-tag :type="statusText(row) === '已上架' ? 'success' : 'info'" effect="light">{{ statusText(row) }}</el-tag></template>
-      </el-table-column>
-      <el-table-column label="首页主推" width="100" align="center">
-        <template #default="{ row }"><el-tag v-if="row.isMainPush" type="warning" effect="light">主推</el-tag><span v-else class="table-muted">-</span></template>
-      </el-table-column>
-      <el-table-column label="操作" width="228" fixed="right" align="right">
-        <template #default="{ row }">
-          <div class="package-table-row-actions">
-            <el-button link type="primary" v-if="canEdit()" @click="openEdit(row)">编辑</el-button>
-            <el-button link :type="statusText(row) === '已上架' ? 'warning' : 'success'" v-if="canEdit()" @click="toggleVisible(row)">{{ statusText(row) === '已上架' ? '下架' : '上架' }}</el-button>
-            <el-dropdown v-if="canEdit()" trigger="click" placement="bottom-end">
-              <el-button link>更多</el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item :class="row.isMainPush ? 'lxm-action--neutral' : 'lxm-action--primary'" @click="toggleMainPush(row)">{{ row.isMainPush ? '取消主推' : '设为主推' }}</el-dropdown-item>
-                  <el-dropdown-item class="lxm-action--danger" @click="requestDeletePackage(row)">删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
-        </template>
-      </el-table-column>
-    </el-table>
-  </div>
+        </div>
+        <p class="package-help">添加后可切换城市 / 打卡点继续添加，已选商品会保留。重复添加同一商品将累计数量。</p>
+        <div class="package-selection-head"><strong>已选商品</strong><span>共 <b>{{ selectedQuantity }}</b> 件 · 合计 <b>{{ money(form.originalPrice || 0) }}</b></span></div>
+        <div v-if="form.includedItems.length" class="package-table-wrap">
+          <table class="package-selected-table">
+            <thead><tr><th scope="col">类型</th><th scope="col">商品 / 来源</th><th scope="col" class="is-number">单价</th><th scope="col">数量</th><th scope="col" class="is-number">小计</th><th scope="col"><span class="package-sr-only">操作</span></th></tr></thead>
+            <tbody>
+              <tr v-for="(item,index) in form.includedItems" :key="item.type+':'+item.productId+':'+index">
+                <td class="package-cell-type"><span class="package-type" :class="'type-'+item.type">{{ itemTypeLabel(item.type) }}</span></td>
+                <td class="package-cell-product"><strong>{{ item.name || '未选择商品' }}</strong><small :class="{'is-peripheral':item.type==='peripheral'}">{{ itemLocation(item) }}</small></td>
+                <td class="is-number package-cell-price" data-label="单价">{{ money(item.price || 0) }}</td>
+                <td class="package-cell-quantity"><el-input-number v-model="item.quantity" :min="1" :precision="0" controls-position="right" :aria-label="item.name+'的数量'" @change="setItemQuantity(item)" /></td>
+                <td class="is-number package-cell-subtotal" data-label="小计">{{ money((item.price || 0)*(item.quantity || 0)) }}</td>
+                <td class="package-cell-remove"><el-button v-if="canEdit()" link type="danger" :aria-label="'移除商品：'+item.name" @click="removeIncludedItem(index)">移除</el-button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="package-selection-empty"><strong>还没有添加商品</strong><span>在上方多选商品并点击「添加所选」，可跨城市与打卡点继续添加</span></div>
+        <p class="package-help">适用打卡点由组合商品自动生成：{{ formSpotNames() }}</p>
+      </section>
 
-  <el-dialog v-model="dialogVisible" :close-on-click-modal="false" :close-on-press-escape="!saving" :title="form && form.id ? '编辑旅拍套餐' : '新增旅拍套餐'" width="680px" class="package-simple-dialog" @close="closeDialog">
-    <div v-if="form" class="package-simple-form">
-      <div class="package-form-tip">这些字段会直接影响小程序首页、点位页、套餐详情和预约页。</div>
-      <div class="package-form-grid">
-        <label class="package-form-field package-form-field--wide"><span>套餐名称</span><el-input v-model="form.name" maxlength="50" show-word-limit placeholder="例如：长沙夜景双人旅拍套餐" /></label>
-        <label class="package-form-field"><span>售价（元）</span><el-input-number v-model="form.price" :min="0" :step="50" controls-position="right" /></label>
-        <label class="package-form-field"><span>原价（元）</span><el-input-number v-model="form.originalPrice" :min="0" :step="50" controls-position="right" /></label>
-        <label class="package-form-field"><span>订金比例（%）</span><el-input-number v-model="form.depositRatio" :min="0" :max="100" :step="5" controls-position="right" /></label>
-        <label class="package-form-field package-form-field--wide"><span>封面图 <el-button type="primary" link @click="uploadPackageCover">上传图片</el-button></span><el-input v-model="form.cover" @change="validateMediaUrl(form,'cover')" placeholder="填写可访问的图片地址，留空使用默认占位图" /></label>
-        <label class="package-form-field package-form-field--wide"><span>适用打卡点</span><el-select v-model="form.spotIds" multiple filterable placeholder="不选择表示全城通用"><el-option v-for="spot in (data.spots || []).filter(Boolean)" :key="spot.id || spot._id" :label="spot.name" :value="spot.id || spot._id" /></el-select></label>
-        <label class="package-form-field"><span>拍摄风格</span><el-select v-model="form.seriesId" clearable filterable placeholder="可选"><el-option v-for="series in (data.series || []).filter(Boolean)" :key="series.id || series._id" :label="series.name" :value="series.id || series._id" /></el-select></label>
-        <label class="package-form-field"><span>关联照片留影</span><el-select v-model="form.albumId" clearable filterable placeholder="可选"><el-option v-for="album in (data.albums || []).filter(Boolean)" :key="album.id || album._id" :label="album.name" :value="album.id || album._id" /></el-select></label>
-        <label class="package-form-field package-form-field--wide"><span>服务内容</span><el-input v-model="form.serviceTagsText" placeholder="用顿号、逗号或换行分隔，例如：拍摄60分钟、精修12张、1套服装" /></label>
-        <label class="package-form-field package-form-field--wide"><span>套餐说明</span><el-input v-model="form.description" type="textarea" :rows="3" maxlength="160" show-word-limit placeholder="小程序套餐详情页展示的说明" /></label>
-      </div>
-      <div class="package-form-switches">
-        <el-switch v-model="form.isShow" active-text="小程序上架展示" inactive-text="暂不展示" />
-        <el-switch v-model="form.isMainPush" active-text="首页主推" inactive-text="普通套餐" />
-      </div>
-    </div>
+      <section class="package-form-section">
+        <div class="package-section-head"><h3>套餐价格</h3><span>{{ form.priceManuallySet ? '已自定义售价' : '售价随商品合计自动更新' }}</span></div>
+        <div class="package-price-fields">
+          <label class="package-field"><span>套餐售价（元） <em>*</em></span><el-input-number v-model="form.price" :min="0" :precision="2" controls-position="right" aria-label="套餐售价，元" @change="setManualPrice" /></label>
+          <label class="package-field"><span>订金比例（%）</span><el-input-number v-model="form.depositRatio" :min="0" :max="100" :step="5" :precision="0" controls-position="right" aria-label="订金比例，百分比" /></label>
+          <div class="package-saving"><span>组合优惠</span><strong>{{ money(packageSaving(form)) }}</strong></div>
+        </div>
+        <el-button v-if="canEdit()" link type="primary" @click="recalculatePrice(true)">售价恢复商品合计</el-button>
+      </section>
+
+      <details class="package-extra-section">
+        <summary>封面与拍摄说明 <span>可选设置</span></summary>
+        <div class="package-extra-body">
+          <div class="package-cover-field"><label class="package-field"><span>套餐封面（可选）</span><el-input v-model="form.cover" aria-label="套餐封面地址" @change="validateMediaUrl(form,'cover')" placeholder="留空时使用组合商品首图" /></label><el-button v-if="canEdit()" plain @click="uploadPackageCover">上传封面</el-button></div>
+          <img v-if="cardCover(form)" class="package-cover-preview" :src="cardCover(form)" alt="套餐封面预览" />
+          <label class="package-field"><span>拍摄说明（可选）</span><el-input v-model="form.shootingNotes" type="textarea" :rows="3" aria-label="拍摄说明" placeholder="填写预约与拍摄注意事项" /></label>
+        </div>
+      </details>
+      <p class="package-help package-save-note">所有修改保存后生效。组合商品或关联打卡点隐藏时，套餐也会随之隐藏。</p>
+    </el-form>
     <template #footer>
-      <el-button :disabled="saving" @click="closeDialog">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="saveForm">保存</el-button>
+      <div class="package-dialog-footer"><el-button :disabled="saving" @click="closeDialog">{{ canEdit() ? '取消' : '关闭' }}</el-button><el-button v-if="canEdit()" type="primary" :loading="saving" @click="saveForm">保存套餐</el-button></div>
     </template>
   </el-dialog>
 </div>

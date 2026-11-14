@@ -1,4 +1,4 @@
-// 接口地址配置。当前为纯前端演示版，正式接入云开发/服务器 API 时只改这里。
+// 同源真实后台接口地址配置。
 const API_CONFIG = {
   baseURL: "",
   endpoints: {

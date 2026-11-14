@@ -1,14 +1,15 @@
-// 内容页数据源切换：演示数据或已登录的真实后台。
+// 内容页只使用已登录的真实后台，旧数据源开关不再生效。
 // 请求经过 cloud.js 的统一 HTTP 客户端，自动带 Bearer 并在 401 时失效会话。
 window.LXM_API = (() => {
   const KEY = "lxm_remote_on";
   const base = String((window.LXM_API_CONFIG && window.LXM_API_CONFIG.base) || "/api").replace(/\/$/, "");
 
   function remoteOn() {
-    try { return localStorage.getItem(KEY) === "1"; } catch (e) { return false; }
+    return true;
   }
-  function setRemote(on) {
-    try { localStorage.setItem(KEY, on ? "1" : "0"); } catch (e) {}
+  function setRemote() {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    return true;
   }
 
   function cloud() {
@@ -17,20 +18,17 @@ window.LXM_API = (() => {
   }
 
   async function loadCollection(name) {
-    if (!remoteOn()) return null;
     if (!window.LXM_AUTH?.hasSession()) throw new Error("需要登录后读取管理数据");
     return cloud().getColl(name);
   }
 
   async function saveDoc(name, doc) {
-    if (!remoteOn()) return { skipped: true };
     if (!window.LXM_AUTH?.hasSession()) throw new Error("需要登录后写入管理数据");
     const id = doc._id || doc.id;
     return id ? cloud().update(name, id, doc) : cloud().create(name, doc);
   }
 
   async function deleteDoc(name, id) {
-    if (!remoteOn()) return { skipped: true };
     if (!window.LXM_AUTH?.hasSession()) throw new Error("需要登录后删除管理数据");
     return cloud().remove(name, id);
   }

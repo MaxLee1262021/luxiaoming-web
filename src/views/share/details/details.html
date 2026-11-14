@@ -1,0 +1,30 @@
+<div class="merchant-share">
+  <header class="share-heading"><div><p class="share-eyebrow">商家分成管理</p><h2>分成明细</h2><p>每行一笔已生成分成，订单信息直接展示；退款以独立负向流水冲抵。</p></div><el-button :loading="shareState.exporting" :disabled="!shareCanView || shareState.loading.details" @click="exportShareDetails">导出当前筛选CSV</el-button></header>
+  <el-alert v-if="!shareCanView" title="当前账号没有分成明细查看权限" type="warning" :closable="false" show-icon />
+  <template v-else>
+    <div class="share-metrics"><div><span>正向合计</span><strong>{{ shareMoney(shareState.detailSum.positiveAmount) }}</strong></div><div><span>退款冲抵</span><strong class="share-negative">{{ shareMoney(shareState.detailSum.reverseAmount) }}</strong></div><div><span>分成净额</span><strong>{{ shareMoney(shareState.detailSum.netAmount) }}</strong></div><div><span>明细笔数</span><strong>{{ shareCount(shareState.detailTotal) }}</strong><small>当前筛选全部结果</small></div></div>
+    <section class="share-panel">
+      <form class="share-filters" @submit.prevent="loadShareDetails(true)">
+        <el-select v-model="shareState.detailQuery.merchantId" clearable filterable placeholder="全部商家" aria-label="筛选商家" @change="loadShareDetails(true)"><el-option v-for="merchant in shareState.merchants" :key="shareId(merchant)" :value="shareId(merchant)" :label="merchant.merchantName || merchant.name" /></el-select>
+        <el-select v-model="shareState.detailQuery.splitType" clearable placeholder="全部订单类型" aria-label="订单类型" @change="loadShareDetails(true)"><el-option label="用户自主下单" value="T1" /><el-option label="客服推荐下单" value="T2" /></el-select>
+        <el-date-picker v-model="shareState.detailQuery.period" type="month" :clearable="false" value-format="YYYY-MM" format="YYYY年MM月" placeholder="选择统计月份" aria-label="统计月份" @change="loadShareDetails(true)" />
+        <el-button native-type="submit" type="primary" :loading="shareState.loading.details">查询</el-button><el-button @click="loadShareDetails()">刷新</el-button>
+      </form>
+      <div v-if="shareState.errors.details" class="share-error" role="alert">{{ shareState.errors.details }} <el-button link @click="loadShareDetails()">重试</el-button></div>
+      <el-table v-loading="shareState.loading.details" :data="shareState.details" stripe empty-text="当前筛选没有分成明细" :row-class-name="({row}) => shareReverse(row) ? 'share-reverse-row' : ''">
+        <el-table-column prop="detailNo" label="分成明细号" min-width="175" />
+        <el-table-column prop="userLabel" label="下单用户" min-width="120" />
+        <el-table-column prop="goodsName" label="商品名称" min-width="200" show-overflow-tooltip />
+        <el-table-column label="实付金额" width="125" align="right"><template #default="{row}">{{ shareMoney(row.payAmount) }}</template></el-table-column>
+        <el-table-column label="支付时间" width="180"><template #default="{row}">{{ shareTime(row.payTime) }}</template></el-table-column>
+        <el-table-column prop="orderNo" label="订单号" min-width="185" />
+        <el-table-column label="商家" min-width="170"><template #default="{row}">{{ row.merchantName || '平台' }}</template></el-table-column>
+        <el-table-column label="类型" width="175"><template #default="{row}"><span>{{ shareType(row) }}</span><el-tag v-if="shareReverse(row)" type="danger" size="small" class="share-reverse-tag">冲抵</el-tag></template></el-table-column>
+        <el-table-column label="分成比例" width="110" align="right"><template #default="{row}">{{ sharePercent(row.ratio) }}</template></el-table-column>
+        <el-table-column label="分成金额" width="135" align="right"><template #default="{row}"><strong :class="{'share-negative': shareReverse(row)}">{{ shareMoney(row.amount) }}</strong></template></el-table-column>
+      </el-table>
+      <div class="share-pager"><el-pagination background layout="total, sizes, prev, pager, next" :total="shareState.detailTotal" v-model:current-page="shareState.detailQuery.page" v-model:page-size="shareState.detailQuery.size" :page-sizes="[20, 50, 100]" @current-change="loadShareDetails()" @size-change="loadShareDetails(true)" /></div>
+    </section>
+    <p class="share-footnote">导出涵盖当前筛选的全部明细。分成金额直接取已落库结果，改配置不重算。</p>
+  </template>
+</div>

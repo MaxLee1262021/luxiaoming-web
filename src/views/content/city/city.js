@@ -85,7 +85,7 @@ window.LXM_PAGES.register({
       source.visible = next;
       const saved = typeof ctx.persistContentMutation === "function"
         ? await ctx.persistContentMutation("cities", source, previous)
-        : true;
+        : false;
       if (!saved) {
         Object.assign(source, previous);
         return;

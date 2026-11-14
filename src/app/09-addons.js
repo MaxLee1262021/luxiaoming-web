@@ -24,7 +24,7 @@
 function addonProducts() {
   const packages = data.packages.filter((p) => p.status !== "下架" && p.isShow !== false).map((p) => ({ ...p, type: p.type === "video" ? "video" : "package", key: `${p.type === "video" ? "video" : "package"}-${p.id}`, price: p.specialPrice || p.price, images: [p.cover] }));
   const albums = data.albums.map((a) => ({ ...a, type: "album", key: `album-${a.id}`, images: samplesByAlbum(a.id).map((s) => s.url), price: a.price }));
-  const servicesList = data.addonServices.filter((s) => s.enabled).map((s) => ({ ...s, type: "service", key: `service-${s.id}`, cover: LXM_SVG(s.name, "通用加购服务") }));
+  const servicesList = data.addonServices.filter((s) => s.enabled).map((s) => ({ ...s, type: "service", key: `service-${s.id}`, cover: s.cover || s.image || "" }));
   const peripherals = data.peripherals.filter((p) => p.enabled).map((p) => ({ ...p, type: "peripheral", key: `peripheral-${p.id}`, images: [p.cover] }));
   return [...packages, ...albums, ...servicesList, ...peripherals];
 }
@@ -67,6 +67,7 @@ function openAddonDialog() {
   const order = state.currentOrder;
   if (!order) return;
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单售后处理中，暂不能调整加购商品");
+  if (!ctx.canManageOrderAddons(order)) return ElMessage.warning("仅可为可编辑的手动录入订单调整商品");
   state.selectedAddonKeys = (order.addons || []).map((a) => a.key || `${a.type}-${a.id}`);
   const first = order.products[0] || {};
   state.addonOpen.common = true;
@@ -85,6 +86,7 @@ function toggleAddon(item) {
 async function replaceOrderProduct(item) {
   const order = state.currentOrder;
   if (!order || isOrderAfterSaleLocked(order)) return;
+  if (!ctx.canManageOrderAddons(order)) return ElMessage.warning("仅可为可编辑的手动录入订单调整商品");
   const original = JSON.parse(JSON.stringify(order));
   const replacement = { id: item.id, type: item.type || "package", name: item.name, price: Number(item.price || 0), spotId: item.spotId, seriesId: item.seriesId, albumId: item.albumId };
   const current = (order.products || []).find((row) => !row.key) || {};
@@ -101,6 +103,7 @@ async function replaceOrderProduct(item) {
 async function giftOrderAddon(item) {
   const order = state.currentOrder;
   if (!order || isOrderAfterSaleLocked(order)) return;
+  if (!ctx.canManageOrderAddons(order)) return ElMessage.warning("仅可为可编辑的手动录入订单调整商品");
   const original = JSON.parse(JSON.stringify(order));
   const gift = { id: item.id, key: `gift-${item.type}-${item.id}-${Date.now().toString(36)}`, type: item.type || "service", name: item.name, price: 0, gift: true, spotId: item.spotId, seriesId: item.seriesId, albumId: item.albumId };
   const reason = `赠送商品：${item.name || item.id}`;
@@ -115,6 +118,7 @@ async function giftOrderAddon(item) {
 async function confirmAddon() {
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能调整加购商品");
   const order = state.currentOrder;
+  if (!order || !ctx.canManageOrderAddons(order)) return ElMessage.warning("仅可为可编辑的手动录入订单调整商品");
   const original = JSON.parse(JSON.stringify(order));
   const previousTotal = Number(order.totalAmount || 0);
   const previousProductNames = (order.products || []).map((item) => productName(item)).filter(Boolean);
@@ -144,6 +148,7 @@ async function removeAddon(item) {
   if (!state.currentOrder || !item?.key) return;
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能取消加购商品");
   const order = state.currentOrder;
+  if (!ctx.canManageOrderAddons(order)) return ElMessage.warning("仅可为可编辑的手动录入订单调整商品");
   const original = JSON.parse(JSON.stringify(order));
   const removedName = productName(item);
   order.addons = (order.addons || []).filter((p) => (p.key || `${p.type}-${p.id}`) !== item.key);

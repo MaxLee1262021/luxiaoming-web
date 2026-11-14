@@ -6,7 +6,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const root = path.resolve(__dirname, "../..");
 function fixture(options = {}) {
-  const requests = [], sent = [], messages = [];
+  const requests = [], sent = [], messages = [], inputs = [];
   let completeCount = 0;
   class FormData { constructor() { this.values = []; } append(...entry) { this.values.push(entry); } }
   class XHR {
@@ -21,14 +21,17 @@ function fixture(options = {}) {
     }
   }
   const window = {
-    Vue: { reactive: (value) => value },
+    Vue: { reactive: (value) => options.onStatusChange && !Array.isArray(value) ? new Proxy(value, { set(target, key, next) { target[key] = next; if (key === "status") options.onStatusChange(next); return true; } }) : value },
     location: { href: "https://admin.example.test/" },
     open() { throw new Error("Preview must not open a download window"); },
     ElementPlus: { ElMessage: { error: (text) => messages.push(text), warning: (text) => messages.push(text) } },
     LXM_API_CONFIG: { base: "/api" },
     LXM_HTTP: { async request(url, init) {
       requests.push({ url, ...init, body: JSON.parse(init.body) });
-      if (url.endsWith("upload-intent")) return { ok: true, json: async () => ({ ok: true, data: { fileId: "f1", uploadUrl: "https://example.oss-cn-hangzhou.aliyuncs.com", fields: { key: "private/orders/f1.png", policy: "short-lived" } } }) };
+      if (url.endsWith("upload-intent")) {
+        if (options.beforeIntent) await options.beforeIntent();
+        return { ok: true, json: async () => ({ ok: true, data: { fileId: "f1", uploadUrl: "https://example.oss-cn-hangzhou.aliyuncs.com", fields: { key: "private/orders/f1.png", policy: "short-lived" } } }) };
+      }
       if (url.endsWith("complete")) {
         completeCount++;
         if (options.failFirstComplete && completeCount === 1) return { ok: false, json: async () => ({ error: "暂时不可用" }) };
@@ -38,8 +41,14 @@ function fixture(options = {}) {
       throw new Error("Unexpected endpoint");
     } }
   };
-  vm.runInNewContext(fs.readFileSync(path.join(root, "src/api/upload.js"), "utf8"), { window, URL, Map, Set, XMLHttpRequest: XHR, FormData });
-  return { upload: window.LXM_UPLOAD, requests, sent, messages };
+  const document = { createElement(tag) {
+    assert.equal(tag, "input");
+    const input = { files: [], attributes: {}, setAttribute(name, value) { this.attributes[name] = value; }, click() { this.clicked = true; } };
+    inputs.push(input);
+    return input;
+  } };
+  vm.runInNewContext(fs.readFileSync(path.join(root, "src/api/upload.js"), "utf8"), { window, document, URL, Map, Set, XMLHttpRequest: XHR, FormData });
+  return { upload: window.LXM_UPLOAD, requests, sent, messages, inputs };
 }
 const png = { name: "photo.png", type: "image/png", size: 100 };
 test("direct upload sends business metadata only to API; updates model after completion", async () => {
@@ -75,12 +84,87 @@ test("business attachment failure retries binding without duplicate object uploa
 });
 test("file type and size restrictions reject before any network request", async () => {
   const f = fixture();
-  for (const file of [{ ...png, size: 21 * 1024 * 1024 }, { ...png, type: "image/svg+xml" }, { ...png, size: 0 }]) await f.upload.upload(file, { purpose: "content" });
+  for (const file of [{ ...png, type: "image/svg+xml" }, { ...png, size: 0 }]) await f.upload.upload(file, { purpose: "content" });
   assert.equal(f.requests.length, 0);
   assert.throws(() => f.upload.validate({ ...png, size: 6 * 1024 * 1024 }, { purpose: "avatar" }));
+  assert.doesNotThrow(() => f.upload.validate({ ...png, size: 30 * 1024 * 1024 }, { purpose: "content" }));
+  assert.doesNotThrow(() => f.upload.validate({ name: "video.mp4", type: "video/mp4", size: 1024 * 1024 * 1024 }, { purpose: "content" }));
   assert.doesNotThrow(() => f.upload.validate({ ...png, size: 49 * 1024 * 1024 }, { purpose: "order-delivery" }));
   assert.equal(f.upload.persistable({ images: ["blob:temporary"] }), false);
   assert.equal(f.upload.persistable({ cover: "https://example.com/photo.jpg" }), true);
+});
+test("folder picker uploads supported nested photos and reports skipped files", async () => {
+  const f = fixture();
+  const received = [];
+  f.upload.pick({ purpose: "content", collection: "albums", imagesOnly: true, directory: true, onUploaded(file) { received.push(file); } });
+  const input = f.inputs[0];
+  assert.equal(input.clicked, true);
+  assert.equal(input.multiple, true);
+  assert.equal(input.webkitdirectory, true);
+  assert.ok("webkitdirectory" in input.attributes && "directory" in input.attributes);
+  input.files = [
+    { ...png, name: "first.png", webkitRelativePath: "相册/first.png" },
+    { name: "second.jpg", type: "image/jpeg", size: 200, webkitRelativePath: "相册/子目录/second.jpg" },
+    { name: "readme.txt", type: "text/plain", size: 20 },
+    { name: "clip.mp4", type: "video/mp4", size: 200 },
+    { ...png, name: "empty.png", size: 0 }
+  ];
+  await input.onchange();
+  assert.equal(received.length, 2);
+  assert.deepEqual(f.requests.filter((item) => item.url.endsWith("upload-intent")).map((item) => item.body.fileName), ["first.png", "second.jpg"]);
+  assert.ok(f.messages.some((message) => /跳过 2 个/.test(message)));
+  assert.ok(f.messages.some((message) => /文件不能为空/.test(message)));
+  assert.equal(f.upload.ready(), true);
+});
+test("empty or unsupported folders produce no uploads", async () => {
+  for (const files of [[], [{ name: "readme.txt", type: "text/plain", size: 10 }]]) {
+    const f = fixture();
+    f.upload.pick({ purpose: "content", imagesOnly: true, directory: true });
+    f.inputs[0].files = files;
+    await f.inputs[0].onchange();
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.upload.jobs.length, 0);
+    assert.match(f.messages[0], /文件夹中没有可上传/);
+  }
+});
+test("whole multi-file selection keeps save guard active between files and rejects concurrent picks", async () => {
+  let release, f;
+  const busyAfterCompletion = [];
+  let intents = 0;
+  f = fixture({
+    beforeIntent: async () => { if (++intents === 1) await new Promise((resolve) => { release = resolve; }); },
+    onStatusChange(status) { if (status === "done") busyAfterCompletion.push(f.upload.busy()); }
+  });
+  f.upload.pick({ purpose: "content", imagesOnly: true, multiple: true });
+  f.upload.pick({ purpose: "content", imagesOnly: true, multiple: true });
+  assert.equal(f.inputs[0].multiple, true);
+  assert.equal(f.inputs[0].webkitdirectory, undefined);
+  f.inputs[0].files = [png, { ...png, name: "two.png" }, { ...png, name: "three.png" }];
+  const batch = f.inputs[0].onchange();
+  assert.deepEqual(Array.from(f.upload.jobs, (job) => job.status), ["uploading", "queued", "queued"]);
+  assert.equal(f.upload.ready(), false);
+  await f.upload.upload(png, { purpose: "content" });
+  f.inputs[1].files = [png];
+  await f.inputs[1].onchange();
+  f.upload.pick({ purpose: "content", multiple: true });
+  assert.equal(f.inputs.length, 2);
+  assert.equal(f.upload.jobs.length, 3);
+  release();
+  await batch;
+  assert.deepEqual(busyAfterCompletion, [true, true, false]);
+  assert.equal(f.upload.ready(), true);
+  assert.equal(f.sent.length, 3);
+});
+test("a failed batch item leaves its retry available while following photos still upload", async () => {
+  const f = fixture({ failFirstUpload: true });
+  f.upload.pick({ purpose: "content", imagesOnly: true, multiple: true });
+  f.inputs[0].files = [png, { ...png, name: "two.png" }];
+  await f.inputs[0].onchange();
+  assert.deepEqual(Array.from(f.upload.jobs, (job) => job.status), ["failed", "done"]);
+  assert.equal(f.upload.ready(), false);
+  await f.upload.retry(f.upload.jobs[0].id);
+  assert.equal(f.upload.ready(), true);
+  assert.equal(f.sent.length, 3);
 });
 test("submission guard suppresses duplicate concurrent requests", async () => {
   const f = fixture(); let calls = 0, finish;
@@ -101,21 +185,23 @@ test("private preview embeds signed image/video and removes URL when closed", as
     assert.equal(f.upload.preview.url, ""); assert.equal(f.upload.preview.open, false);
   }
 });
-test("album and video editors expose first loaded item from their current list sources", () => {
+test("album and video editors expose first loaded server item from their current list sources", async () => {
   for (const [file, rowsKey, selectedKey] of [["album/album.js", "albumRows", "selectedAlbum"], ["videoSingle/videoSingle.js", "videoSingleRows", "selectedVideoSingle"]]) {
     let definition;
     const Vue = {
       ref: (value) => ({ value }), computed: (fn) => ({ get value() { return fn(); } }), unref: (value) => value?.value ?? value,
-      onMounted: (callback) => callback(), onBeforeUnmount() {}, watch() {}
+      onMounted() {}, onBeforeUnmount() {}, watch() {}
     };
     const window = { Vue, LXM_PAGES: { register: (value) => { definition = value; } } };
-    vm.runInNewContext(fs.readFileSync(path.join(root, "src/views/content", file), "utf8"), { window, LXM_API: { remoteOn: () => false } });
     const rows = [{ id: "loaded-record" }];
+    vm.runInNewContext(fs.readFileSync(path.join(root, "src/views/content", file), "utf8"), { window, LXM_API: { remoteOn: () => true, setRemote() {}, async loadCollection() { return rows; } } });
     const result = definition.setup({
       [rowsKey]: Vue.computed(() => rows),
-      state: { authSource: "demo" }, data: { packages: rows },
-      filterVideoSingleRows: (packages) => packages, isServerConnected: () => false
+      state: { authSource: "server" }, data: { packages: rows, albums: rows },
+      albumPhotoUrls: (row) => row.sampleUrls || (row.cover ? [row.cover] : []),
+      filterVideoSingleRows: (packages) => packages, isServerConnected: () => true
     });
+    if (file.startsWith("videoSingle")) await result.refreshFromServer();
     assert.equal(result[selectedKey].value.id, "loaded-record");
   }
 });
@@ -178,6 +264,21 @@ test("customer service publishes selected draft IDs; uploaded media updates capt
   await f.picks[0].onUploaded({ url: "/api/media/f3" });
   assert.equal(original.cover, "/api/media/f3"); assert.equal(other.cover, "keep");
 });
+test("album content folder uploads forward picker options and append to the captured album", async () => {
+  const f = businessFixture("super");
+  const original = { id: "album-one", sampleUrls: [], cover: "" }, other = { id: "album-two", sampleUrls: [] };
+  f.ctx.addAlbumPhoto = (target, url) => { target.sampleUrls.push(url); if (!target.cover) target.cover = url; };
+  f.ui.contentFile(original, "sampleUrls", "albums", false, true, true);
+  assert.equal(f.picks[0].directory, true);
+  assert.equal(f.picks[0].multiple, true);
+  assert.equal(f.picks[0].imagesOnly, true);
+  f.ctx.state.editContent = other;
+  await f.picks[0].onUploaded({ url: "/api/media/photo-one" });
+  await f.picks[0].onUploaded({ url: "/api/media/photo-two" });
+  assert.deepEqual(original.sampleUrls, ["/api/media/photo-one", "/api/media/photo-two"]);
+  assert.deepEqual(other.sampleUrls, []);
+  assert.equal(original.cover, "/api/media/photo-one");
+});
 test("financial evidence is bound to an existing order and persisted evidence cannot be removed", async () => {
   const f = businessFixture("finance");
   f.ctx.state.adjustmentForm = { orderNo: "N1" };
@@ -196,8 +297,10 @@ test("changed Vue templates compile with the shipped Vue runtime", () => {
   vm.runInContext(fs.readFileSync(path.join(root, "src/layout/app-shell.js"), "utf8"), sandbox);
   const templates = [sandbox.window.LXM_VIEWS.app, ...[
     "src/views/content/package/package.html", "src/views/content/videoSingle/videoSingle.html",
+    "src/views/content/spot/spot.html", "src/views/content/album/album.html", "src/views/content/peripheral/peripheral.html", "src/views/content/tag/tag.html", "src/views/operationConfig/guide/guide.html",
     "src/views/finance/reconciliation/reconciliation.html", "src/views/operationConfig/mini-decor/mini-decor.html", "src/views/orders/task/task.html", "src/views/content/photo/photo.html",
-    "src/views/orders/order-list/order-list.html", "src/views/orders/dispatch/dispatch.html", "src/views/orders/after-sale/after-sale.html", "src/views/operation/dashboard/operation-dashboard.html"
+    "src/views/orders/order-list/order-list.html", "src/views/orders/dispatch/dispatch.html", "src/views/orders/after-sale/after-sale.html", "src/views/operation/dashboard/operation-dashboard.html",
+    "src/views/operation/trace/operation-trace.html", "src/views/operation/performance/operation-performance.html", "src/views/system/permissions/permissions.html"
   ].map((name) => fs.readFileSync(path.join(root, name), "utf8"))];
   const entities = { "&lt;": "<", "&gt;": ">", "&amp;": "&", "&quot;": '"', "&#39;": "'" };
   for (const template of templates) assert.equal(typeof sandbox.Vue.compile(template, {

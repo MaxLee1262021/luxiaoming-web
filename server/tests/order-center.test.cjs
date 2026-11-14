@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const createSource = require("../lib/dbSource.cjs");
+const createSource = require("./fixtures/jsonSource.cjs");
 const rpc = require("../lib/rpc.cjs");
 const { finalizePaidBooking } = require("../lib/bookingRequests.cjs");
 

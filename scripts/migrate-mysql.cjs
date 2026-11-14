@@ -16,12 +16,11 @@ const mysqlDescriptions = require("../server/lib/mysqlDescriptions.cjs");
 
 const root = path.resolve(__dirname, "..");
 const schemaFile = path.join(root, "server", "migrations", "001_authz.sql");
-const defaultJsonFile = path.join(root, "server", "data", "db.json");
 const businessKeys = schema.ALL_KEYS;
 const accountKeys = new Set(["staff", "shops", "distributors", "agents"]);
 const args = new Set(process.argv.slice(2));
 const mode = args.has("--rollback") ? "rollback" : args.has("--apply") ? "apply" : "dry-run";
-const importFixture = args.has("--import-fixture");
+const importJson = args.has("--import-json");
 const env = (name, fallback = "") => String(process.env[name] ?? fallback).trim();
 function metadataValue(row, name) {
   if (!row || typeof row !== "object") return undefined;
@@ -31,18 +30,18 @@ function metadataValue(row, name) {
 function usage() {
   process.stdout.write([
     "Usage: node scripts/migrate-mysql.cjs [--dry-run|--apply|--rollback] [--confirm]",
-    "       add --import-fixture only when intentionally seeding the demo fixture",
+    "       --import-json requires JSON_FILE pointing to an explicitly selected real legacy export",
     "Environment: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME, JSON_FILE",
     "--dry-run is the default. --rollback requires --confirm and only drops named lxm_* tables."
   ].join("\n") + "\n");
 }
 
 function config() {
-  const database = env("DB_NAME", env("MYSQL_DATABASE", "luxiaoming_admin"));
+  const database = env("DB_NAME", env("MYSQL_DATABASE"));
   return {
-    host: env("DB_HOST", env("MYSQL_HOST", "127.0.0.1")),
+    host: env("DB_HOST", env("MYSQL_HOST")),
     port: Number(env("DB_PORT", env("MYSQL_PORT", "3306"))),
-    user: env("DB_USER", env("MYSQL_USER", "root")),
+    user: env("DB_USER", env("MYSQL_USER")),
     password: process.env.DB_PASSWORD ?? process.env.MYSQL_PASSWORD ?? "",
     database,
     connectTimeout: 5000,
@@ -58,7 +57,7 @@ function readJson(file) {
     for (const key of Object.keys(value.collections)) if (!businessKeys.includes(key)) throw new Error(`unknown collection: ${key}`);
     return value;
   } catch (error) {
-    if (error && error.code === "ENOENT") return { collections: {} };
+    if (error && error.code === "ENOENT") throw Object.assign(new Error("显式指定的历史 JSON 导出文件不存在"), { code: "DATA_SOURCE_INVALID" });
     throw Object.assign(new Error("JSON 数据文件无效"), { code: "DATA_SOURCE_INVALID" });
   }
 }
@@ -845,13 +844,15 @@ async function verifyNormalizedSchema(conn) {
 
 async function main() {
   if (args.has("--help") || args.has("-h")) return usage();
-  const jsonFile = path.resolve(env("JSON_FILE", defaultJsonFile));
-  const data = importFixture || mode === "dry-run" ? readJson(jsonFile) : { collections: {} };
-  const configData = importFixture ? readStaticConfig() : {};
+  if (args.has("--import-fixture")) throw new Error("演示种子导入已移除；真实历史数据迁移请显式使用 --import-json 和 JSON_FILE");
+  if (importJson && !env("JSON_FILE")) throw new Error("--import-json 必须显式设置真实历史导出文件 JSON_FILE");
+  const jsonFile = importJson ? path.resolve(env("JSON_FILE")) : null;
+  const data = importJson ? readJson(jsonFile) : { collections: {} };
+  const configData = importJson ? readStaticConfig() : {};
   const counts = Object.fromEntries(businessKeys.map((key) => [key, sourceRows(data, key).length]));
   const accountCount = [...accountKeys].reduce((sum, key) => sum + sourceRows(data, key, true).filter((row) => row.doc.account).length, 0);
   if (mode === "dry-run") {
-    process.stdout.write(JSON.stringify({ mode, database: env("DB_NAME", "luxiaoming_admin"), jsonFile, importFixture, collections: counts, accounts: accountCount, schemaVersion: 2, schemaTables: typeof schema.schemaStatements === "function" ? schema.schemaStatements().length : 0, relationTables: Object.keys(schema.RELATIONS || {}).length, normalized: true }) + "\n");
+    process.stdout.write(JSON.stringify({ mode, database: env("DB_NAME"), jsonFile, importJson, collections: counts, accounts: accountCount, schemaVersion: 2, schemaTables: typeof schema.schemaStatements === "function" ? schema.schemaStatements().length : 0, relationTables: Object.keys(schema.RELATIONS || {}).length, normalized: true }) + "\n");
     return;
   }
   if (mode === "rollback" && !args.has("--confirm")) throw new Error("回滚会删除项目 lxm_* 表，请同时传 --confirm");
@@ -878,8 +879,8 @@ async function main() {
     await conn.beginTransaction();
     try {
       let migrated = 0;
-      let authorization = { skipped: true, reason: "fixture_import_disabled" };
-      if (importFixture) {
+      let authorization = { skipped: true, reason: "json_import_disabled" };
+      if (importJson) {
         for (const key of businessKeys) for (const row of sourceRows(data, key)) { await writeNormalized(conn, key, row.id, row.doc, true); migrated += 1; }
         authorization = await seedAuthorization(conn, configData, data);
       }
@@ -891,7 +892,7 @@ async function main() {
       const materializedDocumentsNormalized = await normalizeMaterializedDocuments(conn);
       const verification = await verifyNormalizedSchema(conn);
       await conn.commit();
-    process.stdout.write(JSON.stringify({ mode, database: cfg.database, migrated, importFixture, legacyConverted, legacyLogSnapshots, descriptions: { tables: descriptions.tables }, siteConfigNormalization, financeNormalization, cityIdsBackfilled, lifecycleFlagsNormalized, orphanAttributesRemoved, materializedDocumentsNormalized, authorization, verification, normalized: true }) + "\n");
+    process.stdout.write(JSON.stringify({ mode, database: cfg.database, migrated, importJson, legacyConverted, legacyLogSnapshots, descriptions: { tables: descriptions.tables }, siteConfigNormalization, financeNormalization, cityIdsBackfilled, lifecycleFlagsNormalized, orphanAttributesRemoved, materializedDocumentsNormalized, authorization, verification, normalized: true }) + "\n");
     } catch (error) { try { await conn.rollback(); } catch (_) {} throw error; }
   } finally { await conn.end(); }
 }

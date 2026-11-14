@@ -55,6 +55,30 @@ function packageLinux(options) {
     "docs/oss-ram-policy.json",
     "docs/微信支付接入说明.md",
     "docs/最新订单流程与迁移.md",
+    "docs/商家分成实施与验收-20261106.md",
+    "docs/商家分成发布说明-20261107.md",
+    "docs/商家二维码扫码统计修复-20261113.md",
+    "docs/merchant-share.env.example",
+    "docs/摄影师分成实施与验收-20261111.md",
+    "docs/摄影师分成存量清理-20261111.md",
+    "docs/摄影师账号同步创建-20261113.md",
+    "docs/客服工作台与分成开发验收-20261111.md",
+    "docs/客服工作台查询优化-20261111.md",
+    "docs/后台查询性能优化-20261111.md",
+    "docs/后台发布说明-20261111-r1.md",
+    "docs/后台发布说明-20261112-r1.md",
+    "docs/后台发布说明-20261113-r1.md",
+    "docs/客服模块原型界面还原-20261112.md",
+    "docs/客服模块字段对齐与样式回退-20261112.md",
+    "docs/客服账号直接创建-20261113.md",
+    "docs/客服个人时效编辑-20261113.md",
+    "docs/客服比例列表同步修复-20261113.md",
+    "docs/预约定金与须知配置-20261113.md",
+    "docs/旅拍灵感模块说明.md",
+    "docs/商品规格与库存管理-20261105.md",
+    "docs/真实数据源切换-20261105.md",
+    "docs/mysql-guides-add-columns-20261105.sql",
+    "docs/真实库旅拍灵感补列计划-20261105.md",
     "docs/后台发布打包规范.md",
     ...(options.includeEnv ? [".env"] : [])
   ];
@@ -90,6 +114,8 @@ function packageLinux(options) {
           && !relative.split(path.sep).includes(".git")
           && !relative.split(path.sep).includes(".codex-tmp")
           && !relative.startsWith(path.join("server", "data"))
+          && !relative.startsWith(path.join("src", "mock"))
+          && !["public/public-data.js", "server/seed.cjs", "server/lib/seed.cjs", "server/lib/mockSource.cjs", "scripts/api-smoke.cjs"].includes(relative.split(path.sep).join("/"))
           && !relative.split(path.sep).includes("tests")
           && !(name === ".env" || name.startsWith(".env.") && name !== ".env.example");
       }

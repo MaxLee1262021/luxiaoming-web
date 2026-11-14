@@ -295,6 +295,7 @@
   </el-dialog>
 
   <el-dialog v-model="userDialog" class="permissions-dialog permissions-user-dialog" :title="userForm.id ? '编辑人员' : '新增人员'" width="680px">
+    <el-alert v-if="isNewPhotoUser" title="摄影师需在专用入口建档，保存时同步创建可登录的系统账号并绑定 PH 编号。" type="info" :closable="false"><el-button v-if="canCreatePhotoUser" link type="primary" @click="goToPhotoCreate">去新增摄影师</el-button><span v-else>请联系管理员操作。</span></el-alert>
     <el-form label-width="96px">
       <el-form-item label="姓名" required><el-input v-model="userForm.name" /></el-form-item>
       <el-form-item label="登录账号" required><el-input v-model="userForm.account" autocomplete="off" /></el-form-item>
@@ -304,7 +305,7 @@
       <el-form-item label="绑定角色" required><el-select v-model="userForm.role" placeholder="选择角色"><el-option v-for="role in roleRows" :key="role.id" :label="role.name" :value="role.key || role.id" /></el-select></el-form-item>
       <el-form-item label="状态"><el-radio-group v-model="userForm.status"><el-radio label="启用">启用</el-radio><el-radio label="停用">停用</el-radio></el-radio-group></el-form-item>
     </el-form>
-    <template #footer><div class="permissions-dialog-footer"><el-button @click="userDialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="saveUser">保存人员</el-button></div></template>
+    <template #footer><div class="permissions-dialog-footer"><el-button @click="userDialog=false">取消</el-button><el-button v-if="isNewPhotoUser && canCreatePhotoUser" type="primary" @click="goToPhotoCreate">去新增摄影师</el-button><el-button v-else type="primary" :loading="saving" :disabled="isNewPhotoUser" @click="saveUser">保存人员</el-button></div></template>
   </el-dialog>
 
   <el-dialog v-model="passwordDialog" class="permissions-dialog" title="修改人员密码" width="460px">

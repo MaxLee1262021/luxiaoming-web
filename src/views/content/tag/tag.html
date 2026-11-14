@@ -3,7 +3,7 @@
     <div>
       <span class="eyebrow">全局标签</span>
       <h3>标签管理</h3>
-      <p>统一维护风格、场景、人群、活动标签，供打卡点、照片单品、套餐、周边与商品货架复用，避免运营手写标签重复混乱。</p>
+      <p>统一维护风格、运营、内容标签，所有商品共享使用。支持同名标签，也可在内容编辑时输入新标签并自动保存。</p>
     </div>
     <div class="tag-toolbar-actions">
       <el-button plain @click="state.filters.keyword='';state.tagCategoryFilter=''">重置筛选</el-button>
@@ -17,6 +17,8 @@
   <div class="tag-stat-grid">
     <button :class="{active:!state.tagCategoryFilter}" @click="state.tagCategoryFilter=''"><span>全部标签</span><strong>{{ tagSummary.total }}</strong><em>启用 {{ tagSummary.enabled }} 个</em></button>
     <button :class="{active:state.tagCategoryFilter==='风格'}" @click="state.tagCategoryFilter='风格'"><span>风格标签</span><strong>{{ tagSummary.style }}</strong><em>用于照片单品、套餐展示</em></button>
+    <button :class="{active:state.tagCategoryFilter==='运营'}" @click="state.tagCategoryFilter='运营'"><span>运营标签</span><strong>{{ tagSummary.operation }}</strong><em>用于打卡点运营展示</em></button>
+    <button :class="{active:state.tagCategoryFilter==='内容'}" @click="state.tagCategoryFilter='内容'"><span>内容标签</span><strong>{{ tagSummary.content }}</strong><em>用于内容描述与筛选</em></button>
     <button :class="{active:state.tagCategoryFilter==='场景'}" @click="state.tagCategoryFilter='场景'"><span>场景标签</span><strong>{{ tagSummary.scene }}</strong><em>用于打卡点、货架推荐</em></button>
     <button :class="{active:state.tagCategoryFilter==='人群'}" @click="state.tagCategoryFilter='人群'"><span>人群标签</span><strong>{{ tagSummary.crowd }}</strong><em>情侣、亲子、闺蜜等</em></button>
     <button :class="{active:state.tagCategoryFilter==='活动'}" @click="state.tagCategoryFilter='活动'"><span>活动标签</span><strong>{{ tagSummary.activity }}</strong><em>节假日、档期活动</em></button>
@@ -26,6 +28,8 @@
     <el-input v-model="state.filters.keyword" clearable placeholder="搜索标签名称、分类、适用范围" />
     <el-select v-model="state.tagCategoryFilter" clearable placeholder="标签分类">
       <el-option label="风格" value="风格" />
+      <el-option label="运营" value="运营" />
+      <el-option label="内容" value="内容" />
       <el-option label="场景" value="场景" />
       <el-option label="人群" value="人群" />
       <el-option label="活动" value="活动" />
@@ -38,7 +42,7 @@
       <div class="section-title-row compact">
         <div>
           <h3>标签库明细</h3>
-          <p>停用标签不会删除历史引用；批量替换用于后续清理重复标签。</p>
+          <p>停用后不再提供新选项；删除标签库记录会保留已保存的内容标签。</p>
         </div>
         <el-tag type="info">{{ tagRows.length }} 个标签</el-tag>
       </div>
@@ -61,15 +65,7 @@
           <template #default="{row}">
             <el-button link type="primary" v-if="can('contentEdit')" @click="openTag(row)">编辑</el-button>
             <el-button link :type="row.status==='停用' ? 'success' : 'warning'" v-if="can('contentEdit')" @click="toggleTagStatus(row)">{{ row.status==='停用' ? '启用' : '停用' }}</el-button>
-            <el-dropdown v-if="can('contentEdit')" trigger="click" placement="bottom-end">
-              <el-button link>更多</el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item class="lxm-action--primary" @click="replaceTagUsage(row)">批量替换</el-dropdown-item>
-                  <el-dropdown-item v-if="row.lastReplaceSnapshot" class="lxm-action--success" @click="undoTagReplacement(row)">回溯</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <el-button link type="danger" v-if="state.role==='super'" :disabled="row.status!=='停用'" @click="requestDeleteTag(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -92,12 +88,12 @@
         <span>活动：暑期、周末、节假日</span>
       </div>
       <div>
-        <strong>后续联动</strong>
-        <p>照片单品、套餐、周边、货架均从此处下拉复用；删除标签前先批量替换，避免前端展示脏数据。</p>
+        <strong>共享标签</strong>
+        <p>照片留影、视频摄像和影像周边使用同一个风格标签库。名称相同的记录可以分别维护。</p>
       </div>
       <div>
-        <strong>替换回溯</strong>
-        <p>批量替换会写入操作日志并保留快照编号；生成快照后表格会出现“回溯”入口，便于按映射关系追踪或撤销。</p>
+        <strong>删除与恢复</strong>
+        <p>超级管理员可先停用再删除标签，并从回收站恢复。已保存内容的标签文字保持原样。</p>
       </div>
     </aside>
   </div>

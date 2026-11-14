@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const createSource = require("../lib/dbSource.cjs");
+const createSource = require("./fixtures/jsonSource.cjs");
 const rpc = require("../lib/rpc.cjs");
 const schema = require("../lib/mysqlSchema.cjs");
 const { createWechatPay } = require("../lib/wechatPay.cjs");
@@ -19,6 +19,7 @@ async function fixture(t, ratio = 30) {
   t.after(() => fs.rmSync(dir, { force: true, recursive: true }));
   const cfg = { backend: "json", jsonFile: path.join(dir, "db.json") };
   const source = createSource(cfg);
+  await source.create("siteConfig", { id: "global", bookingNotice: ["Synthetic test booking notice"], bookingNoticeVersion: "v1.0" });
   await source.create("packages", { id: "package", name: "服务套餐", price: 100, depositRatio: ratio, status: "已上架" });
   return { source, restart: () => createSource(cfg) };
 }
@@ -190,6 +191,7 @@ test("MySQL payment uniqueness conflicts roll back instead of overwriting anothe
     let mainRowWritten = false;
     const query = async (sql, params = []) => {
       if (sql.includes("information_schema.columns")) {
+        if (sql.includes("table_name IN")) return [params.flatMap(table_name => { const definition=Object.entries(schema.TABLES).find(([,table])=>table===table_name);return (definition?schema.definition(definition[0]).columns:[]).map(column=>({table_name,column_name:column.name})); })];
         const definition = Object.entries(schema.TABLES).find(([, table]) => table === params[0]);
         return [(definition ? schema.definition(definition[0]).columns : []).map((column) => ({ column_name: column.name }))];
       }

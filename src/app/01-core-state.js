@@ -1,4 +1,4 @@
-// 全局状态、本地持久化与菜单角色基础
+// 全局状态与菜单角色基础：业务数据只由认证后的真实接口载入
 // 由 src/app.js 拆分而来（2026-08 巨无霸拆分）：块内声明顺序与原文件一致，代码逐字保留，
 // 仅整体去一层缩进；引用更晚模块的名字已改写为 ctx.名字（调用期解析，语义等价）。
 // 工厂函数接收 ctx（更早模块的导出 + state/data/Vue 工具），返回本块全部顶层声明。
@@ -23,8 +23,9 @@ const state = reactive({
   changePwd: { open: false, oldPwd: "", newPwd: "", confirmPwd: "", loading: false },
   role: "super",
   previewRole: "super",
-  currentStaffId: "st1",
+  currentStaffId: "",
   active: "dashboard",
+  svcCreateRequested: false,
   dashboardShortcut: "",
   advFiltersOpen: false,
   orderPage: 1,
@@ -92,8 +93,10 @@ const state = reactive({
   selectedOrderIds: [],
   orderDrawer: false,
   orderReadonly: false,
+  orderLedgerDetail: false,
   orderWorkMode: "service",
   currentOrder: null,
+  orderSection: "info",
   confirmationDialog: false,
   confirmationForm: {
     appointmentAt: "",
@@ -148,6 +151,7 @@ const state = reactive({
   addonScope: { type: "common", id: "" },
   addonOpen: { common: true, commonPeripheral: true, commonService: true, root: true, contentRoot: true, navContent: true, navProduct: true, point: {}, seriesRoot: {}, series: {} },
   sidebarCollapsed: false,
+  sidebarGroupCollapsed: {},
   menuSearch: "",
   menuRevision: 0,
   selectedAddonKeys: [],
@@ -205,95 +209,41 @@ const state = reactive({
   videoSingleForm: null,
   seriesDialog: false,
   seriesForm: null,
-  homeConfig: { ...LXM_DATA.homeConfig },
-  siteConfig: { ...LXM_DATA.siteConfig },
-  logs: [...LXM_DATA.logs],
-  trash: [...LXM_DATA.trash],
+  homeConfig: {},
+  siteConfig: {},
+  logs: [],
+  trash: [],
 });
 
 const data = reactive({
-  cities: LXM_DATA.cities,
-  agents: LXM_DATA.agents || [],
-  distributors: LXM_DATA.distributors || [],
-  shops: LXM_DATA.shops || [],
-  staff: LXM_DATA.staff,
-  spots: LXM_DATA.spots,
-  series: LXM_DATA.series,
-  albums: LXM_DATA.albums,
-  samples: LXM_DATA.samples,
-  packages: LXM_DATA.packages,
-  addonServices: LXM_DATA.addonServices,
-  peripherals: LXM_DATA.peripherals,
-  videoSingles: LXM_DATA.videoSingles || [],
-  tagLibrary: LXM_DATA.tagLibrary || [
-    { id: "tag1", name: "清新自然", category: "风格", status: "启用", sort: 10, scope: "照片单品/套餐", color: "#E0662A" },
-    { id: "tag2", name: "复古胶片", category: "风格", status: "启用", sort: 20, scope: "照片单品/套餐", color: "#EE2C2C" },
-    { id: "tag3", name: "情侣出游", category: "人群", status: "启用", sort: 30, scope: "套餐", color: "#dc2626" },
-    { id: "tag4", name: "亲子旅拍", category: "人群", status: "启用", sort: 40, scope: "套餐", color: "#1F9254" },
-    { id: "tag5", name: "热门打卡", category: "场景", status: "启用", sort: 50, scope: "打卡/货架", color: "#ea580c" },
-    { id: "tag6", name: "暑期活动", category: "活动", status: "启用", sort: 60, scope: "货架", color: "#0891b2" }
-  ],
-  guides: LXM_DATA.guides,
-  stories: LXM_DATA.stories,
-  scans: LXM_DATA.scans,
-  orders: LXM_DATA.orders,
-  afterSales: LXM_DATA.afterSales || [],
-  reconciliationTransfers: LXM_DATA.reconciliationTransfers || [],
-  financeSettings: { settlementObservationDays: 3, largeSettlementThreshold: 5000, ...(LXM_DATA.financeSettings || {}) },
-  monthlyClosings: LXM_DATA.monthlyClosings || [],
-  adjustmentRecords: LXM_DATA.adjustmentRecords || [],
+  cities: [],
+  agents: [],
+  distributors: [],
+  shops: [],
+  staff: [],
+  spots: [],
+  series: [],
+  albums: [],
+  samples: [],
+  packages: [],
+  addonServices: [],
+  peripherals: [],
+  videoSingles: [],
+  tagLibrary: [],
+  guides: [],
+  stories: [],
+  scans: [],
+  orders: [],
+  afterSales: [],
+  reconciliationTransfers: [],
+  monthlyClosings: [],
+  adjustmentRecords: [],
+  financeSettings: {}
 });
 
-// === 接入真实数据（麓小鸣云环境 / 演示模式，由 server 决定） ===
-// 后台启动后逐键从 /api 拉取数据写入响应式数据池；拉取失败则保留本地默认值。
-// 顶栏「连接状态」徽标：监听 cloud.js 健康探测结果（/api/health 返回 mode），
-// 把 mode 同步进响应式 state，使徽标实时反映「已连真实库 / 演示模式」，避免运营误以为改动没保存。
-window.addEventListener("lxm-cloud-mode", (e) => { state.cloudMode = e.detail || "mock"; });
-setTimeout(() => { if (!state.cloudMode || state.cloudMode === "checking") state.cloudMode = window.LXM_CLOUD_MODE || "mock"; }, 1000);
-// ===== 演示模式本地持久化（无云密钥也能完整体验管理流程）=====
-// 仅演示模式生效；接真实云后由 /api 接管，本地存储自动让位。
-const LXM_STORAGE_KEY = "lxm_admin_local_v1";
-const LXM_PERSIST_KEYS = ["cities","spots","series","albums","samples","packages","addonServices","peripherals","tagLibrary","guides","stories"];
-let _lxmPersistTimer = null;
-function lxmSafeStringify(obj) {
-  const seen = new WeakSet();
-  return JSON.stringify(obj, (k, v) => {
-    if (typeof v === "object" && v !== null) {
-      if (seen.has(v)) return undefined;
-      seen.add(v);
-    }
-    return v;
-  });
-}
-function persistData() {
-  try {
-    const snap = {};
-    LXM_PERSIST_KEYS.forEach((k) => { if (data[k]) snap[k] = data[k]; });
-    snap.__homeConfig = state.homeConfig;
-    snap.__siteConfig = state.siteConfig;
-    localStorage.setItem(LXM_STORAGE_KEY, lxmSafeStringify(snap));
-  } catch (e) { /* 隐私模式或配额超限，忽略 */ }
-}
-function hydrateFromStorage() {
-  try {
-    const raw = localStorage.getItem(LXM_STORAGE_KEY);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    LXM_PERSIST_KEYS.forEach((k) => {
-      // 防御：剔除 undefined / null 空槽 + 非对象条目，避免历史脏数据让模板 v-for :key="s.id" 报 "Cannot read properties of undefined"
-      if (Array.isArray(saved[k])) data[k] = saved[k].filter((item) => item && typeof item === "object");
-    });
-    if (saved.__homeConfig && typeof saved.__homeConfig === "object") state.homeConfig = saved.__homeConfig;
-    if (saved.__siteConfig && typeof saved.__siteConfig === "object") state.siteConfig = saved.__siteConfig;
-  } catch (e) { /* 本地数据损坏，忽略并回退演示数据 */ }
-}
-function schedulePersist() {
-  if (_lxmPersistTimer) clearTimeout(_lxmPersistTimer);
-  _lxmPersistTimer = setTimeout(persistData, 400);
-}
-if (!(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) {
-  hydrateFromStorage();
-}
+// 连接状态来自真实服务的健康探测，不恢复浏览器中的历史业务快照。
+window.addEventListener("lxm-cloud-mode", (e) => { state.cloudMode = e.detail || "unavailable"; });
+setTimeout(() => { if (!state.cloudMode || state.cloudMode === "checking") state.cloudMode = window.LXM_CLOUD_MODE || "unavailable"; }, 1000);
 
 // 修复：模板中引用了以下 state 属性但未初始化，会导致对应页面渲染即崩溃（点击无反应）。
 // 在此补上默认值，保证照片单品 / 商品上下架等页面正常渲染。
@@ -308,7 +258,7 @@ const roleProfile = computed(() => {
   return LXM_CONFIG.roles[state.role] || LXM_CONFIG.roles.super;
 });
 const currentStaff = computed(() => data.staff.find((s) => s.id === state.currentStaffId) || null);
-const canPreviewRoles = computed(() => state.loginRole === "super");
+const canPreviewRoles = computed(() => false);
 const isMenuEnabled = (menu) => !["停用", "disabled", "inactive"].includes(String(menu?.status || "").trim().toLowerCase());
 const menus = computed(() => {
   state.menuRevision;
@@ -319,7 +269,7 @@ const sidebarSections = computed(() => {
   const allowed = new Set((roleProfile.value.menus || []).map(String));
   const rows = (LXM_CONFIG.menus || [])
     .filter((item) => item && isMenuEnabled(item) && (allowed.has(String(item.key)) || item.containerOnly === true))
-    .map((item, index) => ({ ...item, _index: index, navigable: allowed.has(String(item.key)), children: [] }));
+    .map((item, index) => ({ ...item, _index: index, navigable: item.containerOnly !== true && allowed.has(String(item.key)), children: [] }));
   const byKey = new Map(rows.map((item) => [String(item.key), item]));
   const parentKeyOf = (item) => String(item.parentKey || item.parentId || "").trim();
   const sortRows = (items) => items.sort((left, right) => {
@@ -344,7 +294,18 @@ const sidebarSections = computed(() => {
     if (!sections.has(group)) sections.set(group, { key: `group-${group}`, label: group, items: [] });
     sections.get(group).items.push(item);
   });
-  return [...sections.values()];
+  // Keep top-level navigation in the configured order despite saved menu sort values.
+  const groupOrder = new Map((LXM_CONFIG.groups || []).map((group, index) => [group, index]));
+  return [...sections.values()]
+    .sort((left, right) => (groupOrder.get(left.label) ?? Number.MAX_SAFE_INTEGER) - (groupOrder.get(right.label) ?? Number.MAX_SAFE_INTEGER))
+    .map((section) => {
+      // Commission management keeps its agreed task order even when a saved
+      // server definition still carries the previous menu positions.
+      if (section.items.some((item) => item.navigationOrder !== undefined)) {
+        section.items.sort((left, right) => Number(left.navigationOrder ?? Number.MAX_SAFE_INTEGER) - Number(right.navigationOrder ?? Number.MAX_SAFE_INTEGER));
+      }
+      return section;
+    });
 });
 const activeMenu = computed(() => {
   state.menuRevision;
@@ -352,30 +313,47 @@ const activeMenu = computed(() => {
     || menus.value[0]
     || { key: "", label: "", group: "" };
 });
+const isSidebarSectionCollapsed = (section) => state.sidebarGroupCollapsed[section.label] === true;
+function toggleSidebarSection(section) {
+  state.sidebarGroupCollapsed[section.label] = !isSidebarSectionCollapsed(section);
+}
+function expandSidebarForMenu(key) {
+  const section = sidebarSections.value.find((row) => row.items.some((item) => item.key === key || item.children.some((child) => child.key === key)));
+  if (section) state.sidebarGroupCollapsed[section.label] = false;
+}
+ctx.watch?.(() => [state.active, state.menuRevision, state.role, activeMenu.value.group], () => expandSidebarForMenu(state.active));
 const activeRouteKey = computed(() => {
   const key = activeMenu.value && (activeMenu.value.routeKey || activeMenu.value.targetKey || activeMenu.value.key);
   return key === "videoProducts" ? "packages" : (key || "");
 });
 const groupLabelOf = (groupKey) => String(groupKey || "").trim();
-const breadcrumbTrail = computed(() => [groupLabelOf(activeMenu.value.group), activeMenu.value.label].filter(Boolean));
+const menuParent = (menu) => LXM_CONFIG.menus.find((item) => item.key === (menu.parentKey || menu.parentId));
+const breadcrumbTrail = computed(() => [groupLabelOf(activeMenu.value.group), menuParent(activeMenu.value)?.label, activeMenu.value.label].filter(Boolean));
 const searchedMenus = computed(() => {
   state.menuRevision;
   const keyword = (state.menuSearch || "").trim().toLowerCase();
   if (!keyword) return [];
   return LXM_CONFIG.menus
     .filter((m) => roleProfile.value.menus.includes(m.key) && isMenuEnabled(m))
-    .filter((m) => m.label.toLowerCase().includes(keyword) || groupLabelOf(m.group).toLowerCase().includes(keyword))
+    .filter((m) => [m.label, groupLabelOf(m.group), menuParent(m)?.label || ''].some((label) => label.toLowerCase().includes(keyword)))
     .slice(0, 12)
-    .map((m) => ({ key: m.key, label: m.label, groupLabel: groupLabelOf(m.group) }));
+    .map((m) => ({ key: m.key, label: m.label, groupLabel: [groupLabelOf(m.group), menuParent(m)?.label].filter(Boolean).join(' · ') }));
 });
 function menuIcon(key) {
   return (window.LXM_MENU_ICONS || {})[key] || "";
 }
 function goMenuFromSearch(item) {
   state.menuSearch = "";
-  if (item && item.key) ctx.switchMenu(item.key);
+  if (item && item.key) {
+    expandSidebarForMenu(item.key);
+    ctx.switchMenu(item.key);
+  }
 }
-const photographers = computed(() => data.staff.filter((s) => s.role === "photo"));
+const photographers = computed(() => {
+  const profiles = ctx.photoState?.options || [];
+  const known = new Set(profiles.map((row) => row.id));
+  return [...profiles.filter((row) => row.status === "active"), ...data.staff.filter((row) => row.role === "photo" && !known.has(row.id))];
+});
 const services = computed(() => data.staff.filter((s) => s.role === "service"));
 const visibleCities = computed(() => {
   if (!(state.role === "agent" && state.loginRole !== "super")) return data.cities;
@@ -395,12 +373,6 @@ const visibleDistributors = computed(() => {
   return {
     state,
     data,
-    LXM_STORAGE_KEY,
-    LXM_PERSIST_KEYS,
-    lxmSafeStringify,
-    persistData,
-    hydrateFromStorage,
-    schedulePersist,
     contentKeys,
     statusDict,
     serviceStatusDict,
@@ -409,6 +381,9 @@ const visibleDistributors = computed(() => {
     canPreviewRoles,
     menus,
     sidebarSections,
+    isSidebarSectionCollapsed,
+    toggleSidebarSection,
+    expandSidebarForMenu,
     activeMenu,
     activeRouteKey,
     groupLabelOf,

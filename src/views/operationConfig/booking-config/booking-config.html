@@ -1,0 +1,43 @@
+<div class="booking-config-page">
+  <div class="booking-config-heading">
+    <div><h2>预约配置</h2><p>设置定金收取规则及用户提交预约前需同意的须知。</p></div>
+    <el-button :loading="loading" :disabled="saving" @click="loadConfig">重新加载</el-button>
+  </div>
+  <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
+  <el-form v-else-if="!loading" v-loading="saving" label-position="top" :disabled="!editable || saving" @submit.prevent="saveConfig">
+    <section class="booking-config-card">
+      <h3>默认定金比例</h3>
+      <p>照片留影、视频摄像和旅拍套餐优先使用商品单独设置的定金比例；商品留空时使用这里的默认比例。约拍定制也使用此比例。</p>
+      <el-form-item label="默认定金比例（%）" required>
+        <el-input-number v-model="form.depositRatioPercent" :min="0" :max="100" :precision="2" :step="5" controls-position="right" placeholder="请输入比例" aria-label="默认定金比例（%）" />
+      </el-form-item>
+      <p class="booking-config-hint">例如填写 30，表示按商品价格收取 30% 定金；填写 0 表示不收定金。</p>
+    </section>
+    <section class="booking-config-card">
+      <h3>预约须知</h3>
+      <div class="booking-config-version">
+        <el-form-item label="须知版本" required>
+          <el-input v-model="form.version" :maxlength="128" placeholder="例如 2026-11-13-v1" aria-label="预约须知版本" />
+        </el-form-item>
+      </div>
+      <el-form-item label="须知正文" required>
+        <el-input v-model="form.notice" type="textarea" :rows="8" placeholder="每行一条，请填写实际的预约、拍摄及退款规则" aria-label="预约须知正文" />
+      </el-form-item>
+      <p class="booking-config-hint">修改须知正文时请同步更新版本，用户提交预约时需同意当前版本。</p>
+    </section>
+    <section class="booking-config-card">
+      <h3>约拍定制定价 <span class="booking-config-optional">选填</span></h3>
+      <p>仅用于约拍定制，照片留影、视频摄像和旅拍套餐使用各自商品售价。</p>
+      <div class="booking-config-prices">
+        <el-form-item label="单人 1 小时价格（元）"><el-input-number v-model="form.single" :min="0.01" :precision="2" controls-position="right" placeholder="暂未配置" aria-label="约拍定制单人价格" /></el-form-item>
+        <el-form-item label="每增加一人每小时加价（元）"><el-input-number v-model="form.extraPerPerson" :min="0" :precision="2" controls-position="right" placeholder="暂未配置" aria-label="约拍定制每增加一人价格" /></el-form-item>
+      </div>
+    </section>
+    <div class="booking-config-actions">
+      <span>{{ ready ? '默认定金比例和预约须知已填写' : '请填写默认定金比例、预约须知正文及版本' }}</span>
+      <el-button v-if="editable" type="primary" native-type="submit" :loading="saving" :disabled="loading">保存预约配置</el-button>
+      <span v-else>当前账号仅可查看</span>
+    </div>
+  </el-form>
+  <div v-else class="booking-config-card" role="status">正在加载预约配置…</div>
+</div>

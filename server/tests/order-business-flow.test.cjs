@@ -7,7 +7,7 @@ const test = require("node:test");
 const createApi = require("../lib/api.cjs");
 const rpc = require("../lib/rpc.cjs");
 const workflow = require("../lib/orderWorkflow.cjs");
-const { createTestWechatPay } = require("./helpers/wechatPay.cjs");
+const { createTestWechatPay, confirmTestPayment } = require("./helpers/wechatPay.cjs");
 
 const TEST_WECHAT_PAY = createTestWechatPay();
 
@@ -19,7 +19,7 @@ function makeSource() {
   const collections = {
     packages: { p1: { id: "p1", name: "Portrait", price: 100, depositRatio: 40, status: "published" } },
     albums: {}, peripherals: {}, spots: {}, series: {}, shops: {}, merchantCodes: {},
-    siteConfig: { global: { id: "global", customPrice: { depositRatio: 30 } } },
+    siteConfig: { global: { id: "global", bookingNotice: ["Synthetic test booking notice"], bookingNoticeVersion: "v1.0", customPrice: { depositRatio: 30 } } },
     orders: {}, afterSales: {}, logs: {}, mediaFiles: {},
     staff: {
       service: { id: "service", account: "service", role: "service", status: "active" },
@@ -145,7 +145,7 @@ test("dispatch records confirmed facts and final payment completes independently
 
       const finalBefore = await rpc(source, "createPayment", { data: { orderId: "o1", phase: "final", selectionAccepted: true, idempotencyKey: "final-before-delivery-01" } }, publicIdentity());
       assert.equal(finalBefore.success, true, JSON.stringify(finalBefore));
-      const paid = await rpc(source, "testPayment", { data: { orderId: "o1", phase: "final", selectionAccepted: true, idempotencyKey: "test-final-flow-01" } }, publicIdentity());
+      const paid = await confirmTestPayment(source, { data: { orderId: "o1", phase: "final", selectionAccepted: true, idempotencyKey: "test-final-flow-01" } }, publicIdentity());
       assert.equal(paid.success, true, JSON.stringify(paid));
       assert.equal(workflow.businessStatusForOrder(await source.get("orders", "o1")), "completed");
 
@@ -171,10 +171,10 @@ test("package deposit ratio is normalized and bounded by the admin API", async (
     const send = (body) => fetch(base + "/api/collection/packages", {
       method: "POST", headers: { Authorization: "Bearer super-token", "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    const valid = await send({ id: "p2", name: "Video", price: 200, depositRatio: 25, status: "published" });
+    const valid = await send({ id: "p2", name: "Video", price: 200, depositRatio: 25, status: "草稿", isShow: false });
     assert.equal(valid.status, 201);
     assert.equal((await valid.json()).depositRatio, 0.25);
-    const invalid = await send({ id: "p3", name: "Invalid", price: 200, depositRatio: 101, status: "published" });
+    const invalid = await send({ id: "p3", name: "Invalid", price: 200, depositRatio: 101, status: "草稿", isShow: false });
     assert.equal(invalid.status, 400);
   });
 });

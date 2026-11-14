@@ -28,6 +28,7 @@
     normalizeReviewStatus,
     operationLogRows,
     orderBusinessStatusMeta,
+    orderSourceType,
     persistContentMutation,
     persistTrashRecord,
     productAuditRows,
@@ -70,10 +71,10 @@ function orderLockReasons(order) {
   if (isOrderCancelledStatus(order)) reasons.push("订单已取消：仅保留历史信息，不可再修改");
   return reasons;
 }
-// 是否可调整订单加购商品：编辑权限 + 订单未完结未取消 + 无售后/财务/风控锁
+// 仅手动录入订单可调整商品；小程序订单保留下单商品和价格。
 function canManageOrderAddons(order) {
   if (!order) return false;
-  if (!canEditCurrentOrder()) return false;
+  if (orderSourceType(order) !== "manual" || !canEditCurrentOrder(order)) return false;
   if (isOrderTerminalStatus(order)) return false;
   if (isOrderAfterSaleLocked(order) || isFinanceLocked(order) || hasRiskBlock(order)) return false;
   return true;
@@ -218,10 +219,12 @@ async function requestDeleteSample(sample) {
   log("删除样片进入回收站", "照片单品", sample.name || "样片");
   ElMessage.success("样片已进入回收站，可在 30 天内恢复");
 }
-function undoTagReplacement(tag) {
+async function undoTagReplacement(tag) {
   if (!tag || !tag._replacedBy) return ElMessage.info("该标签没有可撤销的替换");
+  const previous = { ...tag };
   tag._replacedBy = null;
   tag.replaced = false;
+  if (!(await persistContentMutation("tagLibrary", tag, previous))) return;
   log("撤销标签替换", "标签管理", tag.name || "标签");
   ElMessage.success("已撤销标签替换");
 }

@@ -7,11 +7,11 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const createSource = require("../lib/dbSource.cjs");
+const createSource = require("./fixtures/jsonSource.cjs");
 const createApi = require("../lib/api.cjs");
 const rpc = require("../lib/rpc.cjs");
-const { createWechatPay } = require("../lib/wechatPay.cjs");
-const { createTestWechatPay } = require("./helpers/wechatPay.cjs");
+const { createWechatPay, drainMerchantShare } = require("../lib/wechatPay.cjs");
+const { createTestWechatPay, createTestRefundGateway } = require("./helpers/wechatPay.cjs");
 
 const identity = { identity: { kind: "public", openid: "lifecycle-owner" } };
 const bookingInput = {
@@ -42,15 +42,16 @@ function successTransaction(payment, amount) {
 
 async function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lxm-customer-lifecycle-"));
-  t.after(() => fs.rmSync(directory, { force: true, recursive: true }));
+  t.after(async () => { await drainMerchantShare(source); fs.rmSync(directory, { force: true, recursive: true }); });
   const source = createSource({ backend: "json", jsonFile: path.join(directory, "db.json") });
+  await source.create("siteConfig", { id: "global", bookingNotice: ["Synthetic test booking notice"], bookingNoticeVersion: "v1.0" });
   await source.create("packages", { id: "lifecycle-package", name: "旅拍套餐", price: 100, depositRatio: 30, status: "已上架" });
   for (const role of ["super", "finance", "photo"]) await source.create("staff", { id: `lifecycle-${role}`, account: `lifecycle-${role}`, role, status: "active" });
   const sessions = Object.fromEntries(["super", "finance", "photo"].map((role) => [`${role}-token`, {
     kind: "admin", subjectId: `lifecycle-${role}`, account: `lifecycle-${role}`, role, menuKeys: ["orders", "afterSales", "financeReview", "tasks"],
   }]));
   const auth = { async init() {}, async getSession(token) { return sessions[token] || null; } };
-  const handler = createApi(source, "json", { auth, sourceStatus: { ready: true }, permissionStore: null });
+  const handler = createApi(source, "json", { auth, sourceStatus: { ready: true }, permissionStore: null, wechatPay: createTestRefundGateway(source) });
   const server = http.createServer((req, res) => handler(req, res, (req.url || "").split("?")[0]));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
@@ -173,13 +174,14 @@ test("a paid booking supports reviewed deposit refund before any photographer is
   const submitted = await rpc(source, "submitAfterSale", { data: { orderId, type: "定金退款", reason: "行程调整申请全额退还定金" } }, identity);
   assert.equal(submitted.success, true, JSON.stringify(submitted));
   const reviewed = await post("finance", submitted.data.ticketId, {
-    action: "review", approved: true, reason: "核实未派单并人工退还定金", refundTransactionId: "lifecycle-manual-refund-proof",
+    action: "review", approved: true, reason: "核实未派单并微信原路退还定金",
   }, true);
   assert.equal(reviewed.status, 200, JSON.stringify(reviewed.body));
   const detail = await rpc(source, "getOrderDetail", { data: { orderId } }, identity);
   assert.equal(detail.data.businessStatus, "cancelled");
   assert.equal(detail.data.canRefundDeposit, false);
   assert.equal((await source.get("orders", orderId)).depositPaid, 30);
+  assert.equal((await source.get("afterSales", submitted.data.ticketId)).refundStatus, "refunded");
 });
 
 test("an assigned status marker without a photographer does not advance the public lifecycle", async (t) => {

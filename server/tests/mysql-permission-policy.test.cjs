@@ -13,7 +13,7 @@ require("dotenv").config({ path: path.resolve(__dirname, "..", "..", ".env"), qu
 
 const createApi = require("../lib/api.cjs");
 const { createAuthStore } = require("../lib/auth.cjs");
-const createPermissionStore = require("../lib/permissionStore.cjs");
+const createPermissionStore = require("./fixtures/jsonPermissionStore.cjs");
 const selectSource = require("../lib/selectSource.cjs");
 
 const RUN_MYSQL_TESTS = process.env.LXM_TEST_MYSQL === "1";
@@ -64,17 +64,19 @@ async function closeServer(server) {
 test("runtime source selection does not fall back to JSON", () => {
   const previous = Object.fromEntries(["NODE_ENV", "DATA_MODE", "LXM_ALLOW_TEST_JSON_SOURCE", "DB_HOST", "DB_USER", "DB_NAME"].map((key) => [key, process.env[key]]));
   try {
-    process.env.NODE_ENV = "development";
-    process.env.DATA_MODE = "json";
-    delete process.env.LXM_ALLOW_TEST_JSON_SOURCE;
     delete process.env.DB_HOST;
     delete process.env.DB_USER;
     delete process.env.DB_NAME;
-    const selected = selectSource();
-    assert.equal(selected.mode, "mysql");
-    assert.equal(selected.source.backend, "mysql");
-    assert.equal(selected.status.ready, false);
-    assert.equal(selected.status.error, "mysql_config_missing");
+    for (const environment of ["development", "test", "production"]) {
+      process.env.NODE_ENV = environment;
+      process.env.DATA_MODE = "json";
+      process.env.LXM_ALLOW_TEST_JSON_SOURCE = "true";
+      const selected = selectSource();
+      assert.equal(selected.mode, "mysql");
+      assert.equal(selected.source.backend, "mysql");
+      assert.equal(selected.status.ready, false);
+      assert.equal(selected.status.error, "mysql_config_missing");
+    }
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
@@ -217,12 +219,17 @@ test("MySQL admin policy is automatic and password changes require admin", { ski
   const config = databaseConfig();
   const database = `codex_permission_policy_${process.pid}_${Date.now()}`;
   const admin = await mysql.createConnection(config);
+  let databaseCreated = false;
   let store;
   let auth;
   let server;
 
   try {
+    assert.match(database, /^codex_permission_policy_\d+_\d{13}$/);
+    const [[scope]] = await admin.query("SELECT DATABASE() AS selected_database");
+    assert.equal(scope.selected_database, null);
     await admin.query(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    databaseCreated = true;
     store = createPermissionStore({ backend: "mysql", dbHost: config.host, dbPort: config.port, dbUser: config.user, dbPassword: config.password, dbName: database, autoMigrate: true });
     await store.init();
 
@@ -261,7 +268,7 @@ test("MySQL admin policy is automatic and password changes require admin", { ski
     // A separate super account is allowed to reach the management route, but
     // it must not change another person's password.
     await store.setRoleGrants("role_super", { menuKeys: ["root"], permissionKeys: ["*"] });
-    auth = createAuthStore();
+    auth = createAuthStore({ sessionStore: "memory" });
     const handler = createApi(makeSource(), "mysql", { auth, permissionStore: store, sourceStatus: { configured: true, ready: true, persistent: true } });
     server = http.createServer((req, res) => handler(req, res, (req.url || "/").split("?")[0]));
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -360,7 +367,13 @@ test("MySQL admin policy is automatic and password changes require admin", { ski
     await closeServer(server);
     if (auth) await auth.close();
     if (store) await store.close();
-    await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
-    await admin.end();
+    try {
+      // Only a successful CREATE establishes ownership of this temporary DB.
+      if (databaseCreated) {
+        await admin.query(`DROP DATABASE \`${database}\``);
+        const [remaining] = await admin.query("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=?", [database]);
+        assert.equal(remaining.length, 0);
+      }
+    } finally { await admin.end(); }
   }
 });

@@ -1,0 +1,43 @@
+.svc-page { color:#283246; font-size:13px; }
+.svc-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:22px; }
+.svc-head h2 { margin:3px 0 8px; font-size:24px; font-weight:600; }
+.svc-head p { color:#758096; margin:0; }
+.svc-eyebrow { font-size:11px; letter-spacing:2px; color:#7b8699; }
+.svc-card { background:#fff; border:1px solid #e4e8ef; border-radius:10px; padding:20px; margin-bottom:18px; }
+.svc-card h3 { margin:0 0 18px; font-size:15px; }
+.svc-filters { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:18px; }
+.svc-filters .el-input,.svc-filters .el-select { width:180px; }
+.svc-client-preview { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.svc-client-preview .el-select { width:240px; max-width:100%; }
+.svc-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; margin-bottom:20px; }
+.svc-kpi { padding:18px; border:1px solid #e2e6ee; background:#fff; border-radius:10px; }
+.svc-kpi span { display:block; color:#7b8699; margin-bottom:8px; }.svc-kpi strong { font-size:25px; font-variant-numeric:tabular-nums; }
+.svc-page .el-table { font-size:12px; }.svc-page .el-table .cell { padding:0 8px; }
+.svc-oid { border:0; border-bottom:1px dashed #9aa4b5; background:transparent; padding:0; cursor:pointer; font-family:monospace; color:#64748b; }
+.svc-money { white-space:nowrap; font-variant-numeric:tabular-nums; }.svc-zero { text-decoration:line-through; color:#b42318; }
+.svc-muted { display:block; color:#8490a2; font-size:11px; margin-top:3px; }.svc-nowrap { white-space:nowrap; }
+.svc-page .svc-pager { display:flex; justify-content:flex-end; margin-top:20px; overflow:auto; }
+.svc-selection { display:flex; align-items:center; justify-content:space-between; position:sticky; bottom:0; background:#eef2ff; padding:14px 18px; border:1px solid #c7d2fe; border-radius:8px; margin-top:14px; z-index:2; }
+.svc-rate-grid { display:grid; grid-template-columns:110px 200px 1fr; gap:14px; align-items:center; margin:16px 0; }
+.svc-config-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 24px; max-width:850px; }
+.svc-form-dialog { max-width:calc(100vw - 32px); max-height:90vh; margin:5vh auto; display:flex; flex-direction:column; overflow:hidden; }
+.svc-form-dialog .el-dialog__body { min-height:0; overflow-y:auto; flex:1; }
+.svc-form-dialog .el-dialog__header,.svc-form-dialog .el-dialog__footer { flex-shrink:0; }
+.svc-form-dialog .el-radio { max-width:100%; height:auto; white-space:normal; line-height:1.6; margin-top:4px; margin-bottom:4px; }
+.svc-form-dialog .el-radio__label { white-space:normal; overflow-wrap:anywhere; }
+.svc-form-dialog .svc-config-grid .el-select,
+.svc-form-dialog .svc-config-grid .el-date-editor { width:100%; }
+.svc-rule-current { background:#f5f7fc; padding:14px; border-radius:8px; line-height:2; margin-bottom:18px; }
+.svc-alert { margin:12px 0 18px; }.svc-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; }
+.svc-error { margin-bottom:16px; }.svc-details { display:grid; grid-template-columns:110px 1fr; gap:14px; line-height:1.7; overflow-wrap:anywhere; }
+.svc-page .el-form-item__label { color:#667085; }.svc-page .el-dialog { max-width:calc(100vw - 24px); }
+.svc-page .el-drawer { max-width:100vw; }.svc-preview { white-space:pre-wrap; line-height:1.8; }
+@media(max-width:900px) { .svc-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }.svc-config-grid { grid-template-columns:1fr; }.svc-rate-grid { grid-template-columns:75px 150px 1fr; }.svc-head { flex-wrap:wrap; } }
+
+.svc-rate-warning{color:#a86b14;font-size:12px;line-height:1.7}.svc-full-openid{overflow-wrap:anywhere;user-select:all}.svc-drawer{max-width:100vw}.svc-drawer p{line-height:1.8}
+.svc-staff-tags { display:flex; flex-wrap:wrap; gap:5px; }
+.svc-staff-tags .el-tag { max-width:100%; white-space:normal; height:auto; min-height:22px; overflow-wrap:anywhere; }
+.svc-tags-editor { width:100%; }
+.svc-calendar-fields { grid-column:1/-1; border-top:1px solid #e4e8ef; padding-top:18px; margin-top:8px; }
+.svc-calendar-fields h4 { margin:0 0 14px; font-size:14px; }
+.svc-calendar-fields .el-date-editor { width:100%; }

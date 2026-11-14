@@ -58,6 +58,7 @@ async function finalizePaidBooking(source, bookingId) {
     if (booking.bookingStatus !== "confirmed" || booking.confirmedOrderId !== orderId) {
       await base.update("bookingRequests", bookingId, { bookingStatus: "confirmed", confirmedOrderId: orderId, confirmedAt: order.confirmedAt || new Date().toISOString() });
     }
+    await require('./customerService.cjs').queuePaid(base,order);
     return order;
   });
 }

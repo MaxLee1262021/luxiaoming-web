@@ -14,10 +14,15 @@
     "oss:check": "node scripts/oss-check.cjs",
     "migrate:files": "node scripts/migrate-files.cjs",
     "migrate:order-flow": "node scripts/migrate-order-flow.cjs",
+    "migrate:merchant-share": "node scripts/migrate-merchant-share.cjs",
+    "migrate:photo-share": "node scripts/migrate-photo-share.cjs",
+    "cleanup:photo-share": "node scripts/cleanup-photo-share.cjs",
+    "migrate:customer-service": "node scripts/migrate-customer-service.cjs",
+    "reset:service-demo": "node scripts/reset-service-demo.cjs",
     "package:linux": "node scripts/package-linux.cjs",
     "test": "node --test server/tests/*.test.cjs src/tests/*.test.cjs",
     "check": "node scripts/check-syntax.cjs",
-    "lint": "echo \"静态演示版暂未接入 ESLint 运行时依赖，已提供 eslint.config.js 规范文件\"",
+    "lint": "node scripts/check-syntax.cjs",
     "build": "node scripts/serve.cjs --check-only"
   },
   "dependencies": {

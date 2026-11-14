@@ -14,6 +14,7 @@ const ALL_KEYS = Object.freeze([
   "merchantCodes", "siteConfig", "userProfiles", "config", "mediaFiles"
 ]);
 const mysqlDescriptions = require("./mysqlDescriptions.cjs");
+const { normalizeDateTime } = require("./mysqlDateTime.cjs");
 
 const KEY_SET = new Set(ALL_KEYS);
 const TABLES = Object.freeze(Object.fromEntries(ALL_KEYS.map((key) => [key, `lxm_${key}`])));
@@ -148,7 +149,8 @@ const COLLECTIONS = {
   albums: withBase([
     { name: "spotId", type: S.short }, { name: "seriesId", type: S.short }, { name: "name", type: S.short },
     { name: "price", type: S.money }, { name: "intro", type: S.text }, { name: "description", type: S.text },
-    { name: "photoCount", type: S.integer }, { name: "shootingNotes", type: S.text }, { name: "status", type: S.short },
+    { name: "photoCount", type: S.integer }, { name: "retouchMode", type: S.short }, { name: "retouchCount", type: S.integer },
+    { name: "makeupIncluded", type: S.bool }, { name: "shootingNotes", type: S.text }, { name: "status", type: S.short },
     { name: "isShow", type: S.bool }, { name: "isSellable", type: S.bool }, { name: "allowMaterialUse", type: S.bool },
     { name: "photoMaterialEnabled", type: S.bool }, { name: "videoMaterialEnabled", type: S.bool },
     { name: "cover", type: S.text }, { name: "visible", type: S.bool }
@@ -210,6 +212,9 @@ const COLLECTIONS = {
     { name: "name", type: S.short }, { name: "title", type: S.short }, { name: "description", type: S.text },
     { name: "intro", type: S.text }, { name: "status", type: S.short }, { name: "tag", type: S.short },
     { name: "spotId", type: S.short }, { name: "seriesId", type: S.short }, { name: "targetPackageId", type: S.short },
+    { name: "targetProductType", type: S.short }, { name: "targetProductId", type: S.short },
+    { name: "targetProductSpotId", type: S.short }, { name: "contentHtml", type: S.text },
+    { name: "mediaType", type: S.short }, { name: "isTop", type: S.bool },
     { name: "isHot", type: S.bool }, { name: "readCount", type: S.integer }, { name: "score", type: S.number },
     { name: "cover", type: S.text }, { name: "image", type: S.text }, { name: "coverUrl", type: S.text },
     { name: "isShow", type: S.bool }, { name: "visible", type: S.bool }
@@ -229,15 +234,19 @@ const COLLECTIONS = {
     { name: "status", type: S.short }
   ]),
   orders: withBase([
+    { name: 'customer_openid', type: 'VARCHAR(64)' }, { name: 'requested_time', type: 'DATETIME NULL' }, { name: 'schedule_time', type: 'DATETIME NULL' },
+    { name: 'service_status', type: 'VARCHAR(16)' }, { name: 'assignee_id', type: 'VARCHAR(32)' }, { name: 'photo_id', type: 'VARCHAR(32)' },
+    { name: 'done_at', type: 'DATETIME NULL' }, { name: 'reserve_staff_id', type: 'VARCHAR(32)' }, { name: 'is_rebuy', type: S.bool }, { name: 'reflow_from', type: 'VARCHAR(32)' },
+    { name: 'svc_paid_processed', type: S.bool },
     { name: "orderNo", type: S.short }, { name: "bookingIdempotencyKey", type: S.key }, { name: "openid", type: S.short }, { name: "_openid", type: S.short },
     { name: "customer", type: S.text }, { name: "name", type: S.short }, { name: "contactName", type: S.short },
     { name: "phone", type: S.short }, { name: "contactPhone", type: S.short }, { name: "customerPhone", type: S.short },
     { name: "wechat", type: S.short }, { name: "contactWechat", type: S.short }, { name: "customerWechat", type: S.short },
     { name: "shopId", type: S.short }, { name: "shopCode", type: S.short }, { name: "distributorId", type: S.short },
-    { name: "sourceType", type: S.short }, { name: "sourceName", type: S.short }, { name: "sourceScene", type: S.short },
+    { name: "sourceType", type: S.short }, { name: "sourceName", type: S.text }, { name: "sourceScene", type: S.short },
     { name: "sourceChannel", type: S.short }, { name: "sourceCodeId", type: S.short }, { name: "scene", type: S.short },
     { name: "spotId", type: S.short }, { name: "spotName", type: S.short }, { name: "seriesId", type: S.short },
-    { name: "seriesName", type: S.short }, { name: "packageId", type: S.short }, { name: "packageName", type: S.short },
+    { name: "seriesName", type: S.text }, { name: "packageId", type: S.short }, { name: "packageName", type: S.short },
     { name: "date", type: S.short }, { name: "appointmentAt", type: S.time }, { name: "bookingDate", type: S.short },
     { name: "bookingTime", type: S.short }, { name: "timePeriod", type: S.short }, { name: "timeSlot", type: S.short },
     { name: "time", type: S.short }, { name: "message", type: S.text }, { name: "price", type: S.money },
@@ -1108,12 +1117,20 @@ function splitDocument(key, document = {}) {
   const captured = new Set(["id", "_id"]);
   if (key === "orders") ["orderId", "customerName", "scheduleAt", "amountTotal", "paidDeposit", "paidFinal", "remark", "productItems", "items", "extraPhones"].forEach((name) => captured.add(name));
   if (key === "packages") ["items", "comboPrice"].forEach((name) => captured.add(name));
-  if (key === "homeConfig") ["banners"].forEach((name) => captured.add(name));
+  // Banner fields not represented by home_banners (for example cityId and
+  // cityIds) must remain typed attributes. isMaterializedPath already removes
+  // the modeled URL/target fields without discarding those extensions.
   for (const item of definition(key).columns) {
     if (item.name === "id") continue;
     if (Object.prototype.hasOwnProperty.call(input, item.name)) {
       const value = input[item.name];
-      if (value === null || typeof value !== "object") {
+      if (/^DATETIME\b/i.test(item.type)) {
+        // Keep modeled dates in their SQL column, including JS Date values.
+        // Writing them as extension leaves used to produce an ISO string that
+        // failed on the next order/payment update.
+        columns[item.name] = normalizeDateTime(value);
+        captured.add(item.name);
+      } else if (value === null || typeof value !== "object") {
         columns[item.name] = value;
         captured.add(item.name);
       }
@@ -1314,6 +1331,16 @@ function compactObject(value) {
   for (const [key, child] of Object.entries(value)) if (child !== null && child !== undefined) output[key] = compactObject(child);
   return output;
 }
+function cityTimestamp(value) {
+  if (value === undefined || value === null || value === "" || typeof value === "boolean") return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = typeof value === "number" || /^-?\d+(?:\.\d+)?$/.test(text);
+  const number = numeric ? Number(value) : NaN;
+  const milliseconds = value instanceof Date ? value.getTime() : numeric
+    ? number * (Math.abs(number) < 1e11 ? 1000 : 1) : Date.parse(text);
+  return Number.isFinite(milliseconds) && Math.abs(milliseconds) <= 8.64e15 ? milliseconds : null;
+}
 function hydrateDocument(key, row, relationRows = {}) {
   assertKey(key);
   if (!row) return null;
@@ -1338,6 +1365,20 @@ function hydrateDocument(key, row, relationRows = {}) {
     ? []
     : (relationRows[COLLECTION_VALUES_TABLE] || relationRows.collection_values || relationRows.business_attributes);
   hydrateAttributeRows(output, attributeRows);
+  // Older writes left ISO copies of DATETIME columns in typed attributes.
+  // Normalize after applying those leaves so the next write can safely move
+  // the value back to its existing SQL column without changing civil time.
+  for (const item of definition(key).columns) {
+    if (/^DATETIME\b/i.test(item.type) && Object.prototype.hasOwnProperty.call(output, item.name)) {
+      output[item.name] = normalizeDateTime(output[item.name]);
+    }
+  }
+  // Older city rows only have MySQL's physical insertion timestamp. Expose it
+  // for chronological city selection without migrating or rewriting the row.
+  if (key === "cities" && cityTimestamp(output.createdAt) === null) {
+    const createdAt = cityTimestamp(row.created_at);
+    if (createdAt !== null) output.createdAt = new Date(createdAt).toISOString();
+  }
   const rows = (name) => {
     if (!Array.isArray(relationRows[name])) return [];
     const preferred = ["sort_no", "item_no", "record_no", "log_no", "tag_no", "nav_no", "banner_no", "notice_no", "word_no", "image_no", "spec_no", "ordinal"];
@@ -1549,6 +1590,7 @@ function hydrateDocument(key, row, relationRows = {}) {
         featuredPackageIds: output.featuredPackageIds,
         featuredAlbumIds: output.featuredAlbumIds,
         featuredPeripheralIds: output.featuredPeripheralIds,
+        banners: output.banners,
         homeBanners: output.homeBanners,
         exploreBanners: output.exploreBanners,
         quickNav: output.quickNav,

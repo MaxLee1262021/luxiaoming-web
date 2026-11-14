@@ -158,7 +158,11 @@
       </el-table-column>
       <el-table-column label="货架价格" width="180">
         <template #default="{row}">
-          <div class="shelf-price-edit">
+          <div v-if="row.__key==='peripherals' && row.__source.specMode==='multiple'">
+            <strong>{{ money(row.__source.price || 0) }} 起</strong>
+            <small style="display:block">各规格售价请到商品管理修改</small>
+          </div>
+          <div class="shelf-price-edit" v-else>
             <el-input-number v-model="row.shelfPrice" :min="0" :controls="false" />
             <button type="button" class="lxm-action lxm-action--primary lxm-action--link" v-if="can('contentEdit')" @click="syncShelfPrice(row)">保存</button>
           </div>
@@ -175,7 +179,7 @@
       <el-table-column label="销量/成交额" width="125" sortable>
         <template #default="{row}">
           <div class="shelf-number-cell">
-            <strong>{{ row.soldCount || 0 }} 单</strong>
+            <strong v-if="row.__key!=='peripherals'">{{ row.soldCount || 0 }} 单</strong>
             <span>{{ money(row.soldAmount || 0) }}</span>
           </div>
         </template>
@@ -184,7 +188,7 @@
         <template #default="{row}">
           <div class="shelf-mini-cell">
             <strong>{{ row.updatedBy || row.editor || '运营后台' }}</strong>
-            <span>{{ row.updatedAt || row.shelfTime || '当前演示数据' }}</span>
+            <span>{{ row.updatedAt || row.shelfTime || '暂无更新时间' }}</span>
           </div>
         </template>
       </el-table-column>

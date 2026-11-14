@@ -1,0 +1,28 @@
+"use strict";
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {startSvcPrototypeFixture}=require('./fixtures/svc-prototype-browser.cjs');
+test('My Orders always contains the reservation block and supports populated, empty and failed refresh states',{skip:process.env.RUN_SVC_BROWSER!=='1',timeout:90000},async t=>{
+ const fixture=await startSvcPrototypeFixture();
+ await fixture.modules.store.transaction(state=>{state.reserveSources=[{order_no:'LM20261101-0001',done_at:'2026-11-01 19:30:00'}];});
+ const playwright=require(process.env.SVC_PLAYWRIGHT_MODULE||'playwright'),browser=await playwright.chromium.launch({headless:true,executablePath:process.env.SVC_BROWSER_EXECUTABLE||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ const page=await browser.newPage({viewport:{width:1512,height:1000},timezoneId:'Asia/Shanghai'}),errors=[],out=path.resolve(__dirname,'../../../.codex-tmp/customer-service-reserve-20261113');fs.mkdirSync(out,{recursive:true});page.setDefaultTimeout(10000);page.on('pageerror',error=>errors.push(error.message));
+ t.after(async()=>{fs.writeFileSync(path.join(out,'errors.json'),JSON.stringify(errors));await browser.close();await fixture.close();});
+ await page.goto(fixture.url);await page.getByPlaceholder('账号',{exact:true}).fill(fixture.accounts.admin.account);await page.getByPlaceholder('密码',{exact:true}).fill(fixture.accounts.admin.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByPlaceholder('账号',{exact:true}).waitFor({state:'hidden'});
+ await page.locator('[data-menu-key="svcIntake"]').click();await page.locator('[data-page-key="svcIntake"] h2').waitFor();assert.equal(await page.locator('.kf-reserve-panel').count(),0,'public pool is separate from reservations');
+ await page.getByRole('tab',{name:'我的订单',exact:true}).click();
+ const panel=page.getByRole('region',{name:'复购预占订单',exact:true});await panel.waitFor();await panel.getByText('2 单老客户复购，先给你 60 分钟',{exact:true}).waitFor();
+ assert.deepEqual((await panel.locator('.el-table__header-wrapper th').allTextContents()).map(s=>s.trim()),['订单号','客户 OpenID','客户 / 商品','实收','上次服务单','剩余时间','操作']);
+ await panel.getByText('2026-11-01 19:30:00 完成',{exact:true}).waitFor();
+ assert.equal(await panel.getByRole('button',{name:'接单',exact:true}).count(),2);assert.equal(await panel.getByRole('button',{name:'放弃',exact:true}).count(),2);
+ const tabs=await page.locator('.kf-tabs').boundingBox(),reserve=await panel.boundingBox(),list=await page.locator('.kf-panel > .el-table').first().boundingBox();assert.ok(reserve.y>=tabs.y+tabs.height&&list.y>=reserve.y+reserve.height,'block belongs below tabs and before normal My Orders rows');
+ assert.equal(await panel.getByRole('button',{name:'快进到超时',exact:true}).count(),0,'demo simulator must not change real reservation clocks');
+ await page.screenshot({path:path.join(out,'my-orders-with-reservations.png'),animations:'disabled'});
+ await panel.getByRole('button',{name:'接单',exact:true}).first().click();await panel.getByText('1 单老客户复购，先给你 60 分钟',{exact:true}).waitFor();
+ assert.equal(fixture.modules.store.snapshot().orders.find(row=>row.order_no==='LM20261112-0003').assignee_id,'s1');
+ await panel.getByRole('button',{name:'放弃',exact:true}).click();await page.locator('.el-message-box').getByRole('button',{name:'确定',exact:true}).click();await panel.getByText('暂无复购预占订单',{exact:true}).waitFor();
+ assert.equal(await panel.locator('.el-table__body tbody tr').count(),0);assert.equal(await page.locator('.kf-reserve-tab-badge').count(),0);await page.screenshot({path:path.join(out,'my-orders-empty.png'),animations:'disabled'});
+ await page.route('**/api/kf/orders/reserved?*',route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({code:'SVC_UNAVAILABLE',msg:'测试预占请求暂时失败'})}));
+ await panel.getByText(/预占倒计时暂未更新/).waitFor();assert.equal(await panel.locator('.el-table__body tbody tr').count(),0);await page.unroute('**/api/kf/orders/reserved?*');await panel.getByText(/预占倒计时暂未更新/).waitFor({state:'hidden'});
+ await page.getByRole('tab',{name:'公共待认领池',exact:true}).click();assert.equal(await page.locator('.kf-reserve-panel').count(),0);
+ await page.getByRole('tab',{name:'我的订单',exact:true}).click();await page.getByRole('region',{name:'复购预占订单',exact:true}).getByText('暂无复购预占订单',{exact:true}).waitFor();assert.deepEqual(errors,[]);
+});

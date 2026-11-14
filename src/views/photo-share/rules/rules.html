@@ -1,0 +1,20 @@
+<div class="photo-share">
+  <header class="photo-heading"><div><p class="photo-eyebrow">摄影师分成 · PH-01</p><h2>分成配置</h2><p>照片、视频、套餐、周边分别设置比例，按订单支付时点取版本。改动生成新版本，次日00:00生效。</p></div><el-button :loading="photoState.loading.rule" @click="loadPhotoRules">刷新</el-button></header>
+  <el-alert v-if="!photoCanView" title="当前账号没有摄影师分成查看权限" type="warning" :closable="false" />
+  <template v-else>
+    <div v-if="photoState.errors.rule" class="photo-error" role="alert">{{ photoState.errors.rule }}</div>
+    <section class="photo-panel" v-loading="photoState.loading.rule">
+      <div class="photo-panel-heading"><h3>统一比例</h3><span class="photo-muted">当前生效版本 {{ photoState.rule.current ? 'v' + photoState.rule.current.ver : '—' }} · {{ photoTime(photoState.rule.current && photoState.rule.current.eff_at) }}</span></div>
+      <el-form :key="'photo-rule-' + photoCanConfig + '-' + photoState.busy + '-' + !!photoState.rule.current" label-position="top" :disabled="!photoCanConfig || photoState.busy || !photoState.rule.current">
+        <div class="photo-rate-grid"><el-form-item v-for="category in photoCategories" :key="category.key" :label="category.label + '比例（%）'" required><el-input-number v-model="photoState.ruleForm[category.key]" :min="0" :max="100" :step="0.1" :precision="1" controls-position="right" @change="previewPhotoRules" /></el-form-item></div>
+        <el-form-item label="变更原因" required><el-input v-model="photoState.ruleForm.reason" type="textarea" :rows="2" maxlength="255" show-word-limit placeholder="请填写变更原因，并与合作协议保持一致" /></el-form-item>
+      </el-form>
+      <div v-if="photoState.loading.preview" class="photo-preview">正在计算影响预估…</div>
+      <div v-else-if="photoState.preview" class="photo-preview">按当前订单测算：影响 <strong>{{ photoState.preview.affected_count }}</strong> 笔，差额 <strong>{{ photoMoney(photoState.preview.delta_fen) }}</strong>。<span class="photo-form-note">仅用于变更评估，已入账明细金额保持支付时的比例快照。</span><div v-for="item in photoState.preview.categories || []" :key="item.category">{{ photoLabel(item.category) }} · {{ item.count }} 笔 · {{ photoMoney(item.delta_fen) }}</div></div>
+      <div v-if="photoState.errors.preview || photoState.errors.ruleSave" class="photo-error" role="alert">{{ photoState.errors.ruleSave || photoState.errors.preview }}</div>
+      <el-button v-if="photoCanConfig" type="primary" :disabled="!photoState.rule.current" :loading="photoState.busy" @click="savePhotoRule">保存新版本 · 次日生效</el-button>
+    </section>
+    <section class="photo-panel"><h3>版本历史</h3><el-table class="photo-table" :data="photoState.rule.versions" empty-text="暂无规则版本"><el-table-column label="版本" width="100"><template #default="{row}">v{{ row.ver }}</template></el-table-column><el-table-column label="生效时间" min-width="170"><template #default="{row}">{{ photoTime(row.eff_at) }}</template></el-table-column><el-table-column label="四类比例" min-width="320"><template #default="{row}">{{ photoRatesText(row) }}</template></el-table-column><el-table-column prop="operator" label="变更人" min-width="100" /><el-table-column prop="reason" label="变更原因" min-width="200" /></el-table></section>
+    <section class="photo-panel"><h3>单独设置比例</h3><p class="photo-muted">单人四类比例需一次给全，可在摄影师详情中改回统一比例；变更请同步合作协议。</p><el-table class="photo-table" :data="photoState.rule.overrides" empty-text="暂无单独设置比例"><el-table-column label="摄影师" min-width="130"><template #default="{row}"><strong>{{ row.name || row.photo_name || row.party_id }}</strong></template></el-table-column><el-table-column label="覆盖比例" min-width="300"><template #default="{row}">{{ photoRatesText(row.rates || row) }}</template></el-table-column><el-table-column label="变更原因" prop="reason" min-width="180" /><el-table-column label="协议编号" prop="agree_no" min-width="150" /><el-table-column label="查看" width="90"><template #default="{row}"><el-button link type="primary" @click="switchMenu('photoParty')">查看档案</el-button></template></el-table-column></el-table></section>
+  </template>
+</div>

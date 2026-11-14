@@ -8,7 +8,7 @@
   let session = null;
 
   window.LXM_API_STATE = window.LXM_API_STATE || { reachable: null, mode: "checking" };
-  window.LXM_CLOUD_MODE = "mock";
+  window.LXM_CLOUD_MODE = "checking";
 
   function readStoredSession() {
     try {
@@ -36,6 +36,8 @@
       menuKeys: Array.isArray(source.menuKeys) ? source.menuKeys.slice() : undefined,
       menuDefinitions: Array.isArray(source.menuDefinitions) ? source.menuDefinitions.map((item) => ({ ...item })) : undefined,
       permissionSource: source.permissionSource || "",
+      sharePermissions: Array.isArray(source.sharePermissions) ? source.sharePermissions.filter((key) => ["share:view", "share:config", "share:admin"].includes(key)) : [],
+      photoPermissions: Array.isArray(source.photoPermissions) ? source.photoPermissions.filter((key) => ["photo:manage"].includes(key)) : [],
       scope: source.scope || "",
       shopId: source.shopId || "",
       distributorId: source.distributorId || "",
@@ -177,10 +179,12 @@
 
   window.LXM_AUTH = { getSession, hasSession, setSession, clearSession, login: authLogin, me: authMe, logout: authLogout };
 
-  function publishCloudMode(mode, reachable) {
-    const safeMode = mode || "mock";
+  function publishCloudMode(mode, reachable, health = {}) {
+    const safeMode = mode === "mysql" ? "mysql" : "unavailable";
     window.LXM_CLOUD_MODE = safeMode;
-    window.LXM_API_STATE = { reachable: !!reachable, mode: safeMode };
+    window.LXM_API_STATE = { reachable: !!reachable, mode: safeMode,
+      transportReachable: health.transportReachable === true,
+      dataError: health.data?.error || "", incomplete: health.data?.incomplete || [] };
     try { window.dispatchEvent(new CustomEvent("lxm-cloud-mode", { detail: safeMode })); } catch (e) {}
     try { window.dispatchEvent(new CustomEvent("lxm-server-status", { detail: { reachable: !!reachable, mode: safeMode } })); } catch (e) {}
   }
@@ -188,8 +192,12 @@
   // 健康接口保持公开，仅用于显示连接状态；不读取业务数据。
   nativeFetch(`${base}/health`, { method: "GET", credentials: "same-origin", headers: { Accept: "application/json" } })
     .then((response) => response.json().then((body) => ({ response, body })))
-    .then(({ response, body }) => publishCloudMode(response.ok ? ((body && body.mode) || "mock") : "mock", response.ok))
-    .catch(() => publishCloudMode("mock", false));
+    .then(({ response, body }) => {
+      const databaseReady = response.ok && body?.mode === "mysql" && body.ok !== false && body.data?.ready !== false;
+      publishCloudMode(databaseReady ? "mysql" : "unavailable", databaseReady,
+        { ...(body || {}), transportReachable: !!body && typeof body === "object" && body.mode === "mysql" });
+    })
+    .catch(() => publishCloudMode("unavailable", false));
 
   async function getColl(key) {
     if (!hasSession()) throw authError("需要登录后读取管理数据", 401);
@@ -432,8 +440,49 @@
     return version;
   }
 
+  function homeEditorConfig(value) {
+    if (!value || typeof value !== "object") return value;
+    const { editorConfig, ...publicConfig } = value;
+    const editor = editorConfig && typeof editorConfig === "object" ? editorConfig : {};
+    const config = { ...editor, ...publicConfig };
+    // Materialized public fields take precedence over old editor snapshots.
+    if (Array.isArray(publicConfig.homeModules)) config.homeModules = publicConfig.homeModules;
+    else if (Array.isArray(publicConfig.modules)) config.homeModules = publicConfig.modules;
+    if (Array.isArray(publicConfig.homeBanners)) config.homeBanners = publicConfig.homeBanners;
+    else if (!Array.isArray(config.homeBanners) && Array.isArray(publicConfig.banners)) config.homeBanners = publicConfig.banners;
+    // The carousel editor now has one editable list per page. Import old
+    // public/sample banners once; explicit empty lists in the new contract
+    // must remain empty even when an old snapshot contains banners.
+    if (Number(config.bannerConfigVersion || 0) < 1 && !(config.homeBanners || []).length && (publicConfig.banners || []).length) {
+      config.homeBanners = publicConfig.banners;
+      config.carouselIds = [];
+    }
+    const normalizeBanner = (banner) => {
+      const type = (banner.type || banner.mediaType) === "video" ? "video" : "image";
+      const aliases = { photo_package: "package", photo: "album", photo_collection: "album", video_single: "video", video_product: "video", packages: "package_list", spots: "explore", spot_list: "explore", all_spots: "explore", videos: "explore", video_list: "explore", guide_list: "guides", peripherals: "peripheral", albums: "photo_list", album_list: "photo_list", booking_albums: "photo_list", photos: "photo_list", static: "none" };
+      const target = String(banner.targetType ?? banner.linkType ?? banner.jumpType ?? "none").trim()
+        .replace(/([a-z\d])([A-Z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase();
+      return { ...banner, type, mediaType: type,
+        url: banner.url ?? (type === "video" ? banner.videoUrl || banner.fileID || banner.fileId || "" : banner.imageUrl || banner.imgUrl || banner.image || banner.src || banner.fileID || banner.fileId || banner.cover || ""),
+        cover: banner.cover ?? banner.poster ?? "",
+        targetType: aliases[target] || target,
+        targetId: banner.targetId ?? banner.linkId ?? banner.jumpId ?? "",
+        linkUrl: banner.linkUrl ?? banner.jumpUrl ?? banner.targetUrl ?? ""
+      };
+    };
+    for (const group of ["homeBanners", "exploreBanners"]) {
+      if (Array.isArray(config[group])) config[group] = config[group]
+        .filter((banner) => banner && typeof banner === "object").map(normalizeBanner);
+    }
+    const recommendations = publicConfig.recommendations || config.recommendations || {};
+    config.recommendations = recommendations;
+    if (Array.isArray(recommendations.hotPackageIds)) config.featuredPackageIds = recommendations.hotPackageIds.slice();
+    if (Array.isArray(recommendations.featuredAlbumIds)) config.featuredAlbumIds = recommendations.featuredAlbumIds.slice();
+    return config;
+  }
+
   function normalizeModuleValue(key, value, data) {
-    if (key === "homeConfig") return value && value.editorConfig && typeof value.editorConfig === "object" ? value.editorConfig : value;
+    if (key === "homeConfig") return homeEditorConfig(value);
     if (key === "financeSettings") {
       if (!Array.isArray(value)) return { ...((data && data.financeSettings) || {}), ...(value || {}) };
       const merged = value.reduce((memo, row) => {
@@ -454,7 +503,7 @@
     try {
       if (key === "homeConfig") {
         const doc = await getDoc("homeConfig", "homeStats");
-        const config = doc && doc.editorConfig && typeof doc.editorConfig === "object" ? doc.editorConfig : doc;
+        const config = homeEditorConfig(doc);
         return { key, loaded: applyLoadedValue(key, config, data, state, version) };
       }
       if (key === "siteConfig") {
@@ -476,11 +525,13 @@
   }
 
   async function loadModuleData(moduleName, keys, data, state) {
+    const epoch = loadEpoch;
     const versions = new Map(keys.map((key) => [key, beginDataKeyLoad(key)]));
     let payload;
     try {
       payload = await getModuleData(moduleName, keys);
     } catch (error) {
+      if (epoch !== loadEpoch) return [];
       // Keep compatibility with an older server during a rolling deployment.
       if (error && error.status === 404) return Promise.all(keys.map((key) => loadDataKey(key, data, state)));
       if (error && error.status === 401) return keys.map((key) => ({ key, error, status: 401 }));
@@ -503,14 +554,20 @@
     const keys = menuKeysFor(routeKey);
     if (!keys.length) return { ok: true, routeKey, loaded: [], skipped: [] };
 
-    // Queue repeated visits to the same menu instead of collapsing them into a
-    // stale cache hit. Every menu activation performs a new related-data read.
-    const previous = menuLoadChains.get(routeKey) || Promise.resolve();
+    // A newly mounted page may share the navigation request that is already
+    // loading its data. Later visits and explicit retries still read fresh data.
+    const pending = menuLoadChains.get(routeKey);
+    if (options.joinPending === true && pending && pending.data === data && pending.state === state && pending.epoch === loadEpoch) return pending.task;
+    const epoch = loadEpoch;
+    const staleResult = () => ({ ok: false, reason: "session_changed", routeKey, loaded: [], skipped: [] });
+    const previous = pending ? pending.task : Promise.resolve();
     const task = previous.catch(() => {}).then(async () => {
+      if (epoch !== loadEpoch || !hasSession()) return staleResult();
       const moduleName = menuModuleFor(routeKey);
       const results = moduleName
         ? await loadModuleData(moduleName, keys, data, state)
         : await Promise.all(keys.map((key) => loadDataKey(key, data, state)));
+      if (epoch !== loadEpoch) return staleResult();
       const unauthorized = results.find((result) => result && result.status === 401);
       if (unauthorized) return { ok: false, status: 401, routeKey, loaded: results.filter((result) => result.loaded).map((result) => result.key), skipped: [] };
       return {
@@ -521,10 +578,11 @@
         failed: results.filter((result) => result && result.error && !result.status).map((result) => result.key)
       };
     });
-    menuLoadChains.set(routeKey, task);
+    const entry = { task, data, state, epoch };
+    menuLoadChains.set(routeKey, entry);
     task.then(
-      () => { if (menuLoadChains.get(routeKey) === task) menuLoadChains.delete(routeKey); },
-      () => { if (menuLoadChains.get(routeKey) === task) menuLoadChains.delete(routeKey); }
+      () => { if (menuLoadChains.get(routeKey) === entry) menuLoadChains.delete(routeKey); },
+      () => { if (menuLoadChains.get(routeKey) === entry) menuLoadChains.delete(routeKey); }
     );
     return task;
   }

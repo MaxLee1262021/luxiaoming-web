@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const path = require("path");
 const { createOssStorage, fileError } = require("./ossStorage.cjs");
+const { ATTACHMENT_TYPES, MAX_ATTACHMENT_SIZE, isGuideAttachment, detectAttachmentType } = require("./guideAttachments.cjs");
 
 const MiB = 1024 * 1024;
 const TYPES = Object.freeze({ "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "video/mp4": "mp4" });
@@ -12,7 +13,7 @@ function ownerId(session) { return String(session && (session.kind === "public" 
 function owns(session, asset) { return asset.ownerKind === session.kind && asset.ownerId === ownerId(session); }
 function fileIdFromUrl(value) { return typeof value === "string" ? (value.match(/^(?:https?:\/\/[^/]+)?\/api\/media\/(file_[a-f0-9]{32,48})(?:\?.*)?$/) || [])[1] || "" : ""; }
 function descriptor(asset) {
-  return { id: asset.id, fileId: asset.id, name: asset.name, type: asset.mimeType.startsWith("video/") ? "video" : "image",
+  return { id: asset.id, fileId: asset.id, name: asset.name, type: isGuideAttachment(asset) ? "file" : asset.mimeType.startsWith("video/") ? "video" : "image",
     mimeType: asset.mimeType, size: asset.size, status: asset.status,
     ...(asset.visibility === "public" && READY.has(asset.status) ? { url: `/api/media/${asset.id}` } : {}) };
 }
@@ -27,13 +28,16 @@ function detectType(bytes) {
 function validateInput(input) {
   if (!input || !PURPOSES.has(input.purpose)) throw fileError("PURPOSE", "请选择有效的文件用途");
   const mimeType = String(input.mimeType || "").split(";")[0].toLowerCase();
-  if (!TYPES[mimeType] || (mimeType === "video/mp4" && !["content", "order-delivery"].includes(input.purpose))) throw fileError("TYPE", "请选择 JPG、PNG、WebP 图片或适用场景的 MP4 视频");
-  const limit = mimeType === "video/mp4" ? 500 * MiB : input.purpose === "avatar" ? 5 * MiB : input.purpose === "order-delivery" ? 50 * MiB : 20 * MiB;
+  const attachment = isGuideAttachment({ mimeType });
+  if (attachment ? input.purpose !== "content" || input.collection !== "guides"
+    : !Object.prototype.hasOwnProperty.call(TYPES, mimeType) || (mimeType === "video/mp4" && !["content", "order-delivery"].includes(input.purpose))) throw fileError("TYPE", "请选择图片或视频；旅拍灵感附件支持 PDF、DOCX、XLSX、PPTX、TXT、CSV");
+  const limit = attachment ? MAX_ATTACHMENT_SIZE : input.purpose === "content" ? Infinity : mimeType === "video/mp4" ? 500 * MiB : input.purpose === "avatar" ? 5 * MiB : input.purpose === "order-delivery" ? 50 * MiB : 20 * MiB;
   const size = Number(input.size);
   if (!Number.isSafeInteger(size) || size < 1) throw fileError("SIZE", "不能上传空文件");
   if (size > limit) throw fileError("SIZE", `文件不能超过 ${limit / MiB} MB`, 413);
   const name = path.basename(String(input.fileName || input.name || "").replace(/\\/g, "/")).replace(/[\x00-\x1f\x7f]/g, "").slice(0, 180);
   if (!name) throw fileError("NAME", "缺少文件名称");
+  if (attachment && path.extname(name).toLowerCase() !== `.${ATTACHMENT_TYPES[mimeType]}`) throw fileError("TYPE", "文件扩展名与所选附件格式不一致");
   const fields = {};
   for (const key of ["collection", "recordId", "orderId"]) {
     fields[key] = String(input[key] || "");
@@ -41,7 +45,7 @@ function validateInput(input) {
   }
   if (input.purpose === "content" && !fields.collection) throw fileError("SCOPE", "缺少素材所属集合");
   if (["order-delivery", "after-sale"].includes(input.purpose) && !fields.orderId) throw fileError("SCOPE", "缺少关联订单");
-  return { ...fields, name, mimeType, extension: TYPES[mimeType], size, purpose: input.purpose, visibility: input.purpose === "content" ? "public" : "private" };
+  return { ...fields, name, mimeType, extension: attachment ? ATTACHMENT_TYPES[mimeType] : TYPES[mimeType], size, purpose: input.purpose, visibility: input.purpose === "content" ? "public" : "private" };
 }
 
 function createFileService({ source, authorize = async () => false, adapter = createOssStorage(), clock = () => new Date() } = {}) {
@@ -75,7 +79,9 @@ function createFileService({ source, authorize = async () => false, adapter = cr
   }
   async function inspectReady(asset) {
     const result = await adapter.inspect(asset);
-    if (Number(result.size) !== Number(asset.size) || result.mimeType !== asset.mimeType || detectType(result.bytes) !== asset.mimeType
+    const detected = isGuideAttachment(asset) ? detectAttachmentType(result.bytes, asset.mimeType) : detectType(result.bytes);
+    if (Number(result.size) !== Number(asset.size) || result.mimeType !== asset.mimeType || detected !== asset.mimeType
+      || isGuideAttachment(asset) && Buffer.byteLength(result.bytes || []) !== Number(asset.size)
       || result.fileId !== asset.id || result.acl !== "private") {
       // Mark invalid content; signed policy forbids overwrite, so retry needs a new intent.
       await transition(asset, { status: "rejected", rejection: "file_mismatch" });
@@ -111,13 +117,13 @@ function createFileService({ source, authorize = async () => false, adapter = cr
       const asset = await get(id);
       await allow(session, asset, "access");
       if (!READY.has(asset.status)) throw fileError("NOT_READY", "文件尚未上传完成", 409);
-      return { ...await adapter.signRead(asset, options), name: asset.name, mimeType: asset.mimeType,
-        type: asset.mimeType.startsWith("video/") ? "video" : "image" };
+      return { ...await adapter.signRead(asset, { ...options, download: isGuideAttachment(asset) || !!options.download }), name: asset.name, mimeType: asset.mimeType,
+        type: isGuideAttachment(asset) ? "file" : asset.mimeType.startsWith("video/") ? "video" : "image" };
     },
     async publicAccess(id, options = {}) {
       const asset = await get(id);
       if (asset.visibility !== "public" || asset.purpose !== "content" || !READY.has(asset.status)) throw fileError("NOT_FOUND", "文件不存在", 404);
-      return adapter.signRead(asset, options);
+      return adapter.signRead(asset, { ...options, download: isGuideAttachment(asset) || !!options.download });
     },
     async describe(id) { return descriptor(await get(id)); },
     async assertFiles(session, ids, scope = {}) {

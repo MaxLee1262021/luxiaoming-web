@@ -3,6 +3,18 @@
   flex-direction: column;
   gap: 12px;
 }
+.page-route-spot .spot-rank { font-variant-numeric: tabular-nums; }
+.page-route-spot .spot-asset-links {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  align-items: center;
+  gap: 8px 14px;
+}
+.page-route-spot .spot-asset-links .el-button {
+  justify-self: start;
+  margin-left: 0;
+  padding: 0;
+}
 
 .page-route-spot .spot-toolbar,
 .page-route-spot .spot-filter-row,

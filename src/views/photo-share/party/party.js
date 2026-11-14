@@ -1,0 +1,1 @@
+window.LXM_PAGES.register({ key: "photoParty", component: "LxmPagePhotoParty", group: "photoShare", title: "摄影师列表", setup(ctx) { Vue.onMounted(() => ctx.photoEnter("party")); Vue.onBeforeUnmount(() => ctx.clearPhotoNewPassword()); return {}; } });

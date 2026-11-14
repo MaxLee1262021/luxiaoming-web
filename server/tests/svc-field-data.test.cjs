@@ -1,0 +1,15 @@
+"use strict";
+const test=require('node:test'),assert=require('node:assert/strict');
+const {createSvcMemoryStore}=require('../lib/svcStore.cjs'),{createSvcCommission}=require('../lib/svcCommission.cjs'),{createSvcWorkbench}=require('../lib/svcWorkbench.cjs');
+const root={kind:'admin',role:'super',authzUserId:'root'},at='2026-11-12 12:00:00';
+test('original demo field projections use real salary, timing, current rates and order parties',async()=>{
+ const state={staff:[{id:'s1',name:'客服甲',base_salary:3500,account_id:'account1',supervisor_id:'lead',staff_status:'active'},{id:'lead',name:'主管'}],accounts:[{id:'account2',account:'new-login',status:'active'}],configs:[{id:'1',ver:1,eff_at:'2026-01-01 00:00:00',link_valid_days:12,observe_days:4}],orders:[{id:'o',order_no:'ORDER1',category:'photo',customer_name:'客户甲',product_name:'商品甲',merchant_name:'商家甲',assignee_id:'s1',photo_id:'p',service_status:'confirmed',service_managed:true,paid_at:at,net_amount_fen:100000,service_net_amount_fen:20000,schedule_time:'2026-11-13 16:00:00'}],photographers:[{id:'p',name:'摄影师甲',status:'active'}],rules:[{id:'1',ver:1,beneficiary_type:'service',party_id:null,rule_mode:'global',rate_photo_bp:500,rate_video_bp:1000,rate_combo_bp:800,rate_peripheral_bp:1500,eff_at:'2026-01-01 00:00:00'}],ledger:[{id:'1',biz_no:'ORDER1',beneficiary_type:'service',party_id:'s1',category:'photo',net_amount_fen:20000,rate_bp:500,commission_fen:1000,status:'est',paid_at:at,created_at:at},{id:'2',biz_no:'ORDER1',beneficiary_type:'photo',party_id:'p',category:'photo',net_amount_fen:100000,commission_fen:18000,status:'est',paid_at:at,created_at:at}]};
+ const store=createSvcMemoryStore(state),commission=createSvcCommission({store,clock:()=>at}),workbench=createSvcWorkbench({store,clock:()=>at});
+ const me=await commission.execute('GET','/me',{}, {kind:'admin',role:'service',authzUserId:'account1'});
+ assert.equal(me.kpi.base_salary_fen,350000);assert.equal(me.kpi.month_remuneration_fen,351000);assert.equal(me.kpi.month_fen,1000);assert.equal(me.current_rates.photo_bp,500);
+ const people=await commission.execute('GET','/staff',{},root);assert.equal(people.list[0].supervisor_name,'主管');assert.deepEqual(people.list[0].timing,{link_valid_days:12,observe_days:4,cycle:'月结'});
+ const ledger=await commission.execute('GET','/ledger',{},root);assert.equal(ledger.list[0].customer_name,'客户甲');assert.equal(ledger.list[0].assignee_name,'客服甲');
+ const detail=await workbench.execute('GET','/api/kf/orders/ORDER1',{},root);assert.equal(detail.photo_name,'摄影师甲');assert.equal(detail.photo_commission_fen,18000);assert.equal(detail.margin_share_percent,19);assert.equal(detail.margin_alert_percent,null);assert.equal(detail.reminder_at,'2026-11-13 14:00:00');
+ const created=await commission.execute('POST','/staff',{name:'新人',phone:'13900139000',joined_at:'2026-11-12',base_salary:0,rate_mode:'global',account:'new-login'},root);assert.equal(created.account_id,'account2');
+ await assert.rejects(commission.execute('POST','/staff',{name:'错账号',phone:'13900139001',joined_at:'2026-11-12',base_salary:0,rate_mode:'global',account:'unknown'},root),{code:4014});
+});

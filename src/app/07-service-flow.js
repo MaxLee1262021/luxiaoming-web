@@ -23,6 +23,7 @@
     isDepositRegistrationConfirmed,
     isOrderCancelledStatus,
     isOrderCompletedStatus,
+    isOrderLedgerReadonly,
     isOrderAfterSaleLocked,
     isCreatedBooking,
     log,
@@ -127,12 +128,14 @@ function canDispatchOrder(order = state.currentOrder) {
     && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_DISPATCH;
 }
 function canTransferCustomerService(order = state.currentOrder) {
+  if (isOrderLedgerReadonly()) return false;
   if (!order && state.transferForm.batch) return selectedOrders.value.some((item) => canTransferCustomerService(item));
   if (!order || state.orderReadonly || isOrderAfterSaleLocked(order)) return false;
   if (state.role === "super") return !["completed", "cancelled", "canceled"].includes(order.status);
   return state.role === "service" && order.assigneeId === roleProfile.value.staffId && !["completed", "cancelled", "canceled"].includes(order.status);
 }
 function canTransferPhotographer(order = state.currentOrder) {
+  if (isOrderLedgerReadonly()) return false;
   if (!order && state.transferForm.batch) return selectedOrders.value.some((item) => canTransferPhotographer(item));
   return !!order && state.role === "super" && !state.orderReadonly && !isOrderAfterSaleLocked(order) && !["completed", "cancelled", "canceled"].includes(order.status);
 }
@@ -154,7 +157,7 @@ function defaultCustomerStatusForOrderStatus(status) {
   return map[status] || "";
 }
 function canUseOrderExceptionTools(order = state.currentOrder) {
-  return !!order && state.role === "super" && !state.orderReadonly;
+  return !isOrderLedgerReadonly() && !!order && state.role === "super" && !state.orderReadonly;
 }
 function openOrderExceptionDialog(order = state.currentOrder) {
   if (!canUseOrderExceptionTools(order)) return ElMessage.error("只有超管可以使用订单异常处理");
@@ -398,10 +401,9 @@ function moneyFieldMeta(field) {
   }[field] || { label: "金额", reason: "调整原因" };
 }
 function enableMoneyEdit(field) {
-  if (!canEditCurrentOrder()) return ElMessage.error("请先领取订单后调整商品或优惠");
   if (!["couponAmount", "totalAmount"].includes(field)) return ElMessage.warning("已收款金额由支付回调记录，不可编辑");
+  if (!ctx.canManageOrderAddons(state.currentOrder)) return ElMessage.warning("仅可为可编辑的手动录入订单调整价格或优惠");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能调整金额");
-  if (field === "depositPaid" && Number(state.currentOrder?.depositPaid || 0) > 0) return ElMessage.warning("定金已收后不可更");
   state.moneyEdit = field;
   state.moneyDraft = field === "couponAmount" ? Number(state.currentOrder.finalDiscountAmount || 0) : Number(state.currentOrder[field] || 0);
   addOrderTimeline(state.currentOrder, `开启${moneyFieldMeta(field).label}调整，等待填写原因`);
@@ -409,6 +411,8 @@ function enableMoneyEdit(field) {
 }
 async function confirmMoneyEdit(field) {
   if (!state.currentOrder) return;
+  if (!["couponAmount", "totalAmount"].includes(field)) return ElMessage.warning("已收款金额由支付回调记录，不可编辑");
+  if (!ctx.canManageOrderAddons(state.currentOrder)) return ElMessage.warning("仅可为可编辑的手动录入订单调整价格或优惠");
   if (isOrderAfterSaleLocked()) return ElMessage.warning("该订单售后处理中，暂不能调整金额");
   const meta = moneyFieldMeta(field);
   const next = Number(state.moneyDraft || 0);
@@ -647,7 +651,7 @@ function canDeliverOrder(order = state.currentOrder) {
 
 function deliverOrder() { return ElMessage.info("请使用独立交付记录表单登记交付"); }
 async function updateTaskStatus(order, status) {
-  return ElMessage.warning("摄影师任务台仅供查看，拍摄状态由客服在订单管理中登记");
+  return ElMessage.warning("摄影师任务台仅供查看，拍摄状态由客服在客服工作台中登记");
 }
 function taskStatusOf(order = {}) {
   return String(order && order.taskStatus || "pending_acceptance").trim().toLowerCase() || "pending_acceptance";
@@ -702,6 +706,7 @@ function rejectTask(order) {
   }).catch(() => {});
 }
 function cancelOrder(order) {
+  if (isOrderLedgerReadonly()) return ElMessage.warning("订单流水仅供查询与统计，请前往客服工作台处理订单");
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单售后处理中，暂不能取消订单");
   if (!can("cancelOrder")) return ElMessage.error("当前角色无权取消订单");
   if (isOrderCompletedStatus(order)) return ElMessage.warning("已完成订单不能取");

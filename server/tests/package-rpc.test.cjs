@@ -20,7 +20,12 @@ function makeSource() {
       { id: "series-2", name: "其它系列", spotIds: ["spot-2"], isShow: true, status: "启用" }
     ],
     albums: [{ id: "album-1", name: "夜景照片留影", seriesId: "series-1", spotId: "spot-1", price: 399, isShow: true, status: "上架", sampleUrls: ["https://images.invalid/album-cover.jpg"], photoCount: 1 }],
-    peripherals: [{ id: "peripheral-1", name: "定制相册", price: 99, isShow: true, status: "上架", storeProductId: "store-peripheral-1" }],
+    peripherals: [
+      { id: "peripheral-1", name: "定制相册", spotId: "spot-2", price: 99, isShow: true, status: "上架" },
+      { id: "peripheral-offline", name: "下架相册", isShow: true, status: "下架" },
+      { id: "peripheral-hidden", name: "隐藏相册", isShow: false, status: "上架" },
+      { id: "peripheral-deleted", name: "删除相册", isShow: true, status: "上架", deleted: true }
+    ],
     samples: [
       { id: "sample-banner", name: "后台配置轮播", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "image", url: "https://images.invalid/banner.jpg", isShow: true, isShowcase: true },
       { id: "sample-detail", name: "后台配置样片", seriesId: "series-1", albumId: "album-1", spotId: "spot-1", type: "image", url: "https://images.invalid/detail.jpg", isShow: true }
@@ -35,7 +40,10 @@ function makeSource() {
       {
         id: "pkg-multi", name: "双点漫游套餐", type: "photo", price: 899, originalPrice: 1099,
         isHot: true, isShow: true, status: "上架", spotIds: ["spot-1", "spot-2"], seriesId: "series-1",
-        includedItems: [{ type: "peripheral", name: "定制相册", peripheralId: "peripheral-1", price: 0 }]
+        includedItems: [
+          { type: "album", albumId: "album-1", price: 399, quantity: 2 },
+          { type: "peripheral", name: "定制相册", peripheralId: "peripheral-1", price: 99 }
+        ]
       },
       {
         id: "pkg-global-promoted", name: "全局主推套餐", type: "photo", price: 599,
@@ -70,12 +78,15 @@ test("套餐公共 RPC 投影统一主推、详情和多点位字段", async () 
   assert.equal(main.duration, 60);
   assert.equal(main.retouchCount, 12);
   assert.equal(main.includedItems[0].target.albumId, "album-1");
+  assert.deepEqual(home.data.packages.find((item) => item._id === "pkg-multi").spotIds, ["spot-1", "spot-2"]);
+  assert.equal(home.data.packages.find((item) => item._id === "pkg-multi").includedItems[0].quantity, 2);
 
   const detail = await rpc(source, "getSeriesDetail", { data: { seriesId: "series-1", packageId: "pkg-multi", spotId: "spot-2" } });
   assert.equal(detail.success, true);
   assert.equal(detail.data.currentPackage._id, "pkg-multi");
-  assert.equal(detail.data.currentPackage.includedItems[0].target.peripheralId, "peripheral-1");
-  assert.equal(detail.data.currentPackage.includedItems[0].target.id, "peripheral-1");
+  assert.equal(detail.data.currentPackage.includedItems[1].target.peripheralId, "peripheral-1");
+  assert.equal(detail.data.currentPackage.includedItems[1].target.id, "peripheral-1");
+  assert.equal(detail.data.currentPackage.includedItems.length, 2, "公开套餐保留全部可用商品与各自数量");
   assert.ok(detail.data.spotPackages.some((item) => item._id === "pkg-multi"));
   assert.equal(detail.data.mainPushPackages.some((item) => item._id === "pkg-global-promoted"), false);
   assert.equal(detail.data.spotPackages.some((item) => item._id === "pkg-other-series-promoted"), false);
@@ -88,9 +99,9 @@ test("套餐公共 RPC 投影统一主推、详情和多点位字段", async () 
   assert.equal(collection.data.featuredPackages.some((item) => item._id === "pkg-other-series-promoted"), false);
   assert.equal(collection.data.spotPackages.some((item) => item._id === "pkg-other-series-promoted"), false);
   assert.equal(collection.data.collections[0].albumId, "album-1");
-  assert.deepEqual(collection.data.collections[0].sampleUrls, ["https://images.invalid/banner.jpg", "https://images.invalid/detail.jpg"]);
-  assert.equal(collection.data.pageConfig.albumDetail.banners[0]._id, "sample-banner");
-  assert.equal(collection.data.pageConfig.albumDetail.samples[0]._id, "sample-detail");
+  assert.deepEqual(collection.data.collections[0].sampleUrls, ["https://images.invalid/album-cover.jpg"]);
+  assert.equal(collection.data.pageConfig.albumDetail.banners[0].url, "https://images.invalid/album-cover.jpg");
+  assert.equal(collection.data.pageConfig.albumDetail.samples[0].url, "https://images.invalid/album-cover.jpg");
 
   const missingDetail = await rpc(source, "getSeriesDetail", { data: { seriesId: "series-1", packageId: "pkg-missing", spotId: "spot-1" } });
   assert.deepEqual(missingDetail, { success: false, error: "套餐不存在" });
@@ -105,7 +116,7 @@ test("照片留影 RPC 支持仅 albumId，并返回单品字段与装修样片"
   assert.equal(result.data.collections[0].spotId, "spot-1");
   assert.equal(result.data.collections[0].spot.name, "江边");
   assert.equal(result.data.collections[0].price, 399);
-  assert.equal(result.data.pageConfig.samples[0]._id, "sample-detail");
+  assert.equal(result.data.pageConfig.samples[0].url, "https://images.invalid/album-cover.jpg");
 });
 
 test("照片留影 RPC 对下架单品 fail closed", async () => {
@@ -139,4 +150,36 @@ test("photo and image sample labels both remain visible in photo package details
   const detail = await rpc(source, "getSeriesDetail", { data: { seriesId: "series-1", packageId: "pkg-main", spotId: "spot-1" } });
   assert.equal(detail.success, true);
   assert.deepEqual(detail.data.photos.map((photo) => photo.id || photo._id).sort(), ["legacy-image", "uploaded-photo"]);
+});
+
+test("photo detail keeps product cover first and never restores replaced or removed preview photos", async () => {
+  const source = makeSource();
+  const album = await source.get("albums", "album-1");
+  Object.assign(album, { cover: "https://images.invalid/new-cover.jpg", coverImage: "https://images.invalid/old-cover.jpg",
+    sampleUrls: ["https://images.invalid/detail-new.jpg", "https://images.invalid/new-cover.jpg"],
+    photoCount: 6, retouchMode: "included", retouchCount: 9, makeupIncluded: true, tags: ["清新", "胶片"],
+    shootingNotes: "提前沟通拍摄细节", price: 0, originalPrice: 999, specialPrice: 299 });
+  const detail = await rpc(source, "getPhotoCollection", { albumId: "album-1" });
+  assert.equal(detail.success, true);
+  const product = detail.data.collections[0];
+  const expectedUrls = ["https://images.invalid/new-cover.jpg", "https://images.invalid/detail-new.jpg"];
+  assert.deepEqual(product.sampleUrls, expectedUrls);
+  assert.deepEqual(detail.data.photos.map((photo) => photo.url), expectedUrls);
+  assert.deepEqual(detail.data.pageConfig.banners.map((photo) => photo.url), expectedUrls);
+  assert.equal(product.cover, product.coverImage); assert.equal(product.cover, expectedUrls[0]);
+  assert.equal(product.photoCount, 6, "商品张数独立于展示图片数量");
+  assert.equal(product.retouchMode, "included"); assert.equal(product.retouchCount, 0);
+  assert.equal(product.makeupIncluded, true); assert.deepEqual(product.tags, ["清新", "胶片"]);
+  assert.equal(product.seriesName, "夜景"); assert.equal(product.shootingNotes, "提前沟通拍摄细节");
+  assert.equal(product.price, 0, "0元单价不会回退旧售价"); assert.equal(product.originalPrice, undefined);
+  const home = await rpc(source, "getHomeData", {});
+  const card = home.data.albums.find((row) => row.id === "album-1");
+  assert.equal(card.cover, product.cover); assert.equal(card.photoCount, 6); assert.equal(card.seriesName, "夜景");
+  assert.equal(card.originalPrice, undefined); assert.equal(card.specialPrice, undefined);
+  album.sampleUrls = [];
+  const cleared = await rpc(source, "getPhotoCollection", { albumId: "album-1" });
+  assert.deepEqual(cleared.data.collections[0].sampleUrls, [expectedUrls[0]], "清空展示照片后只保留已选封面，不恢复旧样片");
+  delete album.sampleUrls; delete album.coverImage; delete album.cover;
+  const legacy = await rpc(source, "getPhotoCollection", { albumId: "album-1" });
+  assert.deepEqual(legacy.data.collections[0].sampleUrls, ["https://images.invalid/banner.jpg", "https://images.invalid/detail.jpg"], "无sampleUrls的历史商品仍兼容独立样片");
 });

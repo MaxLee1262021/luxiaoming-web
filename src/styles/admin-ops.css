@@ -106,6 +106,55 @@ body::after {
   }
 }
 
+/* Each first-level group is an independent disclosure control. */
+.admin-shell .menu-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, .7);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.admin-shell .menu-group-toggle:hover {
+  background: rgba(255, 255, 255, .08);
+}
+
+.admin-shell .menu-group-toggle:focus-visible {
+  outline: 2px solid var(--lxm-brand-strong, #ee2c2c);
+  outline-offset: -2px;
+}
+
+.admin-shell .menu-group-caret {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  transition: transform .16s ease;
+}
+
+.admin-shell .menu-group-caret.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.admin-shell .lxm-sidebar.collapsed .menu-group.menu-group-toggle {
+  display: flex;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+}
+
+.admin-shell .lxm-sidebar.collapsed .menu-group-toggle::before {
+  display: none;
+}
+
 /* The desktop collapse handle stays on the sidebar edge instead of competing
  * with the brand area or the active page header. */
 @media (min-width: 761px) {
@@ -293,6 +342,96 @@ body::after {
   box-shadow: 0 0 0 1px var(--lxm-line-strong) inset !important;
 }
 
+/* Keep the spot editor's fields and number controls on the same grid. */
+.spot-edit-dialog .content-form-section-head {
+  position: static;
+  align-items: center;
+}
+
+.spot-edit-dialog .content-form-section-head > span {
+  max-width: 72%;
+  line-height: 1.6;
+  text-align: right;
+}
+
+.spot-edit-dialog .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.spot-edit-dialog .spot-location-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.spot-edit-dialog .spot-settings-grid {
+  margin-top: 16px;
+}
+
+.spot-edit-dialog .spot-settings-grid > .full-width {
+  grid-column: 1 / -1;
+}
+
+.spot-edit-dialog .form-grid > label {
+  min-width: 0;
+  align-content: start;
+  grid-template-rows: minmax(24px, auto) auto;
+}
+
+.spot-edit-dialog .form-grid > label > span:first-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 24px;
+  line-height: 1.5;
+}
+
+.spot-edit-dialog .el-input-number {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+}
+
+.spot-edit-dialog .el-input-number > .el-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.spot-edit-dialog .el-input-number .el-input__wrapper {
+  width: 100%;
+}
+
+.spot-edit-dialog .el-input-number .el-input__inner {
+  text-align: left;
+}
+
+@media (max-width: 980px) {
+  .spot-edit-dialog .spot-location-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .spot-edit-dialog .upload-block {
+    flex-direction: column;
+  }
+
+  .spot-edit-dialog .upload-actions {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .spot-edit-dialog .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .spot-edit-dialog .content-form-section-head > span {
+    max-width: none;
+    text-align: left;
+  }
+}
+
 .el-table {
   --el-table-header-bg-color: var(--lxm-cream);
   --el-table-border-color: var(--lxm-line);
@@ -398,4 +537,150 @@ body::after {
 }
 .delivery-record-dialog .form-grid label.full-width {
   grid-column: 1 / -1;
+}
+
+/* Keep order information and actions within the drawer at every zoom level. */
+.order-drawer.el-drawer {
+  max-width: 100vw;
+}
+.order-drawer .el-drawer__header {
+  margin-bottom: 0;
+  padding: 16px;
+}
+.order-drawer .el-drawer__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+}
+.order-workbench-nav {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.order-workbench-nav .el-button {
+  flex: 1 1 100px;
+  margin: 0;
+}
+.order-workbench-nav .el-button + .el-button {
+  margin: 0;
+}
+.order-workbench-nav .el-button.active {
+  color: var(--lxm-brand);
+  border-color: var(--lxm-brand);
+  background: var(--lxm-brand-soft);
+}
+.order-drawer .order-workbench {
+  flex: 1;
+  width: 100%;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  align-items: stretch;
+  overflow: hidden;
+}
+.order-drawer .order-workbench.readonly-detail {
+  grid-template-columns: minmax(0, 1fr);
+}
+.order-drawer .order-left,
+.order-drawer .order-right {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 4px;
+  overflow-wrap: anywhere;
+}
+.order-drawer [data-order-section] {
+  scroll-margin-top: 4px;
+}
+.order-drawer [data-order-section]:focus-visible {
+  outline: 2px solid var(--lxm-brand);
+  outline-offset: -2px;
+}
+.order-drawer .order-head-card,
+.order-drawer .service-workbench-header,
+.order-drawer .service-workbench-header .header-actions {
+  flex-wrap: wrap;
+}
+.order-drawer .service-workbench-header .header-actions {
+  flex-shrink: 1;
+}
+.order-drawer .order-head-card > div,
+.order-drawer .plain-action > div,
+.order-drawer .detail-item {
+  min-width: 0;
+}
+
+@media (max-width: 1180px) {
+  .order-drawer .order-workbench {
+    display: block;
+    overflow-y: auto;
+  }
+  .order-drawer .order-left,
+  .order-drawer .order-right {
+    overflow: visible;
+    scrollbar-gutter: auto;
+    padding-right: 0;
+  }
+  .order-drawer .order-right {
+    margin-top: 14px;
+  }
+  .order-drawer .service-detail[data-panel="info"] .order-right,
+  .order-drawer .service-detail[data-panel="actions"] .order-left {
+    display: none;
+  }
+  .order-drawer .service-detail .order-right {
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .order-drawer .el-drawer__body {
+    padding: 8px;
+    gap: 8px;
+  }
+  .order-workbench-nav {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .order-workbench-nav .el-button {
+    min-width: 0;
+    padding: 8px 4px;
+  }
+  .order-drawer .order-section,
+  .order-drawer .order-head-card,
+  .order-drawer .service-workbench-header,
+  .order-drawer .service-workbench-body,
+  .order-drawer .service-card {
+    padding: 12px;
+  }
+  .order-drawer .detail-grid,
+  .order-drawer .service-info-grid,
+  .order-drawer .status-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .order-drawer .plain-action,
+  .order-drawer .section-title-row,
+  .order-drawer .service-card-head {
+    flex-wrap: wrap;
+  }
+  .order-drawer .service-card-head span {
+    text-align: left;
+  }
+  .order-drawer .service-workbench .flow-steps {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 12px 4px;
+  }
+  .order-drawer .service-workbench .flow-steps::before {
+    display: none;
+  }
+  .order-drawer .flow-steps > .el-tooltip__trigger {
+    flex: 1 1 60px;
+  }
+  .order-drawer .note-area {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

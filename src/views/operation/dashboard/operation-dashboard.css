@@ -11,6 +11,9 @@
 .page-route-operation-dashboard .dashboard-page-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   min-height: 86px;
   margin-bottom: 16px;
   padding: 18px 22px;

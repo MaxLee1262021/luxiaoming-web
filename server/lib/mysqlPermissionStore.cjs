@@ -171,7 +171,9 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     host: options.dbHost, port: options.dbPort || 3306, user: options.dbUser,
     password: options.dbPassword || "", database: options.dbName, waitForConnections: true,
     connectionLimit: options.connectionLimit || 10, connectTimeout: options.connectTimeout || 3000,
-    multipleStatements: false, ...(options.dbSsl ? { ssl: { rejectUnauthorized: true } } : {})
+    multipleStatements: false,
+    compress: String(options.dbCompress ?? process.env.DB_COMPRESS ?? "true").toLowerCase() === "true",
+    ...(options.dbSsl ? { ssl: { rejectUnauthorized: true } } : {})
   });
   const autoMigrate = options.autoMigrate === true || String(options.autoMigrate ?? process.env.DB_AUTO_MIGRATE ?? "false").toLowerCase() === "true";
   const slowQueryMs = Math.min(Math.max(Number(options.slowQueryMs ?? process.env.DB_SLOW_QUERY_MS ?? 500), 1), 120000);
@@ -323,17 +325,29 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   async function menuRows() {
     return query(pool, `SELECT id,menu_key,parent_key,name,path,icon,sort_no,status,meta_group,meta_type,meta_label,created_at,updated_at FROM ${TABLES.menus} ORDER BY sort_no,id`);
   }
-  async function menuDocument(row) {
+  async function menuDocument(row, attributeRows) {
     if (!row) return null;
     const meta = {};
     if (row.meta_group != null) meta.group = row.meta_group;
     if (row.meta_type != null) meta.type = row.meta_type;
     if (row.meta_label != null) meta.label = row.meta_label;
-    const custom = hydrateAttributes(await query(pool, `SELECT attribute_key path,ordinal,value_type,value_text,value_number,value_bool FROM ${TABLES.menuAttributes} WHERE menu_id=? ORDER BY attribute_key,ordinal`, [row.id]));
+    const custom = hydrateAttributes(attributeRows || await query(pool, `SELECT attribute_key path,ordinal,value_type,value_text,value_number,value_bool FROM ${TABLES.menuAttributes} WHERE menu_id=? ORDER BY attribute_key,ordinal`, [row.id]));
     if (custom.meta && typeof custom.meta === "object") Object.assign(meta, custom.meta);
     return { id: row.id, menuKey: row.menu_key, parentKey: row.parent_key, parentId: row.parent_key, name: row.name, path: row.path, icon: row.icon, sortNo: Number(row.sort_no || 0), status: row.status, meta, createdAt: row.created_at, updatedAt: row.updated_at };
   }
-  async function listMenus() { const rows = await menuRows(); const output = []; for (const row of rows) output.push(await menuDocument(row)); return output; }
+  async function listMenus() {
+    const [rows,attributes] = await Promise.all([
+      menuRows(),
+      query(pool, `SELECT menu_id,attribute_key path,ordinal,value_type,value_text,value_number,value_bool FROM ${TABLES.menuAttributes} ORDER BY menu_id,attribute_key,ordinal`),
+    ]);
+    const byMenu = new Map();
+    for (const attribute of attributes) {
+      const key = String(attribute.menu_id);
+      if (!byMenu.has(key)) byMenu.set(key,[]);
+      byMenu.get(key).push(attribute);
+    }
+    return Promise.all(rows.map(row => menuDocument(row,byMenu.get(String(row.id)) || [])));
+  }
   async function getMenu(entityId) { const rows = await query(pool, `SELECT id,menu_key,parent_key,name,path,icon,sort_no,status,meta_group,meta_type,meta_label,created_at,updated_at FROM ${TABLES.menus} WHERE id=?`, [entityId]); return menuDocument(rows[0]); }
   async function writeMenu(input = {}, entityId) {
     const current = entityId ? await getMenu(entityId) : null;
@@ -392,12 +406,12 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   async function getRole(entityId) { const rows = await query(pool, `SELECT id,role_key roleKey,name,status,description,created_at createdAt,updated_at updatedAt FROM ${TABLES.roles} WHERE id=?`, [entityId]); return rows[0] || null; }
   async function createRole(input = {}) { const idv = input.id || input._id || id("role"); await execute(pool, `INSERT INTO ${TABLES.roles} (id,role_key,name,status,description) VALUES (?,?,?,?,?)`, [idv, input.roleKey || input.code || idv, input.name || input.label || "", input.status || "active", input.description || null]); return getRole(idv); }
   async function updateRole(entityId, input = {}) { const current = await getRole(entityId); if (!current) return null; const data = { ...current, ...(input || {}) }; await execute(pool, `UPDATE ${TABLES.roles} SET role_key=?,name=?,status=?,description=?,updated_at=CURRENT_TIMESTAMP(3) WHERE id=?`, [data.roleKey || data.code, data.name || data.label || "", data.status || "active", data.description || null, entityId]); return getRole(entityId); }
-  async function deleteRole(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.roles} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
+  async function deleteRole(entityId) { return withTransaction(async (conn) => { await execute(conn, `DELETE FROM ${TABLES.rolePermissions} WHERE role_id=?`, [entityId]); await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [entityId]); const result = await execute(conn, `DELETE FROM ${TABLES.roles} WHERE id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }); }
 
   async function userAttributes(userId) { return query(pool, `SELECT attribute_key path,ordinal,value_type,value_text,value_number,value_bool FROM ${TABLES.userAttributes} WHERE user_id=? ORDER BY attribute_key,ordinal`, [userId]); }
-  async function userDocument(row, includePassword = false) {
+  async function userDocument(row, includePassword = false, attributeRows) {
     if (!row) return null;
-    const extra = hydrateAttributes(await userAttributes(row.id));
+    const extra = hydrateAttributes(attributeRows || await userAttributes(row.id));
     delete extra.permissions;
     delete extra.permissionKeys;
     const result = { id: row.id, account: row.account, name: row.display_name, roleId: row.role_id, status: row.status, phone: row.phone || "", email: row.email || "", extra, createdAt: row.created_at, updatedAt: row.updated_at };
@@ -412,8 +426,16 @@ module.exports = function createMysqlPermissionStore(options = {}) {
     return includePassword ? result : safeUser(result);
   }
   async function rawUser(entityId) { const rows = await query(pool, `SELECT * FROM ${TABLES.users} WHERE id=?`, [entityId]); return rows[0] || null; }
-  async function listUsers() { const rows = await query(pool, `SELECT * FROM ${TABLES.users} ORDER BY display_name,id`); const out = []; for (const row of rows) out.push(await userDocument(row)); return out; }
-  async function getUser(entityId) { return userDocument(await rawUser(entityId)); }
+  async function listUsers() {
+    const [rows, attributes] = await Promise.all([
+      query(pool, `SELECT * FROM ${TABLES.users} ORDER BY display_name,id`),
+      query(pool, `SELECT user_id,attribute_key path,ordinal,value_type,value_text,value_number,value_bool FROM ${TABLES.userAttributes} ORDER BY user_id,attribute_key,ordinal`),
+    ]);
+    const byUser = new Map();
+    for (const attribute of attributes) { const key = String(attribute.user_id); if (!byUser.has(key)) byUser.set(key, []); byUser.get(key).push(attribute); }
+    return Promise.all(rows.map(row => userDocument(row, false, byUser.get(String(row.id)) || [])));
+  }
+  async function getUser(entityId) { const [row, attributes] = await Promise.all([rawUser(entityId), userAttributes(entityId)]); return userDocument(row, false, attributes); }
   async function getUserState(entityId) { return userDocument(await rawUser(entityId), true); }
   async function writeUser(input = {}, entityId) {
     const existing = entityId ? await rawUser(entityId) : null;
@@ -458,10 +480,55 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   }
   async function setRoleMenus(roleId, menuIds) { return withTransaction(async (conn) => { const keys = [...new Set((menuIds || []).map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [roleId]); for (const key of keys) await execute(conn, `INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`, [roleId, key]); return { roleId, menuKeys: keys }; }); }
   async function getRoleMenus(roleId) { const rows = await query(pool, `SELECT menu_key FROM ${TABLES.roleMenus} WHERE role_id=? ORDER BY menu_key`, [roleId]); return { roleId, menuKeys: rows.map((row) => row.menu_key), menuIds: rows.map((row) => row.menu_key) }; }
+  async function getRoleMenusBatch(roleIds) {
+    const ids = [...new Set((roleIds || []).map(String))];
+    const result = Object.fromEntries(ids.map(roleId => [roleId, { roleId, menuKeys: [], menuIds: [] }]));
+    if (!ids.length) return result;
+    const rows = await query(pool, `SELECT role_id,menu_key FROM ${TABLES.roleMenus} WHERE role_id IN (${ids.map(() => "?").join(",")}) ORDER BY role_id,menu_key`, ids);
+    for (const row of rows) if (result[String(row.role_id)]) { result[String(row.role_id)].menuKeys.push(row.menu_key); result[String(row.role_id)].menuIds.push(row.menu_key); }
+    return result;
+  }
   // Keep historic action rows intact, but do not use or modify them in the
   // live menu-authorized policy.
-  async function setRolePermissions(roleId) { return { roleId }; }
-  async function getRolePermissions(roleId) { return { roleId }; }
+  async function setRolePermissions(roleId, input = []) {
+    // Legacy arbitrary action grants remain retired. Only the new share domain's
+    // explicit capability keys are persisted; menus still govern every other module.
+    const allowed=new Set(['share:view','share:config','share:admin']);
+    const keys=[...new Set((Array.isArray(input)?input:[]).filter(key=>allowed.has(key)))];
+    await withTransaction(async conn=>{
+      await query(conn,`SELECT id FROM ${TABLES.roles} WHERE id=? FOR UPDATE`,[roleId]);
+      await execute(conn,`DELETE FROM ${TABLES.rolePermissions} WHERE role_id=? AND permission_key IN ('share:view','share:config','share:admin')`,[roleId]);
+      for(const key of keys) await execute(conn,`INSERT INTO ${TABLES.rolePermissions} (role_id,permission_key) VALUES (?,?)`,[roleId,key]);
+    });
+    return keys.length ? {roleId,permissionKeys:keys} : {roleId};
+  }
+  async function getRolePermissions(roleId) {
+    const rows=await query(pool,`SELECT permission_key FROM ${TABLES.rolePermissions} WHERE role_id=? AND permission_key IN ('share:view','share:config','share:admin') ORDER BY permission_key`,[roleId]);
+    const keys=rows.map(row=>row.permission_key);
+    return keys.length ? {roleId,permissionKeys:keys} : {roleId};
+  }
+  async function getRolePermissionsBatch(roleIds) {
+    const ids = [...new Set((roleIds || []).map(String))];
+    const result = Object.fromEntries(ids.map(roleId => [roleId, { roleId, permissionKeys: [] }]));
+    if (!ids.length) return result;
+    const rows = await query(pool, `SELECT role_id,permission_key FROM ${TABLES.rolePermissions} WHERE role_id IN (${ids.map(() => "?").join(",")}) AND permission_key IN ('share:view','share:config','share:admin') ORDER BY role_id,permission_key`, ids);
+    for (const row of rows) if (result[String(row.role_id)]) result[String(row.role_id)].permissionKeys.push(row.permission_key);
+    return result;
+  }
+  async function setShareGrants(roleId, input = []) {
+    const allowed=new Set(['share:view','share:config']);
+    if(!Array.isArray(input) || input.some(key=>!allowed.has(key))) throw Object.assign(new Error('分成授权无效'),{statusCode:400,code:'SHARE_4001'});
+    const keys=[...new Set([...input,...(input.includes('share:config')?['share:view']:[])])];
+    await withTransaction(async conn=>{
+      const roles=await query(conn,`SELECT id,role_key FROM ${TABLES.roles} WHERE id=? FOR UPDATE`,[roleId]);
+      if(roles.length!==1 || ['super','merchant'].includes(roles[0].role_key) || keys.includes('share:config') && ['finance','service','photo'].includes(roles[0].role_key)) throw Object.assign(new Error('该角色不允许此分成授权'),{statusCode:400,code:'SHARE_4001'});
+      await execute(conn,`DELETE FROM ${TABLES.rolePermissions} WHERE role_id=? AND permission_key IN ('share:view','share:config','share:admin')`,[roleId]);
+      await execute(conn,`DELETE FROM ${TABLES.roleMenus} WHERE role_id=? AND menu_key IN ('shareRules','shareDetails','shareMine')`,[roleId]);
+      for(const key of keys) await execute(conn,`INSERT INTO ${TABLES.rolePermissions} (role_id,permission_key) VALUES (?,?)`,[roleId,key]);
+      if(keys.length) for(const key of ['shareRules','shareDetails']) await execute(conn,`INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`,[roleId,key]);
+    });
+    return {roleId,permissionKeys:keys};
+  }
   async function setRoleGrantsAtomic(roleId, menuKeys = []) { return withTransaction(async (conn) => { const menus = [...new Set(menuKeys.map(String).filter(Boolean))]; await execute(conn, `DELETE FROM ${TABLES.roleMenus} WHERE role_id=?`, [roleId]); for (const key of menus) await execute(conn, `INSERT INTO ${TABLES.roleMenus} (role_id,menu_key) VALUES (?,?)`, [roleId, key]); return { roleId, menuKeys: menus }; }); }
   async function health() {
     try {
@@ -493,7 +560,7 @@ module.exports = function createMysqlPermissionStore(options = {}) {
   }
   async function snapshot() { return { menus: await listMenus(), roles: await listRoles(), roleMenus: await query(pool, `SELECT role_id roleId,menu_key menuKey FROM ${TABLES.roleMenus}`), users: await listUsers() }; }
 
-  return { mode: "mysql", backend: "mysql", required: true, tables: TABLES, ensureSchema, listMenus, getMenu, createMenu, updateMenu, deleteMenu: async (entityId) => { const result = await execute(pool, `DELETE FROM ${TABLES.menus} WHERE id=?`, [entityId]); await execute(pool, `DELETE FROM ${TABLES.menuAttributes} WHERE menu_id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }, listRoles, getRole, createRole, updateRole, deleteRole, listUsers, getUser, getUserState, createUser, updateUser, deleteUser, setRoleMenus, getRoleMenus, setRolePermissions, getRolePermissions, setRoleGrantsAtomic, authenticate, health, snapshot, async close() { closed = true; if (typeof pool.end === "function") await pool.end(); } };
+  return { mode: "mysql", backend: "mysql", required: true, tables: TABLES, ensureSchema, listMenus, getMenu, createMenu, updateMenu, deleteMenu: async (entityId) => { const result = await execute(pool, `DELETE FROM ${TABLES.menus} WHERE id=?`, [entityId]); await execute(pool, `DELETE FROM ${TABLES.menuAttributes} WHERE menu_id=?`, [entityId]); return Number(result.affectedRows || 0) > 0; }, listRoles, getRole, createRole, updateRole, deleteRole, listUsers, getUser, getUserState, createUser, updateUser, deleteUser, setRoleMenus, getRoleMenus, getRoleMenusBatch, setRolePermissions, getRolePermissions, getRolePermissionsBatch, setShareGrants, setRoleGrantsAtomic, authenticate, health, snapshot, async close() { closed = true; if (typeof pool.end === "function") await pool.end(); } };
 };
 module.exports.hashPassword = hashPassword;
 module.exports.verifyPassword = verifyPassword;

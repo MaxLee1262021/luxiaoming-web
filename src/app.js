@@ -1,11 +1,13 @@
 const { createApp, reactive, computed, onMounted, provide, watch } = Vue;
 
 async function bootstrap() {
-  if (window.LXM_PAGES?.loadAll) await window.LXM_PAGES.loadAll();
 const { ElMessage, ElMessageBox } = ElementPlus;
 const LXM_ELEMENT_LOCALE = {
   name: "zh-cn",
   el: {
+    messagebox: { title: '提示', confirm: '确定', cancel: '取消', error: '输入内容无效' },
+    table: { emptyText: '暂无数据' },
+    select: { loading: '加载中', noMatch: '无匹配数据', noData: '暂无数据', placeholder: '请选择' },
     pagination: {
       goto: "前往",
       pagesize: "条/页",
@@ -54,7 +56,22 @@ const LXM_ELEMENT_LOCALE = {
 };
 
   const app = createApp({
-  template: LXM_VIEWS.app,
+  // Compile the large management shell only after authentication. The login
+  // screen does not need the render functions for every order/content dialog.
+  components: {
+    LxmAdminShell: {
+      template: LXM_VIEWS.app,
+      setup() { return Vue.inject('lxm'); }
+    }
+  },
+  template: `
+    <lxm-admin-shell v-if="state.authed" />
+    <lxm-page-login v-else-if="!state.authChecking" />
+    <div v-else class="auth-loading" role="status" aria-live="polite">
+      <div class="auth-loading-mark">麓</div>
+      <strong>正在验证登录状态</strong>
+      <span>{{ state.authNotice || '请稍候…' }}</span>
+    </div>`,
   setup() {
     // 组装 ctx：先放 Vue 工具与提示组件，再按依赖顺序跑完 src/app/ 下的全部业务模块，
     // 每个模块把自己声明的 state/data/computed/方法合并进 ctx —— 等价于拆分前同一闭包里的全部顶层声明。
@@ -67,7 +84,9 @@ const LXM_ELEMENT_LOCALE = {
       ElMessage: _ElMessage, ElMessageBox: _ElMessageBox,
       ...partExports
     } = ctx;
-    const viewModel = { LXM_CONFIG, LXM_SERVICE, ...partExports };
+    // Registered pages receive this same context through inject("lxm"). Keep
+    // their message and confirmation services available alongside business actions.
+    const viewModel = { LXM_CONFIG, LXM_SERVICE, ElMessage, ElMessageBox, ...partExports };
     provide("lxm", viewModel);
     return viewModel;
   },

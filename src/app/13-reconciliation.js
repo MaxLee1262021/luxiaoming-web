@@ -59,10 +59,31 @@
 function remoteReconciliationEnabled() {
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD && window.LXM_CLOUD.create && window.LXM_CLOUD.update
-    && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+    && window.LXM_CLOUD_MODE === "mysql" && reachable !== false);
+}
+function isLegacyPhotoFinance(row) {
+  return [row?.type, row?.objectType, row?.targetType, row?.typeName].some(value => ["photo", "photographer", "摄影", "摄影师"].includes(String(value || "").trim().toLowerCase()));
+}
+const photoFinanceRoute = computed(() => {
+  const keys = roleProfile.value.menus || [];
+  for (const route of ["photoLedger", "photoSettlement", "photoMine"]) {
+    const key = keys.find(key => (typeof ctx.menuRouteKey === "function" ? ctx.menuRouteKey(key) : key) === route);
+    if (key) return key;
+  }
+  return "";
+});
+function openPhotoFinanceLedger() {
+  if (!photoFinanceRoute.value) return ElMessage.warning("请联系管理员开通摄影师分成明细或结算管理权限");
+  return ctx.switchMenu(photoFinanceRoute.value);
+}
+function confirmedRefundTicket(ticket) {
+  if (Array.isArray(ticket.refundAttempts)) return ticket.refundAttempts.filter((row) => row.status === "SUCCESS").reduce((sum, row) => sum + Number(row.amountFen || 0), 0) / 100;
+  return ["refunded", "manual_refunded", "已退款", "已人工退款"].includes(String(ticket.refundStatus || "").toLowerCase()) && ticket.refundConfirmed === true ? Number(ticket.refundAmount || ticket.amount || 0) : 0;
 }
 async function saveReconciliationRecord(key, row, mode = "create") {
-  if (!remoteReconciliationEnabled()) return row;
+  if (["reconciliationTransfers", "adjustmentRecords"].includes(key) && isLegacyPhotoFinance(row)) throw new Error("摄影师分成由独立账本结算，请前往摄影师分成管理");
+  if (key === "reconciliationTransfers" && ["shop", "merchant", "商家"].includes(row?.type || row?.objectType || row?.targetType)) throw new Error("商家分成按新账本只读展示，本期不提供结算操作");
+  if (!remoteReconciliationEnabled()) throw new Error("真实后端连接不可用，财务记录未保存");
   const id = row && (row.id || row._id);
   let payload = row;
   if (mode === "update") {
@@ -83,6 +104,23 @@ async function saveReconciliationRecord(key, row, mode = "create") {
 }
 
 function reconciliation(type) {
+  // Preserved fulfillment orders are not a second source of photographer
+  // liabilities. Only benefit_ledger/photo_settlement may calculate that debt.
+  if (type === "photo") return [];
+  if (type === "shop") {
+    if (!ctx.shareAnalytics?.ready) return [];
+    return ctx.shareAnalytics.merchants.map((merchant) => {
+      const id = String(merchant.merchantId);
+      const orderIds = new Set(ctx.shareAnalytics.orderAttributions.filter((item) => String(item.merchantId) === id).map((item) => String(item.orderId)));
+      const orders = scopedOrders.value.filter((order) => orderIds.has(String(order.id || order._id)));
+      return { id, type: "shop", typeName: "商家", name: merchant.name, ledgerReadOnly: true,
+        totalOrders: Number(merchant.orderCount || 0), orders: Number(merchant.orderCount || 0), pendingOrders: 0, observationOrders: 0, blockedOrders: 0,
+        totalAmount: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0), amount: orders.reduce((sum, order) => sum + netOrderAmount(order), 0),
+        pendingAmount: 0, observationAmount: 0, blockedAmount: 0, refundAmount: orders.reduce((sum, order) => sum + confirmedRefund(order), 0),
+        paid: orders.reduce((sum, order) => sum + financePaid(order), 0), due: 0, commission: Number(merchant.totalAmount || 0),
+        rateText: "按已入账分成明细", orderIds: orders.map((order) => order.id), orderNos: orders.map((order) => order.orderNo) };
+    });
+  }
   let rows = [];
   if (type === "shop") rows = scopedShops.value;
   if (type === "agent") rows = data.agents.filter((a) => state.role !== "agent" || a.id === roleProfile.value.agentId);
@@ -122,8 +160,7 @@ function reconciliation(type) {
       paid: orders.reduce((s, o) => s + paid(o), 0),
       due: orders.reduce((s, o) => s + financeDue(o), 0),
       commission: orders.reduce((s, o) => s + (
-        type === "shop" ? orderSplit(o).shopAmount
-          : type === "distributor" ? orderSplit(o).distributorAmount
+        type === "distributor" ? orderSplit(o).distributorAmount
           : type === "photo" ? orderSplit(o).photographerAmount
           : commission(o, type)
       ), 0),
@@ -226,6 +263,7 @@ function settlementBatchRecord(row) {
   return data.reconciliationTransfers.find((item) => item.key === key && ["已确", "已封"].includes(item.status));
 }
 function withTransferStatus(row) {
+  if (row.type === "shop") return { ...row, ledgerReadOnly: true, settlementCycle: "本期不结算", settlementPeriod: reconciliationTransferMonth(), transferKey: `share-ledger:${row.id}`, transferRecord: null, transferStatus: "本期不结算", transferText: "新分成账本只读，历史结算记录另行保留", transferredAmount: 0, pendingTransferAmount: 0 };
   const cycle = settlementCycleFor(row);
   const record = settlementBatchRecord({ ...row, settlementCycle: cycle });
   const amount = Number(row.commission || row.settlementAmount || 0);
@@ -244,7 +282,7 @@ function withTransferStatus(row) {
   };
 }
 const reconciliationSettlementRows = computed(() => [
-  ...reconciliation("shop").map((row) => ({ ...row, typeName: "商家", rateText: commissionRateText("shop", row.id) })),
+  ...reconciliation("shop"),
   ...reconciliation("distributor").map((row) => ({ ...row, typeName: "分销", rateText: commissionRateText("distributor", row.id) })),
   ...photographerSettlementRows.value,
 ].map(withTransferStatus));
@@ -295,22 +333,20 @@ const reconciliationSummary = computed(() => {
   const observationSplits = observationOrders.map(orderSplit);
   const estimatedSplits = estimatedOrders.map(orderSplit);
   const eligibleAmount = eligibleSplits.reduce((sum, split) => sum + split.netAmount, 0);
-  const shopCommissionAmount = rows.reduce((sum, row) => sum + row.commission, 0);
+  const shopCommissionAmount = ctx.shareAnalytics?.ready ? rows.reduce((sum, row) => sum + Math.round(row.commission * 100), 0) / 100 : null;
   const distributorCommissionAmount = distributorRows.reduce((sum, row) => sum + row.commission, 0);
-  const photographerCommissionAmount = photoRows.reduce((sum, row) => sum + row.commission, 0);
-  const headquarterAmount = eligibleSplits.reduce((sum, split) => sum + split.headquarterAmount, 0);
+  const photographerCommissionAmount = null;
+  const headquarterAmount = null; // Requires the independent photo ledger to reconcile.
   const transferredAmount = visibleReconciliationSettlementBatchRows.value.reduce((sum, row) => sum + Number(row.transferredAmount || 0), 0);
   const pendingTransferAmount = visibleReconciliationSettlementBatchRows.value.reduce((sum, row) => sum + Number(row.pendingTransferAmount || 0), 0);
-  const scopedRefundRows = data.afterSales.filter((row) => {
-    const order = data.orders.find((item) => item.id === row.orderId);
-    return Number(row.refundAmount || row.amount || 0) > 0 && order && inRoleScope(order) && inDateRange(order.appointmentAt) && (!state.filters.shopId || sameShop(order, state.filters.shopId));
-  });
+  const scopedOrderIds = new Set(baseOrders.map((order) => String(order.id || order._id)));
+  const scopedRefundRows = data.afterSales.filter((row) => Number(row.refundAmount || row.amount || 0) > 0 && scopedOrderIds.has(String(row.orderId)));
   const observationAmount = observationSplits.reduce((sum, split) => sum + split.netAmount, 0);
   const estimatedAmount = estimatedSplits.reduce((sum, split) => sum + split.netAmount, 0);
-  const estimatedShopCommissionAmount = estimatedSplits.reduce((sum, split) => sum + split.shopAmount, 0);
+  const estimatedShopCommissionAmount = null;
   const estimatedDistributorCommissionAmount = estimatedSplits.reduce((sum, split) => sum + split.distributorAmount, 0);
-  const estimatedPhotographerCommissionAmount = estimatedSplits.reduce((sum, split) => sum + split.photographerAmount, 0);
-  const estimatedHeadquarterAmount = estimatedSplits.reduce((sum, split) => sum + split.headquarterAmount, 0);
+  const estimatedPhotographerCommissionAmount = null;
+  const estimatedHeadquarterAmount = null;
   const confirmedSettlementRows = reconciliationTransferRows.value.filter((row) => ["已确", "已封"].includes(row.status));
   const confirmedSettlementOrderIds = new Set();
   confirmedSettlementRows.forEach((row) => (row.orderIds || []).forEach((orderId) => confirmedSettlementOrderIds.add(orderId)));
@@ -344,9 +380,9 @@ const reconciliationSummary = computed(() => {
     confirmedSettlementAmount,
     confirmedSettlementOrders: confirmedSettlementOrderIds.size,
     confirmedSettlementBatches: confirmedSettlementRows.length,
-    reviewedRefundAmount: scopedRefundRows.filter((row) => normalizeReviewStatus(row.financeStatus) === "已审").reduce((sum, row) => sum + Number(row.refundAmount || row.amount || 0), 0),
-    pendingRefundAmount: scopedRefundRows.filter((row) => normalizeReviewStatus(row.financeStatus) !== "已审").reduce((sum, row) => sum + Number(row.refundAmount || row.amount || 0), 0),
-    pendingRefundOrders: scopedRefundRows.filter((row) => normalizeReviewStatus(row.financeStatus) !== "已审").length,
+    reviewedRefundAmount: baseOrders.reduce((sum, order) => sum + confirmedRefund(order), 0),
+    pendingRefundAmount: scopedRefundRows.reduce((sum, row) => sum + Math.max(0, Number(row.refundAmount || row.amount || 0) - confirmedRefundTicket(row)), 0),
+    pendingRefundOrders: scopedRefundRows.filter((row) => Number(row.refundAmount || row.amount || 0) > confirmedRefundTicket(row)).length,
   };
 });
 const reconciliationDifferenceRows = computed(() => {
@@ -354,7 +390,7 @@ const reconciliationDifferenceRows = computed(() => {
   const eligibleOrders = baseOrders.filter(isReconciliationEligible);
   const totalOrderAmount = baseOrders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0);
   const reviewedPaidAmount = baseOrders.reduce((sum, order) => sum + financePaid(order), 0);
-  const settlementAccrued = reconciliationSummary.value.shopCommissionAmount + reconciliationSummary.value.distributorCommissionAmount + reconciliationSummary.value.photographerCommissionAmount;
+  const settlementAccrued = reconciliationSummary.value.distributorCommissionAmount;
   const settlementPaid = reconciliationSummary.value.transferredAmount;
   const rows = [
     { type: "收款差异", amount: Math.max(totalOrderAmount - reviewedPaidAmount - reconciliationSummary.value.reviewedRefundAmount, 0), desc: "订单总额 - 财务已审核收款 - 已审核退款。用于提示客服或财务继续核对收款。", level: "danger" },
@@ -403,11 +439,13 @@ function openReconciliationDifference(row) {
   state.reconciliationDialog = true;
 }
 const adjustmentRecordRows = computed(() => data.adjustmentRecords.filter((row) => {
+  if (isLegacyPhotoFinance(row)) return false;
   if (!["super", "finance"].includes(state.role)) return false;
   const month = reconciliationTransferMonth();
   return !month || String(row.time || "").startsWith(month);
 }).sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))));
 function openAdjustmentDialog(row = null) {
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师调账请前往摄影师分成管理");
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以发起冲正调");
   state.adjustmentForm = {
     orderNo: row?.orderNo || "",
@@ -425,6 +463,7 @@ function openAdjustmentDialog(row = null) {
 async function submitAdjustmentRecord() {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("当前角色无权发起冲正调账");
   const form = state.adjustmentForm;
+  if (isLegacyPhotoFinance(form)) return ElMessage.warning("摄影师调账请前往独立分成管理");
   if (!form.orderNo || !Number(form.amount || 0) || !form.targetName || !form.note) return ElMessage.warning("请填写订单号、冲正金额、扣减主体和备注");
   const order = data.orders.find((item) => item.orderNo === form.orderNo || item.id === form.orderNo);
   const record = {
@@ -468,6 +507,7 @@ function openRetentionAdjustment(row) {
   });
 }
 function approveAdjustmentRecord(row) {
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师财务操作请前往独立分成管理");
   if (state.role !== "super") return ElMessage.warning("只有超管可以审批冲正调账");
   if (!row || row.approvalStatus === "已审") return;
   window.LXMActionConfirm.confirm(ElMessageBox, `确认审批 ${row.orderNo} 的冲正调"${money(Math.abs(Number(row.amount || 0)))}？`, "冲正审批确认", {
@@ -488,7 +528,7 @@ function approveAdjustmentRecord(row) {
   }).catch(() => {});
 }
 const reconciliationSettlementBatchRows = computed(() => reconciliationSettlementRows.value
-  .filter((row) => Number(row.commission || 0) > 0)
+  .filter((row) => row.type !== "shop" && Number(row.commission || 0) > 0)
   .map((row) => ({
     ...row,
     key: settlementBatchKey(row),
@@ -500,7 +540,7 @@ const reconciliationSettlementBatchRows = computed(() => reconciliationSettlemen
     reminder: row.transferStatus === "已结" ? "已生成结算记" : `${row.settlementCycle}待结算，请财务按周期确认`,
   })));
 const visibleReconciliationSettlementBatchRows = computed(() => visibleReconciliationSettlementRows.value
-  .filter((row) => Number(row.commission || 0) > 0)
+  .filter((row) => row.type !== "shop" && Number(row.commission || 0) > 0)
   .map((row) => ({
     ...row,
     key: settlementBatchKey(row),
@@ -512,6 +552,7 @@ const visibleReconciliationSettlementBatchRows = computed(() => visibleReconcili
     reminder: row.transferStatus === "已结" ? "已生成结算记" : `${row.settlementCycle}待结算，请财务按周期确认`,
   })));
 function canSeeSettlementRecord(row) {
+  if (isLegacyPhotoFinance(row)) return false;
   if (["super", "finance"].includes(state.role)) return true;
   if (state.role === "merchant") return row.objectType === "商家" && sameShop({ id: row.objectId, shopId: row.objectId }, roleProfile.value.shopId);
   if (state.role === "distributor") return row.objectType === "分销" && row.objectId === roleProfile.value.distributorId;
@@ -557,6 +598,8 @@ const settlementDueReminderRows = computed(() => visibleReconciliationSettlement
   }))
   .sort((a, b) => String(a.settlementPeriod || "").localeCompare(String(b.settlementPeriod || ""))));
 function markSettlementPaid(row) {
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师财务操作请前往独立分成管理");
+  if (["shop", "merchant", "商家"].includes(row?.type || row?.objectType)) return ElMessage.warning("商家历史结算仅可查看");
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以确认打");
   if (!row || row.status === "已封") return ElMessage.warning("已封存账单不能重复确认打");
   window.LXMActionConfirm.confirm(ElMessageBox, `确认 ${row.objectType}「${row.objectName}」${row.period} 已完成打款？`, "确认打款登记", {
@@ -577,6 +620,8 @@ function markSettlementPaid(row) {
   }).catch(() => {});
 }
 function sealSettlementRecord(row) {
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师财务操作请前往独立分成管理");
+  if (["shop", "merchant", "商家"].includes(row?.type || row?.objectType)) return ElMessage.warning("商家历史结算仅可查看");
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以封存账");
   if (!row) return;
   if (row.status === "已封") return ElMessage.warning("该结算记录已封存");
@@ -600,7 +645,7 @@ function sealSettlementRecord(row) {
 }
 const reconciliationFilterSummary = computed(() => {
   const parts = [];
-  parts.push(state.filters.reconcileMonth ? `月份：${state.filters.reconcileMonth}` : "月份：当前演示数据");
+  parts.push(state.filters.reconcileMonth ? `月份：${state.filters.reconcileMonth}` : "月份：全部已加载记录");
   parts.push(state.filters.cityId ? `城市：${cityName(state.filters.cityId)}` : ["super", "finance"].includes(state.role) ? "城市：总部全部" : "城市：全部可用");
   if (state.filters.shopId) parts.push(`商家：${shopName(state.filters.shopId)}`);
   if (state.filters.agentId) parts.push(`代理分店：${agentName(state.filters.agentId)}`);
@@ -712,9 +757,9 @@ const selectedSettlementDialogOrders = computed(() => {
 });
 function settlementOrderAmount(order, target = state.settlementTarget) {
   if (!order || !target) return 0;
-  if (target.type === "shop") return orderSplit(order).shopAmount;
+  if (target.type === "shop") return 0;
   if (target.type === "distributor") return orderSplit(order).distributorAmount;
-  if (target.type === "photo") return orderSplit(order).photographerAmount;
+  if (isLegacyPhotoFinance(target)) return 0;
   if (target.type === "service") return 0;
   return commission(order, target.type);
 }
@@ -723,6 +768,8 @@ function refreshSettlementFormAmount() {
   state.settlementForm.amount = Math.round(amount * 100) / 100;
 }
 function confirmSettlementBatch(row) {
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师分成请前往独立结算管理，不按旧订单比例重算");
+  if (row?.type === "shop" || row?.ledgerReadOnly) return ElMessage.warning("商家分成只读展示，本期不结算");
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以确认结");
   if (isReconciliationClosed.value) return ElMessage.warning("当前月份已关账，不能确认结算");
   const amount = Number(row.amount || row.commission || row.settlementAmount || 0);
@@ -742,6 +789,8 @@ function onReconciliationSelectionChange(rows) {
   state.selectedReconciliationKeys = (rows || []).map((row) => row.transferKey);
 }
 async function createSettlementRecordFromRow(row, extra = {}) {
+  if (isLegacyPhotoFinance(row)) return null;
+  if (row?.type === "shop" || row?.ledgerReadOnly) return null;
   const selectedOrders = scopedOrders.value.filter((order) => (row.orderIds || []).includes(order.id));
   const amount = Number(row.amount || row.commission || row.settlementAmount || 0);
   const record = {
@@ -776,7 +825,7 @@ async function createSettlementRecordFromRow(row, extra = {}) {
 function batchConfirmSettlement() {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以批量确认结算");
   if (isReconciliationClosed.value) return ElMessage.warning("当前月份已封存，不能批量确认结算");
-  const rows = selectedReconciliationRows.value.filter((row) => ["待结", "待结算"].includes(row.transferStatus) && Number(row.commission || 0) > 0);
+  const rows = selectedReconciliationRows.value.filter((row) => row.type !== "shop" && ["待结", "待结算"].includes(row.transferStatus) && Number(row.commission || 0) > 0);
   if (!rows.length) return ElMessage.warning("请先勾选待结算对象");
   const largeRows = rows.filter((row) => Number(row.commission || 0) >= largeSettlementThreshold() && largeSettlementThreshold() > 0);
   if (largeRows.length) return ElMessage.warning(`已选对象包含 ${largeRows.length} 个大额结算，请逐个打开确认结算并填写凭证与备注`);
@@ -801,7 +850,7 @@ function batchConfirmSettlement() {
 function batchSealSettlement() {
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以批量封存账");
   if (isReconciliationClosed.value) return ElMessage.warning("当前月份已整体封存，不能批量封存单个账单");
-  const rows = selectedReconciliationRows.value.filter((row) => row.transferStatus === "已结" && row.transferRecord);
+  const rows = selectedReconciliationRows.value.filter((row) => row.type !== "shop" && row.transferStatus === "已结" && row.transferRecord);
   if (!rows.length) return ElMessage.warning("请先勾选已结算但未封存的对");
   window.LXMActionConfirm.confirm(ElMessageBox, `确认批量封存 ${rows.length} 个结算对象账单？封存后原始结算记录锁定，后续调整走冲正台账。`, "批量封存账单", {
     confirmButtonClass: "lxm-action-confirm--warning",
@@ -831,6 +880,8 @@ function batchSealSettlement() {
 async function submitSettlementBatch() {
   const row = state.settlementTarget;
   if (!row) return;
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师分成请前往独立结算管理");
+  if (row.type === "shop" || row.ledgerReadOnly) return ElMessage.warning("商家分成只读展示，本期不结算");
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以确认结");
   if (isReconciliationClosed.value) return ElMessage.warning("当前月份已封存，不能确认结算");
   if (settlementBatchRecord(row)) return ElMessage.warning("该对象当前结算周期已确认，不能重复确");
@@ -873,6 +924,8 @@ async function submitSettlementBatch() {
   ElMessage.success("结算批次已记录，并可在确认记录中查看关联订单");
 }
 function closeSettlementBatch(row) {
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师财务操作请前往独立分成管理");
+  if (row?.type === "shop" || row?.ledgerReadOnly) return ElMessage.warning("商家历史结算仅可查看");
   if (!["super", "finance"].includes(state.role)) return ElMessage.warning("只有超管或财务可以封存结算账");
   if (isReconciliationClosed.value) return ElMessage.warning("当前月份已整体封存，不能重复封存单个结算对象");
   const record = settlementBatchRecord(row);
@@ -897,6 +950,8 @@ function closeSettlementBatch(row) {
   }).catch(() => {});
 }
 function unlockSettlementBatch(row) {
+  if (isLegacyPhotoFinance(row)) return ElMessage.warning("摄影师财务操作请前往独立分成管理");
+  if (row?.type === "shop" || row?.ledgerReadOnly) return ElMessage.warning("商家历史结算仅可查看");
   if (state.role !== "super") return ElMessage.warning("只有超管可以解封单主体账");
   const record = settlementBatchRecord(row);
   if (!record || record.status !== "已封") return ElMessage.warning("当前账单未封存，无需解封");
@@ -939,6 +994,9 @@ function openSettlementRecordOrders(row) {
 
   return {
     reconciliation,
+    isLegacyPhotoFinance,
+    photoFinanceRoute,
+    openPhotoFinanceLedger,
     reconciliationTransferMonth,
     currentClosingRecord,
     reconciliationClosingRecord,

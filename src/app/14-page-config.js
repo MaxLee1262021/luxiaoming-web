@@ -15,12 +15,10 @@
   } = ctx;
 
 const homeModuleOptions = [
-  { key: "mainPush", label: "主推套餐", desc: "展示跨全部打卡点的主推套餐" },
-  { key: "spots", label: "热门打卡", desc: "展示城市核心拍摄地点" },
-  { key: "albums", label: "照片单品", desc: "展示可预约的照片单品商品" },
-  { key: "videoProducts", label: "城市短视频", desc: "展示短视频与短视频" },
-  { key: "peripherals", label: "摄影周边", desc: "展示相册、打印、相框等周边" },
-  { key: "guides", label: "攻略故事", desc: "展示攻略和城市故事内容" },
+  { key: "features", label: "特色专区", desc: "地图探点、旅拍灵感、影像周边入口" },
+  { key: "bookingAlbums", label: "照片留影", desc: "按所选打卡点展示照片商品" },
+  { key: "videoProducts", label: "视频摄像", desc: "按所选打卡点展示短视频单品" },
+  { key: "hotPackages", label: "旅拍套餐", desc: "按所选打卡点展示旅拍套餐" },
 ];
 const homePreview = computed(() => {
   const enabled = state.homeConfig.enabledModules || [];

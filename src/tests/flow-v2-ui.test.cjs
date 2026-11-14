@@ -40,10 +40,10 @@ function refundReviewFixture() {
   f.ctx.data.orders.push(order);
   f.ctx.data.afterSales.push(ticket);
   f.ctx.state.currentFinanceReview = { ...row };
-  Object.assign(f.window, { LXM_CLOUD_MODE: "api", LXM_AUTH: { hasSession: () => true } });
+  Object.assign(f.window, { LXM_CLOUD_MODE: "mysql", LXM_AUTH: { hasSession: () => true } });
   f.window.LXM_CLOUD = { async afterSaleAction(id, action, payload) {
     f.calls.push({ id, action, payload });
-    return { ticket: { ...ticket }, order: { ...order, status: payload.approved ? "cancelled" : "deposit_paid" } };
+    return { ticket: { ...ticket, financeStatus: payload.approved ? "已审" : "已驳", refundStatus: payload.approved ? "processing" : "rejected", refundConfirmed: false, status: "pending", customerVisibleStatus: payload.approved ? "微信退款处理中" : "处理" }, order: { ...order } };
   } };
   return { ...f, order, ticket, row };
 }
@@ -68,27 +68,26 @@ test("currency formatting keeps two decimal places for totals, adjustments and m
   }
 });
 
-test("refund approval requires transaction proof and applies the server's cancelled order", async () => {
+test("refund approval submits online refund without manual proof or claiming success", async () => {
   const f = refundReviewFixture();
-  f.ctx.ElMessageBox.prompt = async (_message, _title, options) => {
-    assert.notEqual(options.inputValidator("   "), true);
-    assert.equal(options.inputValidator("refund-proof-1"), true);
-    assert.notEqual(options.inputValidator("r".repeat(161)), true);
-    return { value: " refund-proof-1 " };
-  };
+  f.ctx.ElMessageBox.prompt = async () => { assert.fail("online refund must not ask for manual transaction proof"); };
   await f.ctx.applyRefundReview(f.row, true);
-  assert.equal(f.calls[0].payload.refundTransactionId, "refund-proof-1");
-  assert.equal(f.calls[0].payload.refundMethod, "人工退款");
-  assert.equal(f.order.status, "cancelled");
+  assert.equal(f.calls[0].payload.refundTransactionId, undefined);
+  assert.equal(f.calls[0].payload.refundMethod, undefined);
+  assert.equal(f.calls[0].payload.approved, true);
+  assert.equal(f.ticket.refundStatus, "processing");
+  assert.equal(f.ticket.refundConfirmed, false);
+  assert.equal(f.ticket.status, "pending");
+  assert.equal(f.order.status, "deposit_paid");
 });
 
-test("cancelling the refund proof prompt makes no review changes", async () => {
+test("only a confirmed refund response applies cancellation and the successful refund state", async () => {
   const f = refundReviewFixture();
-  f.ctx.ElMessageBox.prompt = async () => { throw "cancel"; };
-  const before = JSON.stringify({ order: f.order, ticket: f.ticket, row: f.row });
+  f.window.LXM_CLOUD.afterSaleAction = async () => ({ ticket: { ...f.ticket, financeStatus: "已审", refundConfirmed: true, refundStatus: "refunded", status: "completed" }, order: { ...f.order, status: "cancelled" } });
   await f.ctx.applyRefundReview(f.row, true);
-  assert.equal(f.calls.length, 0);
-  assert.equal(JSON.stringify({ order: f.order, ticket: f.ticket, row: f.row }), before);
+  assert.equal(f.ticket.refundConfirmed, true);
+  assert.equal(f.ticket.refundStatus, "refunded");
+  assert.equal(f.order.status, "cancelled");
 });
 
 test("rejecting a refund does not request transaction proof", async () => {
@@ -100,7 +99,7 @@ test("rejecting a refund does not request transaction proof", async () => {
   assert.equal(f.order.status, "deposit_paid");
 });
 
-test("a failed refund review restores proof fields and visible review statuses", async () => {
+test("a failed online refund review preserves all visible state instead of claiming completion", async () => {
   const f = refundReviewFixture();
   f.ctx.ElMessageBox.prompt = async () => ({ value: "refund-proof-1" });
   f.window.LXM_CLOUD.afterSaleAction = async () => { throw new Error("review unavailable"); };
@@ -138,78 +137,31 @@ test("paid reservations begin the four service stages and retain final-payment b
   assert.equal(ctx.canCompleteWorkflow({ status: "shooting" }), false);
 });
 
-test("local fulfilment advances only through real assignment, manual shooting and confirmed final payment", async () => {
+test("disconnected fulfilment rejects all writes without inventing order state", async () => {
   const { ctx } = fixture("service", { useLocalPersistence: true });
-  ctx.state.logs = [];
-  ctx.isServerConnected = () => false;
-  const order = { id: "full-flow", status: "deposit_paid", assigneeId: "s1", totalAmount: 100,
-    depositDue: 30, depositPaid: 30, finalDue: 70, finalPaid: 0 };
-  ctx.state.currentOrder = order;
-  const assertStatus = (business, label) => {
-    assert.equal(ctx.orderBusinessStatus(order), business);
-    assert.equal(ctx.serviceInternalStatusLabel(order), label);
-    assert.equal(ctx.serviceCustomerStatusLabel(order), label);
-  };
-  await ctx.persistOrderAction(order, "payment", { phase: "deposit", paymentStatus: "confirmed" });
-  assertStatus("reserved", "待确认");
-  assert.equal(order.depositRefundable, true);
-  Object.assign(order, { appointmentAt: "2026-12-20", dispatchRecord: {}, businessStatus: "awaiting_shoot", customerStatus: "待拍摄" });
-  assertStatus("reserved", "待确认");
-  assert.equal(ctx.canStartTask(order), false);
-  assert.equal(ctx.canCompleteShooting(order), false);
-  await assert.rejects(ctx.persistOrderAction(order, "start"), /请先安排摄影师/);
-
-  await ctx.persistOrderAction(order, "assign", { photographerId: "photo-1" });
-  assertStatus("awaiting_shoot", "待拍摄");
-  assert.equal(order.depositRefundable, false);
-  await ctx.startShooting(order);
-  assertStatus("shooting", "拍摄中");
-  assert.ok(order.shootingStartedAt);
-  assert.equal(ctx.canCompleteShooting(order), true);
-
-  await ctx.completeShooting(order);
-  assertStatus("shooting", "拍摄中");
-  assert.ok(order.shootingCompletedAt);
-  assert.equal(ctx.canCompleteShooting(order), false);
-  await ctx.persistOrderAction(order, "selectionconfirm");
-  assertStatus("shooting", "拍摄中");
-  await ctx.persistOrderAction(order, "deliver");
-  assertStatus("shooting", "拍摄中");
-  await ctx.persistOrderAction(order, "payment", { phase: "final", paymentStatus: "pending", amount: 70 });
-  assertStatus("shooting", "拍摄中");
-  Object.assign(order, { status: "paid", finalPaid: 70, finalFinanceStatus: "pending", finalPaymentStatus: "pending", customerStatus: "已完成", businessStatus: "completed" });
-  assertStatus("shooting", "拍摄中");
-  await ctx.persistOrderAction(order, "payment", { phase: "final", paymentStatus: "confirmed", amount: 70 });
-  assertStatus("completed", "已完成");
-  await ctx.persistOrderAction(order, "deliveryrecord", { deliveryMethod: "小程序" });
-  assertStatus("completed", "已完成");
-  await ctx.persistOrderAction(order, "deliver");
-  assertStatus("completed", "已完成");
+  const order = { id: "full-flow", status: "deposit_paid", assigneeId: "s1", totalAmount: 100, depositPaid: 30 };
+  const before = JSON.stringify(order);
+  for (const action of ["assign", "start", "shootcomplete", "selectionconfirm", "deliver", "complete", "cancel", "followup", "note", "payment"]) {
+    await assert.rejects(ctx.persistOrderAction(order, action, { photographerId: "photo-1", fields: { totalAmount: 999 }, phase: "final", paymentStatus: "confirmed" }), /真实后端连接不可用/);
+    assert.equal(JSON.stringify(order), before);
+  }
 });
 
-test("local deposit confirmation preserves refund eligibility until the first photographer assignment", async () => {
-  const { ctx } = fixture("service", { useLocalPersistence: true });
-  const payment = { phase: "deposit", paymentStatus: "confirmed" };
-  const order = { id: "refundable", status: "deposit_paid", depositDue: 30, depositPaid: 30 };
-  await ctx.persistOrderAction(order, "payment", payment);
-  assert.equal(order.depositRefundable, true);
-
-  await ctx.persistOrderAction(order, "assign", { photographerId: "photo-1" });
+test("order mutations apply only the acknowledged server response", async () => {
+  const f = fixture("service", { useLocalPersistence: true });
+  const order = { id: "ack", status: "deposit_paid", depositPaid: 30 };
+  Object.assign(f.window, { LXM_CLOUD_MODE: "mysql", LXM_AUTH: { hasSession: () => true }, LXM_API_STATE: { reachable: true }, LXM_CLOUD: {
+    orderAction: async (id, action, payload) => { f.calls.push({ id, action, payload }); return { id, status: "assigned", photographerId: "server-photo", depositRefundable: false }; }
+  } });
+  await f.ctx.persistOrderAction(order, "assign", { photographerId: "requested-photo" });
+  assert.equal(f.calls[0].payload.photographerId, "requested-photo");
+  assert.equal(order.photographerId, "server-photo");
+  assert.equal(order.status, "assigned");
   assert.equal(order.depositRefundable, false);
-  await ctx.persistOrderAction(order, "unassign");
-  await ctx.persistOrderAction(order, "payment", payment);
-  assert.equal(order.photographerId, "");
-  assert.equal(order.depositRefundable, false, "removing an assigned photographer does not restore the pre-assignment refund lane");
-
-  for (const dispatch of [
-    { photographerId: "photo-1" },
-    { dispatchRecord: { next: { photographerId: "photo-1" } } },
-    { dispatchRecords: [{ previous: { photographerId: "photo-1" }, next: { photographerId: "" } }] },
-  ]) {
-    const previouslyAssigned = { id: "assigned", status: "deposit_paid", depositDue: 30, depositPaid: 30, ...dispatch };
-    await ctx.persistOrderAction(previouslyAssigned, "payment", payment);
-    assert.equal(previouslyAssigned.depositRefundable, false);
-  }
+  const before = JSON.stringify(order);
+  f.window.LXM_CLOUD.orderAction = async () => { throw new Error("保存失败"); };
+  await assert.rejects(f.ctx.persistOrderAction(order, "unassign"), /保存失败/);
+  assert.equal(JSON.stringify(order), before);
 });
 
 test("unpaid legacy rows stay outside orders, reminders and service actions", () => {

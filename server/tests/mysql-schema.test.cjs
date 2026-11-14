@@ -35,6 +35,7 @@ test("normalized migration has no opaque business/auth payload columns", () => {
   for (const sql of [migration, normalizedMigration]) {
     assert.match(sql, /CREATE TABLE IF NOT EXISTS `lxm_cities`[\s\S]*?`latitude` DECIMAL\(20,6\) NULL[\s\S]*?`longitude` DECIMAL\(20,6\) NULL[\s\S]*?`coordType` VARCHAR\(255\) NULL/i);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS `lxm_spots`[\s\S]*?`district` VARCHAR\(255\) NULL[\s\S]*?`latitude` DECIMAL\(20,6\) NULL[\s\S]*?`longitude` DECIMAL\(20,6\) NULL[\s\S]*?`coordType` VARCHAR\(255\) NULL/i);
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS `lxm_albums`[\s\S]*?`photoCount` INT NULL[\s\S]*?`retouchMode` VARCHAR\(255\) NULL[\s\S]*?`retouchCount` INT NULL[\s\S]*?`makeupIncluded` TINYINT\(1\) NULL/i);
   }
 });
 
@@ -153,6 +154,26 @@ test("confirmation, task, cancellation and refund extensions stay in typed leave
     assert.doesNotMatch(orderDdl[0], /`(?:taskStatus|serviceConfirmedAt|serviceConfirmedBy|serviceConfirmReason|serviceContent|taskAcceptedAt|taskAcceptedBy|customerCancelIdempotencyKey|cancelledAt|cancelledBy|cancelReason)`/i);
     assert.doesNotMatch(afterSaleDdl[0], /`(?:refundStatus|refundTransactionId|refundMethod|refundConfirmedAt|refundConfirmedBy)`/i);
   }
+});
+
+test("city hydration uses physical creation time only when business creation time is unavailable", () => {
+  const physicalTime = new Date("2026-09-09T08:41:16.801Z");
+  for (const createdAt of [undefined, null, "", "invalid", false]) {
+    const row = { id: "city1", name: "长沙", createdAt, created_at: physicalTime };
+    const restored = schema.hydrateDocument("cities", row);
+    assert.equal(restored.createdAt, physicalTime.toISOString());
+    assert.equal(row.createdAt, createdAt, "read projection must not change the database row");
+  }
+  for (const createdAt of ["2026-01-01T00:00:00.000Z", 1767225600, "1767225600000"]) {
+    const restored = schema.hydrateDocument("cities", { id: "city1", createdAt, created_at: physicalTime });
+    assert.equal(restored.createdAt, createdAt, "valid business timestamp wins over insertion time");
+  }
+  const attributed = schema.hydrateDocument("cities", { id: "city1", created_at: physicalTime }, {
+    collection_values: [{ path: "createdAt", value_type: "string", value_text: "2026-01-01T00:00:00Z" }]
+  });
+  assert.equal(attributed.createdAt, "2026-01-01T00:00:00Z", "typed business timestamp also wins");
+  assert.equal(schema.hydrateDocument("cities", { id: "legacy-no-time" }).createdAt, undefined);
+  assert.equal(schema.hydrateDocument("spots", { id: "spot1", created_at: physicalTime }).createdAt, undefined, "fallback is scoped to cities");
 });
 
 test("city and spot map fields round-trip through normalized storage", () => {

@@ -1,0 +1,25 @@
+"use strict";
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
+const {startSvcPrototypeFixture}=require('./fixtures/svc-prototype-browser.cjs');
+test('new staff timing is editable and the selected settlement cycle survives save and reread',{skip:process.env.RUN_SVC_BROWSER!=='1',timeout:90000},async t=>{
+ const fixture=await startSvcPrototypeFixture(),playwright=require(process.env.SVC_PLAYWRIGHT_MODULE||'playwright'),browser=await playwright.chromium.launch({headless:true,executablePath:process.env.SVC_BROWSER_EXECUTABLE||'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ const page=await browser.newPage({viewport:{width:1512,height:1000},timezoneId:'Asia/Shanghai'}),errors=[],out=path.resolve(__dirname,'../../../.codex-tmp/customer-service-cycle-20261113');fs.mkdirSync(out,{recursive:true});page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(10000);t.after(async()=>{fs.writeFileSync(path.join(out,'errors.json'),JSON.stringify(errors));await browser.close();await fixture.close();});
+ await fixture.modules.store.transaction(state=>{state.accounts=[{id:'qa-cycle-login',account:'qa-cycle-login',status:'active'}];});
+ await page.goto(fixture.url);await page.getByPlaceholder('账号',{exact:true}).fill(fixture.accounts.admin.account);await page.getByPlaceholder('密码',{exact:true}).fill(fixture.accounts.admin.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByPlaceholder('账号',{exact:true}).waitFor({state:'hidden'});
+ await page.locator('[data-menu-key="svcStaff"]').click();await page.locator('[data-page-key="svcStaff"] h2').waitFor();
+ await page.locator('[data-page-key="svcStaff"]').getByRole('button',{name:'新增客服',exact:true}).click();
+ const section=page.getByRole('dialog',{name:'新增客服',exact:true});await section.waitFor({state:'visible'});
+ const cycle=section.getByRole('combobox',{name:'多久结一次',exact:true});await cycle.locator('xpath=ancestor::div[contains(@class,"el-select__wrapper")]').click();
+ const list=page.getByRole('listbox').filter({has:page.getByRole('option',{name:'半月结',exact:true})});assert.deepEqual(await list.getByRole('option').allTextContents(),['月结','半月结','周结','隔天结']);await page.screenshot({path:path.join(out,'dropdown-options.png'),animations:'disabled'});
+ await page.getByRole('option',{name:'周结',exact:true}).click();
+ await section.getByPlaceholder('与身份证一致',{exact:true}).fill('周期测试客服');await section.getByPlaceholder('13800000000',{exact:true}).fill('13912345678');
+ await section.getByText('关联已有账号',{exact:true}).click();await section.getByPlaceholder('填写客服登录账号',{exact:true}).fill('qa-cycle-login');
+ await section.getByRole('spinbutton',{name:'链接有效期（天）',exact:true}).fill('3');await section.getByRole('spinbutton',{name:'链接有效期（天）',exact:true}).press('Tab');
+ await section.getByRole('spinbutton',{name:'结算等待期（天）',exact:true}).fill('0');await section.getByRole('spinbutton',{name:'结算等待期（天）',exact:true}).press('Tab');
+ const date=section.locator('.el-form-item').filter({has:page.locator('.el-form-item__label').getByText('合作起始日',{exact:true})}).locator('input');await date.fill('2026-11-13');await date.press('Tab');
+ const refreshedList=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/svc/staff'&&response.request().method()==='GET');
+ await section.getByRole('button',{name:'保存并生成分成规则',exact:true}).click();await refreshedList;await section.waitFor({state:'hidden'});await page.locator('[data-page-key="svcStaff"] h2').waitFor();
+ const saved=fixture.modules.store.snapshot().staff.find(row=>row.name==='周期测试客服');assert.equal(saved.settlement_cycle,'周结');assert.equal(saved.link_valid_days,3);assert.equal(saved.observe_days,0);
+ const row=page.locator('[data-page-key="svcStaff"] .el-table__body tbody tr').filter({hasText:'周期测试客服'});await row.getByText('链接 3 天 / 等待 0 天 / 周结',{exact:true}).waitFor();await page.screenshot({path:path.join(out,'saved-cycle.png'),animations:'disabled'});
+ assert.deepEqual(errors,[]);
+});

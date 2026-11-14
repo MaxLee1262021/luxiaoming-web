@@ -3,7 +3,7 @@
     <div>
       <span class="lxm-eyebrow">基础内容 · 第二步</span>
       <h3 class="lxm-page-head__title">打卡点管理</h3>
-      <p class="lxm-page-head__desc">打卡点归属到城市，是拍摄风格、照片单品、套餐和短视频的共同挂载点。列表统一展示下游资产与删除保护状态。</p>
+      <p class="lxm-page-head__desc">按城市管理打卡点。隐藏保留商品与灵感关联，重新显示后恢复联动展示；历史订单持续保留。</p>
     </div>
     <div class="lxm-page-head__actions">
       <el-button type="success" plain v-if="can('contentEdit')" @click="batchSetSpotVisible(true, spotTableRows)">批量展示</el-button>
@@ -17,8 +17,8 @@
   <div class="lxm-kpi-grid">
     <div class="lxm-kpi"><span class="lxm-kpi__label">打卡点</span><strong class="lxm-kpi__value">{{ spotSummary.total }}</strong><span class="lxm-kpi__hint">当前筛选范围</span></div>
     <div class="lxm-kpi"><span class="lxm-kpi__label">小程序展示</span><strong class="lxm-kpi__value">{{ spotSummary.visible }}</strong><span class="lxm-kpi__hint">可在探索页露出</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">关联拍摄风格</span><strong class="lxm-kpi__value">{{ spotSummary.series }}</strong><span class="lxm-kpi__hint">按点位配置的分类</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">关联商品</span><strong class="lxm-kpi__value">{{ spotSummary.products }}</strong><span class="lxm-kpi__hint">套餐、短视频和周边</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">旅拍灵感</span><strong class="lxm-kpi__value">{{ spotSummary.guides }}</strong><span class="lxm-kpi__hint">关联当前范围的打卡点</span></div>
+    <div class="lxm-kpi"><span class="lxm-kpi__label">关联商品</span><strong class="lxm-kpi__value">{{ spotSummary.products }}</strong><span class="lxm-kpi__hint">照片留影、视频摄像和旅拍套餐</span></div>
   </div>
 
   <div class="lxm-toolbar">
@@ -38,11 +38,14 @@
     <div class="section-title-row compact">
       <div>
         <h3>打卡点清单</h3>
-        <p>点位删除会先校验拍摄风格、照片单品、商品和订单引用；有依赖时请先通过对应列表迁移或下架。</p>
+        <p>排序按全局顺位插位重排；上升、下降或在编辑中指定顺位时，其他打卡点自动依次调整。未设置排序时从第 1 位插入。仅超级管理员可删除已隐藏点位。</p>
       </div>
       <el-tag type="info">{{ spotTableRows.length }} 个打卡点</el-tag>
     </div>
     <el-table :data="pagedList('spots', spotTableRows)" row-key="id" border stripe empty-text="暂无符合条件的打卡点，试试重置筛选或新增点位">
+      <el-table-column label="排序" width="76" align="center">
+        <template #default="{row}"><span class="spot-rank">{{ spotRankText(row) }}</span></template>
+      </el-table-column>
       <el-table-column label="打卡点" min-width="250">
         <template #default="{row}">
           <div class="basic-content-media-cell">
@@ -58,9 +61,6 @@
       <el-table-column label="所属城市" width="132">
         <template #default="{row}"><span>{{ spotCityName(row) }}</span></template>
       </el-table-column>
-      <el-table-column label="区域 / 坐标" min-width="170">
-        <template #default="{row}"><span class="basic-content-muted">{{ spotLocationText(row) }}</span></template>
-      </el-table-column>
       <el-table-column label="内容标签" min-width="160">
         <template #default="{row}">
           <div class="basic-content-tag-list">
@@ -69,35 +69,29 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="关联资产" min-width="196">
+      <el-table-column label="运营标签" min-width="110"><template #default="{row}">{{ row.tag || '未设置' }}</template></el-table-column>
+      <el-table-column label="关联资产" min-width="244">
         <template #default="{row}">
-          <div class="basic-content-link-list">
-            <el-button link type="primary" @click="goToSeries(row)">风格 {{ row.summary.series }}</el-button>
-            <el-button link type="primary" @click="goToAlbums(row)">照片 {{ row.summary.albums }}</el-button>
-            <el-button link type="primary" @click="goToShelf(row)">商品 {{ row.summary.products }}</el-button>
+          <div class="spot-asset-links">
+            <el-button link type="primary" @click="goToAlbums(row)">照片留影 {{ spotAssets(row).albums }}</el-button>
+            <el-button link type="primary" @click="goToVideos(row)">视频摄像 {{ spotAssets(row).videos }}</el-button>
+            <el-button link type="primary" @click="goToPackages(row)">旅拍套餐 {{ spotAssets(row).packages }}</el-button>
+            <el-button link type="primary" @click="goToGuides(row)">旅拍灵感 {{ spotAssets(row).guides }}</el-button>
           </div>
         </template>
-      </el-table-column>
-      <el-table-column label="热度 / 热榜排序" width="138" align="center">
-        <template #default="{row}"><div class="basic-content-number-cell"><strong>{{ row.hotScore || 0 }}</strong><span>热榜排序 {{ Number(row.sort) > 0 ? row.sort : '未设置' }}</span></div></template>
       </el-table-column>
       <el-table-column label="展示状态" width="112">
         <template #default="{row}"><el-tag :type="isSpotVisible(row) ? 'success' : 'info'">{{ spotStatusText(row) }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="252" fixed="right">
+      <el-table-column label="操作" width="340" fixed="right">
         <template #default="{row}">
           <div class="basic-content-actions">
+            <el-button link type="primary" v-if="can('contentEdit')" :disabled="spotSortDisabled(row, -1)" @click="changeSpotSort(row, -1)">上升</el-button>
+            <el-button link type="primary" v-if="can('contentEdit')" :disabled="spotSortDisabled(row, 1)" @click="changeSpotSort(row, 1)">下降</el-button>
             <el-button link type="primary" @click="openSpotRelation(row)">关系</el-button>
-            <el-button link type="primary" v-if="can('contentEdit')" @click="openContent(row)">编辑</el-button>
-            <el-dropdown v-if="can('contentEdit')" trigger="click" placement="bottom-end">
-              <el-button link>更多</el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item :class="isSpotVisible(row) ? 'lxm-action--warning' : 'lxm-action--success'" @click="toggleSpotVisible(row)">{{ isSpotVisible(row) ? '隐藏' : '展示' }}</el-dropdown-item>
-                  <el-dropdown-item class="lxm-action--danger" @click="requestDeleteSpot(row)">删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <el-button link type="primary" v-if="can('contentEdit')" :disabled="isSpotSortSaving(row)" @click="openContent(row)">编辑</el-button>
+            <el-button link v-if="can('contentEdit')" :disabled="isSpotSortSaving(row)" :type="isSpotVisible(row) ? 'warning' : 'success'" @click="toggleSpotVisible(row)">{{ isSpotVisible(row) ? '隐藏' : '展示' }}</el-button>
+            <el-button link type="danger" v-if="can('contentEdit') && state.role==='super'" :disabled="isSpotSortSaving(row)" @click="requestDeleteSpot(row)">删除</el-button>
           </div>
         </template>
       </el-table-column>

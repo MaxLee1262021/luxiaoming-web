@@ -1,9 +1,25 @@
 (window.LXM_APP_PARTS = window.LXM_APP_PARTS || []).push(function (ctx) {
   const upload = window.LXM_UPLOAD;
-  function contentFile(target, field, collection, videoOnly = false, multiple = false) {
+  function contentFile(target, field, collection, videoOnly = false, multiple = false, directory = false) {
     if (!target || !ctx.can("contentEdit")) return;
-    upload.pick({ purpose: "content", collection, recordId: target.id || target._id || undefined, videoOnly, imagesOnly: !videoOnly, multiple,
+    if (collection === "albums" && field === "sampleUrls") multiple = true;
+    upload.pick({ purpose: "content", collection, recordId: target.id || target._id || undefined, videoOnly, imagesOnly: !videoOnly, multiple, directory,
       onUploaded(file) {
+        if (collection === "albums" && field === "sampleUrls") {
+          ctx.addAlbumPhoto(target, file.url);
+          return;
+        }
+        if (collection === "albums" && field === "cover") {
+          ctx.setAlbumCover(target, file.url);
+          return;
+        }
+        if (collection === "guides" && field === "mediaUrls") {
+          const items = target.mediaItems || [];
+          target.mediaItems = [...items, { url: file.url, type: file.type || (videoOnly ? "video" : "image") }];
+          target.mediaUrls = target.mediaItems.map((item) => item.url);
+          if (!videoOnly && (!target.cover || target.cover.includes("placeholder"))) target.cover = file.url;
+          return;
+        }
         if (multiple) target[field] = [...(target[field] || []), file.url];
         else target[field] = file.url;
       }

@@ -37,13 +37,14 @@ test("扫码明细使用可筛选的中文状态和空态文案", () => {
   assert.match(state, /dashboardTab: "traffic"/);
 });
 
-test("照片留影详情轮播在后台装修页可选择、排序并导出", () => {
+test("小程序配置只提供两页轮播素材和点击去向", () => {
   const decor = read("src/views/operationConfig/mini-decor/mini-decor.html");
-  const pageConfig = read("src/app/14-page-config.js");
-  const builder = read("src/app/12-content-edit.js");
+  const logic = read("src/views/operationConfig/mini-decor/mini-decor.js");
 
-  assert.match(decor, /照片留影详情顶部轮播/);
-  assert.match(decor, /movePageRelation\(entry\.field/);
-  assert.match(pageConfig, /field: "sampleIds"/);
-  assert.match(builder, /map\[page\.key\]\.sampleIds/);
+  assert.match(logic, /label: "首页轮播"/);
+  assert.match(logic, /label: "探索页轮播"/);
+  assert.match(decor, /点击跳转/);
+  assert.match(decor, /不跳转/);
+  assert.doesNotMatch(decor, /首页商品推荐|板块显隐|展示城市|样片轮播|预约须知|全局配置/);
+  assert.equal(fs.existsSync(path.join(root, "src/views/operationConfig/mini-config/mini-config.html")), false);
 });

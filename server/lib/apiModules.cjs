@@ -45,7 +45,7 @@ const MENU_MODULES = Object.freeze({
   guides: "content",
   stories: "content",
   miniDecor: "configuration",
-  miniConfig: "configuration",
+  bookingConfig: "configuration",
   logs: "system",
   trash: "system",
 });

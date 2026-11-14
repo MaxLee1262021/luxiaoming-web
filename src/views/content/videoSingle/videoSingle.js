@@ -1,6 +1,6 @@
 // 短视频管理页：三栏编辑器（左列表 · 中表单 · 右手机预览）。
 // packages 是唯一可编辑数据池；统计、筛选、列表和编辑器始终使用同一份结果。
-// 仅本页特有的「本地选择视频文件预览」放在 pageSetup，不污染中枢逻辑。
+// 视频经统一上传服务保存，列表与草稿卡片直接使用视频播放器。
 // 注：这里必须走 window.LXM_PAGES.register —— 全局没有裸 register 函数，裸调用会 ReferenceError 导致整页注册失效。
 window.LXM_PAGES.register({
   key: "videoSingles",
@@ -15,13 +15,30 @@ window.LXM_PAGES.register({
     const { videoSingleStatus, seriesName, spotName, money } = ctx;
 
     const selectedVideoSingleId = Vue.ref(null);
-    const serverSession = () => ctx.state.authSource === "server" || (ctx.state.authSource !== "demo" && !!window.LXM_AUTH?.hasSession?.());
-    const remoteOn = Vue.ref(serverSession() || LXM_API.remoteOn());
+    const editorOpen = Vue.ref(false);
+    const videoDraft = Vue.ref(null);
+    const saving = Vue.ref(false);
+    const clone = (value) => JSON.parse(JSON.stringify(value));
+    const idOf = (row) => String(row && (row.id || row._id) || "");
+    const emptyDeposit = (value) => value === null || value === undefined || typeof value === "string" && value.trim() === "";
+    function videoDepositPercent(row = {}) {
+      const value = Object.prototype.hasOwnProperty.call(row, "depositRatio") ? row.depositRatio : row.depositRate ?? row.depositPercent ?? row.depositPercentage;
+      if (emptyDeposit(value) || !["number", "string"].includes(typeof value)) return undefined;
+      const number = Number(value);
+      if (!Number.isFinite(number) || number < 0 || number > 100) return undefined;
+      return Number((number <= 1 ? number * 100 : number).toFixed(6));
+    }
+    function videoDepositLabel(row = {}, draft = false) {
+      const percent = draft ? row.depositRatioPercent : videoDepositPercent(row);
+      return emptyDeposit(percent) ? "使用全局比例" : `${percent}%`;
+    }
+    const videoSource = (row = {}) => ctx.contentVideoUrl(row);
+    const serverSession = () => ctx.state.authSource === "server" && !!window.LXM_AUTH?.hasSession?.();
+    const remoteOn = Vue.ref(true);
     const remoteLoading = Vue.ref(false);
     const remoteReady = Vue.ref(false);
     const remoteError = Vue.ref("");
     const serverConnected = () => ctx.isServerConnected();
-    const demoPackages = ctx.state.authSource === "demo" ? ctx.data.packages : null;
     const passedAudits = new Set(["approved", "pass", "passed", "published", "online", "已上", "已上架", "审核通过", "通过"]);
     let loadVersion = 0;
 
@@ -45,6 +62,7 @@ window.LXM_PAGES.register({
 
     const selectedVideoSingle = Vue.computed(() => {
       const list = listSource.value;
+      list.forEach((row) => { if (ctx.hydrateProductSpot) ctx.hydrateProductSpot(row); });
       const id = selectedVideoSingleId.value;
       if (id) {
         const found = list.find((v) => (v._id || v.id) === id);
@@ -61,6 +79,41 @@ window.LXM_PAGES.register({
     function selectVideoSingle(v) {
       if (v) selectedVideoSingleId.value = v._id || v.id;
     }
+    function resetVideoDraft() {
+      const source = videoDraft.value && videoDraft.value.id ? ctx.data.packages.find((row) => idOf(row) === idOf(videoDraft.value)) : null;
+      if (source) setVideoDraft(source);
+    }
+    function setVideoDraft(row) {
+      const draft = clone(row);
+      if (ctx.hydrateProductSpot) ctx.hydrateProductSpot(draft);
+      draft.title = draft.title || draft.name || "";
+      draft.tags = Array.isArray(draft.tags) ? draft.tags : String(draft.tags || "").split(/[，,、|\n]/).map((tag) => tag.trim()).filter(Boolean);
+      draft.isMainPush = draft.isMainPush === true || draft.mainPush === true;
+      draft.shootingNotes = String(draft.shootingNotes ?? draft.intro ?? "");
+      draft.videoUrl = draft.videoUrl || videoSource({ videos: draft.videos });
+      draft.isShow = draft.isShow !== false && !["下架", "草稿", "待审核"].includes(draft.status);
+      draft.spotId = draft.spotId || (draft.spotIds || [])[0] || "";
+      draft.depositRatioPercent = videoDepositPercent(row);
+      delete draft.effectiveVisible;
+      delete draft.visibilityReasons;
+      videoDraft.value = draft;
+    }
+    function openVideoEditor(row = null) {
+      if (!canEditSource() || (!row && ctx.can && !ctx.can("contentEdit"))) return false;
+      if (row) { selectVideoSingle(row); setVideoDraft(row); }
+      else videoDraft.value = { title: "", name: "", videoUrl: "", previewVideoUrl: "", type: "video", productKind: "video_single", isVideoSingle: true, seriesId: "", tags: [], spotId: "", spotIds: [], spotBindingExplicit: true, price: 0, depositRatioPercent: undefined, videoDuration: 30, durationText: "30秒", finishedVideoCount: 1, deliveryCycle: "1–3 个工作日", shootingNotes: "", makeupIncluded: false, hasAerial: false, fullEdit: false, isShow: true, status: "上架", isMainPush: false };
+      editorOpen.value = true;
+      return true;
+    }
+    function closeEditor() { if (!saving.value) { editorOpen.value = false; videoDraft.value = null; } }
+    function previewVisible(row) {
+      const preview = { ...row, status: row.isShow === false ? "下架" : "上架", spotIds: row.spotId ? [String(row.spotId)] : [], spotBindingExplicit: true };
+      return typeof ctx.contentEffectiveVisible === "function" ? ctx.contentEffectiveVisible(preview) : row.isShow !== false;
+    }
+    const videoTagOptions = Vue.computed(() => [...new Set([
+      ...(typeof ctx.tagOptions === "function" ? ctx.tagOptions("风格").map((tag) => tag.name) : []),
+      ...ctx.data.packages.flatMap((row) => Array.isArray(row.tags) ? row.tags : [])
+    ])]);
 
     async function refreshFromServer() {
       const version = ++loadVersion;
@@ -89,27 +142,14 @@ window.LXM_PAGES.register({
     }
 
     function toggleRemote(event) {
-      // 已认证的在线后台始终编辑真实数据，避免把真实记录误标为演示或离线保存。
-      if (serverSession() || ctx.state.authSource !== "demo") {
-        remoteOn.value = true;
-        if (event && event.target) event.target.checked = true;
-        LXM_API.setRemote(true);
-        tip("当前已登录真实后端，短视频使用真实数据");
-        return;
-      }
-      remoteOn.value = !remoteOn.value;
-      LXM_API.setRemote(remoteOn.value);
-      if (remoteOn.value) return refreshFromServer();
-      ++loadVersion;
-      remoteLoading.value = false;
-      remoteReady.value = false;
-      remoteError.value = "";
-      ctx.data.packages = demoPackages || [];
-      tip("已切回本地演示数据");
+      remoteOn.value = true;
+      if (event?.target) event.target.checked = true;
+      LXM_API.setRemote(true);
+      return refreshFromServer();
     }
 
     function canEditSource() {
-      if (remoteOn.value && (!remoteReady.value || remoteLoading.value || remoteError.value || !serverConnected())) {
+      if (!remoteReady.value || remoteLoading.value || remoteError.value || !serverConnected()) {
         tip("真实后端数据尚不可用，请刷新后重试");
         return false;
       }
@@ -141,46 +181,71 @@ window.LXM_PAGES.register({
     });
 
     async function saveSelectedVideoSingle() {
-      if (!canEditSource()) return false;
+      if (!canEditSource() || saving.value || (ctx.can && !ctx.can("contentEdit"))) return false;
       return window.LXM_UPLOAD.single("video-single-save", async () => {
         if (!window.LXM_UPLOAD.ready() || !canEditSource()) return false;
-        const s = selectedVideoSingle.value;
-        if (!s) return false;
+        const draft = editorOpen.value ? videoDraft.value : selectedVideoSingle.value;
+        if (!draft) return false;
+        const s = clone(draft);
         if (!s.title && !s.name) { tip("请填写短视频名称"); return false; }
-        const previous = { ...s };
+        if (editorOpen.value) {
+          const value = draft.depositRatioPercent;
+          if (!emptyDeposit(value) && (!["number", "string"].includes(typeof value) || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100)) {
+            tip("定金比例应为 0 到 100，或留空使用全局比例");
+            return false;
+          }
+          s.depositRatio = emptyDeposit(value) ? null : Number(value) / 100;
+          for (const alias of ["depositRate", "depositPercent", "depositPercentage"]) delete s[alias];
+        }
+        delete s.depositRatioPercent;
+        const source = ctx.data.packages.find((row) => idOf(row) === idOf(s));
+        const previous = source ? clone(source) : null;
+        if (!idOf(s)) { s.id = `video_${Date.now().toString(36)}`; s._id = s.id; }
         s.title = s.title || s.name;
         s.name = s.title;
         s.type = "video";
         s.isVideoSingle = true;
         s.productKind = "video_single";
-        s.isShow = (s.status || "上架") === "上架";
-        if (remoteOn.value) {
-          const ok = await ctx.persistContentMutation("packages", s, previous);
-          if (ok) tip("已写入真实后端");
-          return ok;
+        s.isShow = editorOpen.value ? s.isShow !== false : (s.status || "上架") === "上架";
+        if (editorOpen.value) {
+          s.status = s.isShow ? "上架" : "下架";
+          s.auditStatus = s.isShow ? "已上" : "已下";
+          s.mainPush = s.isMainPush === true;
         }
-        tip("已保存到本地演示数据");
-        return true;
+        s.spotIds = s.spotId ? [String(s.spotId)] : [];
+        s.spotBindingExplicit = true;
+        s.videoDuration = Number(s.videoDuration || 0);
+        if (s.videoDuration) s.durationText = `${s.videoDuration}秒`;
+        s.shootingNotes = String(s.shootingNotes ?? s.intro ?? "").trim();
+        s.intro = s.shootingNotes;
+        saving.value = true;
+        try {
+          if (typeof ctx.persistContentMutation !== "function" || !(await ctx.persistContentMutation("packages", s, previous))) return false;
+          if (source) Object.assign(source, s);
+          else ctx.data.packages.unshift(s);
+          selectedVideoSingleId.value = idOf(s);
+          if (editorOpen.value) closeAfterSave();
+          tip("已写入真实后端");
+          return true;
+        } finally { saving.value = false; }
       });
     }
+    function closeAfterSave() { editorOpen.value = false; videoDraft.value = null; }
 
     function onVideoFilePick(e) {
       const file = e.target.files && e.target.files[0];
-      const target = selectedVideoSingle.value;
+      const target = editorOpen.value ? videoDraft.value : selectedVideoSingle.value;
       e.target.value = '';
-      if (!file || !target || !canEditSource()) return;
-      window.LXM_UPLOAD.upload(file, { purpose: 'content', collection: 'packages', recordId: target.id || target._id, videoOnly: true,
+      if (!file || !target || saving.value || (ctx.can && !ctx.can("contentEdit")) || !canEditSource()) return;
+      return window.LXM_UPLOAD.upload(file, { purpose: 'content', collection: 'packages', recordId: target.id || target._id, videoOnly: true,
         onUploaded(result) {
-          if (canEditSource() && ctx.data.packages.includes(target)) target.videoUrl = result.url;
+          if (canEditSource() && (editorOpen.value ? videoDraft.value === target : ctx.data.packages.includes(target))) target.videoUrl = result.url;
         }
       });
     }
-    function uploadVideoCover() {
-      if (canEditSource() && selectedVideoSingle.value) ctx.contentFile(selectedVideoSingle.value, 'cover', 'packages');
-    }
-
     return {
       selectedVideoSingleId,
+      editorOpen, videoDraft, saving, openVideoEditor, closeEditor, resetVideoDraft, videoTagOptions, previewVisible,
       remoteOn,
       remoteLoading,
       remoteError,
@@ -199,7 +264,7 @@ window.LXM_PAGES.register({
       deleteVideoSingle: (row) => mutateVideoSingle(ctx.deleteVideoSingle, row),
       toggleVideoSingleShelf: (row) => mutateVideoSingle(ctx.toggleVideoSingleShelf, row),
       saveSelectedVideoSingle,
-      onVideoFilePick, uploadVideoCover
+      onVideoFilePick, videoSource, videoDepositLabel
     };
   }
 });

@@ -8,7 +8,7 @@ const test = require("node:test");
 const createApi = require("../lib/api.cjs");
 const schema = require("../lib/mysqlSchema.cjs");
 const rpc = require("../lib/rpc.cjs");
-const { createWechatPay } = require("../lib/wechatPay.cjs");
+const { createWechatPay, drainMerchantShare } = require("../lib/wechatPay.cjs");
 const { withOrderMutex } = require("../lib/orderWorkflow.cjs");
 
 function clone(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
@@ -333,13 +333,14 @@ test("verified callback decrypts once, confirms the server order, and rejects wr
   await assert.rejects(() => gateway.confirmTransaction(source, gateway.parseNotification(invalid.headers, invalid.body)), { code: "WECHAT_PAY_AMOUNT_MISMATCH" });
 });
 
-test("final callback atomically acknowledges selection and completes without delivery or shootcomplete", async () => {
+test("final callback atomically acknowledges selection and completes without delivery or shootcomplete", async t => {
   const keys = makeKeys();
   const gateway = createWechatPay({ config: keys.config });
   const order = pendingOrder();
   Object.assign(order, { status: "shooting", shootingStartedAt: "2026-10-14T01:00:00Z", depositPaid: 30, depositFinanceStatus: "confirmed", selectionStatus: "pending" });
   Object.assign(order.paymentRecords[0], { phase: "final", amount: 70, selectionAccepted: true });
   const source = makeSource(order);
+  t.after(() => drainMerchantShare(source));
   const raw = { appid: keys.config.appId, mchid: keys.config.mchId, out_trade_no: order.paymentRecords[0].outTradeNo,
     transaction_id: "final-callback-tx-1", trade_state: "SUCCESS", trade_type: "JSAPI", payer: { openid: order.openid }, amount: { total: 7000, currency: "CNY" } };
   const envelope = encryptedNotification(keys, raw);
@@ -355,6 +356,67 @@ test("final callback atomically acknowledges selection and completes without del
   assert.equal(saved.shootingCompletedAt, undefined);
   assert.equal((await gateway.confirmTransaction(source, parsed)).idempotent, true);
   assert.equal((await source.get("orders", order.id)).statusLogs.length, 1);
+});
+
+test("a confirmed final receipt completes service status and retries completion effects without charging twice", async t => {
+  const keys = makeKeys();
+  const gateway = createWechatPay({ config: keys.config });
+  const order = pendingOrder();
+  Object.assign(order, { openid: undefined, customer_openid: "service-customer", status: "final_pending",
+    workflowStage: "awaiting_final_payment", service_status: "final_pending", businessStatus: "shooting",
+    shootingCompletedAt: "2026-11-13T02:00:00Z", depositPaid: 30, depositFinanceStatus: "confirmed" });
+  Object.assign(order.paymentRecords[0], { phase: "final", amount: 70 });
+  const source = makeSource(order);
+  t.after(() => drainMerchantShare(source));
+  let completions = 0;
+  t.mock.method(require("../lib/customerService.cjs"), "onCompleted", async (actualSource, completed) => {
+    assert.equal(actualSource, source);
+    assert.equal(completed.service_status, "done");
+    assert.equal(require("../lib/svcCore.cjs").millis(completed.done_at), Math.floor(Date.parse(completed.completedAt) / 1000) * 1000);
+    assert.match(completed.done_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.equal(completed.workflowStage, "completed");
+    assert.equal(completed.businessStatus, "completed");
+    assert.equal(completed.finalPaid, 70);
+    assert.equal(completed.finalPaymentStatus, "confirmed");
+    if (++completions === 1) throw new Error("workbench temporarily unavailable");
+    return { completed: true };
+  });
+  const raw = { appid: keys.config.appId, mchid: keys.config.mchId, out_trade_no: order.paymentRecords[0].outTradeNo,
+    transaction_id: "service-final-callback-1", trade_state: "SUCCESS", trade_type: "JSAPI",
+    payer: { openid: "service-customer" }, amount: { total: 7000, currency: "CNY" } };
+  const wrongPayer = encryptedNotification(keys, { ...raw, payer: { openid: "another-customer" } });
+  await assert.rejects(() => gateway.confirmTransaction(source, gateway.parseNotification(wrongPayer.headers, wrongPayer.body)), { code: "WECHAT_PAY_PAYER_MISMATCH" });
+  assert.equal(completions, 0);
+  const envelope = encryptedNotification(keys, raw);
+  const parsed = gateway.parseNotification(envelope.headers, envelope.body);
+  await assert.rejects(() => gateway.confirmTransaction(source, parsed), /workbench temporarily unavailable/);
+  assert.equal((await source.get("orders", order.id)).finalPaid, 70, "a secondary completion failure must preserve the real receipt");
+  const retried = await gateway.confirmTransaction(source, parsed);
+  assert.equal(retried.idempotent, true);
+  assert.equal(completions, 2);
+  const saved = await source.get("orders", order.id);
+  assert.equal(saved.paymentRecords.length, 1);
+  assert.equal(saved.statusLogs.length, 1);
+  assert.equal(saved.shootingCompletedAt, order.shootingCompletedAt);
+});
+
+test("enabling service intake cannot enroll an unrelated historical completion", async () => {
+  const previous = process.env.SVC_ENABLE_AT;
+  process.env.SVC_ENABLE_AT = "2026-01-01T00:00:00Z";
+  try {
+    const source = {};
+    for (const svc_paid_processed of [undefined, false, 0, "0"]) {
+      assert.deepEqual(await require("../lib/customerService.cjs").onCompleted(source,
+        { id: "legacy", orderNo: "LEGACY", status: "completed", finalPaid: 70, svc_paid_processed }), { skipped: true });
+    }
+    for (const facts of [{ service_status: "refunded" }, { service_status: "canceled" }, { paymentReviewRequired: true }]) {
+      assert.deepEqual(await require("../lib/customerService.cjs").onCompleted(source,
+        { id: "managed", orderNo: "MANAGED", status: "completed", svc_paid_processed: 1, ...facts }), { skipped: true });
+    }
+  } finally {
+    if (previous === undefined) delete process.env.SVC_ENABLE_AT;
+    else process.env.SVC_ENABLE_AT = previous;
+  }
 });
 
 test("stale prepay attempts are closed and made retryable instead of remaining pending", async () => {

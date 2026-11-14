@@ -34,9 +34,20 @@
 
 function isRemoteSession() {
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
-  return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+  return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE === "mysql" && reachable !== false);
 }
 const isAdminAccount = computed(() => String(state.currentAccount || "").trim().toLowerCase() === "admin");
+const isNewPhotoStaff = computed(() => !state.editStaff?.id && ["photo", "photographer"].includes(String(state.editStaff?.role || "").trim().toLowerCase()));
+const canCreatePhotoAccount = computed(() => ["super", "admin", "administrator"].includes(String(state.role || "").trim().toLowerCase()));
+async function goToPhotoCreate() {
+  if (!isNewPhotoStaff.value) return;
+  if (!canCreatePhotoAccount.value || typeof ctx.switchMenu !== "function") return ElMessage.warning("请联系管理员通过“摄影师分成管理 → 新增摄影师”创建档案和登录账号");
+  await ctx.switchMenu("photoNew");
+  if (state.active === "photoParty") {
+    state.staffDialog = false;
+    state.editStaff.password = "";
+  }
+}
 
 const staffRows = computed(() => {
   let list = data.staff;
@@ -53,7 +64,7 @@ function permissionText(row) {
 }
 function openStaff(row = null) {
   // 编辑时密码栏置空（留空=不改）；新增时不再预置弱口令 "123456"，必须手动设置强密码。
-  const base = row ? { ...row, password: "" } : { id: "", name: "", account: "", password: "", phone: "", role: "service", status: "启用", cityId: "city1", city: "长沙", agentId: "", distributorId: "", shopId: "" };
+  const base = row ? { ...row, password: "" } : { id: "", name: "", account: "", password: "", phone: "", role: "service", status: "启用", cityId: "", city: "", agentId: "", distributorId: "", shopId: "" };
   delete base.permissionKeys;
   delete base.permissions;
   if (base.role === "photo") {
@@ -64,6 +75,8 @@ function openStaff(row = null) {
   state.staffDialog = true;
 }
 async function saveStaff() {
+  if (!ctx.isServerConnected()) return ElMessage.error("真实后端连接不可用，账号或商家码未保存");
+  if (isNewPhotoStaff.value) return ElMessage.warning("摄影师请通过“摄影师分成管理 → 新增摄影师”保存，系统会同步生成并绑定登录账号");
   const row = state.editStaff;
   if (!row.name || !row.account) return ElMessage.warning("请填写姓名和账号");
   if (row.id && !isAdminAccount.value) delete row.password;
@@ -86,7 +99,7 @@ async function saveStaff() {
   delete saved.permissionKeys;
   delete saved.permissions;
   const synced = await persistAccountToCloud("staff", saved);
-  if (!synced && isRemoteSession()) {
+  if (!synced) {
     if (previous) Object.assign(saved, previous);
     else data.staff = data.staff.filter((item) => item !== saved);
     return;
@@ -96,6 +109,7 @@ async function saveStaff() {
   ElMessage.success("人员账号已保存");
 }
 async function resetPassword(row) {
+  if (!ctx.isServerConnected()) return ElMessage.error("真实后端连接不可用，账号或商家码未保存");
   if (!isAdminAccount.value) return ElMessage.warning("仅 admin 账号可以修改人员密码");
   const tempPwd = generateTempPassword();
   try {
@@ -114,14 +128,15 @@ async function resetPassword(row) {
       return ElMessage.error("重置失败，未能同步到服务端：" + (e && e.message ? e.message : e));
     }
   }
-  row.password = tempPwd; // 本地同步（离线演示模式直接生效；联网模式刷新后由服务端下发剥离态）
+  // 临时密码只在确认窗口显示一次，不写入浏览器业务数据池。
   log("重置密码", row.name, "已重置为随机临时密码，请转达尽快登录修改", currentOperatorName(), { level: "中" });
   ElMessageBox.alert(`「${row.name}」的新密码：${tempPwd}`, "重置成功", { confirmButtonClass: "lxm-action-cancel", confirmButtonText: "我已记下", type: "success" });
 }
-// 停用/启用人员账号：停用后该账号立即无法登录后台（服务端与离线兜底登录均已拦截）。
+// 停用/启用人员账号：停用后该账号立即无法登录后台（由服务端鉴权拦截）。
 // 专业决策：账号不做物理删除——订单、分成、对账、审计日志都关联人员 id，删人会断追溯链；
 // 「停用」才是账号的正确生命周期终点，历史记录完整保留。
 async function toggleStaffStatus(row) {
+  if (!ctx.isServerConnected()) return ElMessage.error("真实后端连接不可用，账号或商家码未保存");
   const target = data.staff.find((s) => s.id === row.id);
   if (!target) return;
   const disabling = target.status !== "停用";
@@ -151,7 +166,7 @@ async function toggleStaffStatus(row) {
   const previousStatus = target.status;
   target.status = disabling ? "停用" : "启用";
   const synced = await persistAccountToCloud("staff", target);
-  if (!synced && isRemoteSession()) {
+  if (!synced) {
     target.status = previousStatus;
     return;
   }
@@ -159,12 +174,13 @@ async function toggleStaffStatus(row) {
   ElMessage.success(`已${verb}「${target.name}」的账号`);
 }
 function openDistributor(row = null) {
-  const defaultAgentId = state.role === "agent" ? roleProfile.value.agentId : "agent1";
-  const defaultCityId = state.role === "agent" ? roleProfile.value.cityId : "city1";
+  const defaultAgentId = state.role === "agent" ? roleProfile.value.agentId : "";
+  const defaultCityId = state.role === "agent" ? roleProfile.value.cityId : "";
   state.editDistributor = row ? { ...row, password: "" } : { id: "", cityId: defaultCityId, agentId: defaultAgentId, name: "", phone: "", commissionRate: 5, settlementCycle: "月结", status: "启用", account: "", password: "" };
   state.distributorDialog = true;
 }
 async function saveDistributor() {
+  if (!ctx.isServerConnected()) return ElMessage.error("真实后端连接不可用，账号或商家码未保存");
   const row = state.editDistributor;
   if (!row.name || !row.agentId) return ElMessage.warning("请填写分销员名称和所属代");
   if (row.id && !isAdminAccount.value) delete row.password;
@@ -173,14 +189,14 @@ async function saveDistributor() {
   if (row.id && row.password && pwdError) return ElMessage.warning(pwdError);
   if (!row.password) delete row.password;
   delete row.contact;
-  row.cityId = row.cityId || (data.agents.find((a) => a.id === row.agentId) || {}).cityId || "city1";
+  row.cityId = row.cityId || (data.agents.find((a) => a.id === row.agentId) || {}).cityId || "";
   row.settlementCycle = row.settlementCycle || "月结";
   let saved;
   const previous = row.id ? { ...(data.distributors.find((d) => d.id === row.id) || {}) } : null;
   if (row.id) { saved = data.distributors.find((d) => d.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `dist${Date.now()}` }; data.distributors.unshift(saved); }
   const synced = await persistAccountToCloud("distributors", saved);
-  if (!synced && isRemoteSession()) {
+  if (!synced) {
     if (previous) Object.assign(saved, previous);
     else data.distributors = data.distributors.filter((item) => item !== saved);
     return;
@@ -191,13 +207,14 @@ async function saveDistributor() {
 }
 function openShop(row = null) {
   if (!canManageShopBinding()) return ElMessage.warning("分销员只能查看总部绑定给自己的商家，不能新增或编辑商家");
-  const defaultAgentId = state.role === "agent" ? roleProfile.value.agentId : "agent1";
-  const defaultCityId = state.role === "agent" ? roleProfile.value.cityId : "city1";
+  const defaultAgentId = state.role === "agent" ? roleProfile.value.agentId : "";
+  const defaultCityId = state.role === "agent" ? roleProfile.value.cityId : "";
   state.editShop = row ? { ...row, password: "" } : { id: "", name: "", cityId: defaultCityId, city: cityName(defaultCityId), district: "", shopId: `SHOP${Date.now().toString().slice(-4)}`, scene: "门店二维", qrPosition: "收银", commissionRate: 10, shareRatio: 10, settlementCycle: "月结", agentId: defaultAgentId, distributorIds: [], distributorRates: {}, account: "", password: "", contact: "", phone: "", address: "", status: "合作" };
   syncShopDistributorRates();
   state.shopDialog = true;
 }
 async function saveShop() {
+  if (!ctx.isServerConnected()) return ElMessage.error("真实后端连接不可用，账号或商家码未保存");
   if (!canManageShopBinding()) return ElMessage.warning("分销员没有新增、编辑或绑定商家的权");
   const row = state.editShop;
   if (!row.name || !row.account) return ElMessage.warning("请填写商家名称和登录账号");
@@ -221,7 +238,7 @@ async function saveShop() {
   if (row.id) { saved = data.shops.find((s) => s.id === row.id); Object.assign(saved, row); }
   else { saved = { ...row, id: `shop${Date.now()}` }; data.shops.unshift(saved); }
   const synced = await persistAccountToCloud("shops", saved);
-  if (!synced && isRemoteSession()) {
+  if (!synced) {
     if (previous) Object.assign(saved, previous);
     else data.shops = data.shops.filter((item) => item !== saved);
     return;
@@ -269,6 +286,7 @@ async function fetchMerchantCodeStats() {
   } catch (e) {}
 }
 async function generateMerchantQr() {
+  if (!ctx.isServerConnected()) return ElMessage.error("真实后端连接不可用，账号或商家码未保存");
   if (!state.currentShop) return;
   const placementType = "fixed_shop";
   const placementLabel = "门店统一码";
@@ -321,6 +339,9 @@ function shopQrUrl(row) {
     staffRows,
     distributorRows,
     isAdminAccount,
+    isNewPhotoStaff,
+    canCreatePhotoAccount,
+    goToPhotoCreate,
     permissionText,
     openStaff,
     saveStaff,

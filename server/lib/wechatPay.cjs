@@ -22,13 +22,28 @@ const API_HOST = "api.mch.weixin.qq.com";
 const API_PATH = "/v3/pay/transactions/jsapi";
 const SUCCESS_TRADE_STATE = "SUCCESS";
 const TERMINAL_UNPAID_STATES = new Set(["CLOSED", "PAYERROR", "REVOKED"]);
+const NETWORK_ERROR_CODES = new Set([
+  "ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND", "EPIPE", "EHOSTUNREACH", "ENETUNREACH",
+  "ERR_TLS_CERT_ALTNAME_INVALID", "CERT_HAS_EXPIRED", "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN",
+]);
+
+function diagnosticToken(value, pattern) {
+  const match = typeof value === "string" && value.match(pattern);
+  return match && match[0] === value ? value : "";
+}
 
 class WechatPayError extends Error {
-  constructor(message, { code = "WECHAT_PAY_ERROR", statusCode = 502 } = {}) {
+  constructor(message, { code = "WECHAT_PAY_ERROR", statusCode = 502, providerCode, providerRequestId, networkCode } = {}) {
     super(message);
     this.name = "WechatPayError";
     this.code = code;
     this.statusCode = statusCode;
+    const safeProviderCode = diagnosticToken(providerCode, /^[A-Z][A-Z0-9_]{0,63}$/);
+    const safeRequestId = diagnosticToken(providerRequestId, /^[A-Za-z0-9_-]{1,128}$/);
+    if (safeProviderCode) this.providerCode = safeProviderCode;
+    if (safeRequestId) this.providerRequestId = safeRequestId;
+    if (NETWORK_ERROR_CODES.has(networkCode)) this.networkCode = networkCode;
   }
 }
 
@@ -113,6 +128,7 @@ function configFromEnvironment(env = process.env) {
     merchantPrivateKey,
     apiV3Key: text(env.WECHAT_PAY_API_V3_KEY),
     notifyUrl: text(env.WECHAT_PAY_NOTIFY_URL),
+    refundNotifyUrl: text(env.WECHAT_PAY_REFUND_NOTIFY_URL),
     platformPublicKeyId: text(env.WECHAT_PAY_PLATFORM_PUBLIC_KEY_ID),
     platformPublicKey: publicKeyPem,
     platformCertificateSerialNo: text(env.WECHAT_PAY_PLATFORM_CERT_SERIAL_NO),
@@ -190,6 +206,11 @@ function normalizeConfig(input = {}) {
   } catch (_) {
     errors.push("WECHAT_PAY_NOTIFY_URL must be a public HTTPS URL without a query string");
   }
+  let refundNotifyUrl = null;
+  try {
+    refundNotifyUrl = new URL(text(config.refundNotifyUrl) || (notifyUrl && new URL("/api/payments/wechat/refund-notify", notifyUrl).toString()));
+    if (refundNotifyUrl.protocol !== "https:" || refundNotifyUrl.search || refundNotifyUrl.hash) throw new Error("invalid");
+  } catch (_) { errors.push("WECHAT_PAY_REFUND_NOTIFY_URL must be a public HTTPS URL without a query string"); }
   if (!/^[A-Za-z0-9.-]+$/.test(text(config.apiHost))) errors.push("WECHAT_PAY_API_HOST invalid");
 
   const timeout = Number(config.timeoutMs);
@@ -202,6 +223,7 @@ function normalizeConfig(input = {}) {
     merchantPrivateKey,
     apiV3Key: text(config.apiV3Key),
     notifyUrl: notifyUrl && notifyUrl.toString(),
+    refundNotifyUrl: refundNotifyUrl && refundNotifyUrl.toString(),
     platformVerifiers,
     platformSerialNo,
     apiHost: text(config.apiHost) || API_HOST,
@@ -227,6 +249,75 @@ function amountInFen(value) {
   return fen;
 }
 
+// Refund requests must never silently round an amount with a third decimal.
+function refundAmountInFen(value) {
+  const raw = typeof value === "number" ? String(value) : text(value);
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) throw new WechatPayError("Refund amount invalid", { code: "WECHAT_PAY_REFUND_AMOUNT_INVALID", statusCode: 400 });
+  const [whole, fraction = ""] = raw.split(".");
+  const result = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+  if (result <= 0n || result > BigInt(Number.MAX_SAFE_INTEGER)) throw new WechatPayError("Refund amount invalid", { code: "WECHAT_PAY_REFUND_AMOUNT_INVALID", statusCode: 400 });
+  return Number(result);
+}
+
+const MERCHANT_SHARE_WORK = new WeakMap();
+function enqueueMerchantShare(source, order) {
+  const orderId = itemId(order);
+  if (!source || !orderId || source.bookingRequestSource) return { scheduled: false };
+  let pending = MERCHANT_SHARE_WORK.get(source);
+  if (!pending) { pending = new Map(); MERCHANT_SHARE_WORK.set(source, pending); }
+  if (pending.has(orderId)) return { scheduled: true, existed: true, orderId };
+  let finish;
+  const work = { promise: new Promise(resolve => { finish = resolve; }) };
+  pending.set(orderId, work);
+  const run = async () => {
+    let result;
+    try {
+      // The callback's only responsibility was persisting the paid receipt and
+      // retry marker. Read its authoritative facts after leaving that path;
+      // neither caller-supplied money nor rule/binding work runs in the callback.
+      const saved = await source.get("orders", orderId);
+      if (!saved || !saved.shareEnqueuePending) result = { orderId, skipped: true, reason: "NO_PENDING_RECEIPT" };
+      else {
+        const delivered = await require("./merchantShare.cjs").enqueuePaidOrder(source, saved);
+        const patch = { shareEnqueuePending: false };
+        const cleared = typeof source.compareAndUpdate === "function"
+          ? await source.compareAndUpdate("orders", orderId, { shareEnqueuePending: true, paymentRecords: saved.paymentRecords,
+            depositPaid: saved.depositPaid, finalPaid: saved.finalPaid, finalPaidAt: saved.finalPaidAt, completedAt: saved.completedAt }, patch)
+          : await source.update("orders", orderId, patch);
+        // Explicit skips (not enabled / before launch) also finish old markers.
+        // A changed receipt or storage error keeps its marker for the worker.
+        result = { orderId, delivered: true, markerCleared: !!cleared, ...(delivered?.skipped ? { skipped: true, reason: delivered.reason } : {}) };
+      }
+    } catch (error) {
+      result = { orderId, failed: true, code: String(error?.code || "SHARE_ENQUEUE_FAILED") };
+    } finally {
+      if (pending.get(orderId) === work) pending.delete(orderId);
+      finish(result);
+    }
+  };
+  try { setImmediate(run); }
+  catch (_) { pending.delete(orderId); finish({ orderId, failed: true, code: "SHARE_SCHEDULE_FAILED" }); return { scheduled: false, orderId }; }
+  return { scheduled: true, existed: false, orderId };
+}
+
+async function drainMerchantShare(source) {
+  const results = [];
+  const pending = MERCHANT_SHARE_WORK.get(source);
+  while (pending && pending.size) results.push(...await Promise.all([...pending.values()].map(work => work.promise)));
+  return results;
+}
+
+function refundFromResponse(value = {}) {
+  return {
+    refundNo: text(value.out_refund_no), refundId: text(value.refund_id),
+    outTradeNo: text(value.out_trade_no), transactionId: text(value.transaction_id),
+    mchId: text(value.mchid), status: text(value.status || value.refund_status).toUpperCase(),
+    amount: Number(value.amount && value.amount.refund), total: Number(value.amount && value.amount.total),
+    currency: text(value.amount && value.amount.currency || "CNY").toUpperCase(),
+    successTime: text(value.success_time), raw: value,
+  };
+}
+
 function paymentDescription(order = {}, phase = "") {
   const name = text(order.packageName || order.confirmationSnapshot && (order.confirmationSnapshot.name || order.confirmationSnapshot.packageName) || "旅拍服务")
     .replace(/[\r\n\t]+/g, " ");
@@ -241,7 +332,7 @@ function defaultTransport({ hostname, method, path, headers, body, timeoutMs }) 
       response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
       response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), headers: response.headers || {}, body: Buffer.concat(chunks).toString("utf8") }));
     });
-    request.on("timeout", () => request.destroy(new Error("Wechat Pay request timed out")));
+    request.on("timeout", () => request.destroy(Object.assign(new Error("Wechat Pay request timed out"), { code: "ETIMEDOUT" })));
     request.on("error", reject);
     request.end(body || "");
   });
@@ -250,6 +341,19 @@ function defaultTransport({ hostname, method, path, headers, body, timeoutMs }) 
 function publicMessage(error, fallback = "微信支付服务暂不可用，请稍后重试") {
   if (error && error.code === "WECHAT_PAY_CONFIG_INVALID") return "微信支付暂未配置，请联系客服";
   if (error && error.code === "WECHAT_PAY_RESPONSE_SIGNATURE_INVALID") return "微信支付服务响应校验失败，请稍后重试";
+  if (error && error.code === "WECHAT_PAY_NETWORK_ERROR") return "微信支付网络连接异常，请稍后重试";
+  if (error && error.code === "WECHAT_PAY_API_ERROR") {
+    // Only documented API v3 codes select customer-facing messages. Never
+    // display the provider's message/detail, which can contain request data.
+    switch (error.providerCode) {
+      case "SIGN_ERROR": return "微信支付商户签名校验失败，请联系客服";
+      case "NO_AUTH": return "商户微信支付权限不足，请联系客服";
+      case "APPID_MCHID_NOT_MATCH": return "小程序与支付商户未正确关联，请联系客服";
+      case "MCH_NOT_EXISTS": return "微信支付商户配置异常，请联系客服";
+      case "FREQUENCY_LIMITED": return "微信支付请求频繁，请稍后重试";
+      case "SYSTEM_ERROR": return "微信支付服务繁忙，请稍后重试";
+    }
+  }
   return fallback;
 }
 
@@ -305,6 +409,11 @@ function expectedOrderFields(order = {}) {
     depositFinanceStatus: order.depositFinanceStatus,
     finalPaid: order.finalPaid,
     finalFinanceStatus: order.finalFinanceStatus,
+    service_status: order.service_status,
+    done_at: order.done_at,
+    completedAt: order.completedAt,
+    shootingCompletedAt: order.shootingCompletedAt,
+    paymentReviewRequired: order.paymentReviewRequired,
   };
 }
 
@@ -356,41 +465,8 @@ function validateTransaction(config, transaction, { requireSuccessfulFields = tr
   }
 }
 
-function createTestGateway() {
-  function buildMiniProgramPaymentParams(prepayId) {
-    return {
-      timeStamp: "1700000000",
-      nonceStr: "wechat-pay-test-nonce",
-      package: `prepay_id=${prepayId}`,
-      signType: "RSA",
-      paySign: "wechat-pay-test-signature",
-    };
-  }
-  return {
-    isConfigured: () => true,
-    configurationErrors: () => [],
-    configSummary: () => ({ configured: true, testStub: true }),
-    createOutTradeNo,
-    async createJsapiTransaction({ payment }) {
-      const prepayId = `test-prepay-${text(payment && payment.id)}`.slice(0, 120);
-      return { outTradeNo: text(payment && payment.outTradeNo), prepayId, paymentParams: buildMiniProgramPaymentParams(prepayId) };
-    },
-    buildMiniProgramPaymentParams,
-    async queryTransaction(outTradeNo) { return { outTradeNo: text(outTradeNo), tradeState: "NOTPAY", transactionId: "", amountTotal: 0 }; },
-    async closeTransaction() { return true; },
-    async parseNotification() { throw new WechatPayError("Test gateway does not accept payment notifications", { code: "WECHAT_PAY_NOTIFICATION_INVALID", statusCode: 400 }); },
-    async confirmTransaction() { throw new WechatPayError("Test gateway does not confirm transactions", { code: "WECHAT_PAY_TRANSACTION_NOT_SUCCESS", statusCode: 409 }); },
-    publicMessage,
-  };
-}
-
 function createWechatPay(options = {}) {
   const environment = options.env || process.env;
-  if (options.testStub === true || (environment.NODE_ENV === "test"
-    && String(environment.LXM_ALLOW_TEST_JSON_SOURCE || "").toLowerCase() === "true"
-    && String(environment.WECHAT_PAY_MOCK_MODE || "").toLowerCase() === "true")) {
-    return createTestGateway();
-  }
   const config = normalizeConfig(options.config || configFromEnvironment(environment));
   const transport = options.transport || defaultTransport;
 
@@ -458,19 +534,33 @@ function createWechatPay(options = {}) {
         },
       });
     } catch (error) {
-      throw new WechatPayError("Wechat Pay network request failed", { code: "WECHAT_PAY_NETWORK_ERROR", statusCode: 502 });
+      throw new WechatPayError("Wechat Pay network request failed", {
+        code: "WECHAT_PAY_NETWORK_ERROR", statusCode: 502, networkCode: error && error.code,
+      });
     }
     const statusCode = Number(response && response.statusCode || 0);
     const rawBody = String(response && response.body || "");
+    const providerRequestId = diagnosticToken(headerValue(response && response.headers, "Request-ID"), /^[A-Za-z0-9_-]{1,128}$/);
     if (statusCode < 200 || statusCode >= 300) {
-      const error = new WechatPayError("Wechat Pay API rejected request", { code: "WECHAT_PAY_API_ERROR", statusCode: 502 });
+      let providerCode;
+      try { providerCode = JSON.parse(rawBody)?.code; } catch (_) { /* A proxy error may not be JSON. */ }
+      const error = new WechatPayError("Wechat Pay API rejected request", {
+        code: "WECHAT_PAY_API_ERROR", statusCode: 502, providerCode, providerRequestId,
+      });
       error.httpStatus = statusCode;
       throw error;
     }
     if (!rawBody && allowEmptyResponse) return null;
-    verifySignature(response.headers || {}, rawBody);
+    try { verifySignature(response.headers || {}, rawBody); }
+    catch (error) {
+      if (error instanceof WechatPayError) {
+        if (providerRequestId) error.providerRequestId = providerRequestId;
+        error.httpStatus = statusCode;
+      }
+      throw error;
+    }
     try { return JSON.parse(rawBody); }
-    catch (_) { throw new WechatPayError("Wechat Pay response invalid", { code: "WECHAT_PAY_RESPONSE_INVALID", statusCode: 502 }); }
+    catch (_) { throw new WechatPayError("Wechat Pay response invalid", { code: "WECHAT_PAY_RESPONSE_INVALID", statusCode: 502, providerRequestId }); }
   }
 
   function buildMiniProgramPaymentParams(prepayId) {
@@ -517,7 +607,9 @@ function createWechatPay(options = {}) {
       const response = await signedRequest("GET", path, "");
       return transactionFromNotification(response);
     } catch (error) {
-      if (error && error.code === "WECHAT_PAY_API_ERROR" && error.httpStatus === 404) error.code = "WECHAT_PAY_TRANSACTION_NOT_FOUND";
+      if (error && error.code === "WECHAT_PAY_API_ERROR" && error.httpStatus === 404 && error.providerCode === "ORDER_NOT_EXIST") {
+        error.code = "WECHAT_PAY_TRANSACTION_NOT_FOUND";
+      }
       throw error;
     }
   }
@@ -529,6 +621,81 @@ function createWechatPay(options = {}) {
     const path = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(value)}/close`;
     await signedRequest("POST", path, JSON.stringify({ mchid: config.mchId }), { allowEmptyResponse: true });
     return true;
+  }
+
+  function validateRefund(result, { notification = false } = {}) {
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(result.refundNo) || !result.refundId || !result.outTradeNo || !result.transactionId
+      || !["SUCCESS", "PROCESSING", "CLOSED", "ABNORMAL"].includes(result.status)
+      || !Number.isSafeInteger(result.amount) || result.amount <= 0 || !Number.isSafeInteger(result.total)
+      || result.total < result.amount || result.currency !== "CNY"
+      || (result.status === "SUCCESS" && !Number.isFinite(Date.parse(result.successTime)))
+      || ((notification || result.mchId) && result.mchId !== config.mchId)) {
+      throw new WechatPayError("Refund response mismatch", { code: "WECHAT_PAY_REFUND_MISMATCH", statusCode: 400 });
+    }
+    return result;
+  }
+
+  async function createRefund({ payment, refundNo, amount, reason = "" }) {
+    assertConfigured();
+    if (!payment || payment.provider !== "wechat_pay" || normalizePaymentStatus(payment.status) !== "confirmed"
+      || !text(payment.outTradeNo) || !text(payment.externalTransactionId)) {
+      throw new WechatPayError("Verified online payment required", { code: "WECHAT_PAY_REFUND_PAYMENT_INVALID", statusCode: 409 });
+    }
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(text(refundNo))) throw new WechatPayError("Refund number invalid", { code: "WECHAT_PAY_REFUND_INVALID", statusCode: 400 });
+    const refund = refundAmountInFen(amount);
+    const total = refundAmountInFen(payment.amount);
+    if (refund > total) throw new WechatPayError("Refund exceeds payment", { code: "WECHAT_PAY_REFUND_AMOUNT_INVALID", statusCode: 400 });
+    const result = validateRefund(refundFromResponse(await signedRequest("POST", "/v3/refund/domestic/refunds", JSON.stringify({
+      transaction_id: text(payment.externalTransactionId), out_refund_no: text(refundNo),
+      ...(text(reason) ? { reason: text(reason).slice(0, 80) } : {}), notify_url: config.refundNotifyUrl,
+      amount: { refund, total, currency: "CNY" },
+    }))));
+    if (result.refundNo !== text(refundNo) || result.amount !== refund || result.total !== total
+      || result.outTradeNo !== text(payment.outTradeNo) || result.transactionId !== text(payment.externalTransactionId)) {
+      throw new WechatPayError("Refund request response mismatch", { code: "WECHAT_PAY_REFUND_MISMATCH", statusCode: 400 });
+    }
+    return result;
+  }
+
+  async function queryRefund(refundNo) {
+    const value = text(refundNo);
+    if (!/^[A-Za-z0-9_-]{6,64}$/.test(value)) throw new WechatPayError("Refund number invalid", { code: "WECHAT_PAY_REFUND_INVALID", statusCode: 400 });
+    try {
+      const result = validateRefund(refundFromResponse(await signedRequest("GET", `/v3/refund/domestic/refunds/${encodeURIComponent(value)}`, "")));
+      if (result.refundNo !== value) throw new WechatPayError("Refund number mismatch", { code: "WECHAT_PAY_REFUND_MISMATCH", statusCode: 400 });
+      return result;
+    } catch (error) {
+      if (error && error.code === "WECHAT_PAY_API_ERROR" && error.httpStatus === 404) error.code = "WECHAT_PAY_REFUND_NOT_FOUND";
+      throw error;
+    }
+  }
+
+  function parseRefundNotification(headers, rawBody) {
+    assertConfigured();
+    verifySignature(headers, rawBody, { checkTimestamp: true });
+    try {
+      const envelope = JSON.parse(Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : rawBody);
+      const event = text(envelope.event_type);
+      const resource = envelope.resource;
+      if (!["REFUND.SUCCESS", "REFUND.ABNORMAL", "REFUND.CLOSED"].includes(event)
+        || envelope.resource_type !== "encrypt-resource" || !resource || resource.original_type !== "refund"
+        || resource.algorithm !== "AEAD_AES_256_GCM" || !text(resource.nonce) || !text(resource.ciphertext)) throw new Error("invalid refund resource");
+      const ciphertext = Buffer.from(resource.ciphertext, "base64");
+      if (ciphertext.length <= 16) throw new Error("invalid cipher");
+      const decipher = crypto.createDecipheriv("aes-256-gcm", Buffer.from(config.apiV3Key, "utf8"), Buffer.from(resource.nonce, "utf8"));
+      decipher.setAAD(Buffer.from(String(resource.associated_data || ""), "utf8"));
+      decipher.setAuthTag(ciphertext.subarray(-16));
+      const result = validateRefund(refundFromResponse(JSON.parse(Buffer.concat([decipher.update(ciphertext.subarray(0, -16)), decipher.final()]).toString("utf8"))), { notification: true });
+      if (event !== `REFUND.${result.status}`) throw new Error("refund event mismatch");
+      return result;
+    } catch (error) {
+      if (error instanceof WechatPayError) throw error;
+      throw new WechatPayError("Refund notification invalid", { code: "WECHAT_PAY_REFUND_NOTIFICATION_INVALID", statusCode: 400 });
+    }
+  }
+
+  async function confirmRefundCallback(source, headers, rawBody) {
+    return require("./onlineRefunds.cjs").applyRefundResult(source, parseRefundNotification(headers, rawBody));
   }
 
   function parseNotification(headers, rawBody) {
@@ -617,13 +784,18 @@ function createWechatPay(options = {}) {
         if (!validPaymentPhase(phase) || amountInFen(record.amount) !== transaction.amountTotal) {
           throw new WechatPayError("Payment amount mismatch", { code: "WECHAT_PAY_AMOUNT_MISMATCH", statusCode: 400 });
         }
-        if (transaction.payerOpenid && text(order.openid || order._openid) && transaction.payerOpenid !== text(order.openid || order._openid)) {
+        if (transaction.payerOpenid && text(order.openid || order._openid || order.customer_openid) && transaction.payerOpenid !== text(order.openid || order._openid || order.customer_openid)) {
           throw new WechatPayError("Payment payer mismatch", { code: "WECHAT_PAY_PAYER_MISMATCH", statusCode: 400 });
         }
         if (normalizePaymentStatus(record.status) === "confirmed") {
           if (text(record.externalTransactionId) && text(record.externalTransactionId) !== transaction.transactionId) {
             throw new WechatPayError("Payment transaction mismatch", { code: "WECHAT_PAY_TRANSACTION_MISMATCH", statusCode: 400 });
           }
+          if (phase === "final") {
+            if (order.shareEnqueuePending) enqueueMerchantShare(source, order);
+            await require('./customerService.cjs').onCompleted(source,order);
+          }
+          if (phase === 'deposit') await require('./customerService.cjs').queuePaid(source,order);
           return { order, payment: record, idempotent: true };
         }
         if (!canConfirmPhase(order, phase)) {
@@ -662,6 +834,9 @@ function createWechatPay(options = {}) {
           updateTime: now,
         };
         if (phase === "final") {
+          patch.shareEnqueuePending = true;
+          patch.finalPaymentSessionStartAt = record.sessionStartAt || order.finalPaymentSessionStartAt || null;
+          patch.finalPaymentSessionId = record.sessionId || order.finalPaymentSessionId || "";
           const selectionAt = order.selectionConfirmedAt || now;
           patch.selectionStatus = "confirmed";
           patch.selectionConfirmedAt = selectionAt;
@@ -677,6 +852,11 @@ function createWechatPay(options = {}) {
           patch.workflowStage = WORKFLOW_STAGES.COMPLETED;
           patch.completedAt = order.completedAt || now;
           patch.completionSource = order.completionSource || "wechat_pay_final";
+          patch.businessStatus = "completed";
+          patch.businessStatusText = "已完成";
+          patch.customerStatus = "已完成";
+          patch.service_status = "done";
+          patch.done_at = order.done_at || require('./svcCore.cjs').stamp(patch.completedAt);
         }
         const updated = await compareAndUpdate(source, orderId, expectedOrderFields(order), patch);
         if (!updated) continue;
@@ -696,6 +876,13 @@ function createWechatPay(options = {}) {
           // The paid state is authoritative and must not be rolled back if a
           // secondary audit sink is temporarily unavailable.
         }
+        if (phase === "final") {
+          enqueueMerchantShare(source, updated);
+          // This hook is idempotent. A temporary workbench failure leaves the
+          // verified receipt intact and is retried by the next notification.
+          await require('./customerService.cjs').onCompleted(source,updated);
+        }
+        if (phase === 'deposit') await require('./customerService.cjs').queuePaid(source,updated);
         return { order: updated, payment, idempotent: false };
       }
       throw new WechatPayError("Payment state changed concurrently", { code: "WECHAT_PAY_CONCURRENT_UPDATE", statusCode: 503 });
@@ -711,6 +898,10 @@ function createWechatPay(options = {}) {
     buildMiniProgramPaymentParams,
     queryTransaction,
     closeTransaction,
+    createRefund,
+    queryRefund,
+    parseRefundNotification,
+    confirmRefundCallback,
     parseNotification,
     confirmTransaction,
     publicMessage,
@@ -720,6 +911,10 @@ function createWechatPay(options = {}) {
 module.exports = {
   WechatPayError,
   amountInFen,
+  refundAmountInFen,
+  refundFromResponse,
+  enqueueMerchantShare,
+  drainMerchantShare,
   configFromEnvironment,
   createOutTradeNo,
   createWechatPay,

@@ -6,7 +6,7 @@ const test = require("node:test");
 const createApi = require("../lib/api.cjs");
 const rpc = require("../lib/rpc.cjs");
 const workflow = require("../lib/orderWorkflow.cjs");
-const { createTestWechatPay } = require("./helpers/wechatPay.cjs");
+const { createTestWechatPay, confirmTestPayment } = require("./helpers/wechatPay.cjs");
 
 const TEST_WECHAT_PAY = createTestWechatPay();
 
@@ -38,7 +38,7 @@ function makeSource() {
       "package-1": { id: "package-1", name: "测试套餐", price: 100, depositRatio: 30, status: "published" },
     },
     albums: {}, peripherals: {}, spots: {}, series: {}, shops: {}, merchantCodes: {},
-    siteConfig: { global: { id: "global", customPrice: { depositRatio: 30 } } },
+    siteConfig: { global: { id: "global", bookingNotice: ["Synthetic test booking notice"], bookingNoticeVersion: "v1.0", customPrice: { depositRatio: 30 } } },
     orders: {}, afterSales: {}, logs: {},
     staff: {
       super: { id: "super", account: "super", role: "super", status: "active" },
@@ -236,7 +236,7 @@ test("shooting opens final payment and completion is independent of delivery", a
   }
 
   await withTestPayment(async () => {
-    const paid = await rpc(source, "testPayment", {
+    const paid = await confirmTestPayment(source, {
       data: { orderId: "selection", phase: "final", selectionAccepted: true, idempotencyKey: "final-after-selection-0001" },
     }, publicIdentity("owner"));
     assert.equal(paid.success, true, JSON.stringify(paid));

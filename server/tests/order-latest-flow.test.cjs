@@ -107,8 +107,9 @@ test("service starts its assigned order, frozen deposit survives price adjustmen
   source.collections.orders.o.afterSaleStatus = "pending";
   assert.equal(workflow.businessStatusForOrder(source.collections.orders.o), "completed");
 });
-test("zero final balance acknowledges completion without a fabricated WeChat transaction", async () => {
+test("zero final balance acknowledges completion without a fabricated WeChat transaction", async t => {
   const source = fixture();
+  t.after(() => require("../lib/wechatPay.cjs").drainMerchantShare(source));
   source.collections.orders.o = { id: "o", openid: "customer", status: "shooting", totalAmount: 100, depositDue: 100, depositPaid: 100, depositFinanceStatus: "confirmed", finalDue: 0, paymentRecords: [], statusLogs: [], followRecords: [] };
   assert.equal(workflow.publicOrderProjection(source.collections.orders.o).canConfirmCompletion, false);
   const premature = await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "zero-premature-0001" } }, { identity: identity.identity });

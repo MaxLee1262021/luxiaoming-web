@@ -2,6 +2,7 @@
 
 const path = require("path");
 const crypto = require("crypto");
+const { isGuideAttachment, MAX_ATTACHMENT_SIZE } = require("./guideAttachments.cjs");
 
 function fileError(code, message, statusCode = 400) {
   return Object.assign(new Error(message), { code: `FILE_${code}`, statusCode });
@@ -89,11 +90,15 @@ function createOssStorage(options = {}) {
       return safely(async () => {
         const result = await client.head(asset.objectKey);
         const h = result.res.headers;
-        const prefix = await client.get(asset.objectKey, { headers: { Range: "bytes=0-511" } });
+        const attachment = isGuideAttachment(asset);
+        if (attachment && (Number(h["content-length"]) > MAX_ATTACHMENT_SIZE || Number(h["content-length"]) !== Number(asset.size))) throw fileError("INVALID_CONTENT", "实际附件大小与申请不一致", 400);
+        // Office ZIP containers and UTF-8 text need complete, bounded bytes;
+        // the first 512 bytes cannot reliably identify these formats.
+        const prefix = await client.get(asset.objectKey, { headers: { Range: attachment ? `bytes=0-${asset.size - 1}` : "bytes=0-511" } });
         const acl = await client.getACL(asset.objectKey);
         return { size: Number(h["content-length"]), mimeType: String(h["content-type"] || "").split(";")[0].toLowerCase(),
           etag: String(h.etag || "").replace(/"/g, ""), fileId: h["x-oss-meta-file-id"], sha256: h["x-oss-meta-sha256"], acl: acl.acl,
-          bytes: Buffer.from(prefix.content).subarray(0, 512) };
+          bytes: attachment ? Buffer.from(prefix.content) : Buffer.from(prefix.content).subarray(0, 512) };
       });
     },
     async signRead(asset, options = {}) {

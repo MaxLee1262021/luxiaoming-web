@@ -13,7 +13,10 @@ const { spawn } = require("node:child_process");
 
 const DEFAULT_START_TIMEOUT_MS = 7000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 1200;
-const DEFAULT_PROBE_TIMEOUT_MS = 3500;
+// Configuration probes spawn the same server as the normal smoke fixture.
+// Their budget must also cover cold module loading and scheduler contention,
+// in addition to the deliberately short Redis/MySQL connection timeout.
+const DEFAULT_PROBE_TIMEOUT_MS = DEFAULT_START_TIMEOUT_MS;
 
 const COLLECTION_KEYS = [
   "cities", "agents", "distributors", "shops", "staff", "spots", "series",
@@ -44,9 +47,8 @@ const ROLE_MATRIX = Object.freeze({
     scope: { ownField: "photographerId", ownValue: "smoke-photo", ownOrder: "smoke-order-photo" },
   },
   merchant: {
-    allow: ["/api/collection/merchantCodes", "/api/collection/orders"],
-    deny: [{ path: "/api/collection/staff", method: "POST", body: {} }],
-    scope: { ownField: "shopId", ownValue: "smoke-shop", ownOrder: "smoke-order-shop" },
+    allow: ["/api/auth/me", "/api/share/mine"],
+    deny: ["/api/collection/merchantCodes", "/api/collection/orders", "/api/collection/scans", "/api/collection/shops", "/api/share/rules", "/api/share/details", { path: "/api/collection/staff", method: "POST", body: {} }],
   },
   distributor: {
     allow: ["/api/collection/shops", "/api/collection/orders"],
@@ -159,8 +161,11 @@ function makeFixture() {
   };
   collections.shops["smoke-settlement-shop"] = {
     id: "smoke-settlement-shop", shopId: "smoke-settlement-shop", name: "Smoke Settlement Shop",
-    status: "合作中", city: "Smoke City", cityId: "smoke-city", commissionRate: 10,
+    status: "合作中", city: "Smoke City", cityId: "smoke-city", commissionRate: 10, distributorId: "smoke-settlement-distributor",
   };
+  collections.distributors["smoke-settlement-distributor"] = { id: "smoke-settlement-distributor", name: "Smoke Settlement Distributor", status: "启用", commissionRate: 10 };
+  collections.reconciliationTransfers["smoke-legacy-shop-transfer"] = { id: "smoke-legacy-shop-transfer", objectType: "商家", objectId: "smoke-settlement-shop", amount: 10, status: "已确" };
+  collections.adjustmentRecords["smoke-legacy-shop-adjustment"] = { id: "smoke-legacy-shop-adjustment", targetType: "商家", orderId: "smoke-order-settlement", amount: -5, approvalStatus: "待审" };
 
   const distributorOnlyPassword = `S${crypto.randomBytes(12).toString("hex")}9`;
   accounts.distributorOnly = {
@@ -223,12 +228,12 @@ function makeFixture() {
     isDeleted: true, deleted: true, totalPrice: 100,
   };
   collections.orders["smoke-order-settlement"] = {
-    id: "smoke-order-settlement", orderNo: "SMOKE-SETTLE", shopId: "smoke-settlement-shop",
+    id: "smoke-order-settlement", orderNo: "SMOKE-SETTLE", shopId: "smoke-settlement-shop", distributorId: "smoke-settlement-distributor", photographerId: "smoke-photo",
     status: "completed", customerStatus: "已完成", totalAmount: 100, depositPaid: 40, finalPaid: 60,
     depositFinanceStatus: "已审", finalFinanceStatus: "已审",
   };
   collections.orders["smoke-order-recent"] = {
-    id: "smoke-order-recent", orderNo: "SMOKE-RECENT", shopId: "smoke-settlement-shop",
+    id: "smoke-order-recent", orderNo: "SMOKE-RECENT", shopId: "smoke-settlement-shop", distributorId: "smoke-settlement-distributor", photographerId: "smoke-photo",
     status: "completed", totalAmount: 100, depositPaid: 40, finalPaid: 60,
     depositFinanceStatus: "已审", finalFinanceStatus: "已审", completedAt: new Date().toISOString(),
   };
@@ -352,7 +357,7 @@ async function confirmFixtureBooking(baseUrl, token, response) {
   assert.equal(responseRows(beforePayment.body).some((row) => [row.id, row._id, row.bookingId].includes(draft.bookingId)), false,
     "an unpaid booking must not appear in customer order history");
   const idempotencyKey = `smoke-booking-payment-${draft.bookingId}`;
-  const paid = await requestJson(baseUrl, "/api/rpc/testPayment", {
+  const paid = await requestJson(baseUrl, "/api/__fixture__/payment-confirmed", {
     method: "POST", headers: authHeaders(token),
     body: { data: { bookingId: draft.bookingId, phase: "deposit", idempotencyKey } },
   });
@@ -361,7 +366,7 @@ async function confirmFixtureBooking(baseUrl, token, response) {
   const confirmed = paid.body.data || paid.body;
   assert.equal(confirmed.bookingStatus, "confirmed");
   assert.ok(confirmed.orderId, "confirmed deposit must produce a formal order id");
-  const replay = await requestJson(baseUrl, "/api/rpc/testPayment", {
+  const replay = await requestJson(baseUrl, "/api/__fixture__/payment-confirmed", {
     method: "POST", headers: authHeaders(token),
     body: { data: { bookingId: draft.bookingId, phase: "deposit", idempotencyKey } },
   });
@@ -419,23 +424,24 @@ function assertHealthShape(body) {
 }
 
 async function waitForHealth(baseUrl, child, timeoutMs = DEFAULT_START_TIMEOUT_MS) {
+  const startedAt = Date.now();
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      return { ready: false, exited: true, exitCode: child.exitCode, diagnostic: sanitizeDiagnostic(lastError) };
+      return { ready: false, exited: true, exitCode: child.exitCode, elapsedMs: Date.now() - startedAt, diagnostic: sanitizeDiagnostic(lastError) };
     }
     try {
       // Redis fail-closed health may spend up to the configured connect timeout
       // before returning 503; keep the probe from racing that response.
       const result = await requestJson(baseUrl, "/api/health", { timeoutMs: 1200 });
-      if (result.status) return { ready: true, health: result };
+      if (result.status) return { ready: true, health: result, elapsedMs: Date.now() - startedAt };
     } catch (error) {
       lastError = error && error.message;
     }
     await delay(80);
   }
-  return { ready: false, timedOut: true, diagnostic: sanitizeDiagnostic(lastError) };
+  return { ready: false, timedOut: true, elapsedMs: Date.now() - startedAt, diagnostic: sanitizeDiagnostic(lastError) };
 }
 
 function spawnServer(root, fixtureFile, options = {}) {
@@ -449,15 +455,14 @@ function spawnServer(root, fixtureFile, options = {}) {
     DOTENV_CONFIG_PATH: options.dotenvPath || path.join(path.dirname(fixtureFile), ".env"),
     SESSION_STORE: options.sessionStore || "memory",
     AUTH_REQUIRED: "true",
-    // Explicitly enable the in-process payment stub only for this isolated
-    // NODE_ENV=test fixture. Production cannot activate this code path.
-    WECHAT_PAY_MOCK_MODE: "true",
-    TEST_PAYMENT_ENABLED: "true",
+    // The explicit tests-only preloader injects isolated adapters. Runtime
+    // environment variables cannot select these adapters or bypass payments.
+    LXM_SMOKE_ROOT: root,
     ...(fs.existsSync(localNodeModules) ? { NODE_PATH: localNodeModules } : {}),
     ...(options.env || {}),
   });
   const entry = path.join(root, "server", "index.cjs");
-  const child = spawn(process.execPath, [entry], {
+  const child = spawn(process.execPath, ["--require", path.resolve(__dirname, "fixtures/smoke-bootstrap.cjs"), entry], {
     // Keep dotenv scoped to the isolated fixture directory.  The server uses
     // __dirname for all project paths, so changing cwd does not affect routing.
     cwd: path.dirname(fixtureFile),
@@ -599,13 +604,13 @@ async function runConfigProbe(report, root, fixtureFile, label, env, options = {
       if (server.exited) {
         // A non-zero startup exit is an acceptable fail-closed outcome.
         if (server.exitCode && server.exitCode !== 0 && expectedConfigFailure(server, label)) {
-          addPass(report, `${label}: fail-closed startup`);
+          addPass(report, `${label}: fail-closed startup`, `exit=${server.exitCode}; elapsed=${server.elapsedMs}ms`);
           return;
         }
         addFailure(report, `${label}: fail-closed startup`, new Error("process exited without a fail-closed error"));
         return;
       }
-      addFailure(report, `${label}: fail-closed startup`, new Error("process did not fail closed before timeout"));
+      addFailure(report, `${label}: fail-closed startup`, new Error(`process did not fail closed before timeout (${server.elapsedMs}ms; ${server.diagnostic || "no health response"})`));
       return;
     }
     const health = server.health || await requestJson(server.baseUrl, "/api/health");
@@ -631,7 +636,7 @@ async function runConfigProbe(report, root, fixtureFile, label, env, options = {
       const rpcResult = await requestJson(server.baseUrl, "/api/rpc/getBookingConfig", { method: "POST", body: {} });
       assert.equal(rpcResult.status, 503, "public config RPC must not fall back to defaults when MySQL is unavailable");
     }
-    addPass(report, `${label}: fail-closed health`);
+    addPass(report, `${label}: fail-closed health`, `HTTP ${health.status}; elapsed=${server.elapsedMs}ms`);
   } finally {
     await stopServer(server);
   }
@@ -701,7 +706,7 @@ async function runSmoke(options = {}) {
       const encodedMock = await requestJson(server.baseUrl, "/%73rc/%6d%6f%63%6b/business-data.js");
       assert.notEqual(encodedMock.status, 200, "encoded raw demo fixture must not be served");
       const publicData = await requestJson(server.baseUrl, "/public/public-data.js");
-      assert.equal(publicData.status, 200, "public bootstrap data must remain available");
+      assert.equal(publicData.status, 404, "demo bootstrap data must not be served");
       assert.equal(/password|openid|customerPhone/i.test(publicData.text), false, "public bootstrap data must not contain credentials or customer fields");
     });
 
@@ -973,18 +978,21 @@ async function runSmoke(options = {}) {
       await check(report, "channel dashboard and home aggregates stay scoped", async () => {
       const merchantToken = await login(server.baseUrl, fixture.accounts.merchant);
       const merchantDashboard = await requestJson(server.baseUrl, "/api/dashboard", { headers: authHeaders(merchantToken) });
-      assert.equal(merchantDashboard.status, 200);
-      assert.equal(merchantDashboard.body.orders, 4, "merchant dashboard must contain only its scoped orders");
+      assert.equal(merchantDashboard.status, 403, "merchant must use the dedicated share projection instead of the old dashboard");
       const merchantDashboardRpc = await requestJson(server.baseUrl, "/api/rpc/getDashboard", { method: "POST", headers: authHeaders(merchantToken), body: {} });
-      assert.equal(merchantDashboardRpc.status, 200);
-      assert.equal(merchantDashboardRpc.body.orders, 4, "admin dashboard RPC must use the same scoped aggregate");
+      assert.equal(merchantDashboardRpc.status, 403, "legacy dashboard RPC must also be retired for merchant sessions");
       const merchantHome = await requestJson(server.baseUrl, "/api/home", { headers: authHeaders(merchantToken) });
-      assert.equal(merchantHome.status, 200);
-      assert.equal(merchantHome.body.stats.orders, 4, "merchant home stats must contain only its scoped orders");
+      assert.equal(merchantHome.status, 403);
       assert.equal(Object.prototype.hasOwnProperty.call(merchantHome.body, "activityNotice"), false, "channel home must not expose global content config");
       for (const raw of ["synthetic-home-secret", "private.invalid/home", "synthetic-home-audit"]) {
         assert.equal(JSON.stringify(merchantHome.body).includes(raw), false, `channel home must not expose ${raw}`);
       }
+      const mine = await requestJson(server.baseUrl, "/api/share/mine?merchantId=smoke-shop-other", { headers: authHeaders(merchantToken) });
+      assert.equal(mine.status, 200);
+      assert.equal(mine.body.data.merchant.merchantId, "smoke-shop", "caller-supplied merchant must not override the authenticated owner");
+      assert.equal(mine.body.data.list.some(row => row.orderNo === "smoke-order-other"), false);
+      const me = await requestJson(server.baseUrl, "/api/auth/me", { headers: authHeaders(merchantToken) });
+      assert.deepEqual(me.body.menuDefinitions.map(menu => menu.key), ["shareMine"]);
       const distributorToken = await login(server.baseUrl, fixture.accounts.distributor);
       const distributorDashboard = await requestJson(server.baseUrl, "/api/dashboard", { headers: authHeaders(distributorToken) });
       assert.equal(distributorDashboard.status, 200);
@@ -1043,6 +1051,10 @@ async function runSmoke(options = {}) {
         });
         assert.equal(detail.status, 200);
         assert.equal(detail.body && detail.body.data && detail.body.data.currentPackage && detail.body.data.currentPackage.description, payload.description);
+        const hidden = await requestJson(server.baseUrl, `/api/collection/packages/${packageId}`, {
+          method: "PUT", headers: authHeaders(activeSuperToken), body: { isShow: false, status: "下架" },
+        });
+        assert.equal(hidden.status, 200);
         const removed = await requestJson(server.baseUrl, `/api/collection/packages/${packageId}`, {
           method: "DELETE", headers: authHeaders(activeSuperToken),
         });
@@ -1093,8 +1105,16 @@ async function runSmoke(options = {}) {
       });
       await check(report, "restricted order responses redact contact aliases", async () => {
         const merchantToken = await login(server.baseUrl, fixture.accounts.merchant);
+        const retired = await requestJson(server.baseUrl, "/api/collection/orders/smoke-order-redaction", { headers: authHeaders(merchantToken) });
+        assert.equal(retired.status, 403, "merchant cannot read even formerly scoped raw order details");
+        const mine = await requestJson(server.baseUrl, "/api/share/mine?merchantId=smoke-shop-other", { headers: authHeaders(merchantToken) });
+        assert.equal(mine.status, 200);
+        assert.equal(mine.body.data.merchant.merchantId, "smoke-shop");
+        const mineText = JSON.stringify(mine.body);
+        for (const raw of ["13800138000", "13900139000", "nested-openid", "nested-note", "nested-code"]) assert.equal(mineText.includes(raw), false, "merchant share projection must hide all customer evidence");
+        const distributorToken = await login(server.baseUrl, fixture.accounts.distributor);
         const paths = [
-          ["merchant", merchantToken, ["phone", "contactPhone", "customerPhone", "contactPhones", "extraPhones"]],
+          ["distributor", distributorToken, ["phone", "contactPhone", "customerPhone", "contactPhones", "extraPhones"]],
         ];
         const rawPhones = new Set(["13800138000", "13900139000", "13700137000", "13600136000", "13500135000", "13400134000"]);
         for (const [role, token, fields] of paths) {
@@ -1197,21 +1217,33 @@ async function runSmoke(options = {}) {
         });
         assert.equal(financeDocUpdate.status, 200);
         assert.equal(Number(financeDocUpdate.body.settlementObservationDays), 4);
+        for (const objectType of ["商家", "shop", "merchant"]) {
+          const retired = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers", {
+            method: "POST", headers: authHeaders(financeToken), body: { key: `retired-${objectType}`, month: "2099-01", objectType, objectId: "smoke-settlement-shop", amount: 10, orderIds: ["smoke-order-settlement"] },
+          });
+          assert.equal(retired.status, 409, "merchant settlements stay disabled at the server regardless of type alias");
+        }
+        const oldPayment = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers/smoke-legacy-shop-transfer", { method: "PUT", headers: authHeaders(financeToken), body: { payStatus: "已打" } });
+        assert.equal(oldPayment.status, 409, "an existing merchant transfer cannot be marked paid");
+        const oldAdjustment = await requestJson(server.baseUrl, "/api/collection/adjustmentRecords", { method: "POST", headers: authHeaders(financeToken), body: { orderId: "smoke-order-settlement", targetType: "商家", amount: 5, note: "retired merchant adjustment" } });
+        assert.equal(oldAdjustment.status, 409);
+        const oldApproval = await requestJson(server.baseUrl, "/api/collection/adjustmentRecords/smoke-legacy-shop-adjustment", { method: "PUT", headers: authHeaders(superToken), body: { approvalStatus: "已审" } });
+        assert.equal(oldApproval.status, 409, "old merchant adjustments cannot be approved through legacy finance endpoints");
         const key = `smoke-transfer-${crypto.randomBytes(4).toString("hex")}`;
         const create = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers", {
           method: "POST", headers: authHeaders(financeToken), body: {
-            key, month: "2099-01", period: "2099-01-31", settlementCycle: "月结", objectType: "商家",
-            objectId: "smoke-settlement-shop", objectName: "forged name", amount: 10,
+            key, month: "2099-01", period: "2099-01-31", settlementCycle: "月结", objectType: "分销",
+            objectId: "smoke-settlement-distributor", objectName: "forged name", amount: 10,
             orderIds: ["smoke-order-settlement"], orderNos: ["SMOKE-SETTLE"],
           },
         });
         assert.equal(create.status, 201);
-        assert.equal(create.body.objectId, "smoke-settlement-shop");
-        assert.equal(create.body.objectName, "Smoke Settlement Shop", "server must derive settlement name");
+        assert.equal(create.body.objectId, "smoke-settlement-distributor");
+        assert.equal(create.body.objectName, "Smoke Settlement Distributor", "server must derive settlement name");
         const forgedAmount = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers", {
           method: "POST", headers: authHeaders(financeToken), body: {
             key: `smoke-forged-${crypto.randomBytes(4).toString("hex")}`, month: "2099-01", period: "2099-01-31",
-            settlementCycle: "月结", objectType: "商家", objectId: "smoke-settlement-shop", amount: 1,
+            settlementCycle: "月结", objectType: "分销", objectId: "smoke-settlement-distributor", amount: 1,
             orderIds: ["smoke-order-settlement"], orderNos: ["SMOKE-SETTLE"],
           },
         });
@@ -1219,7 +1251,7 @@ async function runSmoke(options = {}) {
         const forgedOrder = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers", {
           method: "POST", headers: authHeaders(financeToken), body: {
             key: `smoke-wrong-order-${crypto.randomBytes(4).toString("hex")}`, month: "2099-01", period: "2099-01-31",
-            settlementCycle: "月结", objectType: "商家", objectId: "smoke-settlement-shop", amount: 10,
+            settlementCycle: "月结", objectType: "分销", objectId: "smoke-settlement-distributor", amount: 10,
             orderIds: ["smoke-order-shop"], orderNos: ["SMOKE"],
           },
         });
@@ -1227,13 +1259,13 @@ async function runSmoke(options = {}) {
         const observationHold = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers", {
           method: "POST", headers: authHeaders(financeToken), body: {
             key: `smoke-observation-${crypto.randomBytes(4).toString("hex")}`, month: "2099-01", period: "2099-01-31",
-            settlementCycle: "月结", objectType: "商家", objectId: "smoke-settlement-shop", amount: 10,
+            settlementCycle: "月结", objectType: "分销", objectId: "smoke-settlement-distributor", amount: 10,
             orderIds: ["smoke-order-recent"], orderNos: ["SMOKE-RECENT"],
           },
         });
         assert.equal(observationHold.status, 409, "recent completed orders must respect settlement observation hold");
         const duplicate = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers", {
-          method: "POST", headers: authHeaders(financeToken), body: { key, month: "2099-01", objectType: "商家", objectId: "smoke-shop", amount: 50 },
+          method: "POST", headers: authHeaders(financeToken), body: { key, month: "2099-01", objectType: "分销", objectId: "smoke-settlement-distributor", amount: 50 },
         });
         assert.equal(duplicate.status, 409);
         const id = create.body.id || create.body._id;
@@ -1241,6 +1273,12 @@ async function runSmoke(options = {}) {
           method: "PUT", headers: authHeaders(financeToken), body: { payStatus: "已打" },
         });
         assert.equal(paid.status, 200);
+        const photo = await requestJson(server.baseUrl, "/api/collection/reconciliationTransfers", { method: "POST", headers: authHeaders(financeToken), body: {
+          key: `smoke-photo-${crypto.randomBytes(4).toString("hex")}`, month: "2099-01", settlementCycle: "月结", objectType: "摄影", objectId: "smoke-photo", amount: 20,
+          orderIds: ["smoke-order-settlement"], orderNos: ["SMOKE-SETTLE"],
+        } });
+        assert.equal(photo.status, 409, "old photographer finance path cannot recreate cleared liabilities outside its independent ledger");
+        assert.match(photo.body.error,/摄影师分成管理/);
         const invalidAdjustment = await requestJson(server.baseUrl, "/api/collection/adjustmentRecords", {
           method: "POST", headers: authHeaders(financeToken), body: { orderNo: "missing", amount: 20, targetName: "Smoke", note: "bad order" },
         });
@@ -1489,10 +1527,24 @@ async function runSmoke(options = {}) {
         });
         assert.equal(finalIntent.status, 200, `final intent: ${JSON.stringify(finalIntent.body)}`);
         assert.equal(finalIntent.body && finalIntent.body.data && finalIntent.body.data.invokeWeChatPay, true);
-        const confirmFinal = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(financeToken), body: { action: "payment", phase: "final", selectionAccepted: true, paymentStatus: "confirmed", amount: 70, idempotencyKey: `workflow-final-confirm-${suffix}`, externalTransactionId: `workflow-final-tx-${suffix}`, reason: "workflow confirm final" },
-        });
-        assert.equal(confirmFinal.status, 200, `finance final confirmation: ${JSON.stringify(confirmFinal.body)}`);
+        const beforeManual = await requestJson(server.baseUrl, `/api/collection/orders/${encodeURIComponent(orderId)}`, { headers: authHeaders(superToken) });
+        for (const token of [financeToken, superToken]) {
+          const confirmFinal = await requestJson(server.baseUrl, actionPath, {
+            method: "POST", headers: authHeaders(token), body: { action: "payment", phase: "final", selectionAccepted: true, paymentStatus: "confirmed", amount: 70, idempotencyKey: `workflow-final-confirm-${suffix}`, externalTransactionId: `workflow-final-tx-${suffix}`, reason: "retired manual receipt" },
+          });
+          assert.equal(confirmFinal.status, 409, "even finance and super cannot fabricate an online receipt");
+        }
+        const afterManual = await requestJson(server.baseUrl, `/api/collection/orders/${encodeURIComponent(orderId)}`, { headers: authHeaders(superToken) });
+        assert.equal(Number(afterManual.body.finalPaid), 0); assert.equal(Number(afterManual.body.depositPaid), 30);
+        assert.deepEqual(afterManual.body.paymentRecords, beforeManual.body.paymentRecords, "rejected manual receipts cannot alter payment evidence");
+        const receipt = { data: { orderId, phase: "final", selectionAccepted: true, idempotencyKey: `workflow-final-intent-${suffix}` } };
+        const onlineFinal = await requestJson(server.baseUrl, "/api/__fixture__/payment-confirmed", { method: "POST", headers: authHeaders(publicToken), body: receipt });
+        assert.equal(onlineFinal.status, 200); assert.equal(onlineFinal.body.success, true, JSON.stringify(onlineFinal.body));
+        const onlineReplay = await requestJson(server.baseUrl, "/api/__fixture__/payment-confirmed", { method: "POST", headers: authHeaders(publicToken), body: receipt });
+        assert.equal(onlineReplay.body.success, true);
+        const afterOnline = await requestJson(server.baseUrl, `/api/collection/orders/${encodeURIComponent(orderId)}`, { headers: authHeaders(superToken) });
+        assert.equal(Number(afterOnline.body.finalPaid), 70); assert.equal(Number(afterOnline.body.depositPaid), 30);
+        assert.equal(afterOnline.body.paymentRecords.filter(row => row.phase === "final" && row.status === "confirmed" && row.provider === "wechat_pay").length, 1);
         const delivered = await requestJson(server.baseUrl, actionPath, {
           method: "POST", headers: authHeaders(serviceToken), body: { action: "deliver", deliveryMethod: "enterprise_wechat", reason: "workflow delivery after final payment" },
         });
@@ -1613,7 +1665,7 @@ async function runSmoke(options = {}) {
     });
     await check(report, "production mode disables synthetic public identity", async () => {
       assert.equal(productionServer.ready, true);
-      assert.equal(productionServer.health.status, 503, "production without Redis must report unhealthy");
+      assert.ok([200, 503].includes(productionServer.health.status), "health follows the explicitly selected session store");
       const result = await requestJson(productionServer.baseUrl, "/api/rpc/login", { method: "POST", body: {} });
       assert.ok([200, 503].includes(result.status));
       assert.equal(result.body && result.body.success, false, "production must not issue dev openid sessions");

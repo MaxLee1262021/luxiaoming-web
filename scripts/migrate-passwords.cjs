@@ -10,9 +10,10 @@ const root = path.resolve(__dirname, "..");
 const accountCollections = ["staff", "shops", "distributors", "agents"];
 
 function parseArgs(argv) {
-  const options = { file: path.join(root, "server", "data", "db.json"), dryRun: false, backup: true };
+  const options = { file: null, dryRun: true, backup: true };
   for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === "--file") options.file = path.resolve(root, argv[++i]);
+    if (argv[i] === "--file") { const value = argv[++i]; if (!value) throw new Error("--file 需要显式指定真实历史导出文件"); options.file = path.resolve(root, value); }
+    else if (argv[i] === "--apply") options.dryRun = false;
     else if (argv[i] === "--dry-run") options.dryRun = true;
     else if (argv[i] === "--no-backup") options.backup = false;
     else if (argv[i] === "--help" || argv[i] === "-h") options.help = true;
@@ -45,12 +46,13 @@ function migrateAccountRecord(record) {
 }
 
 function printHelp() {
-  process.stdout.write("Usage: node scripts/migrate-passwords.cjs [--file server/data/db.json] [--dry-run] [--no-backup]\n");
+  process.stdout.write("Usage: node scripts/migrate-passwords.cjs --file REAL_LEGACY_EXPORT.json [--dry-run|--apply] [--no-backup]\n");
 }
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) return printHelp();
+  if (!options.file) throw new Error("必须用 --file 显式指定真实历史导出文件；默认不读取任何本地业务数据");
   assertInsideRoot(options.file);
   const parsed = JSON.parse(fs.readFileSync(options.file, "utf8"));
   if (!parsed || typeof parsed !== "object" || !parsed.collections || typeof parsed.collections !== "object" || Array.isArray(parsed.collections)) throw new Error("JSON 数据文件格式无效");

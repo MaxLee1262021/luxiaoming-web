@@ -5,6 +5,23 @@ const https = require("https");
 const { withOrderMutex, hasConfirmedPayment, isUnpaidBooking } = require("./orderWorkflow.cjs");
 
 const idOf = (row) => String(row && (row.id || row._id) || "");
+const QR_ERROR_MESSAGES = Object.freeze({
+  QR_CREDENTIALS_MISSING: "请配置微信小程序凭据后生成门店码",
+  QR_SCENE_INVALID: "小程序码来源参数无效",
+  QR_TOKEN_REJECTED: "微信小程序凭据验证失败，请检查小程序配置及IP白名单",
+  QR_API_UNAVAILABLE: "微信小程序码服务暂不可用，请稍后重试",
+  QR_API_TIMEOUT: "微信小程序码请求超时，请稍后重试",
+  QR_PAGE_NOT_RELEASED: "微信小程序码生成失败，请确认扫码落地页已发布且环境配置正确",
+  QR_GENERATION_REJECTED: "微信小程序码生成失败，请检查微信接口配置或稍后重试",
+  QR_RESPONSE_INVALID: "微信小程序码服务返回无效结果，请稍后重试",
+  QR_IMAGE_TOO_LARGE: "小程序码图片超出存储限制，请联系管理员检查图片上限",
+});
+function qrError(code, wechatCode) {
+  return Object.assign(new Error(QR_ERROR_MESSAGES[code] || QR_ERROR_MESSAGES.QR_API_UNAVAILABLE), {
+    code: QR_ERROR_MESSAGES[code] ? code : "QR_API_UNAVAILABLE", statusCode: 503,
+    ...(Number.isSafeInteger(Number(wechatCode)) && wechatCode != null ? { wechatCode: Number(wechatCode) } : {}),
+  });
+}
 function businessDate(value = new Date()) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
@@ -20,48 +37,57 @@ function requestBinary(url, options = {}, body = "") {
       const chunks = []; let size = 0;
       response.on("data", (chunk) => {
         size += chunk.length;
-        if (size > 2 * 1024 * 1024) request.destroy(new Error("微信小程序码响应过大"));
+        if (size > 2 * 1024 * 1024) request.destroy(qrError("QR_IMAGE_TOO_LARGE"));
         else chunks.push(chunk);
       });
-      response.on("error", reject);
+      response.on("error", error => reject(qrError(QR_ERROR_MESSAGES[error?.code] ? error.code : "QR_API_UNAVAILABLE")));
       response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks) }));
     });
-    request.on("error", () => reject(new Error("微信小程序码服务暂不可用")));
-    request.on("timeout", () => request.destroy(new Error("微信小程序码请求超时")));
+    request.on("error", error => reject(qrError(QR_ERROR_MESSAGES[error?.code] ? error.code : "QR_API_UNAVAILABLE")));
+    request.on("timeout", () => request.destroy(qrError("QR_API_TIMEOUT")));
     request.end(body || undefined);
   });
 }
 function createQrProvider(options = {}) {
   const env = options.env || process.env;
   const request = options.request || requestBinary;
+  const maxImageBytes = options.maxImageBytes == null ? 60000 : Number(options.maxImageBytes);
+  if (!Number.isSafeInteger(maxImageBytes) || maxImageBytes < 1 || maxImageBytes > 3 * 1024 * 1024) throw new Error("maxImageBytes must be an integer between 1 and 3145728");
+  async function safeRequest(...args) {
+    try { return await request(...args); }
+    catch (error) { throw qrError(QR_ERROR_MESSAGES[error?.code] ? error.code : "QR_API_UNAVAILABLE"); }
+  }
   let cachedToken = ""; let expiresAt = 0;
   return async function generate(scene) {
     const appId = String(env.WX_APP_ID || "").trim();
     const secret = String(env.WX_APP_SECRET || "").trim();
-    if (!appId || !secret) throw new Error("请配置微信小程序凭据后生成门店码");
-    if (!/^c=[A-Za-z0-9_-]{1,30}$/.test(scene)) throw new Error("小程序码来源参数无效");
+    if (!appId || !secret) throw qrError("QR_CREDENTIALS_MISSING");
+    if (!/^(?:c=[A-Za-z0-9_-]{1,30}|S[A-Z0-9]{9,29})$/.test(scene) || scene.length > 32) throw qrError("QR_SCENE_INVALID");
     if (!cachedToken || Date.now() >= expiresAt) {
-      const response = await request(`https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appId)}&secret=${encodeURIComponent(secret)}`);
+      const response = await safeRequest(`https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appId)}&secret=${encodeURIComponent(secret)}`);
       let result;
-      try { result = JSON.parse(response.body.toString("utf8")); } catch (_) { throw new Error("微信凭据服务返回无效结果"); }
-      if (response.status !== 200 || !result.access_token) throw new Error("微信小程序凭据验证失败");
+      try { result = JSON.parse(response.body.toString("utf8")); } catch (_) { throw qrError("QR_RESPONSE_INVALID"); }
+      if (response.status !== 200 || !result.access_token) throw qrError("QR_TOKEN_REJECTED", result.errcode);
       cachedToken = result.access_token;
       expiresAt = Date.now() + Math.max(Number(result.expires_in || 7200) - 120, 0) * 1000;
     }
     const version = ["release", "trial", "develop"].includes(env.WX_ENV_VERSION) ? env.WX_ENV_VERSION : "release";
     const body = JSON.stringify({ scene, page: "pages/scanEntry/scanEntry", check_path: version === "release", env_version: version, width: 280 });
-    const response = await request(`https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=${encodeURIComponent(cachedToken)}`, {
+    const response = await safeRequest(`https://api.weixin.qq.com/wxa/getwxacodeunlimit?access_token=${encodeURIComponent(cachedToken)}`, {
       method: "POST", headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) }
     }, body);
     const bytes = response.body;
+    if (!Buffer.isBuffer(bytes)) throw qrError("QR_RESPONSE_INVALID");
+    if (bytes.length > 2 * 1024 * 1024) throw qrError("QR_IMAGE_TOO_LARGE");
     const png = bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
     const jpeg = bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
     if (response.status !== 200 || (!png && !jpeg)) {
       cachedToken = "";
-      throw new Error("微信小程序码生成失败，请检查已发布落地页和微信配置");
+      let errorBody = {}; try { errorBody = JSON.parse(bytes.toString("utf8")); } catch (_) {}
+      throw qrError(Number(errorBody.errcode) === 41030 ? "QR_PAGE_NOT_RELEASED" : "QR_GENERATION_REJECTED", errorBody.errcode);
     }
     const image = `data:image/${png ? "png" : "jpeg"};base64,${bytes.toString("base64")}`;
-    if (Buffer.byteLength(image) > 60000) throw new Error("小程序码图片超出存储限制，请重试");
+    if (Buffer.byteLength(image) > maxImageBytes) throw qrError("QR_IMAGE_TOO_LARGE");
     return image;
   };
 }
@@ -128,4 +154,4 @@ async function merchantCodeStats(source, shopId = "", date = businessDate()) {
   return { scans: scans.length, orders: codes.reduce((sum, code) => sum + code.orderCount, 0), deals: codes.reduce((sum, code) => sum + code.dealCount, 0), codeCount: codes.length, todayUnique: selected.unique, dailyUnique: selected.unique, unique: selected.unique, anonymousScans: selected.anonymousScans, date, daily };
 }
 
-module.exports = { businessDate, active, createQrProvider, generateMerchantCode, listMerchantCodes, merchantCodeStats };
+module.exports = { businessDate, active, createQrProvider, generateMerchantCode, listMerchantCodes, merchantCodeStats, QR_ERROR_MESSAGES };

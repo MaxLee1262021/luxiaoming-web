@@ -1,0 +1,1 @@
+window.LXM_PAGES.register({ key: "photoNew", component: "LxmPagePhotoNew", group: "photoShare", title: "新增摄影师", setup(ctx) { Vue.onMounted(() => ctx.photoEnter("new")); Vue.onBeforeUnmount(() => ctx.clearPhotoNewPassword()); return {}; } });

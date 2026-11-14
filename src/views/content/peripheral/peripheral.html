@@ -1,151 +1,107 @@
-<div class="peripheral-page">
-  <div class="ppl-toolbar">
-    <div>
-      <span class="eyebrow">影像周边</span>
-      <h3>摄影周边</h3>
-      <p>管理相册、钥匙扣、明信片等实物周边商品，支持定点专属和全城通用两种模式，并维护规格、库存、发货周期与定时上下架。</p>
+<div class="catalog-page peripheral-products">
+  <header class="catalog-head">
+    <div><h2>{{ editorOpen ? (selectedPeripheralId ? '编辑商品' : '新建商品') : '商品管理（影像周边）' }}</h2><p>{{ editorOpen ? '维护商品资料、销售规格和库存，右侧实时预览' : '管理相框、相册、冰箱贴等影像周边商品的价格、规格和库存' }}</p></div>
+    <div class="catalog-actions">
+      <template v-if="!editorOpen">
+        <span class="catalog-source">真实数据库</span>
+        <el-button v-if="remoteOn" plain :loading="remoteLoading" @click="refreshFromServer">刷新</el-button><el-button plain @click="openContentTrash">回收站</el-button><el-button type="primary" v-if="can('contentEdit')" @click="createPeripheral">＋ 新建商品</el-button>
+      </template>
+      <template v-else><el-button :disabled="saving" @click="closeEditor">返回列表</el-button><el-button type="primary" v-if="can('contentEdit')" :loading="saving" @click="saveSelectedPeripheral">保存商品</el-button></template>
     </div>
-    <div class="ppl-toolbar-actions">
-      <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
-        <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
-        <span class="remote-dot"></span>{{ remoteOn ? '数据源：真实后端' : '数据源：演示数据' }}
-      </label>
-      <el-button v-if="state.role==='super' && remoteOn" plain @click="refreshFromServer">刷新真实数据</el-button>
-      <el-button plain @click="clearContentFilters">重置筛选</el-button>
-      <el-button plain @click="openContentTrash">回收站</el-button>
-      <el-button @click="switchMenu('shelfProducts')">进入货架</el-button>
-      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('peripherals')">新增周边</el-button>
+  </header>
+  <el-alert v-if="remoteError" class="catalog-alert" type="error" :closable="false" :title="'载入失败：'+remoteError" show-icon />
+  <template v-if="!editorOpen">
+    <div class="catalog-filters">
+      <el-input v-model="state.filters.keyword" clearable placeholder="搜索商品名称 / 编码 / 分类 / 标签" />
+      <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="全部打卡点"><el-option v-for="s in data.spots.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select>
+      <el-select v-model="state.filters.contentStatus" clearable placeholder="全部状态"><el-option label="上架" value="上架" /><el-option label="下架" value="下架" /><el-option label="草稿" value="草稿" /></el-select>
+      <el-select v-model="stockFilter" clearable placeholder="全部库存"><el-option label="库存充足" value="normal" /><el-option label="库存预警" value="low" /><el-option label="缺货" value="empty" /><el-option label="未设置库存" value="unset" /></el-select>
+      <el-button plain @click="clearPeripheralFilters">重置</el-button><span class="catalog-count">共 <b>{{ listSource.length }}</b> 个商品</span>
     </div>
-  </div>
-
-  <div class="ppl-stat-grid">
-    <div><span>周边总数</span><strong>{{ peripheralSummary.total }}</strong><em>实物商品配置</em></div>
-    <div><span>在售</span><strong>{{ peripheralSummary.onSale }}</strong><em>小程序可展示</em></div>
-    <div><span>定点专属</span><strong>{{ peripheralSummary.spotOnly }}</strong><em>跟随打卡点展示</em></div>
-    <div><span>全城通用</span><strong>{{ peripheralSummary.cityWide }}</strong><em>不限制点位</em></div>
-    <div><span>库存预警</span><strong>{{ peripheralSummary.lowStock }}</strong><em>缺货或低库存</em></div>
-    <div><span>成交额</span><strong>{{ money(peripheralSummary.revenue) }}</strong><em>关联订单统计</em></div>
-  </div>
-
-  <div class="ppl-filter-row">
-    <el-input v-model="state.filters.keyword" clearable placeholder="搜索周边名称、规格、说明" />
-    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
-      <el-option v-for="s in (data.spots || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
-    </el-select>
-    <el-select v-model="state.filters.contentStatus" clearable placeholder="状态">
-      <el-option label="上架" value="上架" />
-      <el-option label="下架" value="下架" />
-      <el-option label="草稿" value="草稿" />
-    </el-select>
-  </div>
-
-  <div class="ppl-editor">
-    <!-- 左：列表 -->
-    <aside class="ppl-list">
-      <div class="ppl-list-head">
-        <strong>摄影周边</strong>
-        <span>{{ listSource.length }} 项</span>
-      </div>
-      <div class="ppl-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
-        <button v-for="item in listSource" :key="item.id||item._id" class="ppl-list-item" :class="{active: isSelected(item), off: productStatus(item)==='下架'}" @click="selectPeripheral(item)">
-          <span class="pli-cover"><img v-if="item.cover" :src="item.cover" /><i v-else>周</i></span>
-          <span class="pli-main">
-            <strong>{{ item.name }}</strong>
-            <em>{{ money(item.price||0) }} · {{ peripheralModeText(item) }} · {{ peripheralStockStatus(item) }}</em>
-          </span>
-        </button>
-        <div v-if="listSource.length===0" class="empty-state">
-          <strong>暂无摄影周边</strong><span>新增实物周边后，可进入统一货架控制推荐位和上下架。</span>
-        </div>
-      </div>
-    </aside>
-
-    <!-- 中：表单 -->
-    <section class="ppl-form" v-if="selectedPeripheral">
-      <div class="ppl-form-head">
-        <div>
-          <strong>编辑周边商品</strong>
-          <p>改完点「保存」；开关类直接切换即时生效。</p>
-        </div>
-        <div class="ppl-form-actions">
-           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedPeripheral">保存</el-button>
-           <el-button v-if="can('contentEdit')" type="primary" plain @click="openContent(selectedPeripheral)">高级编辑</el-button>
-          <el-button @click="previewContent(selectedPeripheral)">预览</el-button>
-          <el-button type="danger" plain v-if="can('contentEdit')" @click="requestDeletePeripheral(selectedPeripheral)">删除</el-button>
-        </div>
-      </div>
-
-      <div class="ppl-form-body">
-         <label class="pf-field"><span>名称</span><el-input v-model="selectedPeripheral.name" :disabled="!can('contentEdit')" /></label>
-        <div class="pf-row">
-           <label class="pf-field"><span>分类</span><el-input v-model="selectedPeripheral.category" placeholder="相册 / 钥匙扣 / 明信片" :disabled="!can('contentEdit')" /></label>
-           <label class="pf-field"><span>规格</span><el-input v-model="selectedPeripheral.specs" placeholder="标准款" :disabled="!can('contentEdit')" /></label>
-        </div>
-        <div class="pf-row">
-           <label class="pf-field"><span>售价（元）</span><el-input-number v-model="selectedPeripheral.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
-           <label class="pf-field"><span>库存</span><el-input-number v-model="selectedPeripheral.stock" :min="0" :step="1" :disabled="!can('contentEdit')" /></label>
-        </div>
-         <label class="pf-field"><span>发货周期</span><el-input v-model="selectedPeripheral.deliveryCycle" placeholder="3-5天发" :disabled="!can('contentEdit')" /></label>
-         <div class="pf-row">
-           <label class="pf-field"><span>微信小店商品ID</span><el-input v-model="selectedPeripheral.storeProductId" placeholder="小店商品ID，非本地周边ID" :disabled="!can('contentEdit')" /></label>
-           <label class="pf-field"><span>推广信息（可选）</span><el-input v-model="selectedPeripheral.storeProductPromotionLink" placeholder="小店推广参数" :disabled="!can('contentEdit')" /></label>
-         </div>
-         <label class="pf-field"><span>简介 / 商品说明</span><el-input type="textarea" :rows="3" v-model="selectedPeripheral.intro" :disabled="!can('contentEdit')" /></label>
-
-        <div class="pf-switches">
-           <label><span>上架展示</span><el-switch v-model="selectedPeripheral.isShow" :disabled="!can('contentEdit')" /></label>
-           <label><span>标记新品</span><el-switch v-model="selectedPeripheral.isHot" :disabled="!can('contentEdit')" /></label>
-        </div>
-
-        <div class="pf-meta">
-          <span>关联模式：{{ peripheralModeText(selectedPeripheral) }}</span>
-          <span>库存状态：{{ peripheralStockStatus(selectedPeripheral) }}</span>
-          <span>货架：{{ productStatus(selectedPeripheral) }}</span>
-          <span v-if="selectedPeripheral.summary">关联订单：{{ selectedPeripheral.summary.orders }} 单</span>
-        </div>
-
-        <div class="pf-row" v-if="can('contentEdit')">
-          <el-button type="primary" plain @click="setPeripheralMode(selectedPeripheral, peripheralModeText(selectedPeripheral)==='全城通用' ? '定点专属' : '全城通用')">
-            切换为{{ peripheralModeText(selectedPeripheral)==='全城通用' ? '定点专属' : '全城通用' }}
-          </el-button>
-          <el-button :type="productStatus(selectedPeripheral)==='下架' ? 'success' : 'warning'" plain @click="togglePeripheralShelf(selectedPeripheral)">
-            {{ productStatus(selectedPeripheral)==='下架' ? '上架' : '下架' }}
-          </el-button>
-        </div>
-      </div>
-    </section>
-
-    <!-- 右：手机实时预览（小程序客人端真实效果） -->
-    <aside class="ppl-preview" v-if="selectedPeripheral">
-      <div class="lxm-phone">
-        <div class="lxm-phone-notch"></div>
-        <div class="lxm-phone-screen">
-          <div class="phone-banner">影像周边</div>
-          <div class="pd-card">
-            <div class="pd-cover" :class="{off: productStatus(selectedPeripheral)==='下架'}">
-              <img v-if="selectedPeripheral.cover" :src="selectedPeripheral.cover" />
-              <i v-else>周</i>
-              <span v-if="productStatus(selectedPeripheral)!=='下架'" class="pd-badge">{{ peripheralModeText(selectedPeripheral) }}</span>
-              <span v-else class="pd-badge off">下架</span>
-            </div>
-            <div class="pd-info">
-              <strong class="pd-title">{{ selectedPeripheral.name }}</strong>
-              <div class="pd-price">{{ money(selectedPeripheral.price||0) }}</div>
-              <div class="pd-note">{{ selectedPeripheral.intro || '暂无周边说明' }}</div>
-              <div class="pd-tags">
-                <span v-if="selectedPeripheral.isHot" class="ok">新品</span>
-                <span v-else class="warn">常规</span>
-                <span :class="peripheralStockStatus(selectedPeripheral)==='库存正常' ? 'ok' : 'warn'">{{ peripheralStockStatus(selectedPeripheral) }}</span>
-              </div>
-            </div>
+    <div class="catalog-grid" v-loading="remoteLoading">
+      <article class="catalog-card" v-for="item in listSource" :key="item.id || item._id" :class="{'is-hidden':!contentEffectiveVisible(item)}">
+        <div class="catalog-cover"><img v-if="item.cover || item.image" :src="item.cover || item.image" :alt="item.name" loading="lazy" /><div v-else class="catalog-placeholder">{{ item.name || '影像周边' }}<small>待上传商品照片</small></div><span class="catalog-badge" :class="{'is-off':!contentEffectiveVisible(item)}">{{ contentEffectiveVisible(item) ? '显示中' : '已隐藏' }}</span><span class="catalog-kind">{{ item.category || item.cate || '周边' }}</span></div>
+        <div class="catalog-card-body">
+          <h3>{{ item.name || '未命名商品' }}</h3><div class="peripheral-code">商品编码：{{ item.productCode || '未填写' }}</div>
+          <div class="catalog-chips"><span class="catalog-chip" v-for="tag in (Array.isArray(item.tags) ? item.tags : []).slice(0,4)" :key="tag">{{ tag }}</span><span v-if="!(item.tags || []).length" class="catalog-chip is-muted">未设置标签</span></div>
+          <div class="catalog-meta">
+            <div class="catalog-meta-row"><span>规格</span><strong>{{ specText(item) }}</strong></div>
+            <div class="catalog-meta-row"><span>商品售价</span><strong class="catalog-price">{{ priceText(item) }}</strong></div>
+            <div class="catalog-meta-row"><span>库存</span><strong class="peripheral-inventory"><span>{{ stockText(item) }}</span><span class="peripheral-stock" :class="'is-'+stockState(item).key">{{ stockState(item).text }}</span></strong></div>
+            <div class="catalog-meta-row"><span>交付周期</span><strong>{{ item.deliveryCycle || '未填写' }}</strong></div><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ item.spotId ? spotName(item.spotId) : '不关联打卡点' }}</strong></div>
           </div>
         </div>
-      </div>
-      <p class="preview-tip">↑ 小程序客人端真实效果预览（与小程序展示一致）</p>
+        <div class="catalog-card-footer"><el-button plain type="primary" @click="selectPeripheral(item)">{{ can('contentEdit') ? '编辑商品' : '查看商品' }}</el-button><el-button plain @click="selectPeripheral(item)">规格与库存</el-button><el-button v-if="state.role==='super'" plain type="danger" @click="requestDeletePeripheral(item)">删除</el-button></div>
+      </article>
+      <div v-if="!listSource.length" class="catalog-empty"><strong>暂无商品</strong>调整筛选条件，或新建一个周边商品。</div>
+    </div>
+  </template>
+  <div class="catalog-editor" v-else-if="selectedPeripheral">
+    <el-form class="catalog-form" :disabled="!can('contentEdit') || saving">
+      <section class="catalog-panel">
+        <div class="catalog-panel-head"><h3>基本信息</h3></div>
+        <label class="catalog-field"><span>商品名称</span><el-input v-model="selectedPeripheral.name" placeholder="例如：原木定制相框" maxlength="60" /></label>
+        <div class="catalog-row"><label class="catalog-field"><span>商品编码</span><el-input v-model="selectedPeripheral.productCode" maxlength="128" placeholder="选填，例如：FRAME-001" /></label><label class="catalog-field"><span>销售单位</span><el-input v-model="selectedPeripheral.unit" maxlength="20" placeholder="例如：件、本、套" /></label></div>
+        <label class="catalog-field"><span>商品分类</span><el-select v-model="selectedPeripheral.category" filterable allow-create default-first-option placeholder="选择或输入分类"><el-option v-for="name in ['相框','相册','冰箱贴','明信片','钥匙扣','其他']" :key="name" :label="name" :value="name" /></el-select></label>
+        <label class="catalog-field"><span>标签</span><el-select v-model="selectedPeripheral.tags" multiple filterable allow-create default-first-option placeholder="选择已有标签，或输入后回车"><el-option v-for="tag in peripheralTags" :key="tag" :label="tag" :value="tag" /></el-select></label>
+      </section>
+      <section class="catalog-panel peripheral-spec-panel">
+        <div class="catalog-panel-head"><h3>销售规格与库存</h3><span class="peripheral-stock" :class="'is-'+stockState(selectedPeripheral).key">{{ stockState(selectedPeripheral).text }}</span></div>
+        <label class="catalog-field"><span>规格模式</span><el-radio-group v-model="selectedPeripheral.specMode" @change="changeSpecMode"><el-radio-button value="single" label="single">单规格</el-radio-button><el-radio-button value="multiple" label="multiple">多规格</el-radio-button></el-radio-group></label>
+        <template v-if="selectedPeripheral.specMode==='single'">
+          <label class="catalog-field"><span>规格说明</span><el-select v-model="selectedPeripheral.specs" multiple filterable allow-create default-first-option placeholder="例如：10寸、原木色，输入后回车"><el-option v-for="spec in selectedPeripheral.specs" :key="spec" :label="spec" :value="spec" /></el-select></label>
+          <div class="catalog-row"><label class="catalog-field"><span>商品售价（元）</span><el-input-number v-model="selectedPeripheral.price" :min="0" :precision="2" controls-position="right" /></label><label class="catalog-field"><span>库存（{{ selectedPeripheral.unit || '件' }}）</span><el-input-number v-model="selectedPeripheral.stock" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" placeholder="未设置，请填写" /></label></div>
+        </template>
+        <template v-else>
+          <p class="catalog-hint peripheral-spec-hint">每种规格分别设置售价和库存，例如「10寸 / 原木色」「12寸 / 胡桃色」。多规格商品暂支持展示与咨询，预约加购请联系客服。</p>
+          <div class="peripheral-sku-list">
+            <article class="peripheral-sku" v-for="(sku,index) in selectedPeripheral.skus" :key="index">
+              <div class="peripheral-sku-head"><strong>规格 {{ index + 1 }}</strong><el-button link type="danger" :disabled="selectedPeripheral.skus.length<=1" @click="removeSku(index)">删除规格</el-button></div>
+              <div class="catalog-row"><label class="catalog-field"><span>规格名称</span><el-input v-model="sku.spec" maxlength="160" placeholder="例如：10寸 / 原木色" /></label><label class="catalog-field"><span>规格编码</span><el-input v-model="sku.skuCode" maxlength="128" placeholder="选填，例如：FRAME-10-WOOD" /></label></div>
+              <div class="catalog-row"><label class="catalog-field"><span>售价（元）</span><el-input-number v-model="sku.price" :min="0" :precision="2" controls-position="right" /></label><label class="catalog-field"><span>库存（{{ selectedPeripheral.unit || '件' }}）</span><el-input-number v-model="sku.stock" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" placeholder="请填写库存" /></label></div>
+            </article>
+          </div>
+          <div class="peripheral-sku-tools"><el-button plain type="primary" :disabled="selectedPeripheral.skus.length>=100" @click="addSku">＋ 添加规格</el-button><span>{{ selectedPeripheral.skus.length }} / 100 个规格</span></div>
+          <div class="peripheral-sku-summary"><span>商品起售价 <strong>{{ priceText(selectedPeripheral) }}</strong></span><span>总库存 <strong>{{ stockText(selectedPeripheral) }}</strong></span></div>
+        </template>
+        <label class="catalog-field"><span>预警库存（{{ selectedPeripheral.unit || '件' }}）</span><el-input-number v-model="selectedPeripheral.stockWarning" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" /><small class="catalog-hint">总库存大于 0 且不高于此值时显示库存预警；库存为 0 时显示缺货。</small></label>
+      </section>
+      <section class="catalog-panel">
+        <div class="catalog-panel-head"><h3>商品照片与素材</h3><el-button plain type="primary" @click="contentFile(selectedPeripheral,'images','peripherals',false,true)">上传照片</el-button></div>
+        <label class="catalog-field"><span>首图 <el-button link type="primary" @click="contentFile(selectedPeripheral,'cover','peripherals')">上传首图</el-button></span><el-input v-model="selectedPeripheral.cover" @change="validateMediaUrl(selectedPeripheral,'cover')" placeholder="上传或填写首图地址" /></label>
+        <div class="catalog-gallery" v-if="selectedPeripheral.images.length"><article v-for="(url,index) in selectedPeripheral.images" :key="url" class="catalog-media"><el-image :src="url" fit="cover" :preview-src-list="selectedPeripheral.images" :initial-index="index" preview-teleported /><span class="catalog-badge" v-if="selectedPeripheral.cover===url">首图</span><div class="catalog-media-tools"><el-button link type="primary" :disabled="selectedPeripheral.cover===url" @click="selectedPeripheral.cover=url">设为首图</el-button><el-button link type="danger" @click="removeMedia('images',url)">删除</el-button></div></article></div><div class="catalog-upload-empty" v-else>上传商品照片后，可选择一张作为首图。</div>
+        <div class="catalog-panel-head" style="margin-top:20px"><h3>视频素材（可选）</h3><el-button plain type="primary" @click="contentFile(selectedPeripheral,'videos','peripherals',true,true)">上传视频</el-button></div><div v-for="url in selectedPeripheral.videos" :key="url"><video :src="url" controls preload="metadata" class="catalog-video-player"></video><el-button link type="danger" @click="removeMedia('videos',url)">删除视频</el-button></div>
+      </section>
+      <section class="catalog-panel">
+        <div class="catalog-panel-head"><h3>配送与服务内容</h3></div>
+        <div class="catalog-row"><label class="catalog-field"><span>运费（元）</span><el-input-number v-model="selectedPeripheral.shippingFee" :min="0" :precision="2" controls-position="right" /><small class="catalog-hint">填写 0 表示免运费。</small></label><label class="catalog-field"><span>交付周期</span><el-input v-model="selectedPeripheral.deliveryCycle" placeholder="例如：3–5个工作日" /></label></div>
+        <label class="catalog-switch"><span>照片精修</span><el-switch v-model="selectedPeripheral.retouchIncluded" active-text="包含" inactive-text="不包含" /></label><label class="catalog-switch"><span>视频精剪</span><el-switch v-model="selectedPeripheral.editingIncluded" active-text="包含" inactive-text="不包含" /></label>
+      </section>
+      <section class="catalog-panel"><div class="catalog-panel-head"><h3>商品说明</h3></div><el-input type="textarea" :rows="5" v-model="selectedPeripheral.intro" placeholder="填写材质、制作工艺、定制方式及交付说明" /></section>
+      <section class="catalog-panel">
+        <div class="catalog-panel-head"><h3>关联与显示</h3></div>
+        <label class="catalog-field"><span>关联打卡点（可选）</span><el-select v-model="selectedPeripheral.spotId" clearable filterable placeholder="不关联打卡点" @change="changeSpot"><el-option v-for="s in data.spots.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select></label>
+        <label class="catalog-switch"><span>是否在小程序显示<small>保存后生效，关联打卡点隐藏时商品也会隐藏。</small></span><el-switch v-model="selectedPeripheral.isShow" /></label><label class="catalog-switch"><span>标记新品</span><el-switch v-model="selectedPeripheral.isHot" /></label>
+        <details class="catalog-advanced"><summary>高级设置</summary><label class="catalog-field"><span>所属城市</span><el-select v-model="selectedPeripheral.cityId" clearable filterable><el-option v-for="c in data.cities.filter(i=>!i.deleted && !i.isDeleted)" :key="c.id || c._id" :label="c.name" :value="c.id || c._id" /></el-select></label><label class="catalog-switch"><span>仅后台调用<small>启用后不在小程序展示。</small></span><el-switch v-model="selectedPeripheral.internalOnly" /></label><label class="catalog-field"><span>微信小店商品ID（兼容配置）</span><el-input v-model="selectedPeripheral.storeProductId" placeholder="小店商品ID" /></label><label class="catalog-field"><span>小店推广参数（兼容配置）</span><el-input v-model="selectedPeripheral.storeProductPromotionLink" placeholder="选填" /></label></details>
+      </section>
+      <div class="catalog-editor-footer"><el-button :disabled="saving" @click="resetDraft">还原修改</el-button><el-button :disabled="saving" @click="closeEditor">取消</el-button><el-button v-if="can('contentEdit')" type="primary" :loading="saving" @click="saveSelectedPeripheral">保存商品</el-button></div>
+    </el-form>
+    <aside class="catalog-preview">
+      <div class="catalog-preview-title">商品预览<span>实时更新</span></div>
+      <article class="catalog-card">
+        <div class="catalog-cover"><img v-if="selectedPeripheral.cover" :src="selectedPeripheral.cover" :alt="selectedPeripheral.name" /><div class="catalog-placeholder" v-else>待上传商品照片</div><span class="catalog-badge" :class="{'is-off':!previewVisible(selectedPeripheral)}">{{ previewVisible(selectedPeripheral) ? '显示中' : '已隐藏' }}</span><span class="catalog-kind">{{ selectedPeripheral.category || '周边' }}</span></div>
+        <div class="catalog-card-body">
+          <h3>{{ selectedPeripheral.name || '商品名称' }}</h3><div class="peripheral-code">商品编码：{{ selectedPeripheral.productCode || '未填写' }}</div><div class="catalog-chips"><span class="catalog-chip" v-for="tag in selectedPeripheral.tags" :key="tag">{{ tag }}</span></div>
+          <div class="catalog-meta">
+            <div class="catalog-meta-row"><span>商品规格</span><strong>{{ specText(selectedPeripheral) }}</strong></div><div class="catalog-meta-row"><span>商品售价</span><strong class="catalog-price">{{ priceText(selectedPeripheral) }}</strong></div>
+            <div class="catalog-meta-row"><span>总库存</span><strong class="peripheral-inventory"><span>{{ stockText(selectedPeripheral) }}</span><span class="peripheral-stock" :class="'is-'+stockState(selectedPeripheral).key">{{ stockState(selectedPeripheral).text }}</span></strong></div>
+            <div class="catalog-meta-row"><span>运费</span><strong>{{ selectedPeripheral.shippingFee===0 ? '免运费' : money(selectedPeripheral.shippingFee || 0) }}</strong></div><div class="catalog-meta-row"><span>交付周期</span><strong>{{ selectedPeripheral.deliveryCycle || '未填写' }}</strong></div><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ selectedPeripheral.spotId ? spotName(selectedPeripheral.spotId) : '不关联打卡点' }}</strong></div>
+          </div>
+          <ul class="catalog-preview-list" v-if="selectedPeripheral.specMode==='multiple'"><li v-for="(sku,index) in selectedPeripheral.skus" :key="index">{{ sku.spec || '待填写规格' }}<small>{{ priceText(sku) }} · 库存 {{ stockText({...sku, unit:selectedPeripheral.unit}) }}</small></li></ul>
+          <p class="catalog-preview-desc">{{ selectedPeripheral.intro || '待填写商品说明' }}</p>
+        </div>
+      </article>
+      <p class="catalog-preview-note">预览当前草稿 · 所有修改保存后生效</p>
     </aside>
-  </div>
-
-  <div v-if="!selectedPeripheral" class="empty-state">
-    <strong>请选择左侧摄影周边</strong><span>点击列表项即可在中栏编辑、右栏预览。</span>
   </div>
 </div>

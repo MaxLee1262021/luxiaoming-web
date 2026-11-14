@@ -31,9 +31,27 @@
     statusMeta
   } = ctx;
 
+// Statistical filters never replace the role's order authorization above.
+// The employee order worklist continues to use its existing channel filters.
+function usesShareStatisticsFilters() {
+  const route = typeof ctx.menuRouteKey === "function" ? ctx.menuRouteKey(state.active) : state.active;
+  return ["dashboard", "performance", "reconciliation", "report"].includes(route) && (state.role === "super" || !!ctx.can?.("shareView"));
+}
+function statisticsCityId() {
+  const route = typeof ctx.menuRouteKey === "function" ? ctx.menuRouteKey(state.active) : state.active;
+  return state.filters.cityId || (["dashboard", "performance"].includes(route) ? state.dashboardCityId : "") || "";
+}
+function orderBusinessCity(order = {}) { return String(order.cityId || order.source?.cityId || order.bookingCityId || order.products?.[0]?.cityId || ""); }
+function matchesOrderBusinessCity(order, city) { const value = orderBusinessCity(order); return !!value && sameCity(value, city); }
+function matchesStatisticsMerchant(order, merchantId) {
+  return String(ctx.shareAttribution?.(order)?.merchantId ?? "") === String(merchantId);
+}
+function matchesViewCity(order, cityId) { return usesShareStatisticsFilters() ? matchesOrderBusinessCity(order, cityId) : sameCity(orderShop(order), cityId); }
+function matchesViewMerchant(order, merchantId) { return usesShareStatisticsFilters() ? matchesStatisticsMerchant(order, merchantId) : sameShop(order, merchantId); }
+
 const scopedShops = computed(() => {
   let list = data.shops.filter(inRoleScope);
-  if (state.filters.cityId) list = list.filter((s) => sameCity(s, state.filters.cityId));
+  if (state.filters.cityId && !usesShareStatisticsFilters()) list = list.filter((s) => sameCity(s, state.filters.cityId));
   if (state.filters.agentId) list = list.filter((s) => s.agentId === state.filters.agentId);
   if (state.filters.keyword) list = list.filter((s) => JSON.stringify(s).includes(state.filters.keyword));
   return list;
@@ -47,10 +65,11 @@ function orderProducts(order = {}) {
 const scopedOrders = computed(() => {
   let list = data.orders.filter((o) => o && isCreatedBooking(o) && !o.deleted && !o.isDeleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
-  if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
+  const cityId = usesShareStatisticsFilters() ? statisticsCityId() : state.filters.cityId;
+  if (cityId) list = list.filter((o) => matchesViewCity(o, cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
   if (state.filters.distributorId) list = list.filter((o) => o.distributorId === state.filters.distributorId || orderDistributorIds(o).includes(state.filters.distributorId));
-  if (state.filters.shopId) list = list.filter((o) => sameShop(o, state.filters.shopId));
+  if (state.filters.shopId) list = list.filter((o) => matchesViewMerchant(o, state.filters.shopId));
   if (state.filters.sourceType) list = list.filter((o) => orderSourceType(o) === state.filters.sourceType);
   if (state.filters.status) list = list.filter((o) => ["reserved", "awaiting_shoot", "shooting", "completed", "cancelled"].includes(state.filters.status)
     ? orderBusinessStatus(o) === state.filters.status : o.status === state.filters.status);
@@ -79,10 +98,11 @@ const scopedOrders = computed(() => {
 const reminderBaseOrders = computed(() => {
   let list = data.orders.filter((o) => o && isCreatedBooking(o) && !o.deleted && !o.isDeleted && inRoleScope(o));
   list = list.filter((o) => inDateRange(o.appointmentAt));
-  if (state.filters.cityId) list = list.filter((o) => sameCity(orderShop(o), state.filters.cityId));
+  const cityId = usesShareStatisticsFilters() ? statisticsCityId() : state.filters.cityId;
+  if (cityId) list = list.filter((o) => matchesViewCity(o, cityId));
   if (state.filters.agentId) list = list.filter((o) => orderShop(o).agentId === state.filters.agentId);
   if (state.filters.distributorId) list = list.filter((o) => o.distributorId === state.filters.distributorId || orderDistributorIds(o).includes(state.filters.distributorId));
-  if (state.filters.shopId) list = list.filter((o) => sameShop(o, state.filters.shopId));
+  if (state.filters.shopId) list = list.filter((o) => matchesViewMerchant(o, state.filters.shopId));
   if (state.filters.sourceType) list = list.filter((o) => orderSourceType(o) === state.filters.sourceType);
   if (state.filters.assigneeId) list = list.filter((o) => o.assigneeId === state.filters.assigneeId);
   if (state.filters.photographerId) list = list.filter((o) => o.photographerId === state.filters.photographerId);
@@ -132,6 +152,7 @@ const scopedScans = computed(() => {
 });
 
   return {
+    usesShareStatisticsFilters, statisticsCityId, orderBusinessCity, matchesOrderBusinessCity, matchesStatisticsMerchant,
     scopedShops,
     scopedOrders,
     reminderBaseOrders,

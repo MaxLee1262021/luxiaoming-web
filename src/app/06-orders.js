@@ -23,6 +23,7 @@
     isCreatedBooking,
     isOrderCancelledStatus,
     isOrderCompletedStatus,
+    isOrderLedgerReadonly,
     log,
     money,
     normalizeReviewStatus,
@@ -60,8 +61,8 @@ function onOrderSelection(rows) {
   state.selectedOrderIds = rows.map((row) => row.id);
 }
 async function refreshOrders() {
-  const connected = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.getColl && window.LXM_CLOUD_MODE !== "mock");
-  if (!connected) return ElMessage.info("当前为本地演示数据，无需刷新");
+  const connected = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.getColl && window.LXM_CLOUD_MODE === "mysql");
+  if (!connected) return ElMessage.error("真实后端连接不可用，无法刷新订单");
   state.orderRefreshing = true;
   try {
     const response = await window.LXM_CLOUD.getColl("orders");
@@ -90,10 +91,11 @@ async function refreshOrders() {
   }
 }
 function exportOrders() {
-  log("导出订单", "订单管理", `按当前筛选导"${scopedOrders.value.length} 条，选中 ${selectedOrders.value.length} 条`);
-  ElMessage.success("演示版已记录订单导出，正式版按当前筛选生成 Excel");
+  if (!window.LXM_AUTH?.hasSession?.()) return ElMessage.error("请先登录后导出真实订单");
+  return ctx.openExportDialog("orderDetail");
 }
 function batchCancelOrders() {
+  if (isOrderLedgerReadonly()) return ElMessage.warning("订单流水仅供查询与统计，请前往客服工作台处理订单");
   if (!can("cancelOrder")) return ElMessage.error("当前角色无权取消订单");
   if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订");
   if (selectedOrders.value.some((order) => isOrderAfterSaleLocked(order))) return ElMessage.warning("选中的订单包含售后处理中订单，请先完成售后处");
@@ -129,12 +131,14 @@ function batchAcceptOrders() {
   ElMessage.info("服务确认需要逐单核对时间、地点、人数、服务内容与报价，请从订单详情完成确认");
 }
 function openBatchNoteDialog() {
+  if (isOrderLedgerReadonly()) return ElMessage.warning("订单流水仅供查询与统计，请前往客服工作台处理订单");
   if (!canEditOrder()) return ElMessage.error("当前角色无权批量备注");
   if (!selectedOrders.value.length) return ElMessage.warning("请先勾选订");
   state.batchNoteText = "";
   state.batchNoteDialog = true;
 }
 async function confirmBatchNote() {
+  if (isOrderLedgerReadonly()) return ElMessage.warning("订单流水仅供查询与统计，请前往客服工作台处理订单");
   const text = String(state.batchNoteText || "").trim();
   if (!text) return ElMessage.warning("请填写批量备注内");
   const rows = selectedOrders.value.filter((order) => !isOrderAfterSaleLocked(order) && !isOrderCompletedStatus(order) && !isOrderCancelledStatus(order));
@@ -162,7 +166,11 @@ function openOrder(order, options = {}) {
   if (!order || !order.orderNo || !isCreatedBooking(order)) return ElMessage.warning("未找到有效订单数据");
   if (options && options.type === "selection") return;
   state.currentOrder = order;
-  state.orderReadonly = !!options.readonly || !canManageOrderRecords(order);
+  state.orderSection = "info";
+  // 记录入口来源，避免离开流水页后仍打开的详情恢复旧编辑能力。
+  state.orderLedgerDetail = false;
+  state.orderLedgerDetail = isOrderLedgerReadonly();
+  state.orderReadonly = !!options.readonly || state.orderLedgerDetail || !canManageOrderRecords(order);
   state.orderWorkMode = options.mode || "service";
   state.currentFinanceReview = options.financeReview || null;
   state.moneyEdit = "";
@@ -172,7 +180,17 @@ function openOrder(order, options = {}) {
   state.orderDrawer = true;
   log("查看订单", order.orderNo, order.customer);
 }
+async function focusOrderSection(section) {
+  if (!["info", "followup", "status", "photography"].includes(section)) return;
+  state.orderSection = section;
+  await window.Vue.nextTick();
+  const target = document.querySelector(`.order-drawer [data-order-section="${section}"]`);
+  if (!target) return;
+  target.scrollIntoView({ block: "start" });
+  target.focus({ preventScroll: true });
+}
 async function claimOrder(order) {
+  if (isOrderLedgerReadonly()) return ElMessage.warning("请前往客服工作台承接订单");
   if (!order || state.role !== "service" || order.assigneeId) return;
   const staffId = roleProfile.value.staffId || state.currentStaffId || "";
   if (!staffId) return ElMessage.error("当前客服账号缺少人员标识，无法领取订单");
@@ -197,6 +215,7 @@ function openAfterSalesForOrder(order) {
   switchMenu("afterSales", { preserveFilters: true });
 }
 function openAfterSaleSubmit(order = state.currentOrder) {
+  if (isOrderLedgerReadonly()) return ElMessage.warning("订单流水仅供查询与统计，请前往客服工作台处理订单");
   if (!order) return;
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单已有售后处理中，请先完成当前售后处理，避免重复提交");
   state.afterSaleForm = {
@@ -208,6 +227,8 @@ function openAfterSaleSubmit(order = state.currentOrder) {
   state.afterSaleSubmitDialog = true;
 }
 async function submitAfterSale() {
+  if (isOrderLedgerReadonly()) return ElMessage.warning("订单流水仅供查询与统计，请前往客服工作台处理订单");
+  if (!window.LXM_AUTH?.hasSession?.() || window.LXM_CLOUD_MODE !== "mysql" || window.LXM_API_STATE?.reachable === false) return ElMessage.error("真实后端连接不可用，操作未保存");
   const order = state.currentOrder;
   if (!order) return;
   if (isOrderAfterSaleLocked(order)) return ElMessage.warning("该订单已有售后处理中，请先完成当前售后处理，避免重复提交");
@@ -231,7 +252,7 @@ async function submitAfterSale() {
     approvedAt: "",
     logs: [`${currentOperatorName()}提交售后：${form.reason.trim()}`],
   };
-  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE === "mysql" && window.LXM_AUTH?.hasSession?.();
   try {
     if (connected && window.LXM_CLOUD?.create) {
       const saved = await window.LXM_CLOUD.create("afterSales", item);
@@ -303,6 +324,7 @@ function confirmAfterSaleRefundAmount() {
   }).catch(() => {});
 }
 async function saveAfterSaleProcess(complete = false, confirmed = false) {
+  if (!window.LXM_AUTH?.hasSession?.() || window.LXM_CLOUD_MODE !== "mysql" || window.LXM_API_STATE?.reachable === false) return ElMessage.error("真实后端连接不可用，操作未保存");
   const row = state.currentAfterSale;
   if (!row) return;
   const source = data.afterSales.find((item) => item.id === row.id);
@@ -357,7 +379,7 @@ async function saveAfterSaleProcess(complete = false, confirmed = false) {
   source.logs = source.logs || [];
   source.logs.unshift(`${currentOperatorName()} ${complete ? "处理完成" : "保存跟进记录"}：${form.note.trim()}`);
   log("售后处理", order.orderNo, `${source.type} / ${source.status} / ${form.note.trim()}`);
-  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE === "mysql" && window.LXM_AUTH?.hasSession?.();
   if (connected && window.LXM_CLOUD?.afterSaleAction) {
     try {
       const saved = await window.LXM_CLOUD.afterSaleAction(source.id || source._id, complete ? "complete" : "follow", {
@@ -457,6 +479,7 @@ function reviewFinanceItem(row, approved = true) {
   }).then(() => applyFinanceReview(row, approved)).catch(() => {});
 }
 async function applyFinanceReview(row, approved = true) {
+  if (!window.LXM_AUTH?.hasSession?.() || window.LXM_CLOUD_MODE !== "mysql" || window.LXM_API_STATE?.reachable === false) return ElMessage.error("真实后端连接不可用，操作未保存");
   const order = data.orders.find((item) => item && (item.id === row.orderId || item._id === row.orderId));
   if (!order) return;
   const original = JSON.parse(JSON.stringify(order));
@@ -467,7 +490,7 @@ async function applyFinanceReview(row, approved = true) {
   }
   const typeText = row.type;
   const amountText = money(row.amount);
-  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
+  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE === "mysql" && window.LXM_AUTH?.hasSession?.();
   if (connected && window.LXM_CLOUD?.orderAction) {
     try {
       const phase = row.field === "depositFinanceStatus" ? "deposit" : "final";
@@ -510,10 +533,12 @@ function openFinanceReview(row) {
 }
 function reviewRefund(row, approved = true) {
   if (!can("financeReview")) return ElMessage.error("当前角色无权审核退款");
-  if (approved && normalizeReviewStatus(row.status) === "已审") return ElMessage.warning("该记录已审核通过，不能重复通过");
+  const ticket = data.afterSales.find((item) => item.id === (row.afterSaleId || row.id));
+  const mayQuery = approved && ["processing", "refund_failed"].includes(String(ticket?.refundStatus || "")) && Array.isArray(ticket?.refundAttempts) && ticket.refundAttempts.length;
+  if (approved && normalizeReviewStatus(row.status) === "已审" && !mayQuery) return ElMessage.warning("该记录已审核通过，不能重复通过");
   if (!approved && row.status === "已驳") return ElMessage.warning("该记录已驳回，不能重复驳");
   const actionText = approved ? "审核通过" : "审核驳回";
-  window.LXMActionConfirm.confirm(ElMessageBox, `确认 ${row.orderNo} 的「退款审核${actionText}」？金额：${money(row.amount || row.refundAmount || 0)}。`, `确认${approved ? "通过" : "驳回"}退款审核`, {
+  window.LXMActionConfirm.confirm(ElMessageBox, mayQuery ? `查询 ${row.orderNo} 已发起的微信退款结果，不创建新的退款单。` : `确认 ${row.orderNo} 的「退款审核${actionText}」？金额：${money(row.amount || row.refundAmount || 0)}。${approved ? "审核通过后将发起微信原路退款，到账以微信退款结果为准。" : ""}`, mayQuery ? "查询微信退款结果" : `确认${approved ? "通过" : "驳回"}退款审核`, {
     confirmButtonClass: approved ? "lxm-action-confirm--success" : "lxm-action-confirm--danger",
     cancelButtonClass: "lxm-action-cancel",
     autofocus: approved,
@@ -523,69 +548,32 @@ function reviewRefund(row, approved = true) {
   }).then(() => applyRefundReview(row, approved)).catch(() => {});
 }
 async function applyRefundReview(row, approved = true) {
+  if (!window.LXM_AUTH?.hasSession?.() || window.LXM_CLOUD_MODE !== "mysql" || window.LXM_API_STATE?.reachable === false || !window.LXM_CLOUD?.afterSaleAction) return ElMessage.error("真实后端连接不可用，操作未保存");
   const source = data.afterSales.find((item) => item.id === (row.afterSaleId || row.id));
   const order = data.orders.find((item) => item.id === row.orderId);
   if (!source || !order) return;
-  let refundTransactionId = "";
-  if (approved && Number(source.refundAmount || source.amount || 0) > 0) {
-    try {
-      const result = await window.LXMActionConfirm.prompt(ElMessageBox, "请填写已实际退款的流水号或凭据编号。本操作仅登记退款凭据并提交审核结论，不会向支付渠道执行退款。", "确认登记退款凭据", {
-        confirmButtonClass: "lxm-action-confirm--warning",
-        cancelButtonClass: "lxm-action-cancel",
-        confirmButtonText: "确认登记并通过",
-        cancelButtonText: "暂不审核",
-        inputPlaceholder: "退款流水号 / 凭据编号",
-        inputValidator: (value) => {
-          const reference = String(value || "").trim();
-          return reference.length > 0 && reference.length <= 160 || "请填写 1–160 个字符的退款流水号或凭据编号";
-        },
-      });
-      refundTransactionId = String(result.value || "").trim();
-      if (!refundTransactionId || refundTransactionId.length > 160) return ElMessage.warning("请填写有效的退款流水号或凭据编号");
-    } catch (_) {
-      return;
-    }
+  try {
+    // Approval starts a real online refund. Only its acknowledged result can
+    // confirm funds; the browser never optimistically marks a refund paid.
+    const saved = await window.LXM_CLOUD.afterSaleAction(source.id || source._id, "review", {
+      approved,
+      reason: approved ? "退款审核通过，申请微信原路退款" : "退款审核驳回",
+    });
+    const serverTicket = saved && (saved.ticket || saved);
+    if (!serverTicket || serverTicket.error || serverTicket.ok === false) throw new Error(serverTicket && serverTicket.error ? serverTicket.error : "退款审核保存失败");
+    Object.assign(source, serverTicket);
+    if (saved && saved.order) Object.assign(order, saved.order);
+    row.status = source.financeStatus;
+    if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = source.financeStatus;
+    if (!approved) return ElMessage.success("退款审核已驳回");
+    if (source.refundStatus === "refunded" && source.refundConfirmed === true) return ElMessage.success("微信原路退款成功");
+    if (source.refundStatus === "refund_failed") return ElMessage.warning("微信退款异常，请核查渠道结果后重试查询");
+    ElMessage.success("退款审核已通过，微信退款处理中；到账以渠道结果为准");
+  } catch (error) {
+    // A timeout can follow a remotely accepted request. Its stable refund
+    // number must be queried rather than replaced with another application.
+    return ElMessage.error((error && error.message) || "退款结果暂未确认，请刷新后查询，勿重复创建申请");
   }
-  const beforeSource = JSON.parse(JSON.stringify(source));
-  const beforeOrder = JSON.parse(JSON.stringify(order));
-  const beforeRowStatus = row.status;
-  const beforeCurrentReviewStatus = state.currentFinanceReview?.status;
-  if (refundTransactionId) Object.assign(source, { refundTransactionId, refundMethod: "人工退款" });
-  source.financeStatus = approved ? "已审" : "已驳";
-  row.status = source.financeStatus;
-  if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = source.financeStatus;
-  source.financeReviewedBy = currentOperatorName();
-  source.financeReviewedAt = LXMFormat.nowText();
-  source.updatedAt = LXMFormat.nowText();
-  source.status = approved ? "已完" : "处理";
-  source.customerVisibleStatus = approved ? "已完" : "处理";
-  source.logs = source.logs || [];
-  source.logs.unshift(`${currentOperatorName()} ${approved ? "财务审核通过" : "财务审核驳回"}，退款金额 ${money(source.refundAmount || 0)}`);
-  addOrderTimeline(order, `${approved ? "财务审核通过退" : "财务驳回退"} ${money(source.refundAmount || 0)}`);
-  log("退款财务审", order.orderNo, `${approved ? "通过" : "驳回"} / ${money(source.refundAmount || 0)}`);
-  const connected = window.LXM_CLOUD_MODE && window.LXM_CLOUD_MODE !== "mock" && window.LXM_AUTH?.hasSession?.();
-  if (connected && window.LXM_CLOUD?.afterSaleAction) {
-    try {
-      const saved = await window.LXM_CLOUD.afterSaleAction(source.id || source._id, "review", {
-        approved,
-        reason: approved ? "退款审核通过" : "退款审核驳回",
-        ...(refundTransactionId ? { refundTransactionId, refundMethod: "人工退款" } : {}),
-      });
-      const serverTicket = saved && (saved.ticket || saved);
-      if (!serverTicket || serverTicket.error) throw new Error(serverTicket && serverTicket.error ? serverTicket.error : "退款审核保存失败");
-      Object.assign(source, serverTicket);
-      if (saved && saved.order) Object.assign(order, saved.order);
-    } catch (error) {
-      Object.keys(source).forEach((key) => { if (!(key in beforeSource)) delete source[key]; });
-      Object.keys(order).forEach((key) => { if (!(key in beforeOrder)) delete order[key]; });
-      Object.assign(source, beforeSource);
-      Object.assign(order, beforeOrder);
-      row.status = beforeRowStatus;
-      if (state.currentFinanceReview?.id === row.id) state.currentFinanceReview.status = beforeCurrentReviewStatus;
-      return ElMessage.error((error && error.message) || "退款审核未保存，请稍后重试");
-    }
-  }
-  ElMessage.success(approved ? "退款已通过财务审核，并同步月度对账" : "退款审核已驳回，订单回到售后处理中");
 }
 onMounted(() => {
   window.LXM_OPEN_ORDER = openOrderById;
@@ -615,7 +603,7 @@ async function addFollowLog(text) {
   const order = state.currentOrder;
   const original = JSON.parse(JSON.stringify(order));
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
-  const connected = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+  const connected = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD_MODE === "mysql" && reachable !== false);
   try {
     await persistOrderAction(order, "followup", {
       type: "service",
@@ -660,6 +648,7 @@ async function completeFollowup(followupId, note = "") {
     confirmBatchNote,
     onOrderPageSizeChange,
     openOrder,
+    focusOrderSection,
     claimOrder,
     completeFollowup,
     openOrderById,

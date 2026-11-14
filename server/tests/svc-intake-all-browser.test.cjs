@@ -1,0 +1,107 @@
+"use strict";
+const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path");
+const { startSvcPrototypeFixture } = require("./fixtures/svc-prototype-browser.cjs");
+const { orderRow } = require("../lib/svcStore.cjs");
+
+test("paid unassigned orders expose a claim action and enter mine only after an explicit claim", { skip: process.env.RUN_SVC_BROWSER !== "1", timeout: 90000 }, async t => {
+  const fixture = await startSvcPrototypeFixture();
+  await fixture.modules.store.transaction(state => {
+    const base = { contactName: "同步验收客户", contactPhone: "13900000001", packageName: "同步验收套餐", totalAmount: 100, depositPaid: 0, depositDue: 20, createdAt: "2026-11-13 10:00:00", svc_paid_processed: 0 };
+    state.orders.push(...[
+      { ...base, id: "sync-unpaid", orderNo: "SYNC-UNPAID" },
+      { ...base, id: "sync-old", orderNo: "SYNC-HISTORICAL", depositPaid: 20, depositPaidAt: "2026-10-01 10:00:00" },
+      { ...base, id: "sync-canceled", orderNo: "SYNC-CANCELED", status: "canceled" },
+      { ...base, id: "sync-waived", orderNo: "SYNC-WAIVED", depositDue: 0 },
+      { ...base, id: "sync-done", orderNo: "SYNC-DONE", completedAt: "2026-11-10 12:00:00" },
+    ].map(orderRow));
+  });
+  const playwright = require(process.env.SVC_PLAYWRIGHT_MODULE || "playwright");
+  const browser = await playwright.chromium.launch({ headless: true, executablePath: process.env.SVC_BROWSER_EXECUTABLE || "C:/Program Files/Google/Chrome/Application/chrome.exe" });
+  const page = await browser.newPage({ viewport: { width: 1512, height: 1000 }, timezoneId: "Asia/Shanghai" });
+  const errors = [], out = path.resolve(__dirname, "../../../.codex-tmp/customer-service-intake-all-20261113"); fs.mkdirSync(out, { recursive: true });
+  const report = { testOnly: true, realDatabaseAccess: false, status: "running", checks: [], requests: [] };
+  page.setDefaultTimeout(10000); page.on("pageerror", error => errors.push(error.message));
+  page.on("request", request => { const url = new URL(request.url()); if (url.pathname.startsWith("/api/kf/")) report.requests.push({ method: request.method(), pathname: url.pathname, search: url.search }); });
+  t.after(async () => { report.pageErrors = errors; fs.writeFileSync(path.join(out, "browser.json"), JSON.stringify(report, null, 2)); fs.writeFileSync(path.join(out, "errors.json"), JSON.stringify(errors)); await browser.close(); await fixture.close(); });
+  await page.goto(fixture.url);
+  await page.getByPlaceholder("账号", { exact: true }).fill(fixture.accounts.admin.account);
+  await page.getByPlaceholder("密码", { exact: true }).fill(fixture.accounts.admin.password);
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.getByPlaceholder("账号", { exact: true }).waitFor({ state: "hidden" });
+  await page.locator('[data-menu-key="svcIntake"]').click();
+  await page.getByRole("tab", { name: "全部订单", exact: true }).waitFor();
+  assert.equal(await page.getByRole("tab", { name: "全部订单", exact: true }).getAttribute("aria-selected"), "true");
+  await page.getByPlaceholder("订单号 / 客户 / 商品 / OpenID", { exact: true }).fill("SYNC-");
+  await page.getByRole("button", { name: "查询", exact: true }).click();
+  const table = page.locator(".kf-panel > .el-table").first();
+  await table.getByRole("button", { name: "SYNC-UNPAID", exact: true }).waitFor();
+  assert.equal(await table.locator(".el-table__body tbody tr").count(), 5);
+  const row = no => table.locator(".el-table__body tbody tr").filter({ hasText: no });
+  assert.match(await table.locator("thead").innerText(), /支付状态/);
+  assert.match(await table.locator("thead").innerText(), /下单时间/);
+  assert.match(await row("SYNC-UNPAID").innerText(), /未支付/);
+  assert.match(await row("SYNC-UNPAID").innerText(), /待支付/);
+  assert.match(await row("SYNC-CANCELED").innerText(), /已取消/);
+  assert.match(await row("SYNC-DONE").innerText(), /已完成/);
+  assert.match(await row("SYNC-WAIVED").innerText(), /免定金/);
+  for (const no of ["SYNC-UNPAID", "SYNC-CANCELED", "SYNC-DONE"]) assert.equal(await row(no).getByRole("button", { name: "认领", exact: true }).count(), 0, no);
+  assert.equal(await row("SYNC-HISTORICAL").getByRole("button", { name: "认领", exact: true }).count(), 1);
+  assert.equal(await row("SYNC-WAIVED").getByRole("button", { name: "认领", exact: true }).count(), 1);
+  const fixedBackgrounds = await table.locator("td.el-table-fixed-column--right").evaluateAll(cells => cells.map(cell => getComputedStyle(cell).backgroundColor));
+  assert.ok(fixedBackgrounds.length > 0 && fixedBackgrounds.every(color => color === "rgb(255, 255, 255)"), "fixed status/actions must cover scrolled text with an opaque background");
+  await page.screenshot({ path: path.join(out, "all-orders.png"), fullPage: true, animations: "disabled" });
+  await table.locator(".el-scrollbar__wrap").evaluate(element => { element.scrollLeft = element.scrollWidth - element.clientWidth; });
+  const dateCell = row("SYNC-UNPAID").locator("td").filter({ hasText: "2026-11-13 10:00:00" });
+  const dateBounds = await dateCell.boundingBox(), tableBounds = await table.boundingBox(), statusBounds = await row("SYNC-UNPAID").locator("td.el-table-fixed-column--right").first().boundingBox();
+  assert.ok(dateBounds.x >= tableBounds.x && dateBounds.x + dateBounds.width <= statusBounds.x + 1, "horizontal scrolling reveals the full order date before fixed status/actions");
+  await page.screenshot({ path: path.join(out, "all-orders-scrolled.png"), fullPage: true, animations: "disabled" });
+  await table.locator(".el-scrollbar__wrap").evaluate(element => { element.scrollLeft = 0; });
+  await table.getByRole("button", { name: "SYNC-UNPAID", exact: true }).click();
+  const drawer = page.locator(".kf-drawer");
+  await drawer.getByText("未支付", { exact: true }).waitFor();
+  assert.equal(await drawer.locator(".kf-detail-actions button").count(), 0);
+  assert.equal(await drawer.getByRole("button", { name: "提交售后", exact: true }).count(), 0);
+  const paidTime = drawer.locator(".el-descriptions__table tr").filter({ hasText: "支付时间" });
+  assert.match(await paidTime.innerText(), /—/);
+  await page.screenshot({ path: path.join(out, "unpaid-readonly-detail.png"), animations: "disabled" });
+  await drawer.getByRole("button", { name: "关闭", exact: true }).last().click();
+  const beforePool = fixture.modules.store.snapshot();
+  await page.getByRole("tab", { name: "公共待认领池", exact: true }).click();
+  await table.getByRole("button", { name: "SYNC-HISTORICAL", exact: true }).waitFor();
+  await table.getByRole("button", { name: "SYNC-WAIVED", exact: true }).waitFor();
+  assert.equal(await table.locator(".el-table__body tbody tr").count(), 2, "pool includes paid historical and waived orders within the keyword filter");
+  assert.equal(await row("SYNC-HISTORICAL").getByRole("button", { name: "认领", exact: true }).count(), 1, "real payment permits an explicit claim without replaying its payment event");
+  assert.equal(await row("SYNC-WAIVED").getByRole("button", { name: "认领", exact: true }).count(), 1);
+  assert.equal(await row("SYNC-UNPAID").count(), 0, "unpaid orders stay in the all-orders view");
+  for (const no of ["SYNC-CANCELED", "SYNC-DONE"]) assert.equal(await row(no).count(), 0, no + " is not pending claim");
+  assert.match(await row("SYNC-HISTORICAL").innerText(), /已支付/);
+  assert.deepEqual(fixture.modules.store.snapshot(), beforePool, "pool GET cannot create events, reservations, bindings or commission records");
+  report.checks.push("paid historical and waived orders appear in the public pool; unpaid and terminal orders remain excluded");
+  report.checks.push("paid public-pool and waived rows both expose an explicit claim action");
+  await page.screenshot({ path: path.join(out, "pool-historical-visible.png"), fullPage: true, animations: "disabled" });
+  await table.getByRole("button", { name: "SYNC-HISTORICAL", exact: true }).click();
+  await drawer.getByText("已支付", { exact: true }).waitFor();
+  assert.equal(await drawer.locator(".kf-detail-actions button").count(), 0);
+  assert.equal(await drawer.getByRole("button", { name: "提交售后", exact: true }).count(), 0);
+  assert.match(await drawer.locator(".el-descriptions__table tr").filter({ hasText: "支付时间" }).innerText(), /2026-10-01 10:00:00/);
+  assert.deepEqual(fixture.modules.store.snapshot(), beforePool, "historical detail GET must preserve all persisted facts");
+  const historical = fixture.modules.store.snapshot().orders.find(order => order.order_no === "SYNC-HISTORICAL");
+  assert.equal(historical.svc_paid_processed, 0); assert.equal(historical.assignee_id, null);
+  report.checks.push("historical order detail is available without fabricating payment processing or commission attribution");
+  await page.screenshot({ path: path.join(out, "historical-readonly-detail.png"), animations: "disabled" });
+  await drawer.getByRole("button", { name: "关闭", exact: true }).last().click();
+  await row("SYNC-HISTORICAL").getByRole("button", { name: "认领", exact: true }).click();
+  await row("SYNC-HISTORICAL").waitFor({state:"hidden"});
+  await page.getByRole("tab", {name:"我的订单",exact:true}).click();
+  await row("SYNC-HISTORICAL").getByRole("button", {name:"确认时间",exact:true}).waitFor();
+  const claimedState = fixture.modules.store.snapshot();
+  const claimed = claimedState.orders.find(order=>order.order_no==="SYNC-HISTORICAL");
+  assert.equal(claimed.service_status,"claimed");assert.equal(claimed.assignee_id,"s1");assert.equal(claimed.svc_paid_processed,0);
+  assert.equal(claimed.paid_at,historical.paid_at);
+  assert.deepEqual(claimedState.events,beforePool.events);assert.deepEqual(claimedState.reserves,beforePool.reserves);assert.deepEqual(claimedState.bindings,beforePool.bindings);
+  assert.equal(claimedState.operationLogs.filter(log=>log.order_no==="SYNC-HISTORICAL"&&log.action==="claim").length,1);
+  await page.screenshot({path:path.join(out,"paid-order-claimed-mine.png"),fullPage:true,animations:"disabled"});
+  report.checks.push("clicking claim removes paid order from pool and persists it in mine without fabricating a payment callback");
+  assert.deepEqual(errors, []);
+  report.status = "passed";
+});

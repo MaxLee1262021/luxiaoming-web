@@ -47,7 +47,10 @@ function fixture(options = {}) {
   const fetch = async (input, init = {}) => {
     const url = new URL(String(input), window.location.href);
     requests.push({ path: url.pathname, search: url.search, method: init.method || "GET" });
-    if (url.pathname === "/api/health") return response({ ok: true, mode: "mysql" });
+    if (url.pathname === "/api/health") {
+      if (options.healthNetworkFailure) throw new Error("offline");
+      return response(options.healthBody || { ok: true, mode: "mysql" }, options.healthStatus || 200);
+    }
     if (url.pathname === "/api/meta/keys") return response({ keys: window.LXM_API_CONFIG.dataKeys.concat(window.LXM_API_CONFIG.stateKeys, window.LXM_API_CONFIG.docKeys) });
     const moduleMatch = url.pathname.match(/^\/api\/modules\/([^/]+)$/);
     if (moduleMatch) {
@@ -59,7 +62,8 @@ function fixture(options = {}) {
         else if (key === "financeSettings") collections[key] = { id: "global", settlementObservationDays: 3 };
         else collections[key] = [{ id: key }];
       }
-      return response({ module: moduleMatch[1], collections, skippedKeys: [] });
+      const payload = { module: moduleMatch[1], collections, skippedKeys: [] };
+      return options.moduleResponse ? options.moduleResponse(payload) : response(payload);
     }
     const documentMatch = url.pathname.match(/^\/api\/collection\/([^/]+)\/([^/]+)$/);
     if (documentMatch) {
@@ -86,6 +90,33 @@ function fixture(options = {}) {
 function protectedRequests(rows) {
   return rows.filter((row) => row.path.startsWith("/api/") && row.path !== "/api/health");
 }
+
+test("schema readiness failure keeps a distinct transport signal without enabling local fallback writes", async () => {
+  const f = fixture({ session: true, healthStatus: 503, healthBody: { ok: false, mode: "mysql", data: { error: "schema_incomplete", incomplete: ["lxm_guides.contentHtml"] } } });
+  await new Promise(setImmediate);
+  assert.equal(f.window.LXM_API_STATE.reachable, false);
+  assert.equal(f.window.LXM_API_STATE.transportReachable, true);
+  assert.equal(f.window.LXM_API_STATE.dataError, "schema_incomplete");
+  assert.deepEqual(Array.from(f.window.LXM_API_STATE.incomplete), ["lxm_guides.contentHtml"]);
+  assert.equal(f.window.LXM_CLOUD_MODE, "unavailable", "the unhealthy business store is never treated as ready");
+  assert.equal(f.window.LXM_AUTH.hasSession(), true);
+});
+
+test("unreachable or unknown health responses cannot authorize file uploads", async () => {
+  for (const options of [{ healthNetworkFailure: true }, { healthStatus: 503, healthBody: { error: "proxy failed" } }]) {
+    const f = fixture(options); await new Promise(setImmediate);
+    assert.equal(f.window.LXM_API_STATE.reachable, false);
+    assert.equal(f.window.LXM_API_STATE.transportReachable, false);
+  }
+});
+
+test("legacy mock and JSON health responses cannot enable real-data mode", async () => {
+  for (const mode of ["mock", "json", "", "unknown"]) {
+    const f = fixture({ healthBody: { ok: true, mode } }); await new Promise(setImmediate);
+    assert.equal(f.window.LXM_API_STATE.reachable, false);
+    assert.equal(f.window.LXM_CLOUD_MODE, "unavailable");
+  }
+});
 
 function collectionKey(pathname) {
   const match = pathname.match(/^\/api\/collection\/([^/]+)(?:\/[^/]+)?$/);
@@ -123,6 +154,21 @@ test("orders menu requests only its configured data pack after login", async () 
   assert.equal(f.data.afterSales[0].id, "afterSales");
 });
 
+test("套餐菜单直接进入时加载城市、点位和全部组合商品来源", async () => {
+  const f = fixture();
+  f.window.LXM_AUTH.setSession({ token: "session-token", role: "super" });
+  const result = await f.window.LXM_CLOUD.loadMenuData("packages", f.data, f.state, { force: true });
+  const requests = protectedRequests(f.requests);
+  assert.equal(result.ok, true);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, "/api/modules/content");
+  const keys = moduleKeys(requests[0]);
+  for (const key of ["cities", "spots", "albums", "packages", "peripherals"]) {
+    assert.ok(keys.includes(key), `套餐组合需要加载 ${key}`);
+    assert.equal(f.data[key][0].id, key);
+  }
+});
+
 test("each menu activation reloads its own data pack without revisiting unrelated collections", async () => {
   const f = fixture();
   f.window.LXM_AUTH.setSession({ token: "session-token", role: "super" });
@@ -143,16 +189,92 @@ test("each menu activation reloads its own data pack without revisiting unrelate
   assert.equal(moduleKeys(secondOrderRequests[0]).includes("logs"), false);
 });
 
-test("fixed-document menus fetch only their owned document and permissions has no collection preload", async () => {
+test("guide page mounting shares a pending navigation read while retries and later visits remain fresh", async () => {
+  const replies = [];
+  const f = fixture({ session: true, moduleResponse: (payload) => new Promise((resolve) => replies.push(() => resolve(response(payload)))) });
+  const navigation = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state, { force: true });
+  await new Promise(setImmediate);
+  const mounted = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state, { force: true, joinPending: true });
+  assert.equal(protectedRequests(f.requests).length, 1);
+  replies.shift()();
+  const results = await Promise.all([navigation, mounted]);
+  assert.equal(results.every((result) => result.ok), true);
+  assert.deepEqual(moduleKeys(protectedRequests(f.requests)[0]), ["albums", "guides", "packages", "series", "spots"]);
+  const retry = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state, { force: true });
+  const nextVisit = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state, { force: true });
+  await new Promise(setImmediate);
+  assert.equal(protectedRequests(f.requests).length, 2, "a retry starts a fresh read");
+  replies.shift()();
+  await retry;
+  await new Promise(setImmediate);
+  assert.equal(protectedRequests(f.requests).length, 3, "another navigation retains its own fresh read");
+  replies.shift()();
+  assert.equal((await nextVisit).ok, true);
+});
+
+test("pending menu reads are not shared across data or state containers", async () => {
+  for (const container of ["data", "state"]) {
+    const replies = [];
+    const f = fixture({ session: true, moduleResponse: (payload) => new Promise((resolve) => replies.push(() => resolve(response(payload)))) });
+    const first = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state);
+    await new Promise(setImmediate);
+    const otherData = container === "data" ? { ...f.data, guides: [] } : f.data;
+    const otherState = container === "state" ? { ...f.state } : f.state;
+    const second = f.window.LXM_CLOUD.loadMenuData("guides", otherData, otherState, { joinPending: true });
+    replies.shift()();
+    await first;
+    await new Promise(setImmediate);
+    assert.equal(protectedRequests(f.requests).length, 2, `${container} target needs its own read`);
+    replies.shift()();
+    assert.equal((await second).ok, true);
+    assert.equal(otherData.guides[0].id, "guides");
+  }
+});
+
+test("session changes discard old and queued menu reads without replacing the new session data", async () => {
+  const replies = [];
+  const f = fixture({ session: true, moduleResponse: (payload) => new Promise((resolve) => replies.push((id) => resolve(response({
+    ...payload, collections: { ...payload.collections, guides: [{ id }] }
+  })))) });
+  const oldSession = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state);
+  const queued = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state);
+  await new Promise(setImmediate);
+  f.window.LXM_AUTH.setSession({ token: "new-session", role: "super" });
+  const newSession = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state, { joinPending: true });
+  await new Promise(setImmediate);
+  assert.equal(protectedRequests(f.requests).length, 2, "the new session never joins the old request");
+  replies[1]("current");
+  assert.equal((await newSession).ok, true);
+  replies[0]("expired");
+  assert.equal((await oldSession).reason, "session_changed");
+  assert.equal((await queued).reason, "session_changed");
+  assert.equal(protectedRequests(f.requests).length, 2, "an obsolete queued read never runs with the new credentials");
+  assert.equal(f.data.guides[0].id, "current");
+});
+
+test("an old session module response cannot fall back to collections using new credentials", async () => {
+  let finish;
+  const f = fixture({ session: true, moduleResponse: () => new Promise((resolve) => { finish = resolve; }) });
+  const pending = f.window.LXM_CLOUD.loadMenuData("guides", f.data, f.state);
+  await new Promise(setImmediate);
+  f.window.LXM_AUTH.setSession({ token: "new-session", role: "super" });
+  finish(response({ error: "old server" }, 404));
+  assert.equal((await pending).reason, "session_changed");
+  assert.equal(protectedRequests(f.requests).length, 1);
+  assert.equal(f.data.guides.length, 0);
+});
+
+test("carousel settings fetch only banners and jump targets while retired settings have no data pack", async () => {
   const f = fixture();
   f.window.LXM_AUTH.setSession({ token: "session-token", role: "super" });
   await f.window.LXM_CLOUD.loadMenuData("permissions", f.data, f.state, { force: true });
   assert.deepEqual(protectedRequests(f.requests), []);
-  await f.window.LXM_CLOUD.loadMenuData("miniConfig", f.data, f.state, { force: true });
+  await f.window.LXM_CLOUD.loadMenuData("miniDecor", f.data, f.state, { force: true });
   const configRequests = protectedRequests(f.requests).map((row) => row.path).sort();
   assert.deepEqual(configRequests, ["/api/modules/configuration"]);
-  assert.deepEqual(moduleKeys(protectedRequests(f.requests)[0]), ["siteConfig"]);
-  assert.deepEqual(f.state.siteConfig, { id: "global", bookingNotice: [] });
+  assert.deepEqual(moduleKeys(protectedRequests(f.requests)[0]), ["albums", "guides", "homeConfig", "packages", "peripherals", "samples", "spots"]);
+  assert.deepEqual(Array.from(f.window.LXM_CLOUD.menuKeysFor("miniConfig")), []);
+  assert.equal(f.window.LXM_API_CONFIG.menuModules.miniConfig, undefined);
 });
 
 test("legacy loader compatibility resolves to the active menu instead of the full collection catalog", async () => {
@@ -167,13 +289,19 @@ test("legacy loader compatibility resolves to the active menu instead of the ful
   assert.equal(moduleKeys(requested[0]).length < f.window.LXM_API_CONFIG.dataKeys.length, true);
 });
 
+test("server share permissions survive the public session metadata boundary", () => {
+  const f = fixture();
+  f.window.LXM_AUTH.setSession({ token: "test-session", role: "custom-ops", sharePermissions: ["share:view", "share:config", "unrelated"] });
+  assert.deepEqual(Array.from(f.window.LXM_AUTH.getSession().sharePermissions), ["share:view", "share:config"]);
+});
+
 test("menu switching invokes a fresh route-key data load on every visit", async () => {
   const calls = [];
   const state = {
     authChecking: false, authNotice: "", authSource: "server", serverReachable: true, dataLoading: false,
     menuDataLoadingKey: "", menuDataRequestId: 0, mobileMenuOpen: false, authed: true,
     role: "super", loginRole: "super", previewRole: "super", currentStaffId: "staff-1", currentAccount: "admin",
-    active: "dashboard", menuRevision: 0, selectedOrderIds: [], merchantCodes: [], merchantCodeStats: {},
+    active: "dashboard", login: {}, menuRevision: 0, selectedOrderIds: [], merchantCodes: [], merchantCodeStats: {},
     currentOrder: null, currentAfterSale: null, currentFinanceReview: null,
     filters: { status: "", financeStatus: "", afterSaleStatus: "", refundStatus: "", transferStatus: "", rescheduleStatus: "", assigneeId: "", photographerId: "", productType: "", contentStatus: "", contentSpotId: "", contentSeriesId: "", shelfType: "", cityId: "", agentId: "", distributorId: "", shopId: "", logUser: "", logModule: "", logLevel: "", logAction: "", keyword: "" }
   };
@@ -185,13 +313,14 @@ test("menu switching invokes a fresh route-key data load on every visit", async 
     LXM_APP_PARTS: [],
     LXM_DATA: {},
     LXM_API_STATE: { reachable: true },
-    LXM_AUTH: { getSession: () => null, hasSession: () => true, setSession() {}, clearSession() {}, logout: async () => null },
+    LXM_CLOUD_MODE: "mysql",
+    LXM_AUTH: { getSession: () => ({ token: "fixture-session", role: "super" }), hasSession: () => true, setSession() {}, clearSession() {}, logout: async () => null },
     LXM_CLOUD: { async loadMenuData(routeKey, loadedData, loadedState, options) { calls.push({ routeKey, loadedData, loadedState, options }); return { ok: true, routeKey }; } },
     addEventListener(type, callback) { listeners.set(type, callback); }
   };
   const LXM_CONFIG = {
-    menus: [{ key: "dashboard", label: "看板" }, { key: "salesWorklist", label: "订单工作台", routeKey: "orders" }, { key: "shops", label: "商家", routeKey: "shops" }],
-    roles: { super: { name: "超管", home: "dashboard", menus: ["dashboard", "salesWorklist", "shops"], scope: "all", staffId: "staff-1" } }
+    menus: [{ key: "dashboard", label: "看板" }, { key: "salesWorklist", label: "订单工作台", routeKey: "orders" }, { key: "staff", label: "人员", routeKey: "staff" }, { key: "miniDecor", label: "轮播配置", group: "内容管理", navigationOrder: 9 }],
+    roles: { super: { name: "超管", home: "dashboard", menus: ["dashboard", "salesWorklist", "staff", "miniDecor"], scope: "all", staffId: "staff-1" } }
   };
   const ctx = {
     ElMessage: { warning() {}, error() {}, success() {} },
@@ -202,9 +331,27 @@ test("menu switching invokes a fresh route-key data load on every visit", async 
   vm.runInNewContext(fs.readFileSync(path.join(root, "src/app/03-auth.js"), "utf8"), { window, LXM_CONFIG, structuredClone, console, Set, Map, Object, Array, Promise }, { filename: "03-auth.js" });
   const auth = window.LXM_APP_PARTS[0](ctx);
   await auth.switchMenu("salesWorklist");
-  await auth.switchMenu("shops");
+  await auth.switchMenu("staff");
   await auth.switchMenu("salesWorklist");
-  assert.deepEqual(calls.map((call) => call.routeKey), ["orders", "shops", "orders"]);
+  assert.deepEqual(calls.map((call) => call.routeKey), ["orders", "staff", "orders"]);
   assert.equal(calls.every((call) => call.options.force === true), true);
   assert.equal(state.active, "salesWorklist");
+  auth.applyLogin({ token: "fixture-session", role: "super", menus: ["dashboard", "miniDecor", "miniConfig", "legacyGlobal"], menuDefinitions: [
+    { key: "miniDecor", label: "小程序首页", routeKey: "miniDecor" },
+    { key: "miniConfig", label: "小程序全局配置", routeKey: "miniConfig" },
+    { key: "legacyGlobal", label: "旧全局配置", routeKey: "miniConfig" }
+  ] }, { source: "server" });
+  assert.equal(LXM_CONFIG.menus.some((menu) => ["miniConfig", "legacyGlobal"].includes(menu.key)), false);
+  assert.equal(LXM_CONFIG.menus.find((menu) => menu.key === "miniDecor").label, "轮播配置");
+  await auth.switchMenu("miniConfig");
+  assert.equal(calls.at(-1).routeKey, "miniDecor");
+  assert.equal(state.active, "miniDecor");
+});
+
+test("retired settings route resolves to carousel settings without registering its deleted assets", () => {
+  const window = {};
+  vm.runInNewContext(fs.readFileSync(path.join(root, "src/router/index.js"), "utf8"), { window });
+  assert.equal(window.LXM_PAGES.manifest.some((page) => page.key === "miniConfig"), false);
+  assert.equal(window.LXM_PAGES.componentNameFor("miniConfig"), "LxmPageMiniDecor");
+  assert.equal(window.LXM_PAGES.pageFor("miniConfig").key, "miniDecor");
 });

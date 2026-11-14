@@ -1,170 +1,29 @@
-<div class="lxm-page">
-  <header class="lxm-page-head">
-    <div>
-      <span class="lxm-eyebrow">短视频单品</span>
-      <h3 class="lxm-page-head__title">短视频</h3>
-      <p class="lxm-page-head__desc">独立可售的短视频成片，关联打卡点与拍摄风格，作为小程序「短视频」tab 的单品展示与预约入口。与旅拍套餐并列两类内容。</p>
+<div class="catalog-page">
+  <header class="catalog-head"><div><h2>{{ editorOpen ? (videoDraft.id ? '编辑视频产品' : '新建视频产品') : '视频摄像' }}</h2><p>{{ editorOpen ? '填写产品信息，右侧实时预览卡片效果' : '管理视频类旅拍产品，支持新建、编辑与关联打卡点' }}</p></div><div class="catalog-actions">
+    <template v-if="!editorOpen"><span class="catalog-source">真实数据库</span><el-button plain :loading="remoteLoading" @click="refreshFromServer">刷新</el-button><el-button plain @click="openContentTrash">回收站</el-button><el-button type="primary" v-if="can('contentEdit')" @click="openVideoEditor()">＋ 新建视频产品</el-button></template>
+    <template v-else><el-button :disabled="saving" @click="closeEditor">返回列表</el-button><el-button v-if="can('contentEdit')" type="primary" :loading="saving" @click="saveSelectedVideoSingle">保存产品</el-button></template>
+  </div></header>
+  <template v-if="!editorOpen">
+    <div class="catalog-kpis"><span><b>{{ videoSingleSummary.total }}</b>个视频产品</span><span><b>{{ videoSingleSummary.onSale }}</b>个在售</span><span><b>{{ videoSingleSummary.mainPush }}</b>个主推</span><span><b>{{ videoSingleSummary.pending }}</b>个待审</span></div>
+    <div class="catalog-filters"><el-input v-model="state.filters.keyword" clearable placeholder="搜索产品名称 / 标签" /><el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="全部打卡点"><el-option v-for="s in data.spots.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select><el-select v-model="state.filters.contentStatus" clearable placeholder="全部状态"><el-option label="上架" value="上架" /><el-option label="下架" value="下架" /><el-option label="草稿" value="草稿" /></el-select><el-button plain @click="clearContentFilters">重置</el-button></div>
+    <div class="catalog-grid" v-loading="remoteLoading">
+      <article v-for="item in listSource" :key="item.id || item._id" class="catalog-card" :class="{'is-hidden':!contentEffectiveVisible(item)}">
+        <div class="catalog-cover catalog-video"><video v-if="videoSource(item)" :src="videoSource(item)" :aria-label="item.title || item.name || '商品视频'" controls playsinline preload="metadata"></video><div class="catalog-placeholder" v-else>{{ item.title || item.name || '视频摄像' }}<small>待上传商品视频</small></div><span class="catalog-badge" :class="{'is-off':!contentEffectiveVisible(item)}">{{ contentEffectiveVisible(item) ? '显示中' : '已隐藏' }}</span><span class="catalog-kind">视频</span></div>
+        <div class="catalog-card-body"><h3>{{ item.title || item.name || '未命名视频产品' }}</h3><div class="catalog-chips"><span class="catalog-chip" v-for="tag in (item.tags || []).slice(0,4)" :key="tag">{{ tag }}</span><span class="catalog-chip is-muted" v-if="!(item.tags || []).length">未设置标签</span></div><div class="catalog-meta"><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ item.spotId ? spotName(item.spotId) : '不关联打卡点' }}</strong></div><div class="catalog-meta-row"><span>商品价格</span><strong class="catalog-price">{{ money(item.price || 0) }}</strong></div><div class="catalog-meta-row"><span>定金比例</span><strong>{{ videoDepositLabel(item) }}</strong></div><div class="catalog-meta-row"><span>成片数量 / 时长</span><strong>{{ item.finishedVideoCount || 0 }} 条 · {{ item.videoDuration ? item.videoDuration+'秒' : item.durationText || '未设置' }}</strong></div><div class="catalog-meta-row"><span>交付周期</span><strong>{{ item.deliveryCycle || '未填写' }}</strong></div></div></div>
+        <div class="catalog-card-footer"><el-button plain type="primary" @click="openVideoEditor(item)">{{ can('contentEdit') ? '编辑' : '查看' }}</el-button><el-button plain @click="openVideoEditor(item)">关联打卡点</el-button><el-button plain @click="openVideoEditor(item)">标签</el-button><el-button plain v-if="can('contentEdit')" @click="toggleVideoSingleShelf(item)">{{ contentManualVisible(item) ? '隐藏' : '显示' }}</el-button><el-button v-if="state.role==='super'" plain type="danger" @click="deleteVideoSingle(item)">删除</el-button></div>
+      </article>
+      <div v-if="remoteError" class="catalog-empty"><strong>视频产品加载失败</strong>{{ remoteError }}<br /><el-button plain @click="refreshFromServer">重新加载</el-button></div><div v-else-if="!remoteLoading && !listSource.length" class="catalog-empty"><strong>暂无视频产品</strong>调整筛选条件，或新建一个视频摄像产品。</div>
     </div>
-    <div class="lxm-page-head__actions">
-      <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
-        <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
-        <span class="remote-dot"></span>{{ remoteOn ? '真实数据：已开启' : '演示数据：已开启' }}
-      </label>
-      <el-button v-if="state.role==='super' && remoteOn" plain :loading="remoteLoading" @click="refreshFromServer">刷新真实数据</el-button>
-      <el-button plain @click="openContentLogs('短视频')">操作日志</el-button>
-      <el-button type="primary" v-if="can('contentEdit')" @click="openVideoSingle()">新增短视频</el-button>
-    </div>
-  </header>
-
-  <div class="lxm-kpi-grid">
-    <div class="lxm-kpi"><span class="lxm-kpi__label">短视频总数</span><strong class="lxm-kpi__value">{{ videoSingleSummary.total }}</strong><span class="lxm-kpi__hint">当前筛选的独立可售短视频</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">在售</span><strong class="lxm-kpi__value">{{ videoSingleSummary.onSale }}</strong><span class="lxm-kpi__hint">满足货架展示</span></div>
-    <div class="lxm-kpi"><span class="lxm-kpi__label">主推</span><strong class="lxm-kpi__value">{{ videoSingleSummary.mainPush }}</strong><span class="lxm-kpi__hint">优先推荐位</span></div>
-    <div class="lxm-kpi warning"><span class="lxm-kpi__label">待处理</span><strong class="lxm-kpi__value">{{ videoSingleSummary.pending }}</strong><span class="lxm-kpi__hint">审核 / 上下架</span></div>
+  </template>
+  <div v-else-if="videoDraft" class="catalog-editor">
+    <el-form class="catalog-form" :disabled="!can('contentEdit') || saving">
+      <section class="catalog-panel"><div class="catalog-panel-head"><h3>基础信息</h3></div><label class="catalog-field"><span>产品名称</span><el-input v-model="videoDraft.title" placeholder="例如：洱海旅拍大片" maxlength="60" /></label><label class="catalog-field"><span>标签</span><el-select v-model="videoDraft.tags" multiple filterable allow-create default-first-option placeholder="选择标签，或输入新标签后回车"><el-option v-for="tag in videoTagOptions" :key="tag" :label="tag" :value="tag" /></el-select></label></section>
+      <section class="catalog-panel"><div class="catalog-panel-head"><h3>商品视频</h3></div><label class="catalog-file-button">上传商品视频<input type="file" accept="video/mp4,.mp4" :disabled="!can('contentEdit') || saving" @change="onVideoFilePick" /></label><p class="catalog-hint">支持 MP4。无需上传首图，保存后可在小程序商品卡片中直接播放。</p><label class="catalog-field"><span>视频地址</span><el-input v-model="videoDraft.videoUrl" @change="validateMediaUrl(videoDraft,'videoUrl')" placeholder="上传视频后自动填入，也可输入视频地址" /></label><label class="catalog-field"><span>预览视频地址（可选）</span><el-input v-model="videoDraft.previewVideoUrl" @change="validateMediaUrl(videoDraft,'previewVideoUrl')" placeholder="留空使用商品视频" /></label></section>
+      <section class="catalog-panel"><div class="catalog-panel-head"><h3>价格与交付</h3></div><div class="catalog-row"><label class="catalog-field"><span>产品价格（元）</span><el-input-number v-model="videoDraft.price" :min="0" :precision="2" /></label><label class="catalog-field"><span>成片数量（条）</span><el-input-number v-model="videoDraft.finishedVideoCount" :min="1" :precision="0" /></label></div><div class="catalog-row"><label class="catalog-field"><span>视频时长（秒）</span><el-input-number v-model="videoDraft.videoDuration" :min="0" :precision="0" /></label><label class="catalog-field"><span>交付周期</span><el-input v-model="videoDraft.deliveryCycle" placeholder="例如：7个工作日" /></label></div><label class="catalog-field"><span>定金比例（%）</span><el-input-number v-model="videoDraft.depositRatioPercent" :min="0" :max="100" :precision="2" :step="5" controls-position="right" placeholder="使用全局比例" aria-label="视频定金比例，百分比" /><small class="catalog-hint">留空使用「预约配置」中的全局定金比例；填写 0 表示不收定金。</small></label><label class="catalog-field"><span>时长说明（可选）</span><el-input v-model="videoDraft.durationText" placeholder="例如：60–90秒" /></label><label class="catalog-switch"><span>航拍服务</span><el-switch v-model="videoDraft.hasAerial" active-text="包含" inactive-text="不包含" /></label><label class="catalog-switch"><span>全包剪辑</span><el-switch v-model="videoDraft.fullEdit" active-text="包含" inactive-text="不包含" /></label><label class="catalog-switch"><span>妆造服务</span><el-switch v-model="videoDraft.makeupIncluded" active-text="包含" inactive-text="不包含" /></label></section>
+      <section class="catalog-panel"><div class="catalog-panel-head"><h3>拍摄说明</h3></div><el-input v-model="videoDraft.shootingNotes" type="textarea" :rows="5" placeholder="填写拍摄内容、服务范围、成片标准与注意事项" /></section>
+      <section class="catalog-panel"><div class="catalog-panel-head"><h3>关联与显示</h3></div><label class="catalog-field"><span>关联打卡点（可选）</span><el-select v-model="videoDraft.spotId" clearable filterable placeholder="不关联打卡点" @change="markContentSpotChange(videoDraft)"><el-option v-for="s in data.spots.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select></label><label class="catalog-switch"><span>是否在小程序显示<small>保存后生效，关联打卡点隐藏时商品也会隐藏。</small></span><el-switch v-model="videoDraft.isShow" /></label><label class="catalog-switch"><span>首页主推</span><el-switch v-model="videoDraft.isMainPush" /></label><details class="catalog-advanced"><summary>其他设置</summary><label class="catalog-field"><span>所属城市</span><el-select v-model="videoDraft.cityId" clearable filterable><el-option v-for="c in data.cities.filter(i=>!i.deleted && !i.isDeleted)" :key="c.id || c._id" :label="c.name" :value="c.id || c._id" /></el-select></label></details></section>
+      <div class="catalog-editor-footer"><el-button v-if="videoDraft.id" @click="resetVideoDraft">还原修改</el-button><el-button @click="closeEditor">取消</el-button><el-button v-if="can('contentEdit')" type="primary" :loading="saving" @click="saveSelectedVideoSingle">保存产品</el-button></div>
+    </el-form>
+    <aside class="catalog-preview"><div class="catalog-preview-title">卡片预览<span>实时更新</span></div><article class="catalog-card"><div class="catalog-cover catalog-video"><video v-if="videoSource(videoDraft)" :src="videoSource(videoDraft)" :aria-label="videoDraft.title || '商品视频预览'" controls playsinline preload="metadata"></video><div v-else class="catalog-placeholder">待上传商品视频</div><span class="catalog-badge" :class="{'is-off':!previewVisible(videoDraft)}">{{ previewVisible(videoDraft) ? '显示中' : '已隐藏' }}</span><span class="catalog-kind">视频</span></div><div class="catalog-card-body"><h3>{{ videoDraft.title || '视频产品名称' }}</h3><div class="catalog-chips"><span class="catalog-chip" v-for="tag in videoDraft.tags" :key="tag">{{ tag }}</span></div><div class="catalog-meta"><div class="catalog-meta-row"><span>产品价格</span><strong class="catalog-price">{{ money(videoDraft.price || 0) }}</strong></div><div class="catalog-meta-row"><span>定金比例</span><strong>{{ videoDepositLabel(videoDraft, true) }}</strong></div><div class="catalog-meta-row"><span>成片数量</span><strong>{{ videoDraft.finishedVideoCount || 0 }} 条</strong></div><div class="catalog-meta-row"><span>视频时长</span><strong>{{ videoDraft.videoDuration ? videoDraft.videoDuration+'秒' : videoDraft.durationText || '未设置' }}</strong></div><div class="catalog-meta-row"><span>交付周期</span><strong>{{ videoDraft.deliveryCycle || '未填写' }}</strong></div><div class="catalog-meta-row"><span>服务内容</span><strong>{{ videoDraft.hasAerial ? '含航拍' : '不含航拍' }} · {{ videoDraft.fullEdit ? '含剪辑' : '不含剪辑' }} · {{ videoDraft.makeupIncluded ? '含妆造' : '不含妆造' }}</strong></div><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ videoDraft.spotId ? spotName(videoDraft.spotId) : '不关联打卡点' }}</strong></div></div><p class="catalog-preview-desc">{{ videoDraft.shootingNotes || '待填写拍摄说明' }}</p></div></article><p class="catalog-preview-note">预览当前草稿 · 所有修改保存后生效</p></aside>
   </div>
-
-  <div class="lxm-toolbar">
-    <el-input v-model="state.filters.keyword" clearable placeholder="搜索短视频名称 / 标签" />
-    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="关联打卡点">
-      <el-option v-for="s in (data.spots || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
-    </el-select>
-    <el-select v-model="state.filters.contentSeriesId" clearable filterable placeholder="拍摄风格">
-      <el-option v-for="s in (data.series || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
-    </el-select>
-    <el-select v-model="state.filters.contentStatus" clearable placeholder="状态">
-      <el-option label="上架" value="上架" />
-      <el-option label="下架" value="下架" />
-      <el-option label="草稿" value="草稿" />
-    </el-select>
-    <el-button @click="clearContentFilters">重置</el-button>
-  </div>
-
-  <div class="vse-editor">
-    <!-- 左：列表 -->
-    <aside class="vse-list">
-      <div class="vse-list-head">
-        <strong>短视频</strong>
-        <span>{{ listSource.length }} 项</span>
-      </div>
-      <div class="vse-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
-        <button v-for="item in listSource" :key="item.id||item._id" class="vse-list-item" :class="{active: isSelected(item), off: videoSingleStatus(item)==='下架'}" @click="selectVideoSingle(item)">
-          <span class="vli-cover">
-            <img v-if="item.cover" :src="item.cover" />
-            <i v-else>&#9654;</i>
-            <span v-if="item.durationText" class="vli-dur">{{ item.durationText }}</span>
-          </span>
-          <span class="vli-main">
-            <strong>{{ item.title || item.name }}</strong>
-            <em>{{ money(item.price||0) }} · {{ videoSingleStatus(item) }} · {{ seriesName(item.seriesId) }}</em>
-          </span>
-        </button>
-        <div v-if="remoteError" class="empty-state">
-          <strong>短视频加载失败</strong><span>{{ remoteError }}</span>
-          <el-button plain @click="refreshFromServer">重新加载</el-button>
-        </div>
-        <div v-else-if="!remoteLoading && listSource.length===0" class="empty-state">
-          <strong>暂无短视频</strong><span>先新增一条短视频成片（带视频文件 / 链接），再关联打卡点与拍摄风格。</span>
-        </div>
-      </div>
-    </aside>
-
-    <!-- 中：表单 -->
-    <section class="vse-form" v-if="selectedVideoSingle">
-      <div class="vse-form-head">
-        <div>
-          <strong>编辑短视频</strong>
-          <p>修改内容后点「保存」；下方上下架按钮即时生效。</p>
-        </div>
-        <div class="vse-form-actions">
-          <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedVideoSingle">保存</el-button>
-          <el-button v-if="can('contentEdit')" type="primary" plain @click="openVideoSingle(selectedVideoSingle)">高级编辑</el-button>
-          <el-button type="danger" plain v-if="can('contentEdit')" @click="deleteVideoSingle(selectedVideoSingle)">删除</el-button>
-        </div>
-      </div>
-
-      <div class="vse-form-body">
-        <label class="vf-field"><span>名称</span><el-input v-model="selectedVideoSingle.title" placeholder="如：杜甫江阁湘江夜景短片" :disabled="!can('contentEdit')" /></label>
-        <div class="vf-row">
-          <label class="vf-field"><span>拍摄风格</span>
-            <el-select v-model="selectedVideoSingle.seriesId" filterable placeholder="选择风格" :disabled="!can('contentEdit')">
-              <el-option v-for="s in (data.series || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
-            </el-select>
-          </label>
-          <label class="vf-field"><span>关联打卡点</span>
-            <el-select v-model="selectedVideoSingle.spotId" filterable placeholder="选择打卡点" :disabled="!can('contentEdit')">
-              <el-option v-for="s in (data.spots || []).filter(Boolean)" :key="s.id" :label="s.name" :value="s.id" />
-            </el-select>
-          </label>
-        </div>
-        <label class="vf-field"><span>视频文件 / 链接</span>
-          <el-input v-model="selectedVideoSingle.videoUrl" @change="validateMediaUrl(selectedVideoSingle,'videoUrl')" placeholder="粘贴视频 URL，或选择 MP4 上传" :disabled="!can('contentEdit')" />
-          <span class="vf-upload">
-            <input type="file" accept="video/mp4" @change="onVideoFilePick" :disabled="!can('contentEdit')" />
-            <span class="vf-upload__hint">MP4 最大 500 MiB。上传成功后保存；右下角可查看进度和重试。</span>
-          </span>
-        </label>
-        <label class="vf-field"><span>封面图 <el-button type="primary" link @click="uploadVideoCover" :disabled="!can('contentEdit')">上传图片</el-button></span><el-input v-model="selectedVideoSingle.cover" @change="validateMediaUrl(selectedVideoSingle,'cover')" placeholder="封面图 URL（留空将用占位图）" :disabled="!can('contentEdit')" /></label>
-        <div class="vf-row">
-          <label class="vf-field"><span>时长</span><el-input v-model="selectedVideoSingle.durationText" placeholder="如 60秒" :disabled="!can('contentEdit')" /></label>
-          <label class="vf-field"><span>价格（元）</span><el-input-number v-model="selectedVideoSingle.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
-        </div>
-        <label class="vf-field"><span>简介 / 描述</span><el-input type="textarea" :rows="2" v-model="selectedVideoSingle.intro" :disabled="!can('contentEdit')" /></label>
-        <div class="vf-row">
-          <label class="vf-field"><span>状态</span>
-            <el-select v-model="selectedVideoSingle.status" :disabled="!can('contentEdit')">
-              <el-option label="上架" value="上架" />
-              <el-option label="下架" value="下架" />
-              <el-option label="草稿" value="草稿" />
-            </el-select>
-          </label>
-          <label class="vf-field"><span>主推</span>
-            <el-switch v-model="selectedVideoSingle.isMainPush" :disabled="!can('contentEdit')" />
-          </label>
-        </div>
-        <label class="vf-field"><span>标签</span>
-          <el-select v-model="selectedVideoSingle.tags" multiple filterable allow-create default-first-option placeholder="输入或选择标签" :disabled="!can('contentEdit')">
-            <el-option v-for="t in (data.tagLibrary || []).filter(Boolean)" :key="t.id" :label="t.name" :value="t.name" />
-          </el-select>
-        </label>
-        <el-button v-if="can('contentEdit')" :type="videoSingleStatus(selectedVideoSingle)==='下架' ? 'success' : 'warning'" plain @click="toggleVideoSingleShelf(selectedVideoSingle)">
-          {{ videoSingleStatus(selectedVideoSingle)==='下架' ? '上架' : '下架' }}
-        </el-button>
-      </div>
-    </section>
-
-    <!-- 右：手机实时预览（小程序客人端真实效果） -->
-    <aside class="vse-preview" v-if="selectedVideoSingle">
-      <div class="lxm-phone">
-        <div class="lxm-phone-notch"></div>
-        <div class="lxm-phone-screen">
-          <div class="phone-banner">短视频</div>
-          <div class="vse-phone-card">
-            <div class="vse-phone-cover">
-              <img v-if="selectedVideoSingle.cover" :src="selectedVideoSingle.cover" />
-              <i v-else>&#9654;</i>
-              <span class="vse-phone-play">&#9654;</span>
-              <span v-if="selectedVideoSingle.durationText" class="vse-phone-dur">{{ selectedVideoSingle.durationText }}</span>
-              <span v-if="selectedVideoSingle.isMainPush" class="vse-phone-hot">主推</span>
-              <span class="vse-phone-status" :class="{off: videoSingleStatus(selectedVideoSingle)==='下架'}">{{ videoSingleStatus(selectedVideoSingle) }}</span>
-            </div>
-            <div class="vse-phone-info">
-              <strong class="vse-phone-title">{{ selectedVideoSingle.title || selectedVideoSingle.name }}</strong>
-              <div class="vse-phone-meta">
-                <span class="vse-phone-price">{{ money(selectedVideoSingle.price||0) }}</span>
-                <span>{{ seriesName(selectedVideoSingle.seriesId) }}</span>
-                <span>{{ spotName(selectedVideoSingle.spotId) }}</span>
-              </div>
-              <div class="vse-phone-tags">
-                <span class="lxm-pill" v-for="t in (selectedVideoSingle.tags || []).slice(0,4)" :key="t">{{ t }}</span>
-                <span class="lxm-pill lxm-pill--muted" v-if="!(selectedVideoSingle.tags || []).length">未配置标签</span>
-              </div>
-            </div>
-          </div>
-          <video v-if="selectedVideoSingle.videoUrl" :src="selectedVideoSingle.videoUrl" controls class="vse-phone-video" />
-        </div>
-      </div>
-      <p class="preview-tip">↑ 小程序客人端真实效果预览（与小程序展示一致）</p>
-    </aside>
-  </div>
-
 </div>

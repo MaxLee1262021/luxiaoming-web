@@ -23,6 +23,7 @@ function metadataSourcePool() {
   return {
     async query(sql, params = []) {
       if (sql.includes("information_schema.columns")) {
+        if (sql.includes("table_name IN")) return [params.flatMap(TABLE_NAME=>(collectionColumns.get(TABLE_NAME)||relations.get(TABLE_NAME)||[]).map(COLUMN_NAME=>({TABLE_NAME,COLUMN_NAME})))];
         const table = String(params[0]);
         const columns = table === "lxm_business_documents"
           ? []
@@ -30,7 +31,7 @@ function metadataSourcePool() {
         return [columns.map((column) => ({ COLUMN_NAME: column }))];
       }
       if (sql.includes("information_schema.tables")) return [[{ count: params.length }]];
-      if (sql.includes("information_schema.statistics")) return [[{ COLUMN_NAME: "updatedAt", INDEX_NAME: "idx_updated_at" }]];
+      if (sql.includes("information_schema.statistics")) return [params.map(TABLE_NAME=>({TABLE_NAME,COLUMN_NAME: "updatedAt", INDEX_NAME: "idx_updated_at" }))];
       if (sql.includes("FROM `lxm_collection_values`")) return [[{ count: 0 }]];
       if (sql.includes("LEFT JOIN")) return [[{ count: 0 }]];
       throw new Error(`Unexpected source metadata query: ${sql}`);

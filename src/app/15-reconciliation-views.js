@@ -44,16 +44,16 @@ function eligibleScopedOrders() {
 }
 function reconciliationDetailAmount(row, type) {
   if (!row) return 0;
-  if (type === "shop") return orderSplit(row).shopAmount;
+  if (type === "shop") return ctx.shareAttribution?.(row)?.ledgerAmount ?? null;
   if (type === "distributor") return orderSplit(row).distributorAmount;
-  if (type === "photo") return orderSplit(row).photographerAmount;
-  if (type === "headquarter") return orderSplit(row).headquarterAmount;
+  if (type === "photo" || type === "headquarter") return null;
   if (type === "due") return financeDue(row);
   if (type === "settlementDue") return Number(row.settlementDueAmount || row.pendingTransferAmount || row.pendingAmount || row.commission || 0);
   if (["eligible", "estimated", "observation", "retained"].includes(type)) return netOrderAmount(row);
   return Number(row.totalAmount || 0);
 }
 function openReconciliationDetail(type, label) {
+  if (type === "photo") return ctx.openPhotoFinanceLedger();
   let rows = scopedOrders.value;
   let desc = "按当前角色和筛选范围展示订单明细";
   let amountLabel = "订单金额";
@@ -82,9 +82,9 @@ function openReconciliationDetail(type, label) {
     desc = `预计可入分账池包含实际可分账订单，以及已交付/已完成且定金、尾款均经财务审核通过的订单；正式分账仍需满足 ${settlementObservationDays()} 天订单静置期、无售后退款和无风控阻塞。`;
     amountLabel = "预计入池净额";
   } else if (type === "shop") {
-    rows = eligibleScopedOrders().filter((order) => commission(order, "shop") > 0);
-    desc = "按商家分成比例计算的可分账订单。";
-    amountLabel = "商家应计";
+    rows = ctx.shareAnalytics?.ready ? scopedOrders.value.filter((order) => ctx.shareAttribution?.(order) && String(ctx.shareAttribution(order).merchantId) !== "0") : [];
+    desc = "按新分成账本归属展示已授权订单；金额直接读取已生成分成，包含退款冲抵。本期不提供商家结算。";
+    amountLabel = "已入账分成净额";
   } else if (type === "distributor") {
     rows = eligibleScopedOrders().filter((order) => commission(order, "distributor") > 0);
     desc = "按分销员分成比例计算的可分账订单。";
@@ -98,8 +98,8 @@ function openReconciliationDetail(type, label) {
     desc = "按摄影师分成比例计算的可分账订单。";
     amountLabel = "摄影师应计";
   } else if (type === "headquarter") {
-    rows = eligibleScopedOrders().filter((order) => orderSplit(order).headquarterAmount > 0);
-    desc = "总部收入 = 实际入池净额 - 商家应计 - 分销员应计 - 摄影师应计；总部自有二维码订单不会产生商家/分销员分成。";
+    rows = [];
+    desc = "总部收入须合并摄影师独立账本核对，本页不再按订单中的旧摄影师比例推算。";
     amountLabel = "总部收入";
   } else if (type === "due") {
     rows = scopedOrders.value.filter((order) => financeDue(order) > 0);
@@ -127,7 +127,7 @@ const reconciliationScopeInfo = computed(() => {
     agent: ["代理分店 · 自己代理城市", "代理相当于总部分店，重点核对本城市成交、下属分销员、合作商家和代理分店应计数据。"],
     distributor: ["分销员 · 自己拓展商家", "重点核对自己拓展商家的扫码成交、可分订单和分销应计数据。"],
     service: ["客服 · 订单跟进核对", "重点核对自己跟进订单的成交、待收尾款和暂缓订单，不显示渠道分账操作。"],
-    finance: ["财务 · 总部对账", "默认核对总部自营订单，重点核对订单成交、已确认退款、订单静置期暂缓、售后暂缓、商家/分销员/摄影师应计和报表导出。"],
+    finance: ["财务 · 总部对账", "核对订单成交、退款、暂缓与商家/分销员分账；摄影师报酬另在独立账本核对。"],
     photo: ["摄影师 · 我的拍摄任务核对", "仅核对分配给自己的拍摄任务、完成订单和待处理异常。"],
     merchant: ["商家 · 自己门店对账", "仅核对本门店扫码带来的订单、成交额、暂缓订单和商家应计数据。"],
     content: ["内容运营 · 内容数据核对", "内容角色以查看商品成交表现为主，不参与资金操作。"],
@@ -162,7 +162,7 @@ const reconciliationFocus = computed(() => {
   if (state.role === "finance") {
     return { title: "财务全平台对", desc: "财务视角核对分成对象应计、客服经手业绩、退款暂缓和已确认退款净额", rows: visibleReconciliationSettlementRows.value };
   }
-  return { title: "总部对账", desc: "总部视角默认查看自营商家、分销员、摄影师应计明细；可按商家或分销员手动筛选", rows: visibleReconciliationSettlementRows.value };
+  return { title: "总部对账", desc: "总部视角查看商家与分销员分账；摄影师报酬以独立账本为准", rows: visibleReconciliationSettlementRows.value };
 });
 function showReconciliationSection(section) {
   if (["super", "finance"].includes(state.role)) return true;

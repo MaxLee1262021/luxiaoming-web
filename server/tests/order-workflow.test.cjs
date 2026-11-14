@@ -20,7 +20,7 @@ function makeSource() {
       "package-1": { id: "package-1", name: "测试套餐", price: 100, depositRatio: 30, status: "已上架" },
     },
     albums: {}, peripherals: {}, spots: {}, series: {}, shops: {}, merchantCodes: {},
-    siteConfig: { global: { id: "global", customPrice: { depositRatio: 30 } } },
+    siteConfig: { global: { id: "global", bookingNotice: ["Synthetic test booking notice"], bookingNoticeVersion: "v1.0", customPrice: { depositRatio: 30 } } },
     orders: {}, afterSales: { unrelated: { id: "unrelated", orderId: "other-order", status: "pending" } }, logs: {},
     staff: { admin: { id: "admin", account: "admin", name: "Admin", role: "super", status: "启用", password: "test" } },
   };
@@ -153,6 +153,61 @@ test("legacy delivery before final payment remains actionable but private to the
   assert.deepEqual(output.deliverFiles, []);
 });
 
+test("default pending finance statuses do not imply an uncreated final payment intent", async () => {
+  const source = makeSource();
+  const order = {
+    id: "final-without-intent", openid: "customer-openid", status: "final_pending",
+    totalAmount: 100, depositDue: 30, finalDue: 70, depositPaid: 30, depositFinanceStatus: "已审",
+    shootingCompletedAt: "2026-11-13T02:00:00.000Z", finalPaid: 0,
+    paymentRecords: [{ id: "received-deposit", phase: "deposit", amount: 30, status: "confirmed", provider: "wechat_pay" }],
+  };
+  for (const finalFinanceStatus of ["pending", "processing", "待审", "待审核"]) {
+    const output = workflow.publicOrderProjection({ ...order, finalFinanceStatus });
+    assert.equal(output.paymentPhase, "final");
+    assert.equal(output.finalPaymentStatus, "not_created", finalFinanceStatus);
+    assert.equal(output.paymentStatus, "not_created", finalFinanceStatus);
+    assert.equal(output.paymentPending, false);
+    assert.equal(output.pendingFinalAmount, 0);
+    assert.equal(output.canPayFinal, true);
+  }
+  source.collections.orders[order.id] = { ...order, finalFinanceStatus: "待审" };
+  const status = await rpc(source, "getPaymentStatus", { data: { orderId: order.id, phase: "final" } }, publicIdentity());
+  assert.equal(status.success, true);
+  assert.equal(status.data.status, "not_created");
+  const intent = await rpc(source, "createPayment", { data: {
+    orderId: order.id, phase: "final", selectionAccepted: true, idempotencyKey: "final-without-intent-key",
+  } }, publicIdentity());
+  assert.equal(intent.success, true, JSON.stringify(intent));
+  assert.equal(intent.data.invokeWeChatPay, true);
+  assert.ok(intent.data.paymentParams);
+});
+
+test("payment projection preserves real pending intents, registered receipts and confirmed payments", () => {
+  const order = {
+    id: "final-payment-facts", status: "final_pending", totalAmount: 100, depositDue: 30, finalDue: 70,
+    depositPaid: 30, depositFinanceStatus: "已审", finalPaid: 0, finalFinanceStatus: "待审",
+    shootingCompletedAt: "2026-11-13T02:00:00.000Z",
+  };
+  const pending = workflow.publicOrderProjection({ ...order, paymentRecords: [{
+    id: "pending-final", phase: "final", amount: 70, status: "pending", provider: "wechat_pay", idempotencyKey: "pending-final-key",
+  }] });
+  assert.equal(pending.finalPaymentStatus, "pending");
+  assert.equal(pending.paymentPending, true);
+  assert.equal(pending.pendingFinalAmount, 70);
+
+  const registered = workflow.publicOrderProjection({ ...order, finalPaid: 70 });
+  assert.equal(registered.finalPaymentStatus, "pending");
+  assert.equal(registered.paymentStatus, "pending");
+  assert.equal(registered.paymentPending, true);
+  assert.equal(registered.pendingFinalAmount, 70);
+
+  const confirmed = workflow.publicOrderProjection({ ...order, finalPaid: 70, finalFinanceStatus: "已审" });
+  assert.equal(confirmed.finalPaymentStatus, "confirmed");
+  assert.equal(confirmed.finalPaid, 70);
+  assert.equal(confirmed.paymentPending, false);
+  assert.equal(confirmed.canPayFinal, false);
+});
+
 test("booking rejects a peripheral-only cart even when the client bypasses its form validation", async () => {
   const source = makeSource();
   source.collections.peripherals["peripheral-1"] = { id: "peripheral-1", name: "定制相册", price: 50, status: "已上架" };
@@ -161,6 +216,32 @@ test("booking rejects a peripheral-only cart even when the client bypasses its f
   }, publicIdentity());
   assert.equal(result.success, false);
   assert.equal(result.error, "影像周边需搭配拍摄项目一起预约");
+});
+
+test("multiple-spec peripherals cannot be added to legacy bookings at the minimum display price", async () => {
+  const source = makeSource();
+  source.collections.peripherals["peripheral-1"] = { id: "peripheral-1", name: "定制相册", specMode: "multiple", price: 20, stock: 8,
+    skus: [{ spec: "6寸", price: 20, stock: 3 }, { spec: "10寸", price: 50, stock: 5 }], status: "已上架" };
+  const result = await rpc(source, "createBooking", { data: {
+    expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true }, name: "测试用户", phone: "13800000000",
+    items: [{ packageId: "package-1" }, { peripheralId: "peripheral-1", price: 20, spec: "10寸" }], idempotencyKey: "booking-multiple-spec-test",
+  } }, publicIdentity());
+  assert.equal(result.success, false); assert.match(result.error, /多规格.*确认规格/);
+  assert.equal((await source.list("orders")).length, 0); assert.equal((await source.list("bookingRequests")).length, 0);
+  assert.equal(source.collections.peripherals["peripheral-1"].stock, 8);
+});
+
+test("single-spec peripheral bookings use the current price before historical sale-price aliases", async () => {
+  const source = makeSource();
+  source.collections.peripherals["peripheral-1"] = { id: "peripheral-1", name: "定制相册", price: 25, specialPrice: 5, salePrice: 3, stock: 8, status: "已上架" };
+  const result = await rpc(source, "createBooking", { data: {
+    expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true }, name: "测试用户", phone: "13800000000",
+    items: [{ packageId: "package-1" }, { peripheralId: "peripheral-1" }], idempotencyKey: "booking-current-product-price",
+  } }, publicIdentity());
+  assert.equal(result.success, true, JSON.stringify(result));
+  const booking = await source.get("bookingRequests", result.bookingId);
+  assert.equal(booking.totalPrice, 125);
+  assert.equal(source.collections.peripherals["peripheral-1"].stock, 8, "本次商品参数管理不新增库存扣减流程");
 });
 
 test("customer order filters and counts use the five business states", async () => {

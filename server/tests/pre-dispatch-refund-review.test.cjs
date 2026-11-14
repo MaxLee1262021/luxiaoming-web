@@ -6,6 +6,7 @@ const test = require("node:test");
 const createApi = require("../lib/api.cjs");
 const rpc = require("../lib/rpc.cjs");
 const workflow = require("../lib/orderWorkflow.cjs");
+const { createTestRefundGateway } = require("./helpers/wechatPay.cjs");
 
 const clone = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
 
@@ -14,7 +15,7 @@ function makeSource() {
     id: "booking", _id: "booking", orderNo: "ORDER-BOOKING", openid: "owner", assigneeId: "service",
     status: "deposit_paid", workflowStage: "awaiting_dispatch", totalAmount: 100, depositDue: 30, finalDue: 70,
     depositPaid: 30, depositFinanceStatus: "confirmed", finalPaid: 0,
-    paymentRecords: [{ id: "deposit-paid", phase: "deposit", amount: 30, status: "confirmed", provider: "wechat_pay", externalTransactionId: "deposit-tx" }],
+    paymentRecords: [{ id: "deposit-paid", phase: "deposit", amount: 30, status: "confirmed", provider: "wechat_pay", outTradeNo: "booking-deposit-trade", externalTransactionId: "deposit-tx" }],
     dispatchStatus: "pending", afterSaleStatus: "pending", afterSaleId: "deposit-refund", followRecords: [], statusLogs: [],
   };
   const ticket = {
@@ -46,12 +47,13 @@ function makeSource() {
   };
 }
 
-async function startApi(t, source) {
+async function startApi(t, source, providerOptions = {}) {
   const sessions = Object.fromEntries(["super", "finance", "service"].map((role) => [`${role}-token`, {
     kind: "admin", subjectId: role, account: role, role, menuKeys: ["orders", "afterSales", "financeReview", "tasks"],
   }]));
   const auth = { async init() {}, async getSession(token) { return clone(sessions[token]); } };
-  const handler = createApi(source, "json", { auth, sourceStatus: { ready: true }, permissionStore: null });
+  source.wechatPay = createTestRefundGateway(source, providerOptions);
+  const handler = createApi(source, "json", { auth, sourceStatus: { ready: true }, permissionStore: null, wechatPay: source.wechatPay });
   const server = http.createServer((req, res) => handler(req, res, (req.url || "").split("?")[0]));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); });
@@ -64,8 +66,9 @@ async function startApi(t, source) {
   };
 }
 
-const approve = (extra = {}) => ({ action: "review", approved: true, reason: "摄影师安排前退还定金", refundTransactionId: "manual-refund-proof", ...extra });
-const confirmedRefund = (orderId, amount, phase = "deposit") => ({ id: `prior-${orderId}`, orderId, refundAmount: amount, refundPhase: phase, financeStatus: "已审", refundStatus: "manual_refunded", status: "已完" });
+const approve = (extra = {}) => ({ action: "review", approved: true, reason: "摄影师安排前微信原路退还定金", ...extra });
+const confirmedRefund = (orderId, amount, phase = "deposit") => ({ id: `prior-${orderId}`, orderId, refundAmount: amount, refundPhase: phase, financeStatus: "已审", refundStatus: "refunded", refundConfirmed: true, status: "已完",
+  refundAttempts: [{ refundNo: `PRIOR_${orderId}`, refundId: `WX_PRIOR_${orderId}`, outTradeNo: `${orderId}-deposit-trade`, transactionId: "deposit-tx", amountFen: Math.round(amount * 100), totalFen: 3000, status: "SUCCESS", successTime: "2026-11-01T12:00:00+08:00" }] });
 
 test("pre-dispatch deposit refund cancels the order once and preserves confirmed payment evidence", async (t) => {
   const source = makeSource();
@@ -76,9 +79,10 @@ test("pre-dispatch deposit refund cancels the order once and preserves confirmed
   assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
   const saved = await source.get("orders", "booking");
   const ticket = await source.get("afterSales", "deposit-refund");
-  assert.equal(ticket.refundStatus, "manual_refunded");
+  assert.equal(ticket.refundStatus, "refunded");
   assert.equal(ticket.refundConfirmed, true);
-  assert.equal(ticket.refundTransactionId, "manual-refund-proof");
+  assert.match(ticket.refundTransactionId, /^wx-LXMR/);
+  assert.equal(source.wechatPay.refundRequests.filter((request) => request.method === "POST").length, 1);
   assert.equal(saved.status, "cancelled");
   assert.equal(saved.workflowStage, workflow.WORKFLOW_STAGES.CANCELLED);
   assert.equal(workflow.canonicalStage(saved), workflow.WORKFLOW_STAGES.CANCELLED);
@@ -90,8 +94,8 @@ test("pre-dispatch deposit refund cancels the order once and preserves confirmed
   assert.equal(saved.depositFinanceStatus, "confirmed");
   assert.deepEqual(saved.paymentRecords, paymentBefore);
   assert.equal(saved.statusLogs.filter((entry) => entry.to === "cancelled").length, 1);
-  assert.equal(Object.values(source.collections.logs).filter((entry) => entry.action === "售后review").length, 1);
-  const retry = await post("super", approve({ refundTransactionId: "different-proof" }));
+  assert.ok(Object.values(source.collections.logs).some((entry) => entry.action.includes("微信原路退款")), "approval records a traceable refund intent");
+  const retry = await post("super", approve());
   assert.equal(retry.status, 409);
   assert.deepEqual(await source.get("orders", "booking"), saved);
   const assignment = await post("super", {
@@ -103,15 +107,21 @@ test("pre-dispatch deposit refund cancels the order once and preserves confirmed
   assert.equal(payment.success, false);
 });
 
-test("pre-dispatch refund still requires external manual refund proof", async (t) => {
+test("online processing does not cancel or deduct funds; a signed query success completes the refund", async (t) => {
   const source = makeSource();
-  const beforeOrder = clone(source.collections.orders.booking);
-  const beforeTicket = clone(source.collections.afterSales["deposit-refund"]);
-  const post = await startApi(t, source);
-  const result = await post("finance", approve({ refundTransactionId: "" }));
-  assert.equal(result.status, 400);
-  assert.deepEqual(await source.get("orders", "booking"), beforeOrder);
-  assert.deepEqual(await source.get("afterSales", "deposit-refund"), beforeTicket);
+  const post = await startApi(t, source, { status: "PROCESSING" });
+  const result = await post("finance", approve());
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const pending = await source.get("afterSales", "deposit-refund");
+  assert.equal(pending.refundConfirmed, false);
+  assert.equal(pending.refundStatus, "processing");
+  assert.equal((await source.get("orders", "booking")).status, "deposit_paid");
+  for (const [key, value] of source.wechatPay.refundReplies) source.wechatPay.refundReplies.set(key, { ...value, status: "SUCCESS", success_time: new Date().toISOString() });
+  const done = await post("finance", approve());
+  assert.equal(done.status, 200, JSON.stringify(done.body));
+  assert.equal((await source.get("orders", "booking")).status, "cancelled");
+  assert.equal((await source.get("afterSales", "deposit-refund")).refundConfirmed, true);
+  assert.equal(source.wechatPay.refundRequests.filter((request) => request.method === "POST").length, 1, "query retry keeps the original refund number");
 });
 
 test("mini-program request and finance review share the pre-dispatch refund contract", async (t) => {
@@ -202,7 +212,7 @@ test("rejected deposit refund leaves the paid booking active", async (t) => {
   assert.equal((await source.get("afterSales", "deposit-refund")).refundStatus, "rejected");
 });
 
-test("refund audit failure restores both the order and ticket before retry", async (t) => {
+test("refund intent audit failure prevents any provider request before a safe retry", async (t) => {
   const source = makeSource();
   const beforePayment = clone(source.collections.orders.booking.paymentRecords);
   const create = source.create;
@@ -216,6 +226,7 @@ test("refund audit failure restores both the order and ticket before retry", asy
   assert.deepEqual(saved.paymentRecords, beforePayment);
   assert.deepEqual(saved.statusLogs, []);
   assert.equal((await source.get("afterSales", "deposit-refund")).financeStatus, "待审");
+  assert.equal(source.wechatPay.refundRequests.length, 0, "no external refund can occur before the audit intent persists");
   source.create = create;
   const retried = await post("finance", approve());
   assert.equal(retried.status, 200, JSON.stringify(retried.body));
@@ -234,6 +245,6 @@ test("service-exception refund totals stay scoped to their own order", async (t)
   assert.equal(completed.status, 200, JSON.stringify(completed.body));
   const result = await post("finance", approve());
   assert.equal(result.status, 200, JSON.stringify(result.body));
-  assert.equal((await source.get("afterSales", "deposit-refund")).refundStatus, "manual_refunded");
+  assert.equal((await source.get("afterSales", "deposit-refund")).refundStatus, "refunded");
   assert.equal((await source.get("orders", "booking")).status, "deposit_paid");
 });

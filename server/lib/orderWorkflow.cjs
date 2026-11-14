@@ -187,6 +187,7 @@ function hasCurrentPhotographerAssignment(order = {}) {
 }
 function hasCompletedShooting(order = {}) {
   return !!order.shootingCompletedAt || order.shootingCompleted === true
+    || String(order.service_status || '').trim().toLowerCase() === 'final_pending'
     || ["final_pending", "editing", "retouching", "delivered", "已交付"].includes(String(order.status || "").toLowerCase());
 }
 function hasEffectiveDispatch(order = {}) {
@@ -211,6 +212,9 @@ function refundableDepositAmount(order = {}, tickets = []) {
   const paid = confirmedDepositAmount(order);
   const refunded = (Array.isArray(tickets) ? tickets : []).reduce((sum, ticket) => {
     if (!ticket || String(ticket.orderId || "") !== idOf(order)) return sum;
+    if (Array.isArray(ticket.refundAttempts)) {
+      return sum + ticket.refundAttempts.filter((row) => row.status === "SUCCESS").reduce((amount, row) => amount + Number(row.amountFen || 0), 0) / 100;
+    }
     // Before dispatch the only confirmed funds are the deposit. Count all
     // refunds even when a legacy ticket has an incorrect phase label.
     const approved = ["已审", "approved", "passed"].includes(String(ticket.financeStatus || "").trim().toLowerCase());
@@ -227,9 +231,8 @@ function canRefundDeposit(order = {}, tickets = []) {
     && refundableDepositAmount(order, tickets) > 0;
 }
 function isDepositRefundable(order = {}) {
-  // Refunds are manual, reviewed exceptions after a confirmed deposit. A
-  // dispatch changes the review lane; it does not permanently prohibit a
-  // finance-approved refund with a reason and external transaction proof.
+  // Staff-reviewed online after-sales are separate from the customer's
+  // pre-dispatch deposit-refund action, which canRefundDeposit guards.
   return canonicalStage(order) !== WORKFLOW_STAGES.CANCELLED;
 }
 function hasActiveAfterSale(order = {}) {
@@ -252,12 +255,27 @@ function customerCancellation(order = {}) {
   if (![WORKFLOW_STAGES.AWAITING_CONFIRMATION, WORKFLOW_STAGES.AWAITING_DEPOSIT].includes(stage)) return { canCancel: false, rule: "before_service_confirmation_and_payment_intent", reason: "当前订单不支持自助取消" };
   return { canCancel: true, rule: "before_deposit_payment", reason: "" };
 }
+function serviceStatus(order = {}) {
+  return String(order.service_status || "").trim().toLowerCase();
+}
+function isCancelledOrder(order = {}) {
+  return CANCELLED_STATUSES.has(String(order.status || "").trim().toLowerCase())
+    || ["canceled", "cancelled", "refunded"].includes(serviceStatus(order))
+    || order.isDeleted || order.deleted;
+}
+function hasCompletionFact(order = {}) {
+  // The service workbench persists its own lifecycle and completion time.
+  // These are fulfillment facts; they do not imply a confirmed final payment.
+  return COMPLETED_STATUSES.has(String(order.status || "").trim().toLowerCase())
+    || !!(order.completedAt || order.done_at) || serviceStatus(order) === "done";
+}
 function canonicalStage(order = {}) {
   const status = String(order.status || "").trim().toLowerCase();
-  if (CANCELLED_STATUSES.has(status) || order.isDeleted || order.deleted) return WORKFLOW_STAGES.CANCELLED;
+  if (isCancelledOrder(order)) return WORKFLOW_STAGES.CANCELLED;
   if (order.paymentReviewRequired === true) return order.shootingStartedAt || order.shootingCompletedAt || hasDeliveryRecord(order)
     ? WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT : hasConfirmedPayment(order, "deposit") ? WORKFLOW_STAGES.AWAITING_DISPATCH : WORKFLOW_STAGES.AWAITING_DEPOSIT;
-  if (COMPLETED_STATUSES.has(status)) return WORKFLOW_STAGES.COMPLETED;
+  if (serviceStatus(order) === "final_pending" && !hasConfirmedPayment(order, "final")) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
+  if (hasCompletionFact(order)) return WORKFLOW_STAGES.COMPLETED;
   const finalSettled = hasConfirmedPayment(order, "final");
   if (finalSettled && finalDue(order) > 0) return WORKFLOW_STAGES.COMPLETED;
   // New flow is selection -> final payment -> delivery. A legacy row may have
@@ -273,7 +291,7 @@ function canonicalStage(order = {}) {
   // shooting completion. The public projection keeps it in 拍摄中 until the
   // final payment callback atomically completes the order.
   if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT;
-  if (status === "shooting" || order.shootingStartedAt) return WORKFLOW_STAGES.SHOOTING;
+  if (status === "shooting" || order.shootingStartedAt || serviceStatus(order) === "shooting") return WORKFLOW_STAGES.SHOOTING;
   if (hasCurrentPhotographerAssignment(order)) return WORKFLOW_STAGES.AWAITING_SHOOT;
   if (hasConfirmedPayment(order, "deposit")) return WORKFLOW_STAGES.AWAITING_DISPATCH;
   if (depositDue(order) <= 0) return WORKFLOW_STAGES.AWAITING_DISPATCH;
@@ -282,13 +300,14 @@ function canonicalStage(order = {}) {
 
 function businessStatusForOrder(order = {}) {
   const status = String(order.status || "").trim().toLowerCase();
-  if (CANCELLED_STATUSES.has(status) || order.isDeleted || order.deleted) return BUSINESS_STATUSES.CANCELLED;
+  if (isCancelledOrder(order)) return BUSINESS_STATUSES.CANCELLED;
   if (order.paymentReviewRequired === true) return order.shootingStartedAt || order.shootingCompletedAt || hasDeliveryRecord(order)
     ? BUSINESS_STATUSES.SHOOTING : hasConfirmedPayment(order, "deposit") ? BUSINESS_STATUSES.BOOKED : BUSINESS_STATUSES.PENDING_PAYMENT;
-  if (COMPLETED_STATUSES.has(status) || order.completedAt) return BUSINESS_STATUSES.COMPLETED;
+  if (serviceStatus(order) === "final_pending" && !hasConfirmedPayment(order, "final")) return BUSINESS_STATUSES.SHOOTING;
+  if (hasCompletionFact(order)) return BUSINESS_STATUSES.COMPLETED;
   const finalSettled = hasConfirmedPayment(order, "final");
   if (finalSettled && (finalDue(order) > 0 || selectionConfirmed(order))) return BUSINESS_STATUSES.COMPLETED;
-  if (order.shootingStartedAt || status === "shooting") return BUSINESS_STATUSES.SHOOTING;
+  if (order.shootingStartedAt || status === "shooting" || serviceStatus(order) === "shooting") return BUSINESS_STATUSES.SHOOTING;
   if (order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(status)) return BUSINESS_STATUSES.SHOOTING;
   if (hasCurrentPhotographerAssignment(order)) return BUSINESS_STATUSES.AWAITING_SHOOT;
   if (hasConfirmedPayment(order, "deposit") || depositDue(order) <= 0) return BUSINESS_STATUSES.BOOKED;
@@ -321,9 +340,10 @@ function customerStatusForStage(stage) {
 // publicStatus/publicStatusText (and businessStatus aliases above).
 function legacyBusinessStatusForOrder(order = {}) {
   const status = String(order.status || "").trim().toLowerCase();
-  if (CANCELLED_STATUSES.has(status) || order.isDeleted || order.deleted) return "cancelled";
+  if (isCancelledOrder(order)) return "cancelled";
   if (hasActiveAfterSale(order)) return "after_sale";
-  if (COMPLETED_STATUSES.has(status) || order.completedAt) return "delivered";
+  if (serviceStatus(order) === "final_pending" && !hasConfirmedPayment(order, "final")) return "shot";
+  if (hasCompletionFact(order)) return "delivered";
   if (hasDeliveryRecord(order) && hasConfirmedPayment(order, "final")) return "delivered";
   if (hasConfirmedPayment(order, "final")) return "paid";
   if (order.shootingCompletedAt || order.shootingStartedAt || status === "shooting") return "shot";
@@ -422,7 +442,13 @@ function publicOrderProjection(order = {}, options = {}) {
     if (latest && normalizePaymentStatus(latest.status) === "pending" && !hasIntentIdentity(latest)) return "not_created";
     if (latest) return normalizePaymentStatus(latest.status);
     const statusField = phase === "deposit" ? order.depositFinanceStatus : order.finalFinanceStatus;
-    if (statusField) return normalizePaymentStatus(statusField);
+    if (statusField) {
+      const status = normalizePaymentStatus(statusField);
+      const paid = roundMoney(phase === "deposit" ? order.depositPaid : order.finalPaid);
+      // Finance defaults can be pending before a payment exists. Only a
+      // registered amount or a real intent should expose a pending payment.
+      if (status !== "pending" || paid > 0) return status;
+    }
     const due = phase === "deposit" ? depositDue(order) : finalDue(order);
     return due <= 0 ? "not_required" : "not_created";
   };

@@ -1,237 +1,127 @@
-// 小程序装修预览页：所有数据/计算由 12-content-edit.js + 14-page-config.js 暴露的 ctx 字段提供；
-// setup 只做字段透传和装修页的轻量交互辅助；持久化仍由 saveHomeConfig 统一完成。
 window.LXM_PAGES.register({
-  key: "miniDecor",
-  component: "LxmPageMiniDecor",
-  group: "operationConfig",
-  title: "小程序装修预览",
-  description: "后台内部装修预览",
-  styleScope: "page-route-mini-decor",
+  key: "miniDecor", component: "LxmPageMiniDecor", group: "operationConfig",
+  title: "小程序轮播配置", description: "首页和探索页轮播素材及点击跳转", styleScope: "page-route-mini-decor",
   setup(ctx) {
-    // 把 ctx 上所有需要的字段都解构出来
-    const {
-      // 通用
-      state, data, log, money, statusMeta, switchMenu, can, ElMessage,
-      // 12-content-edit.js
-      toggleHomeModule, toggleHomeSelection, saveHomeConfig, exportHomeConfigJson, uploadHomeMaterial,
-      // 14-page-config.js
-      publicMiniPreview, miniPreviewPages, miniPreviewCurrentPage, miniPreviewCurrentPackage,
-      miniPreviewCurrentSeries, miniPreviewCurrentAlbum, miniPreviewCurrentOrder,
-      miniPreviewSeriesAlbums, miniPreviewAlbumSamples,
-      miniPreviewReset, miniPreviewGo, miniPreviewBack,
-      pageConfigPages, selectPageConfig, togglePageModule, togglePageRelation, movePageRelation, removePageRelation,
-      activePageConfig, activePageConfigMeta, activePageModuleOptions, activePageRelationGroups,
-      homeModuleOptions: configuredHomeModuleOptions,
-      // scopedOrders 等
-      scopedOrders
-    } = ctx;
-
-    // Reuse the canonical module keys from 14-page-config.js.  The old local
-    // labels (packages/albums/...) were not understood by buildMiniProgramHomeConfig.
-    const homeModuleOptions = Array.isArray(configuredHomeModuleOptions)
-      ? configuredHomeModuleOptions
-      : [
-        { key: "mainPush", label: "主推套餐", desc: "展示跨全部打卡点的主推套餐" },
-        { key: "spots", label: "热门打卡", desc: "展示城市核心拍摄地点" },
-        { key: "albums", label: "照片单品", desc: "展示可预约的照片单品商品" },
-        { key: "videoProducts", label: "城市短视频", desc: "展示短视频商品" },
-        { key: "peripherals", label: "摄影周边", desc: "展示旅拍周边商品" },
-        { key: "guides", label: "攻略故事", desc: "展示攻略和城市故事内容" }
-      ];
-
-    const quickNavPresets = [
-      { targetType: "all_spots", label: "打卡点" },
-      { targetType: "package_list", label: "旅拍套餐" },
-      { targetType: "videos", label: "视频摄像" },
-      { targetType: "peripherals", label: "影像周边" },
-      { targetType: "guides", label: "旅拍灵感" },
-      { targetType: "my", label: "我的订单" }
+    const { state, data, can, ElMessage, validateMediaUrl } = ctx;
+    const { computed, ref, watch } = window.Vue;
+    const activePage = ref("home"), previewIndex = ref(0), saving = ref(false);
+    const pages = [{ key: "home", field: "homeBanners", label: "首页轮播" }, { key: "explore", field: "exploreBanners", label: "探索页轮播" }];
+    const currentPage = computed(() => pages.find(page => page.key === activePage.value) || pages[0]);
+    const idOf = row => String(row && (row.id || row._id) || "");
+    const nameOf = row => row ? (row.name || row.title || "未命名") : "";
+    const visible = row => {
+      if (!row) return false;
+      const enabled = typeof ctx.contentEffectiveVisible === "function" ? ctx.contentEffectiveVisible(row)
+        : !row.deleted && !row.isDeleted && row.isShow !== false && !["草稿", "下架", "停用"].includes(row.status);
+      const audit = String(row.auditStatus || row.reviewStatus || "").trim().toLowerCase();
+      return enabled && (!audit || ["approved", "pass", "passed", "published", "online", "已上", "已上架", "审核通过", "通过"].includes(audit));
+    };
+    const isVideo = row => [row.type, row.mediaType, row.productType, row.serviceType, row.productKind].some(value => /video|视频/.test(String(value || "").toLowerCase()));
+    const isVideoSingle = row => typeof ctx.isVideoSingleProduct === "function" ? ctx.isVideoSingleProduct(row)
+      : isVideo(row) && (row.isVideoSingle === true || row.productKind === "video_single");
+    // Import old sample selections into the editable list; explicit empty lists stay empty.
+    function importLegacySamples() {
+      const config = state.homeConfig;
+      if (!config || config.bannerConfigVersion || (config.homeBanners || []).length || !(config.carouselIds || []).length) return;
+      const samples = config.carouselIds.map(id => (data.samples || []).find(row => idOf(row) === String(id)))
+        .filter(row => visible(row) && (row.url || row.cover)).slice(0, 6);
+      if (!samples.length) return;
+      config.homeBanners = samples.map(row => ({ _id: idOf(row), type: isVideo(row) ? "video" : "image",
+        url: row.url || row.cover, cover: row.cover || row.poster || "", targetType: row.targetType || "none", targetId: row.targetId || "" }));
+      config.carouselIds = [];
+    }
+    watch(() => [state.homeConfig, data.samples], importLegacySamples, { immediate: true });
+    const banners = computed(() => state.homeConfig[currentPage.value.field] || []);
+    const previewBanner = computed(() => banners.value[Math.min(previewIndex.value, banners.value.length - 1)] || null);
+    watch(activePage, () => { previewIndex.value = 0; });
+    const jumpPresets = [
+      { value: "none", label: "不跳转" }, { value: "package", label: "旅拍套餐详情" },
+      { value: "album", label: "照片留影详情" }, { value: "video", label: "视频摄像详情" },
+      { value: "peripheral", label: "影像周边商品" }, { value: "guide", label: "旅拍灵感详情" },
+      { value: "guides", label: "旅拍灵感列表" }, { value: "external", label: "外部链接页" },
+      { value: "spot", label: "打卡点详情" }, { value: "package_list", label: "旅拍套餐搜索" },
+      { value: "photo_list", label: "照片留影搜索" }, { value: "explore", label: "探索地图" },
+      { value: "booking", label: "预约填写" }, { value: "my", label: "我的" }
     ];
-
-    const homeBannerJumpPresets = [
-      { value: "none", label: "不跳转" },
-      { value: "package", label: "套餐详情" },
-      { value: "album", label: "照片单品" },
-      { value: "video", label: "短视频" },
-      { value: "spot", label: "打卡点" },
-      { value: "peripheral", label: "摄影周边" },
-      { value: "guide", label: "攻略" },
-      { value: "link", label: "外部链接" }
-    ];
-    const exploreBannerJumpPresets = homeBannerJumpPresets;
-
-    function notify(type, message) {
+    const bannerTargetNeedsId = banner => ["package", "album", "video", "spot", "peripheral", "guide"].includes(banner.targetType);
+    function bannerTargetRows(banner) {
+      const rows = ({ package: (data.packages || []).filter(row => visible(row) && !isVideo(row) && !isVideoSingle(row)),
+        album: (data.albums || []).filter(visible), video: (data.packages || []).filter(row => visible(row) && isVideoSingle(row)),
+        spot: (data.spots || []).filter(visible), peripheral: (data.peripherals || []).filter(visible), guide: (data.guides || []).filter(visible) })[banner.targetType] || [];
+      if (banner.targetId && !rows.some(row => idOf(row) === String(banner.targetId))) return [{ id: banner.targetId, name: "当前目标不可用（请重新选择）", unavailable: true }, ...rows];
+      return rows;
+    }
+    function changeBannerTarget(banner) {
+      banner.targetId = ""; banner.linkUrl = "";
+      for (const key of ["linkId", "jumpId", "linkType", "jumpType", "jumpUrl", "targetUrl", "path", "pagePath"]) delete banner[key];
+    }
+    function externalBannerUrl(value) {
+      const url = String(value || "").trim();
+      if (!/^https:\/\//i.test(url) || /[\s\\<>"'\u0000-\u001f\u007f]/.test(url)) return "";
       try {
-        if (ElMessage && typeof ElMessage[type] === "function") ElMessage[type](message);
-        else if (ElMessage) ElMessage(message);
-      } catch (_) {}
+        const parsed = new URL(url);
+        const validHost = parsed.hostname.length <= 253 && parsed.hostname.split(".")
+          .every(label => /^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/i.test(label));
+        return validHost && !parsed.username && !parsed.password && parsed.port !== "0" ? parsed.href : "";
+      } catch (_) { return ""; }
     }
-
-    function pageConfigValue() {
-      if (activePageConfig && (activePageConfig.__v_isRef || Object.prototype.hasOwnProperty.call(activePageConfig, "value"))) return activePageConfig.value || {};
-      return activePageConfig || {};
+    function jumpLabel(banner) {
+      if (!banner) return "";
+      const preset = jumpPresets.find(item => item.value === banner.targetType);
+      if (!preset) return "不跳转";
+      if (banner.targetType === "external") return preset.label + " · " + (banner.linkUrl || "请填写链接地址");
+      const target = bannerTargetRows(banner).find(row => idOf(row) === String(banner.targetId));
+      return preset.label + (bannerTargetNeedsId(banner) ? " · " + (target ? nameOf(target) : "请选择目标") : "");
     }
-
-    function pageRelationName(id) {
-      const row = (publicMiniPreview && publicMiniPreview.value ? publicMiniPreview.value.samples : []).find((item) => String(item.id || item._id) === String(id));
-      return row ? (row.name || row.title || row.id) : String(id || "未命名样片");
+    function addBanner() {
+      if (!can("contentEdit")) return;
+      const list = state.homeConfig[currentPage.value.field] || (state.homeConfig[currentPage.value.field] = []);
+      if (list.length >= 6) return ElMessage.warning("每个页面最多配置 6 张轮播");
+      list.push({ _id: currentPage.value.key + "-" + Date.now() + "-" + list.length, type: "image", mediaType: "image", url: "", cover: "", targetType: "none", targetId: "", linkUrl: "" });
+      previewIndex.value = list.length - 1;
     }
-
-    function quickNavPreviewPage(item) {
-      const key = String(item && (item.targetType || item.type || "") || "").trim().toLowerCase();
-      return ({
-        all_spots: "spotList", spots: "spotList", spot: "spotList", spot_list: "spotList",
-        package_list: "packageList", packages: "packageList", package: "packageDetail",
-        albums: "albumDetail", album: "albumDetail", videos: "videoList", videosingles: "videoList",
-        video: "videoDetail", peripherals: "peripherals", guides: "guides", my: "my"
-      })[key] || "home";
+    function moveBanner(index, delta) {
+      if (!can("contentEdit")) return;
+      const list = banners.value, next = index + delta;
+      if (index < 0 || index >= list.length || next < 0 || next >= list.length) return;
+      [list[index], list[next]] = [list[next], list[index]]; previewIndex.value = next;
     }
-
-    function updateQuickNavLabel(index, value) {
-      const list = state.homeConfig && Array.isArray(state.homeConfig.quickNav) ? state.homeConfig.quickNav : [];
-      if (!list[index]) return;
-      list[index].label = String(value == null ? "" : value);
+    function removeBanner(index) {
+      if (!can("contentEdit") || index < 0 || index >= banners.value.length) return;
+      banners.value.splice(index, 1); previewIndex.value = Math.max(0, Math.min(previewIndex.value, banners.value.length - 1));
     }
-
-    function removeQuickNav(index) {
-      const list = state.homeConfig && Array.isArray(state.homeConfig.quickNav) ? state.homeConfig.quickNav : [];
-      if (index >= 0 && index < list.length) list.splice(index, 1);
-    }
-
-    function firstHomeBanner() {
-      const list = (state.homeConfig && state.homeConfig.homeBanners) || [];
-      return list[0] || null;
-    }
-
-    function addHomeBanner() {
-      const c = state.homeConfig || (state.homeConfig = {});
-      c.homeBanners = c.homeBanners || [];
-      c.homeBanners.push({
-        _id: "b" + Date.now(),
-        title: "新首页 Banner",
-        type: "image",
-        mediaType: "image",
-        url: "",
-        cover: "",
-        targetType: "none",
-        targetId: "",
-        linkUrl: ""
-      });
-    }
-
-    function addExploreBanner() {
-      const c = state.homeConfig || (state.homeConfig = {});
-      c.exploreBanners = c.exploreBanners || [];
-      c.exploreBanners.push({
-        _id: "eb" + Date.now(),
-        title: "新探索页 Banner",
-        type: "image",
-        mediaType: "image",
-        url: "",
-        cover: "",
-        targetType: "none",
-        targetId: "",
-        linkUrl: ""
-      });
-    }
-
-    function moveHomeBanner(i, delta) {
-      const list = (state.homeConfig && state.homeConfig.homeBanners) || [];
-      const j = i + delta;
-      if (j < 0 || j >= list.length) return;
-      const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
-    }
-
-    function moveExploreBanner(i, delta) {
-      const list = (state.homeConfig && state.homeConfig.exploreBanners) || [];
-      const j = i + delta;
-      if (j < 0 || j >= list.length) return;
-      const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
-    }
-
-    function addQuickNav(targetType) {
-      const c = state.homeConfig || (state.homeConfig = {});
-      c.quickNav = c.quickNav || [];
-      c.quickNav.push({ targetType, label: targetType });
-    }
-
-    function moveQuickNav(i, delta) {
-      const list = (state.homeConfig && state.homeConfig.quickNav) || [];
-      const j = i + delta;
-      if (j < 0 || j >= list.length) return;
-      const tmp = list[i]; list[i] = list[j]; list[j] = tmp;
-    }
-
-    function removeHomeBanner(index) {
-      const list = (state.homeConfig && state.homeConfig.homeBanners) || [];
-      if (index >= 0 && index < list.length) list.splice(index, 1);
-    }
-
-    function removeExploreBanner(index) {
-      const list = (state.homeConfig && state.homeConfig.exploreBanners) || [];
-      if (index >= 0 && index < list.length) list.splice(index, 1);
-    }
-
-    function pickBannerMedia(collection, index, mediaType) {
-      const banner = state.homeConfig?.[collection]?.[index];
-      if (!banner || !can('contentEdit')) return;
-      window.LXM_UPLOAD.pick({ purpose: 'content', collection: 'homeConfig', recordId: 'homeStats',
-        imagesOnly: mediaType !== 'video', videoOnly: mediaType === 'video',
+    function uploadBannerMedia(index, mediaType) {
+      const banner = banners.value[index];
+      if (!banner || !can("contentEdit")) return;
+      window.LXM_UPLOAD.pick({ purpose: "content", collection: "homeConfig", recordId: "homeStats",
+        imagesOnly: mediaType !== "video", videoOnly: mediaType === "video",
         onUploaded(file) {
-          if (mediaType === 'cover') { banner.cover = file.url; return; }
+          if (mediaType === "cover") { banner.cover = file.url; return; }
           banner.type = mediaType; banner.mediaType = mediaType; banner.url = file.url;
-          if (mediaType === 'image') banner.cover = file.url;
+          banner.cover = mediaType === "image" ? file.url : "";
         }
       });
     }
-
-    function uploadHomeBannerMedia(index, mediaType) {
-      pickBannerMedia("homeBanners", index, mediaType);
+    async function saveBanners() {
+      if (!can("contentEdit") || saving.value) return;
+      for (const page of pages) for (const [index, banner] of (state.homeConfig[page.field] || []).entries()) {
+        if (!String(banner.url || "").trim()) return ElMessage.warning(`${page.label}第 ${index + 1} 张请上传素材或删除空轮播`);
+        if (banner.targetType === "external" && !externalBannerUrl(banner.linkUrl)) {
+          return ElMessage.warning(`${page.label}第 ${index + 1} 张请填写有效的 HTTPS 外部链接`);
+        }
+        if (bannerTargetNeedsId(banner)) {
+          const target = bannerTargetRows(banner).find(row => idOf(row) === String(banner.targetId));
+          if (!target || target.unavailable) return ElMessage.warning(`${page.label}第 ${index + 1} 张请选择有效的跳转目标`);
+        }
+      }
+      for (const page of pages) for (const banner of state.homeConfig[page.field] || []) {
+        if (banner.targetType === "external") banner.linkUrl = externalBannerUrl(banner.linkUrl);
+      }
+      saving.value = true;
+      try { return await ctx.saveHomeConfig(); } finally { saving.value = false; }
     }
-
-    function uploadExploreBannerMedia(index, mediaType) {
-      pickBannerMedia("exploreBanners", index, mediaType);
-    }
-
-    function addSpotCategory() {
-      const config = pageConfigValue();
-      if (!Array.isArray(config.categories)) config.categories = [];
-      config.categories.push({ name: "新筛选标签", value: "" });
-    }
-
-    function removeSpotCategory(index) {
-      const config = pageConfigValue();
-      if (index > 0 && Array.isArray(config.categories)) config.categories.splice(index, 1);
-    }
-
-    function addSpotSort() {
-      const config = pageConfigValue();
-      if (!Array.isArray(config.sortOptions)) config.sortOptions = [];
-      config.sortOptions.push({ name: "新排序", value: "name" });
-    }
-
-    function removeSpotSort(index) {
-      const config = pageConfigValue();
-      if (index >= 0 && Array.isArray(config.sortOptions)) config.sortOptions.splice(index, 1);
-    }
-
-    return {
-      // 通用
-      state, data, log, money, statusMeta, switchMenu, can,
-      // 12 / 14 模块暴露的
-      toggleHomeModule, toggleHomeSelection, saveHomeConfig, exportHomeConfigJson, uploadHomeMaterial,
-      publicMiniPreview, miniPreviewPages, miniPreviewCurrentPage, miniPreviewCurrentPackage,
-      miniPreviewCurrentSeries, miniPreviewCurrentAlbum, miniPreviewCurrentOrder,
-      miniPreviewSeriesAlbums, miniPreviewAlbumSamples,
-      miniPreviewReset, miniPreviewGo, miniPreviewBack,
-      pageConfigPages, selectPageConfig, togglePageModule, togglePageRelation, movePageRelation, removePageRelation,
-      activePageConfig, activePageConfigMeta, activePageModuleOptions, activePageRelationGroups,
-      scopedOrders,
-      homeModuleOptions, quickNavPresets, homeBannerJumpPresets, exploreBannerJumpPresets,
-      firstHomeBanner, quickNavPreviewPage, updateQuickNavLabel, removeQuickNav,
-      addHomeBanner, addExploreBanner, moveHomeBanner, moveExploreBanner, pageRelationName,
-      removeHomeBanner, removeExploreBanner, uploadHomeBannerMedia, uploadExploreBannerMedia,
-      addQuickNav, moveQuickNav, addSpotCategory, removeSpotCategory, addSpotSort, removeSpotSort
-    };
+    return { state, can, validateMediaUrl, activePage, pages, currentPage, banners, previewIndex, previewBanner, saving,
+      idOf, nameOf, jumpPresets, bannerTargetNeedsId, bannerTargetRows, changeBannerTarget, jumpLabel,
+      addBanner, moveBanner, removeBanner, uploadBannerMedia, saveBanners };
   }
 });

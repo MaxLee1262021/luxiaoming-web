@@ -22,31 +22,6 @@
   };
   const roleLabel = (key, fallback = "未命名角色") => window.LXM_CONFIG?.roles?.[key]?.name || fallback;
 
-  function fallbackMenus() {
-    return (window.LXM_CONFIG?.menus || []).map((item, index) => ({
-      id: item.key,
-      key: item.key,
-      name: item.label,
-      label: item.label,
-      parentId: item.parentId ?? item.parentKey ?? "",
-      parentKey: item.parentKey ?? item.parentId ?? "",
-      group: item.group || "",
-      sort: item.sort === undefined ? index + 1 : item.sort,
-      status: item.status || "启用"
-    }));
-  }
-
-  function fallbackRoles() {
-    return Object.entries(window.LXM_CONFIG?.roles || {}).map(([key, item]) => ({
-      id: key,
-      key,
-      name: item.name || key,
-      description: item.description || `${item.name || key}可访问的后台角色`,
-      menus: unique(item.menus),
-      status: item.status || "启用"
-    }));
-  }
-
   function defaultUser() {
     return { id: "", name: "", account: "", phone: "", email: "", role: "service", status: "启用", password: "" };
   }
@@ -60,8 +35,8 @@
     const readOnly = computed(() => state.role !== "super");
     const canWrite = computed(() => !readOnly.value);
     const isAdminAccount = computed(() => text(state.currentAccount).trim().toLowerCase() === "admin");
-    const menuRows = ref(fallbackMenus());
-    const roleRows = ref(fallbackRoles());
+    const menuRows = ref([]);
+    const roleRows = ref([]);
     const userRows = ref([]);
     const menuQuery = reactive({ keyword: "", level: "", status: "", group: "" });
     const menuFilters = reactive({ keyword: "", level: "", status: "", group: "" });
@@ -78,6 +53,12 @@
     const menuLevel = ref("一级菜单");
     const roleForm = reactive({ id: "", key: "", name: "", description: "", menus: [], status: "启用" });
     const userForm = reactive(defaultUser());
+    const isNewPhotoUser = computed(() => {
+      if (userForm.id) return false;
+      const selected = roleRows.value.find(row => [row.id, row.key, row.roleKey, row.code].some(value => value != null && text(value) === text(userForm.role)));
+      return ["photo", "photographer"].includes(text(selected?.roleKey || selected?.key || selected?.code || userForm.role).trim().toLowerCase());
+    });
+    const canCreatePhotoUser = computed(() => ["super", "admin", "administrator"].includes(text(state.role).trim().toLowerCase()));
     const userPhoneError = ref("");
     const passwordForm = reactive({ id: "", account: "", name: "", password: "" });
 
@@ -259,32 +240,31 @@
       }));
     }
 
-    function setRows(target, rows, fallback, useFallback = false, prefix = "permission") {
-      target.value = useFallback ? normalizeRows(fallback(), prefix) : normalizeRows(rows, prefix);
+    function setRows(target, rows, prefix = "permission") {
+      target.value = normalizeRows(rows, prefix);
     }
 
-    async function loadCollection(key, target, fallback) {
+    async function loadCollection(key, target) {
       const loader = key === MENU_COLLECTION ? window.LXM_PERMISSIONS?.menus
         : key === ROLE_COLLECTION ? window.LXM_PERMISSIONS?.roles
           : window.LXM_PERMISSIONS?.users;
       if (typeof loader !== "function" || !window.LXM_AUTH?.hasSession?.()) {
-        setRows(target, [], fallback, false, key);
+        setRows(target, [], key);
         return false;
       }
       try {
-        setRows(target, await loader(), fallback, false, key);
+        setRows(target, await loader(), key);
         return true;
       } catch (error) {
         console.warn(`[permissions] load ${key} failed`, error);
-        // An authenticated page must never substitute bundled demo rows for a
-        // denied or unavailable permission service.
-        setRows(target, [], fallback, false, key);
+        // Failed or denied requests keep the table empty.
+        setRows(target, [], key);
         return false;
       }
     }
 
     async function loadUsers() {
-      await loadCollection(USER_COLLECTION, userRows, () => data?.staff || []);
+      await loadCollection(USER_COLLECTION, userRows);
     }
 
     function syncMenuDefinitions(rows) {
@@ -317,8 +297,8 @@
       loading.value = true;
       try {
         const [menusLoaded] = await Promise.all([
-          loadCollection(MENU_COLLECTION, menuRows, fallbackMenus),
-          loadCollection(ROLE_COLLECTION, roleRows, fallbackRoles),
+          loadCollection(MENU_COLLECTION, menuRows),
+          loadCollection(ROLE_COLLECTION, roleRows),
           loadUsers()
         ]);
         if (menusLoaded) syncMenuDefinitions(menuRows.value);
@@ -527,6 +507,7 @@
     function userRoleName(row) { return roleLabel(row.role, row.roleName || row.role); }
 
     async function saveUser() {
+      if (isNewPhotoUser.value) return ElMessage.warning("摄影师请通过“摄影师分成管理 → 新增摄影师”创建，档案和登录账号会同时保存并绑定 PH 编号");
       if (!ensureWriteAccess() || !userForm.name.trim() || !userForm.account.trim() || !userForm.role) return ElMessage.warning("请填写姓名、登录账号并选择角色");
       if (!userForm.id && !userForm.password) return ElMessage.warning("新增人员必须设置登录密码");
       if (!validateUserPhone()) return ElMessage.warning(userPhoneError.value);
@@ -544,6 +525,13 @@
       } finally {
         saving.value = false;
       }
+    }
+
+    async function goToPhotoCreate() {
+      if (!isNewPhotoUser.value) return;
+      if (!canCreatePhotoUser.value || typeof ctx.switchMenu !== "function") return ElMessage.warning("请联系管理员通过“摄影师分成管理 → 新增摄影师”创建账号");
+      await ctx.switchMenu("photoNew");
+      if (state.active === "photoParty") { userDialog.value = false; userForm.password = ""; }
     }
 
     async function toggleUser(row) {
@@ -578,7 +566,7 @@
       activeTab, loading, saving, readOnly, canWrite, isAdminAccount, menuRows, roleRows, userRows,
       menuQuery, roleQuery, userQuery, filteredMenus, filteredRoles, filteredUsers, selectedRole,
       menuGroupOptions, menuOptions, routeOptions, activeMenuCount, activeRoleCount, menuForm, menuLevel, menuLevelLabel, roleForm, userForm, passwordForm,
-      userPhoneError,
+      userPhoneError, isNewPhotoUser, canCreatePhotoUser, goToPhotoCreate,
       menuDialog, roleDialog, userDialog, passwordDialog, selectedRoleId,
       applyMenuFilters, resetMenuFilters, selectMenuGroup, applyRoleFilters, resetRoleFilters, applyUserFilters, resetUserFilters,
       validateUserPhone, onUserPhoneInput, copyText, goPermissionTab, showPermissionPrinciple,

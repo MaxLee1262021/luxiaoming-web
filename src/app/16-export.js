@@ -60,7 +60,7 @@ const exportOptions = computed(() => {
     { key: "convertedOrders", menu: "dashboard", name: "扫码转化订单", desc: "导出由扫码产生的预约订单、成交额、已收和待收。", rows: scopedOrders.value.filter((o) => scopedScans.value.some((s) => s.orderId === o.id)).length, roles: ["super", "agent", "distributor", "merchant", "service", "finance"] },
     { key: "orderDetail", menu: "orders", name: "订单明细报表", desc: "导出当前筛选范围内全部订单明细。", rows: scopedOrders.value.length, roles: ["super", "agent", "distributor", "merchant", "service", "finance"] },
     { key: "taskOrders", menu: "tasks", name: "我的任务报表", desc: "导出当前摄影师账号可见的拍摄任务、预约时间、订单状态和售后标识。", rows: taskOrders.value.length, roles: ["photo"] },
-    { key: "shopRank", menu: "shops", name: "商家来源排行", desc: "导出商家扫码、订单、成交额排行。", rows: shopRank.value.length, roles: ["super", "agent", "distributor"] },
+    { key: "shopRank", menu: "dashboard", name: "商家分成归属排行", desc: "导出已授权商家的有效码扫码、归属订单与已入账分成净额。", rows: shopRank.value.length, roles: ["super", "finance", "service"] },
     { key: "cityRank", menu: "dashboard", name: "城市排行报表", desc: "导出各城市商家数、订单数、成交额。", rows: cityRank.value.length, roles: ["super", "agent"] },
     { key: "financeReview", menu: "financeReview", name: "财务审核报表", desc: "导出预约定金、收尾款、退款审核明细和审核状态。", rows: financeReviewRows.value.length, roles: ["super", "finance"] },
     { key: "reconciliationPlatform", menu: "reconciliation", name: "全平台月度汇总表", desc: "仅超管/财务可导出，包含全量订单、分账、退款、冲正、结算数据。", rows: scopedOrders.value.length + visibleReconciliationSettlementRows.value.length + adjustmentRecordRows.value.length, roles: ["super", "finance"] },
@@ -130,6 +130,9 @@ function selectedReconciliationExportSummaryRows() {
   const orders = selectedReconciliationExportOrders();
   const accruedAmount = rows.reduce((sum, row) => sum + Number(row.commission || row.performanceAmount || 0), 0);
   const settledAmount = transfers.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const payableAccrued = rows.filter((row) => row.type !== "shop").reduce((sum, row) => sum + Number(row.commission || row.performanceAmount || 0), 0);
+  const payableSettled = transfers.filter((row) => !["shop", "merchant", "商家"].includes(row.type || row.objectType)).reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const merchantLedgerAmount = rows.filter((row) => row.type === "shop").reduce((sum, row) => sum + Number(row.commission ?? 0), 0);
   const netAmount = rows.reduce((sum, row) => sum + Number(row.amount || row.completedAmount || 0), 0);
   return [
     { "指标": "核对对象数量", "金额": "", "数量": rows.length, "说明": "当前导出范围内的结算主体或客服业绩对象数" },
@@ -137,7 +140,8 @@ function selectedReconciliationExportSummaryRows() {
     { "指标": "入池净", "金额": netAmount, "数量": "", "说明": "满足入池条件后的净额；客服口径展示经手已完成净" },
     { "指标": "应计分成/业绩", "金额": accruedAmount, "数量": "", "说明": "商家、分销员、摄影师为应计分成；客服仅为经手业绩" },
     { "指标": "已确认结", "金额": settledAmount, "数量": transfers.length, "说明": "已生成结算台账的实结分成金额" },
-    { "指标": "待确认结", "金额": Math.max(accruedAmount - settledAmount, 0), "数量": "", "说明": "应计金额 - 已确认结算金" },
+    { "指标": "商家已入账分成", "金额": merchantLedgerAmount, "数量": "", "说明": "新分成账本只读金额，本期不结算，不计入待确认结算" },
+    { "指标": "待确认结", "金额": Math.max(payableAccrued - payableSettled, 0), "数量": "", "说明": "非商家主体应计金额 - 对应已确认结算金额" },
   ];
 }
 const exportPreviewRowsCount = computed(() => {
@@ -217,7 +221,7 @@ function settlementExportRow(row) {
     "主体名称": row.name || row.objectName,
     "入池净": Number(row.amount || 0),
     "分成比例": row.rateText || (row.rateValue !== undefined ? `${row.rateValue}%` : ""),
-    "应计金额": Number(row.commission || row.amount || 0),
+    "应计金额": row.ledgerReadOnly ? Number(row.commission ?? 0) : Number(row.commission || row.amount || 0),
     "结算周期": row.settlementCycle || "",
     "结算范围": row.settlementPeriod || row.period || "",
     "结算状": row.transferStatus || row.status || "",
@@ -243,12 +247,12 @@ function servicePerformanceExportRow(row) {
 function reconciliationCompositeExportRows(includePlatform = false) {
   const rows = [];
   rows.push({ "报表模块": "业务汇总", "主体类型": "汇总", "主体名称": "实际可分账净额", "金额": reconciliationSummary.value.eligibleAmount, "数量": reconciliationSummary.value.eligibleOrders, "说明": "全部入池条件通过后的订单实收基数合计" });
-  rows.push({ "报表模块": "业务汇总", "主体类型": "汇总", "主体名称": "总部收入", "金额": reconciliationSummary.value.headquarterAmount, "数量": "", "说明": "实际可分账净额 - 商家应计 - 分销应计 - 摄影应计" });
+  rows.push({ "报表模块": "业务汇总", "主体类型": "汇总", "主体名称": "总部收入", "金额": reconciliationSummary.value.headquarterAmount, "数量": "", "说明": "需合并摄影师独立账本核对，当前报表不推算总部收入" });
   visibleReconciliationSettlementRows.value.forEach((row) => rows.push({
     "报表模块": "分账应计明细",
     "主体类型": row.typeName,
     "主体名称": row.name,
-    "金额": Number(row.commission || row.settlementAmount || row.amount || 0),
+    "金额": row.ledgerReadOnly ? Number(row.commission ?? 0) : Number(row.commission || row.settlementAmount || row.amount || 0),
     "数量": row.orders || row.orderCount || 0,
     "分成比例": row.rateText || "-",
     "结算周期": row.settlementCycle,
@@ -268,7 +272,7 @@ function reconciliationWorkbookSheets(includePlatform = false) {
     { "指标": "本月订单总额", "金额": reconciliationSummary.value.totalAmount, "数量": reconciliationSummary.value.totalOrders, "说明": "筛选范围内订单原始成交金额合计" },
     { "指标": "实际可分账净额", "金额": reconciliationSummary.value.eligibleAmount, "数量": reconciliationSummary.value.eligibleOrders, "说明": "全部入池条件通过后的订单实收基数合计" },
     { "指标": "预计可入分账池", "金额": reconciliationSummary.value.estimatedAmount, "数量": reconciliationSummary.value.estimatedOrders, "说明": "预算参考，不允许直接结算" },
-    { "指标": "总部收入", "金额": reconciliationSummary.value.headquarterAmount, "数量": "", "说明": "实际可分账净额 - 商家应计 - 分销应计 - 摄影应计" },
+    { "指标": "总部收入", "金额": reconciliationSummary.value.headquarterAmount, "数量": "", "说明": "需合并摄影师独立账本核对，当前报表不推算总部收入" },
   ];
   return [
     { name: "业务汇总", headers: ["指标", "金额", "数量", "说明"], rows: summaryRows },
@@ -290,6 +294,7 @@ function reconciliationPersonalWorkbookSheets() {
   ];
 }
 function exportRowsForOption(key) {
+  if (key === "shopRank") return { headers: ["商家ID", "商家", "当前有效码扫码（门店累计）", "有效绑定人数（门店累计）", "归属订单", "已入账分成净额"], rows: shopRank.value.map((row) => ({ "商家ID": row.id, "商家": row.name, "当前有效码扫码（门店累计）": row.scanCount, "有效绑定人数（门店累计）": row.boundUsers, "归属订单": row.orderCount, "已入账分成净额": row.totalAmount })) };
   if (key === "reconciliation" || key === "reconciliationPlatform") return { headers: ["报表模块", "主体类型", "主体名称", "金额", "数量", "分成比例", "结算周期", "结算范围", "结算状态", "说明"], rows: reconciliationCompositeExportRows(key === "reconciliationPlatform"), sheets: reconciliationWorkbookSheets(key === "reconciliationPlatform") };
   if (key === "reconciliationPersonal") {
     const rows = selectedReconciliationExportRows();
@@ -317,6 +322,7 @@ function openExportDialog(defaultType = "") {
 function confirmExport() {
   const option = selectedExportOption.value;
   if (!option) return ElMessage.warning("当前角色暂无可导出的报表");
+  if ((["shopRank", "reconciliation", "reconciliationPlatform", "dashboardSummary"].includes(option.key) || option.key === "reconciliationPersonal" && state.exportTargetType === "shop") && !ctx.shareAnalytics?.ready) return ElMessage.warning("商家分成数据尚未加载成功，请重试后导出");
   const payload = exportRowsForOption(option.key);
   const month = reconciliationTransferMonth();
   const targetName = state.exportType === "reconciliationPersonal" && state.exportTargetType ? `-${(reconciliationExportTargetOptions.value.find((item) => item.value === exportTargetValue.value) || {}).label || "指定对象"}` : "";

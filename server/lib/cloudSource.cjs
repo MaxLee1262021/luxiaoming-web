@@ -1,6 +1,6 @@
 // 真实云模式数据源：通过腾讯云开发 Node SDK 读写小程序同一个云环境。
 // 仅在「服务器设置了云环境密钥」时才会被启用，且 @cloudbase/node-sdk 采用懒加载，
-// 因此演示模式（无密钥）即使没装这个包也能正常运行。
+// 这是历史云数据适配器；当前业务运行时只选择 MySQL。
 // 部署到轻量服务器时：npm i @cloudbase/node-sdk，并设置下方三个环境变量。
 const map = require("./map.cjs");
 
@@ -10,7 +10,7 @@ module.exports = function (cfg) {
   let app = null;
   function getApp() {
     if (app) return app;
-    // 懒加载，避免演示模式缺包时报错
+    // 历史迁移工具按需加载 SDK。
     const { init } = require("@cloudbase/node-sdk");
     app = init({
       env: cfg.envId,

@@ -16,6 +16,8 @@ const crypto = require("crypto");
 const { isDeepStrictEqual } = require("util");
 const schema = require("./mysqlSchema.cjs");
 const mysqlDescriptions = require("./mysqlDescriptions.cjs");
+const { SQL_TIME_ZONE, normalizeDateTime } = require("./mysqlDateTime.cjs");
+const { planSpotMutation } = require("./spotOrder.cjs");
 const { createLogger, errorCode, recordDatabaseOperation } = require("./observability.cjs");
 
 const {
@@ -168,6 +170,7 @@ function sanitizeLegacyDocument(value) {
 function coerceForSql(column, value) {
   if (value === undefined) return null;
   if (value === null) return null;
+  if (/^DATETIME\b/i.test(column.type)) return normalizeDateTime(value);
   if (/TINYINT/i.test(column.type)) return bool(value) ? 1 : 0;
   if (/(?:INT|DECIMAL)/i.test(column.type)) {
     const number = Number(value);
@@ -262,9 +265,11 @@ module.exports = function createMysqlSource(cfg = {}) {
     user: cfg.dbUser,
     password: cfg.dbPassword || "",
     database: cfg.dbName,
+    timezone: SQL_TIME_ZONE,
     waitForConnections: true,
     connectionLimit: cfg.connectionLimit || 10,
     multipleStatements: false,
+    compress: String(cfg.dbCompress ?? process.env.DB_COMPRESS ?? "true").toLowerCase() === "true",
     enableKeepAlive: true,
     connectTimeout: cfg.connectTimeout || 3000,
     ...(cfg.dbSsl ? { ssl: { rejectUnauthorized: true } } : {})
@@ -303,6 +308,15 @@ module.exports = function createMysqlSource(cfg = {}) {
       logger.error("database.query.failed", { operation, durationMs: Math.round(durationMs * 100) / 100, errorCode: errorCode(error) });
       throw error;
     }
+  }
+  async function readIndependentRelations(conn, reads) {
+    // Pool reads use separate connections, so unrelated relation tables need
+    // not pay one network round trip after another. A transaction must retain
+    // its dedicated connection and query order. The pool bounds concurrency.
+    if (conn === pool) return Promise.all(reads.map((read) => read()));
+    const output = [];
+    for (const read of reads) output.push(await read());
+    return output;
   }
   async function execute(conn, sql, params = []) {
     const startedAt = process.hrtime.bigint();
@@ -345,6 +359,21 @@ module.exports = function createMysqlSource(cfg = {}) {
   async function inspectTable(conn, table) {
     const rows = await query(conn, "SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=? ORDER BY ordinal_position", [table]);
     return new Set(rows.map((row) => String(metadataValue(row, "column_name") || "")).filter(Boolean));
+  }
+
+  async function inspectTables(conn, tables, statistics = false) {
+    const names = [...new Set(tables)];
+    const catalog = new Map(names.map(name => [name.toLowerCase(), new Set()]));
+    if (!names.length) return catalog;
+    const rows = await query(conn, statistics
+      ? `SELECT table_name,column_name,index_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name IN (${names.map(() => "?").join(",")})`
+      : `SELECT table_name,column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name IN (${names.map(() => "?").join(",")}) ORDER BY table_name,ordinal_position`, names);
+    for (const row of rows) {
+      const name = String(metadataValue(row, "table_name") || "").toLowerCase();
+      const column = String(metadataValue(row, "column_name") || "");
+      if (catalog.has(name) && column) catalog.get(name).add(column);
+    }
+    return catalog;
   }
 
   async function ensureIndexes(conn) {
@@ -509,6 +538,22 @@ module.exports = function createMysqlSource(cfg = {}) {
       ensurePromise = (async () => {
         const conn = typeof pool.getConnection === "function" ? await pool.getConnection() : pool;
         try {
+          // Schema facts are static for this source instance. The normal
+          // read-only startup must not spend one network round trip per table.
+          if (!autoMigrate) {
+            const catalog = await inspectTables(conn, ["lxm_business_documents", ...ALL_KEYS.map(tableName)]);
+            if (catalog.get("lxm_business_documents").size) {
+              const rows = await query(conn, "SELECT 1 FROM `lxm_business_documents` LIMIT 1");
+              if (rows.length) throw Object.assign(new Error("检测到旧版聚合表 lxm_business_documents，请先执行 npm run migrate:mysql -- --apply"), { code: "SCHEMA_LEGACY_MIGRATION_REQUIRED" });
+            }
+            for (const key of ALL_KEYS) {
+              const table = tableName(key), columns = catalog.get(table.toLowerCase());
+              if (!columns.size) state.set(key, { table, legacy: false, missing: true });
+              else await upgradeLegacyKey(conn, key, columns);
+            }
+            schemaReady = true;
+            return true;
+          }
           const aggregateColumns = await inspectTable(conn, "lxm_business_documents");
           const aggregateRows = aggregateColumns.size ? await query(conn, "SELECT 1 FROM `lxm_business_documents` LIMIT 1") : [];
           if (aggregateRows.length) {
@@ -666,7 +711,8 @@ module.exports = function createMysqlSource(cfg = {}) {
   }
 
   async function relationRows(key, id, conn = pool) {
-    const output = { [COLLECTION_VALUES_TABLE]: await query(conn, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id=? ORDER BY path,ordinal`, [key, id]) };
+    const names = [COLLECTION_VALUES_TABLE];
+    const reads = [() => query(conn, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id=? ORDER BY path,ordinal`, [key, id])];
     for (const relationName of RELATION_BY_KEY[key] || []) {
       const relation = RELATIONS[relationName];
       const parent = relationParent(relationName);
@@ -674,16 +720,18 @@ module.exports = function createMysqlSource(cfg = {}) {
       if (relationName === "account_permissions") continue;
       else {
         const orderBy = relationOrderColumns(relation).map((name) => `\`${name}\``).join(",");
-        output[relationName] = await query(conn, `SELECT * FROM \`${relation.table}\` WHERE ${parent.columns[0]}=? ORDER BY ${orderBy}`, [id]);
+        names.push(relationName);
+        reads.push(() => query(conn, `SELECT * FROM \`${relation.table}\` WHERE ${parent.columns[0]}=? ORDER BY ${orderBy}`, [id]));
       }
     }
-    return output;
+    const rows = await readIndependentRelations(conn, reads);
+    return Object.fromEntries(names.map((name, index) => [name, rows[index]]));
   }
 
   // A list used to hydrate every record by issuing one attribute query and one
   // query per relation for each row. Batch relationship reads keep query count
   // proportional to relationship types rather than the number of records.
-  async function relationRowsMany(key, ids, conn = pool) {
+  async function relationRowsMany(key, ids, conn = pool, knownAttributes) {
     const uniqueIds = [...new Set((ids || []).map((id) => String(id || "")).filter(Boolean))];
     const output = new Map(uniqueIds.map((id) => [id, emptyRelations()]));
     if (!uniqueIds.length) return output;
@@ -694,17 +742,19 @@ module.exports = function createMysqlSource(cfg = {}) {
       const parent = relationParent(relationName);
       if (relation && parent && parent.columns[0]) relationPayload[relationName] = { parentColumn: parent.columns[0], rows: [] };
     }
-    const attributes = [];
+    const attributes = knownAttributes === undefined ? [] : knownAttributes;
     for (const batch of chunks(uniqueIds, relationBatchSize)) {
       const placeholders = batch.map(() => "?").join(",");
-      const attributeRows = await query(conn, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id IN (${placeholders}) ORDER BY record_id,path,ordinal`, [key, ...batch]);
-      attributes.push(...attributeRows);
-      for (const [relationName, payload] of Object.entries(relationPayload)) {
+      const entries = Object.entries(relationPayload);
+      const reads = knownAttributes === undefined ? [() => query(conn, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id IN (${placeholders}) ORDER BY record_id,path,ordinal`, [key, ...batch])] : [];
+      for (const [relationName, payload] of entries) {
         const relation = RELATIONS[relationName];
         const orderBy = relationOrderColumns(relation).map((name) => `\`${name}\``).join(",");
-        const rows = await query(conn, `SELECT * FROM \`${relation.table}\` WHERE \`${payload.parentColumn}\` IN (${placeholders}) ORDER BY \`${payload.parentColumn}\`,${orderBy}`, batch);
-        payload.rows.push(...rows);
+        reads.push(() => query(conn, `SELECT * FROM \`${relation.table}\` WHERE \`${payload.parentColumn}\` IN (${placeholders}) ORDER BY \`${payload.parentColumn}\`,${orderBy}`, batch));
       }
+      const rows = await readIndependentRelations(conn, reads);
+      if (knownAttributes === undefined) attributes.push(...rows[0]);
+      entries.forEach(([, payload], index) => payload.rows.push(...rows[index + (knownAttributes === undefined ? 1 : 0)]));
     }
     return groupRelationRows(uniqueIds, attributes, relationPayload);
   }
@@ -735,6 +785,48 @@ module.exports = function createMysqlSource(cfg = {}) {
     const rows = await query(pool, `SELECT * FROM \`${tableFor(key)}\` ORDER BY id`);
     const related = await relationRowsMany(key, rows.map((row) => String(row.id)));
     return rows.map((row) => hydrateDocument(key, row, related.get(String(row.id)) || emptyRelations()));
+  }
+
+  async function listMany(keys) {
+    // Module endpoints have already authorized their keys; the source still
+    // validates every identifier before issuing any SQL. Results are fresh and
+    // never shared across requests. The pool bounds independent read concurrency.
+    if (!Array.isArray(keys)) throw Object.assign(new Error("集合列表格式无效"), { code: "DATA_SOURCE_INVALID" });
+    const requested = [...new Set(keys.map(assertKey))];
+    if (!requested.length) return {};
+    await ensure();
+    for (const key of requested) if (state.get(key)?.missing) throw Object.assign(new Error("规范化数据表不存在"), { code: "SCHEMA_MISSING" });
+    const rawByKey = new Map();
+    const legacyByKey = new Map();
+    await Promise.all(requested.map(async key => {
+      if (state.get(key)?.legacy) legacyByKey.set(key, (await readLegacy(key)).map(row => ({ ...sanitizeLegacyDocument(row.doc), id: row.id, _id: row.id })));
+      else rawByKey.set(key, await query(pool, `SELECT * FROM \`${tableFor(key)}\` ORDER BY id`));
+    }));
+    const owners = [...rawByKey].flatMap(([key, rows]) => rows.map(row => ({ key, id: String(row.id) })));
+    const attributesByKey = new Map(requested.map(key => [key, []]));
+    const canonicalKeys = new Map(requested.map(key => [key.toLowerCase(),key]));
+    await Promise.all(chunks(owners, relationBatchSize).map(async batch => {
+      const groups = new Map();
+      for (const {key,id} of batch) { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(id); }
+      const params = [], predicates = [];
+      for (const [key, ids] of groups) {
+        predicates.push(`(collection_name=? AND record_id IN (${ids.map(() => "?").join(",")}))`);
+        params.push(key, ...ids);
+      }
+      const rows = await query(pool, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE ${predicates.join(" OR ")} ORDER BY collection_name,record_id,path,ordinal`, params);
+      for (const row of rows) {
+        const key = canonicalKeys.get(String(row.collection_name).toLowerCase());
+        if (key) attributesByKey.get(key).push(row);
+      }
+    }));
+    const output = {};
+    await Promise.all(requested.map(async key => {
+      if (legacyByKey.has(key)) { output[key] = legacyByKey.get(key); return; }
+      const rows = rawByKey.get(key);
+      const related = await relationRowsMany(key, rows.map(row => String(row.id)), pool, attributesByKey.get(key));
+      output[key] = rows.map(row => hydrateDocument(key, row, related.get(String(row.id)) || emptyRelations()));
+    }));
+    return Object.fromEntries(requested.map(key => [key, output[key]]));
   }
 
   async function findOrderByPaymentOutTradeNo(outTradeNo) {
@@ -805,7 +897,10 @@ module.exports = function createMysqlSource(cfg = {}) {
       const error = new Error("旧版数据表只读，请先执行规范化迁移"); error.code = "SCHEMA_LEGACY"; throw error;
     }
     try {
-      await withTransaction((conn) => writeRecord(conn, key, id, item, tableFor(key), false));
+      await withTransaction(async conn => {
+        await writeRecord(conn, key, id, item, tableFor(key), false);
+        if (key === "orders") await require("./photoOrderBridge.cjs").syncPhotoOrderTx(conn,{...item,id},null);
+      });
     } catch (error) {
       if (error && (error.code === "ER_DUP_ENTRY" || Number(error.errno) === 1062)) throw Object.assign(new Error("记录已存在"), { code: "DUPLICATE_RECORD" });
       throw error;
@@ -824,9 +919,29 @@ module.exports = function createMysqlSource(cfg = {}) {
       const normalizedPatch = schema.normalizeDocumentAliases(key, patch && typeof patch === "object" ? patch : {});
       const next = { ...current, ...normalizedPatch, id: String(id), _id: String(id) };
       await writeRecord(conn, key, String(id), next, tableFor(key), true);
+      if (key === "orders") await require("./photoOrderBridge.cjs").syncPhotoOrderTx(conn,next,current);
       return true;
     });
     return changed ? readOne(key, String(id)) : null;
+  }
+
+  async function applySpotMutation(id, patch = {}, options = {}) {
+    await ensure();
+    const stateItem = state.get("spots");
+    if (stateItem && (stateItem.legacy || stateItem.missing)) throw Object.assign(new Error("打卡点数据结构尚未就绪"), { code: stateItem.legacy ? "SCHEMA_LEGACY" : "SCHEMA_MISSING" });
+    return withTransaction(async conn => {
+      // Lock the complete order in a stable sequence, including insertion gaps.
+      // Every reorder computes from committed values and publishes once at commit.
+      const rows = await query(conn, `SELECT * FROM \`${tableFor("spots")}\` ORDER BY id FOR UPDATE`);
+      const relations = await relationRowsMany("spots", rows.map(row => String(row.id)), conn);
+      const documents = rows.map(row => hydrateDocument("spots", row, relations.get(String(row.id))));
+      const plan = planSpotMutation(documents, id, schema.normalizeDocumentAliases("spots", patch), options);
+      if (!plan) return null;
+      for (const change of plan.changes) {
+        await writeRecord(conn, "spots", change.id, change.after, tableFor("spots"), !!change.before);
+      }
+      return plan;
+    });
   }
 
   async function upsert(key, id, patch = {}) {
@@ -862,7 +977,9 @@ module.exports = function createMysqlSource(cfg = {}) {
       const current = hydrateDocument(key, rows[0], await relationRows(key, String(id), conn));
       if (!Object.entries(expected || {}).every(([field, value]) => isDeepStrictEqual(current[field], value))) return false;
       const normalized = schema.normalizeDocumentAliases(key, patch || {});
-      await writeRecord(conn, key, String(id), { ...current, ...normalized, id: String(id) }, tableFor(key), true);
+      const next = { ...current, ...normalized, id: String(id) };
+      await writeRecord(conn, key, String(id), next, tableFor(key), true);
+      if (key === "orders") await require("./photoOrderBridge.cjs").syncPhotoOrderTx(conn,next,current);
       return true;
     });
     return changed ? readOne(key, String(id)) : null;
@@ -885,36 +1002,40 @@ module.exports = function createMysqlSource(cfg = {}) {
     try {
       await ensure();
       const names = ALL_KEYS.map((key) => tableFor(key));
-      const rows = await query(pool, `SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN (${names.map(() => "?").join(",")})`, names);
-      const count = Number(rows[0] && rows[0].count || 0);
       const relationNames = Object.values(RELATIONS).map((relation) => relation.table);
-      const relationRows = relationNames.length
-        ? await query(pool, `SELECT COUNT(*) AS count FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN (${relationNames.map(() => "?").join(",")})`, relationNames)
-        : [{ count: 0 }];
-      const relationCount = Number(relationRows[0] && relationRows[0].count || 0);
-      const legacy = [...state.values()].filter((item) => item.legacy).length;
-      const missing = [...state.values()].filter((item) => item.missing).length;
+      const [columnsByTable,indexesByTable] = await Promise.all([
+        inspectTables(pool, [...names, ...relationNames]),
+        inspectTables(pool, names, true),
+      ]);
+      const columnsFor = name => columnsByTable.get(name.toLowerCase()) || new Set();
+      const count = names.filter(name => columnsFor(name).size).length;
+      const relationCount = relationNames.filter(name => columnsFor(name).size).length;
+      const legacy = names.filter(name => columnsFor(name).has("doc")).length;
+      const missing = names.length-count;
       const incomplete = [];
       for (const key of ALL_KEYS) {
-        const columns = await inspectTable(pool, tableFor(key));
+        const columns = columnsFor(tableFor(key));
         if (columns.has("doc")) incomplete.push(`${tableFor(key)}.doc`);
         if (key === "logs" && (columns.has("snapshot") || !columns.has("snapshotText"))) incomplete.push(`${tableFor(key)}.snapshot`);
         for (const column of schema.definition(key).columns) if (!columns.has(column.name)) incomplete.push(`${tableFor(key)}.${column.name}`);
-        const indexes = await query(pool, "SELECT column_name FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=?", [tableFor(key)]);
-        if (!indexes.some((row) => String(metadataValue(row, "column_name") || "").toLowerCase() === "updatedat")) incomplete.push(`${tableFor(key)}.idx_updated_at`);
+        const indexes = indexesByTable.get(tableFor(key).toLowerCase()) || new Set();
+        if (![...indexes].some(column => column.toLowerCase() === "updatedat")) incomplete.push(`${tableFor(key)}.idx_updated_at`);
       }
       const financeLeaves = await query(pool, "SELECT COUNT(*) AS count FROM `lxm_collection_values` WHERE collection_name=?", ["financeSettings"]);
       if (Number(financeLeaves[0] && financeLeaves[0].count || 0) > 0) incomplete.push("lxm_collection_values.financeSettings");
       for (const relation of Object.values(RELATIONS)) {
-        const columns = await inspectTable(pool, relation.table);
+        const columns = columnsFor(relation.table);
         for (const declaration of relation.columns) {
           const name = String(declaration).trim().split(/\s+/, 1)[0];
           if (!columns.has(name)) incomplete.push(`${relation.table}.${name}`);
         }
       }
-      for (const key of ALL_KEYS) {
-        const orphan = await query(pool, `SELECT COUNT(*) AS count FROM \`${RELATIONS.collection_values.table}\` values_row LEFT JOIN \`${tableFor(key)}\` parent_row ON parent_row.id=values_row.record_id WHERE values_row.collection_name=? AND parent_row.id IS NULL`, [key]);
-        if (Number(orphan[0] && orphan[0].count || 0) > 0) incomplete.push(`${RELATIONS.collection_values.table}.${key}.orphan`);
+      // A single request checks the same indexed orphan predicates as before.
+      // Skip missing parent tables so health can report their precise columns.
+      const parentKeys = ALL_KEYS.filter(key => columnsFor(tableFor(key)).has("id"));
+      if (parentKeys.length && columnsFor(RELATIONS.collection_values.table).size) {
+        const orphanRows = await query(pool, parentKeys.map(key => `SELECT ? AS collection_name,COUNT(*) AS count FROM \`${RELATIONS.collection_values.table}\` values_row LEFT JOIN \`${tableFor(key)}\` parent_row ON parent_row.id=values_row.record_id WHERE values_row.collection_name=? AND parent_row.id IS NULL`).join(" UNION ALL "), parentKeys.flatMap(key => [key,key]));
+        for (const orphan of orphanRows) if (Number(orphan.count || 0) > 0) incomplete.push(`${RELATIONS.collection_values.table}.${orphan.collection_name}.orphan`);
       }
       const ready = count === ALL_KEYS.length && relationCount === relationNames.length && legacy === 0 && missing === 0 && incomplete.length === 0;
       return { backend: "mysql", configured: true, ready, persistent: true, tables: count, relationTables: relationCount, normalized: [...state.values()].filter((item) => !item.legacy && !item.missing).length, legacy, missing, ...(incomplete.length ? { error: "schema_incomplete", incomplete } : {}) };
@@ -940,11 +1061,13 @@ module.exports = function createMysqlSource(cfg = {}) {
     ALL_KEYS,
     schema,
     list: readMany,
+    listMany,
     get: readOne,
     findOrderByPaymentOutTradeNo,
     findBookingByPaymentOutTradeNo,
     create,
     update,
+    applySpotMutation,
     compareAndUpdate,
     replace,
     upsert,

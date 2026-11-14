@@ -15,6 +15,15 @@
     tasks: '<svg ' + S + '><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>',
     addonServices: '<svg ' + S + '><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',
     // 财务
+    photoRules: '<svg ' + S + '><path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg>',
+    photoLedger: '<svg ' + S + '><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z"/><path d="M9 7h6m-6 4h6m-6 4h4"/></svg>',
+    photoSettlement: '<svg ' + S + '><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 12h5m-5 5h8"/></svg>',
+    photoParty: '<svg ' + S + '><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a7 7 0 0 1 14 0v2m2-13h4m-2-2v4"/></svg>',
+    photoNew: '<svg ' + S + '><circle cx="9" cy="7" r="4"/><path d="M2 21v-2a7 7 0 0 1 12-5m1 4h8m-4-4v8"/></svg>',
+    photoMine: '<svg ' + S + '><circle cx="12" cy="7" r="3"/><path d="M5 21v-3a7 7 0 0 1 14 0v3M9 17h6"/></svg>',
+    shareRules: '<svg ' + S + '><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/><path d="M7 7h2m5 0h3m-3 7h3m-3 3h3"/></svg>',
+    shareDetails: '<svg ' + S + '><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z"/><path d="M9 7h6m-6 4h6m-6 4h4"/></svg>',
+    shareMine: '<svg ' + S + '><circle cx="12" cy="7" r="3"/><path d="M5 21v-3a7 7 0 0 1 14 0v3M9 17h6m-3-3v6"/></svg>',
     financeReview: '<svg ' + S + '><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>',
     reconciliation: '<svg ' + S + '><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="7" x2="16" y2="7"/><line x1="8" y1="12" x2="12" y2="12"/><line x1="8" y1="17" x2="12" y2="17"/></svg>',
     // 渠道
@@ -36,8 +45,8 @@
     shelfProducts: '<svg ' + S + '><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
     productAudit: '<svg ' + S + '><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
     // 小程序装修与配置
+    bookingConfig: '<svg ' + S + '><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18m-13 5 3 2 5-4"/></svg>',
     miniDecor: '<svg ' + S + '><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
-    miniConfig: '<svg ' + S + '><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     // 系统
     permissions: '<svg ' + S + '><path d="M12 3l8 3v5c0 5.2-3.4 8.4-8 10-4.6-1.6-8-4.8-8-10V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>',
     logs: '<svg ' + S + '><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>',

@@ -84,7 +84,9 @@ test("validate actual bytes, metadata, size, ACL and expired/removed intents", a
 });
 test("reject invalid formats and limits, preserve file registry through normalized SQL mapping", () => {
   for (const mimeType of ["image/svg+xml", "text/html", "application/pdf", "image/gif"]) assert.throws(() => validateInput({ ...input, mimeType }), { code: "FILE_TYPE" });
-  assert.throws(() => validateInput({ ...input, size: 21 * 1024 * 1024 }), { code: "FILE_SIZE" });
+  assert.equal(validateInput({ ...input, size: 21 * 1024 * 1024 }).size, 21 * 1024 * 1024);
+  assert.equal(validateInput({ ...input, size: 1024 * 1024 * 1024, mimeType: "video/mp4" }).size, 1024 * 1024 * 1024);
+  assert.throws(() => validateInput({ ...input, purpose: "after-sale", orderId: "one", size: 21 * 1024 * 1024 }), { code: "FILE_SIZE" });
   assert.throws(() => validateInput({ ...input, purpose: "avatar", size: 6 * 1024 * 1024 }), { code: "FILE_SIZE" });
   assert.throws(() => validateInput({ ...input, purpose: "after-sale", mimeType: "video/mp4", orderId: "one" }), { code: "FILE_TYPE" });
   assert.equal(detectType(png), "image/png");

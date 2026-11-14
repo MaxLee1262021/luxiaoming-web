@@ -1,0 +1,5 @@
+@import url("../photo-share.css");
+.photo-mine-preview { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:15px 18px; margin-bottom:18px; border:1px solid #dce7f3; border-radius:8px; background:#f5f8fc; color:#486b89; font-size:13px; }
+.photo-mine-preview .el-select { width:280px; max-width:100%; }
+.photo-mine-preview span { font-size:12px; }
+@media(max-width:680px) { .photo-mine-preview .el-select { width:100%; } }

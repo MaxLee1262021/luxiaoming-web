@@ -4,6 +4,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
 const createApi = require("../lib/api.cjs");
+const rpc = require("../lib/rpc.cjs");
+const schema = require("../lib/mysqlSchema.cjs");
 
 const clone = (value) => value == null ? value : structuredClone(value);
 async function fixture(t) {
@@ -35,7 +37,8 @@ async function fixture(t) {
   const adapter = {
     allocation(id, extension) { return { bucket: "fixture-private", objectKey: `fixture/${id}.${extension}` }; },
     async signUpload(asset) { return { uploadUrl: "https://fixture.invalid", fields: { key: asset.objectKey }, expiresAt: new Date(Date.now() + 60000).toISOString() }; },
-    async inspect(asset) { return { size: asset.size, mimeType: asset.mimeType, fileId: asset.id, acl: "private", etag: "fixture", bytes: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]) }; },
+    async inspect(asset) { return { size: asset.size, mimeType: asset.mimeType, fileId: asset.id, acl: "private", etag: "fixture", bytes: asset.mimeType === "video/mp4"
+      ? Buffer.from("000000186674797069736f6d0000020069736f6d", "hex") : Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]) }; },
     async signRead(asset, options) { reads.push({ id: asset.id, options }); return { url: `https://fixture.invalid/${asset.id}?temporary=yes`, expiresAt: new Date(Date.now() + 60000).toISOString() }; },
     async remove() {},
   };
@@ -154,6 +157,91 @@ test("public material can be reused across content pages but private file URLs c
   const privateId = await f.upload("customer", { purpose: "avatar" });
   assert.equal((await f.request("content", "/api/collection/samples", { name: "伪造", url: `/api/media/${privateId}` })).status, 403);
   assert.equal((await f.request("super", "/api/collection/mediaFiles")).status, 400);
+});
+
+test("spot cover upload creates and replaces the same durable image on home and detail after SQL hydration", async (t) => {
+  const f = await fixture(t);
+  f.collections.cities = { city: { id: "city", name: "长沙", status: "运营中", enabled: true } };
+  const spot = { id: "spot-cover", name: "江边打卡点", cityId: "city", address: "江边步道", intro: "日落江景",
+    tag: "推荐", tags: ["江景"], isShow: true, status: "启用" };
+  const firstId = await f.upload("content", { purpose: "content", collection: "spots", recordId: spot.id });
+  const firstCover = `/api/media/${firstId}`;
+  const created = await f.request("content", "/api/collection/spots", { ...spot, cover: firstCover });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(f.collections.mediaFiles[firstId].status, "bound");
+
+  async function verifyCover(expected) {
+    const saved = (await f.request("content", `/api/collection/spots/${spot.id}`)).body;
+    for (const field of ["cover", "coverUrl", "coverImage", "image"]) assert.equal(saved[field], expected);
+    const split = schema.splitDocument("spots", saved);
+    const restored = schema.hydrateDocument("spots", { id: split.id, ...split.columns }, { ...split.relations, collection_values: split.attributes });
+    for (const field of ["cover", "coverUrl", "coverImage", "image"]) assert.equal(restored[field], expected);
+    const hydratedSource = { ...f.source, list: async (key) => key === "spots" ? [restored] : f.source.list(key) };
+    for (const source of [f.source, hydratedSource]) {
+      const home = await rpc(source, "getHomeData", { cityId: "city" });
+      const detail = await rpc(source, "getSpots", { cityId: "city" });
+      assert.equal(home.success, true, JSON.stringify(home)); assert.equal(detail.success, true, JSON.stringify(detail));
+      for (const row of [home.data.spots[0], detail.data[0]]) {
+        assert.equal(row._id, spot.id); assert.equal(row.cover, expected); assert.equal(row.coverUrl, expected);
+      }
+    }
+    const publicImage = await f.request(null, expected);
+    assert.equal(publicImage.status, 302);
+    assert.match(publicImage.headers.get("location"), /^https:\/\/fixture\.invalid\//);
+  }
+  await verifyCover(firstCover);
+  const replacementId = await f.upload("content", { purpose: "content", collection: "spots", recordId: spot.id });
+  const replacementCover = `/api/media/${replacementId}`;
+  const updated = await f.request("content", `/api/collection/spots/${spot.id}`, { cover: replacementCover }, "PUT");
+  assert.equal(updated.status, 200, JSON.stringify(updated.body));
+  assert.equal(f.collections.mediaFiles[replacementId].status, "bound");
+  await verifyCover(replacementCover);
+});
+
+test("uploaded MP4 publishes a coverless video product and survives SQL hydration on every public product route", async (t) => {
+  const f = await fixture(t);
+  const id = "coverless-video";
+  const fileId = await f.upload("content", { purpose: "content", collection: "packages", recordId: id,
+    fileName: "product.mp4", mimeType: "video/mp4", size: 20 });
+  const videoUrl = `/api/media/${fileId}`;
+  const created = await f.request("content", "/api/collection/packages", { id, name: "电影感短片", type: "video",
+    productKind: "video_single", isVideoSingle: true, videoUrl, price: 299, tags: ["电影感"], shootingNotes: "提前沟通拍摄细节",
+    videoDuration: 30, finishedVideoCount: 1, deliveryCycle: "2个工作日", isShow: true, status: "上架", spotBindingExplicit: true });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  assert.equal(f.collections.mediaFiles[fileId].status, "bound");
+  assert.equal(f.collections.mediaFiles[fileId].mimeType, "video/mp4");
+  const saved = (await f.request("content", `/api/collection/packages/${id}`)).body;
+  const split = schema.splitDocument("packages", saved);
+  assert.equal(split.columns.videoUrl, videoUrl);
+  const restored = schema.hydrateDocument("packages", { id: split.id, ...split.columns }, { ...split.relations, collection_values: split.attributes });
+  assert.equal(restored.videoUrl, videoUrl);
+  const hydratedSource = { ...f.source, list: async (key) => key === "packages" ? [restored] : f.source.list(key) };
+  for (const source of [f.source, hydratedSource]) {
+    const home = await rpc(source, "getHomeData", {});
+    const list = await rpc(source, "getVideoSingles", {});
+    const detail = await rpc(source, "getSeriesDetail", { packageId: id });
+    assert.equal(home.success, true, JSON.stringify(home)); assert.equal(list.success, true, JSON.stringify(list));
+    assert.equal(detail.success, true, JSON.stringify(detail));
+    for (const row of [home.data.videoSingles.find((row) => row.id === id), list.data.find((row) => row.id === id), detail.data.currentPackage]) {
+      assert.equal(row.videoUrl, videoUrl); assert.equal(row.cover, "");
+    }
+  }
+  const media = await f.request(null, videoUrl);
+  assert.equal(media.status, 302); assert.match(media.headers.get("location"), /^https:\/\/fixture\.invalid\//);
+  const imageId = await f.upload("content", { purpose: "content", collection: "packages", recordId: id });
+  const imageUrl = `/api/media/${imageId}`;
+  for (const patch of [{ videoUrl: imageUrl }, { previewVideoUrl: imageUrl }, { videos: [{ url: imageUrl, type: "video" }] }]) {
+    const rejected = await f.request("content", `/api/collection/packages/${id}`, patch, "PUT");
+    assert.equal(rejected.status, 400, JSON.stringify(rejected.body));
+    assert.match(rejected.body.error, /必须引用视频文件/);
+    assert.equal(f.collections.packages[id].videoUrl, videoUrl);
+  }
+  // A public image already bound elsewhere also cannot bypass the type check.
+  const publicImage = await f.upload("content", { purpose: "content", collection: "samples" });
+  await f.request("content", "/api/collection/samples", { id: "old-image", url: `/api/media/${publicImage}` });
+  assert.equal((await f.request("content", `/api/collection/packages/${id}`, { videoUrl: `/api/media/${publicImage}` }, "PUT")).status, 400);
+  f.collections.packages[id].videoUrl = imageUrl; f.collections.packages[id].isShow = false;
+  assert.equal((await f.request("content", `/api/collection/packages/${id}`, { isShow: true }, "PUT")).status, 400, "重新显示也校验已保存视频的实际类型");
 });
 
 test("finance evidence is validated and survives the normalized business contract", async (t) => {

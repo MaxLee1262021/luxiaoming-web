@@ -6,21 +6,14 @@ const { migrateSource } = require("../server/lib/orderFlowMigration.cjs");
 const root = path.resolve(__dirname, "..");
 async function main(args = process.argv.slice(2)) {
   if (args.includes("--help")) {
-    process.stdout.write("node scripts/migrate-order-flow.cjs --json=路径|--mysql [--apply]\n默认只读报告。--apply 自动备份订单；--restore=备份文件 --apply 恢复。\n");
+    process.stdout.write("node scripts/migrate-order-flow.cjs [--mysql] [--apply]\n默认只读报告。--apply 自动备份订单；--restore=备份文件 --apply 恢复。\n");
     return;
   }
   const apply = args.includes("--apply");
-  const json = args.find(arg => arg.startsWith("--json="));
+  if (args.some(arg => arg.startsWith("--json"))) throw new Error("订单流程迁移只连接真实 MySQL，不再支持 JSON 文件数据源");
   const restore = args.find(arg => arg.startsWith("--restore="));
-  let source;
-  if (args.includes("--mysql")) {
-    require("dotenv").config({ path: path.join(root, ".env"), quiet: true });
-    source = createSource({ backend: "mysql", dbHost: process.env.DB_HOST, dbPort: Number(process.env.DB_PORT || 3306), dbUser: process.env.DB_USER, dbPassword: process.env.DB_PASSWORD, dbName: process.env.DB_NAME, autoMigrate: false });
-  } else {
-    const file = json ? path.resolve(root, json.slice(7)) : path.join(root, "server", "data", "db.json");
-    if (!fs.existsSync(file)) throw new Error("JSON 数据文件不存在");
-    source = createSource({ backend: "json", jsonFile: file });
-  }
+  require("dotenv").config({ path: path.join(root, ".env"), quiet: true });
+  const source = createSource({ backend: "mysql", dbHost: process.env.DB_HOST, dbPort: Number(process.env.DB_PORT || 3306), dbUser: process.env.DB_USER, dbPassword: process.env.DB_PASSWORD, dbName: process.env.DB_NAME, autoMigrate: false });
   try {
     if (restore) {
       if (!apply) throw new Error("恢复订单必须显式传 --apply");

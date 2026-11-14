@@ -1,3 +1,5 @@
+<el-alert v-if="canReadShareAnalytics() && (shareAnalytics.loading || shareAnalytics.error)" :title="shareAnalytics.error || '商家分成数据加载中'" :type="shareAnalytics.error ? 'error' : 'info'" :closable="false" show-icon style="margin-bottom:16px"><template #default><el-button v-if="shareAnalytics.error" link @click="loadShareAnalytics">重新加载</el-button></template></el-alert>
+<el-alert title="摄影师分成在独立账本核算，本页不从保留订单重算摄影师应付，也不生成摄影师结算。总部收入需合并摄影师账本核对。" type="info" :closable="false" style="margin-bottom:16px"><template #default><el-button v-if="photoFinanceRoute" link type="primary" @click="openPhotoFinanceLedger">查看摄影师分成</el-button></template></el-alert>
 <div class="reconcile-page finance-grade-page" :class="{ 'recon-compact': state.reconciliationCompactMode }">
   <div class="recon-topbar">
     <div class="recon-title-block">
@@ -169,19 +171,19 @@
       <div class="board-title">
         <div>
           <h3>实际分账汇总</h3>
-          <p>最终结算依据，可直接用于打款对账</p>
+          <p>本页展示渠道分账，摄影师报酬以独立账本为准</p>
         </div>
         <el-tag type="primary">实际口径</el-tag>
       </div>
       <div class="formula-line">
-        <span>实际可分账净额</span><b>-</b><span>商家应计</span><b>-</b><span>分销员应计</span><b>-</b><span>摄影师应计</span><b>=</b><strong>总部收入</strong>
+        <span>实际可分账净额</span><b>-</b><span>商家已入账分成</span><b>-</b><span>分销员应计</span><b>-</b><span>摄影师独立账本金额</span><b>=</b><strong>总部收入</strong>
       </div>
       <div class="board-metrics">
         <div><span>实际可分账净额</span><strong>{{ money(reconciliationSummary.eligibleAmount) }}</strong></div>
-        <div><span>商家总应计</span><strong>{{ money(reconciliationSummary.shopCommissionAmount) }}</strong></div>
+        <div><span>商家已入账分成</span><strong>{{ shareAnalytics.ready ? money(reconciliationSummary.shopCommissionAmount) : '—' }}</strong></div>
         <div><span>分销员总应计</span><strong>{{ money(reconciliationSummary.distributorCommissionAmount) }}</strong></div>
-        <div><span>摄影师总应计</span><strong>{{ money(reconciliationSummary.photographerCommissionAmount) }}</strong></div>
-        <div class="hq"><span>总部收入</span><strong>{{ money(reconciliationSummary.headquarterAmount) }}</strong></div>
+        <div><span>摄影师分成</span><strong>独立核算</strong></div>
+        <div class="hq"><span>总部收入</span><strong>合并摄影师账本后核对</strong></div>
         <div><span>已确认结算</span><strong>{{ money(reconciliationSummary.confirmedSettlementAmount || reconciliationSummary.transferredAmount) }}</strong><em>{{ reconciliationSummary.confirmedSettlementOrders || 0 }} 单 / {{ reconciliationSummary.confirmedSettlementBatches || 0 }} 批</em></div>
         <div><span>待结算</span><strong>{{ money(reconciliationSummary.pendingTransferAmount) }}</strong></div>
       </div>
@@ -197,10 +199,10 @@
       </div>
       <div class="board-metrics">
         <div><span>预计入池净额</span><strong>{{ money(reconciliationSummary.estimatedAmount) }}</strong></div>
-        <div><span>预计商家应计</span><strong>{{ money(reconciliationSummary.estimatedShopCommissionAmount) }}</strong></div>
+        <div><span>预计商家应计</span><strong>{{ '按已入账明细展示' }}</strong></div>
         <div><span>预计分销员应计</span><strong>{{ money(reconciliationSummary.estimatedDistributorCommissionAmount) }}</strong></div>
-        <div><span>预计摄影师应计</span><strong>{{ money(reconciliationSummary.estimatedPhotographerCommissionAmount) }}</strong></div>
-        <div class="hq"><span>预计总部收入</span><strong>{{ money(reconciliationSummary.estimatedHeadquarterAmount) }}</strong></div>
+        <div><span>摄影师报酬</span><strong>以独立账本为准</strong></div>
+        <div class="hq"><span>预计总部收入</span><strong>{{ '—' }}</strong></div>
       </div>
     </section>
   </div>
@@ -218,7 +220,7 @@
     <div class="table-card-toolbar">
       <div>
         <h3>到期结算提醒</h3>
-        <p>按商家、分销员、摄影师各自的结算周期汇总，已到期但尚未确认结算的主体会出现在这里。</p>
+        <p>按商家、分销员各自的结算周期汇总，已到期但尚未确认结算的主体会出现在这里。</p>
       </div>
       <el-tag type="warning">{{ settlementDueReminderRows.length }} 个待结算主体</el-tag>
     </div>
@@ -239,7 +241,7 @@
         <div v-if="state.loading" class="recon-skeleton"><i></i><i></i><i></i><i></i></div>
         <div v-else-if="!visibleReconciliationSettlementRows.length" class="recon-empty-state">
           <strong>暂无可结算对象</strong>
-          <span>当前筛选条件下没有满足入池条件的商家、分销员或摄影师。可切换月份、放宽筛选，或到暂缓订单明细查看未入池原因。</span>
+          <span>当前筛选条件下没有满足入池条件的商家或分销员。可切换月份、放宽筛选，或到暂缓订单明细查看未入池原因。</span>
         </div>
         <div v-if="canUseHeadquarterReconciliation" class="finance-batch-toolbar">
           <span>已选 {{ selectedReconciliationRows.length }} 个对象</span>
@@ -256,7 +258,7 @@
           <el-table-column prop="settlementCycle" label="周期" width="80" />
           <el-table-column prop="settlementPeriod" label="结算范围" width="190" />
           <el-table-column label="结算状态" width="160"><template #default="{row}"><el-tag :type="row.transferStatus==='已封存' ? 'success' : row.transferStatus==='已结算' ? 'primary' : row.transferStatus==='待结算' ? 'warning' : 'info'">{{ row.transferStatus }}</el-tag><div class="muted">{{ row.transferText }}</div></template></el-table-column>
-          <el-table-column fixed="right" label="操作" width="260"><template #default="{row}"><el-button type="primary" link @click="openReconciliationDetail(row.type, row.name + '关联订单')">查看订单</el-button><el-button v-if="row.transferRecord" link type="primary" @click="openSettlementRecordOrders(row.transferRecord)">结算记录</el-button><el-button type="warning" v-if="canUseHeadquarterReconciliation && row.transferStatus==='待结算'" link :disabled="isReconciliationClosed || Number(row.commission||0)<=0" @click="confirmSettlementBatch(row)">确认结算</el-button><el-button v-if="canUseHeadquarterReconciliation && row.transferStatus==='已结算'" link type="warning" :disabled="isReconciliationClosed" @click="closeSettlementBatch(row)">封存账单</el-button><el-button v-if="state.role==='super' && row.transferStatus==='已封存'" link type="danger" @click="unlockSettlementBatch(row)">解封</el-button></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="260"><template #default="{row}"><el-button type="primary" link @click="openReconciliationDetail(row.type, row.name + '关联订单')">查看订单</el-button><el-button v-if="row.transferRecord" link type="primary" @click="openSettlementRecordOrders(row.transferRecord)">结算记录</el-button><el-button type="warning" v-if="row.type!=='shop' && canUseHeadquarterReconciliation && row.transferStatus==='待结算'" link :disabled="isReconciliationClosed || Number(row.commission||0)<=0" @click="confirmSettlementBatch(row)">确认结算</el-button><el-button v-if="row.type!=='shop' && canUseHeadquarterReconciliation && row.transferStatus==='已结算'" link type="warning" :disabled="isReconciliationClosed" @click="closeSettlementBatch(row)">封存账单</el-button><el-button v-if="row.type!=='shop' && state.role==='super' && row.transferStatus==='已封存'" link type="danger" @click="unlockSettlementBatch(row)">解封</el-button></template></el-table-column>
         </el-table>
         <div class="table-pager" v-if="visibleReconciliationSettlementRows.length > 0">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="visibleReconciliationSettlementRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconSettlement').size" :current-page="pager('reconSettlement').page" @current-change="pager('reconSettlement').page = $event" @size-change="onListPageSizeChange('reconSettlement', $event)" />
@@ -270,7 +272,7 @@
       <div class="table-card finance-table-card">
         <div v-if="!reconciliationFocus.rows.length" class="recon-empty-state">
           <strong>暂无核对对象</strong>
-          <span>当前角色或筛选范围下没有可查看对象。总部财务可按商家、分销员、摄影师、客服继续筛选核对。</span>
+          <span>当前角色或筛选范围下没有可查看对象。总部财务可按商家、分销员、客服继续筛选核对。</span>
         </div>
         <el-table :data="reconciliationFocus.rows" stripe empty-text="当前角色暂无可核对数据">
           <el-table-column fixed prop="typeName" label="对象类型" width="105" />
@@ -326,7 +328,7 @@
           <el-table-column label="实结分成金额" width="135" align="right"><template #default="{row}">{{ money(row.amount) }}</template></el-table-column>
           <el-table-column label="账单状态" width="170"><template #default="{row}"><el-tag :type="settlementRecordStageType(row)">{{ settlementRecordStage(row) }}</el-tag><div v-if="row.paidAt" class="muted">打款：{{ row.paidBy }} · {{ row.paidAt }}</div><div v-if="settlementRecordStage(row)==='已封存'" class="muted">封存：{{ row.sealedBy }} · {{ row.sealedAt }}</div></template></el-table-column>
           <el-table-column label="付款/凭证" width="150"><template #default="{row}"><span>{{ row.method || '-' }}</span><div class="muted">{{ row.voucherNo || '无凭证号' }}</div></template></el-table-column>
-          <el-table-column fixed="right" label="操作" width="220"><template #default="{row}"><el-button link type="primary" @click="openSettlementRecordOrders(row)">批次详情</el-button><el-button v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已确认待打款'" link type="warning" @click="markSettlementPaid(row)">确认打款</el-button><el-button type="warning" v-if="canUseHeadquarterReconciliation && settlementRecordStage(row)==='已打款待复核'" link @click="sealSettlementRecord(row)">复核封存</el-button></template></el-table-column>
+          <el-table-column fixed="right" label="操作" width="220"><template #default="{row}"><el-button link type="primary" @click="openSettlementRecordOrders(row)">批次详情</el-button><el-button v-if="!(['shop','merchant','商家'].includes(row.type || row.objectType)) && canUseHeadquarterReconciliation && settlementRecordStage(row)==='已确认待打款'" link type="warning" @click="markSettlementPaid(row)">确认打款</el-button><el-button type="warning" v-if="!(['shop','merchant','商家'].includes(row.type || row.objectType)) && canUseHeadquarterReconciliation && settlementRecordStage(row)==='已打款待复核'" link @click="sealSettlementRecord(row)">复核封存</el-button></template></el-table-column>
         </el-table>
         <div class="table-pager" v-if="reconciliationTransferRows.length > 0">
           <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="reconciliationTransferRows.length" :page-sizes="[12, 20, 50, 100]" :page-size="pager('reconTransfer').size" :current-page="pager('reconTransfer').page" @current-change="pager('reconTransfer').page = $event" @size-change="onListPageSizeChange('reconTransfer', $event)" />

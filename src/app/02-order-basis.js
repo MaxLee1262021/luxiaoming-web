@@ -11,7 +11,6 @@
     currentStaff,
     data,
     roleProfile,
-    schedulePersist,
     state,
     statusDict
   } = ctx;
@@ -19,7 +18,7 @@
 const CONTENT_EDIT_ROUTES = new Set([
   "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags",
   "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "addonServices",
-  "miniDecor", "miniConfig", "guides", "stories"
+  "miniDecor", "bookingConfig", "guides", "stories"
 ]);
 const MENU_ACTION_ROUTES = {
   dashboard: ["dashboard"],
@@ -63,6 +62,21 @@ function can(action) {
   if (state.role === "super") return true;
   const routes = grantedRouteKeys();
   if (!routes.size) return false;
+  if (["photoView", "photoConfig", "photoSettle"].includes(action)) {
+    if (["photo", "photographer", "merchant", "distributor", "agent", "content"].includes(state.role)) return false;
+    if (action === "photoView") return ["photoRules", "photoLedger", "photoParty", "photoSettlement", "photoNew"].some((key) => routes.has(key));
+    const write = ["service", "finance"].includes(state.role) || (state.photoPermissions || []).includes("photo:manage");
+    return write && (action === "photoSettle" ? routes.has("photoLedger") || routes.has("photoSettlement") : ["photoRules", "photoParty", "photoNew"].some((key) => routes.has(key)));
+  }
+  if (["shareView", "shareConfig", "shareAdmin", "sharedAdmin"].includes(action)) {
+    if (state.role === "merchant") return false;
+    const permissions = new Set(Array.isArray(state.sharePermissions) ? state.sharePermissions : []);
+    const viewRoutes = routes.has("shareRules") || routes.has("shareDetails");
+    if (action === "shareView") return viewRoutes && (["finance", "service"].includes(state.role) || ["share:view", "share:config", "share:admin"].some((key) => permissions.has(key)));
+    if (["finance", "service"].includes(state.role)) return false;
+    if (action === "shareConfig") return routes.has("shareRules") && (permissions.has("share:config") || permissions.has("share:admin"));
+    return viewRoutes && permissions.has("share:admin");
+  }
   if (action === "*") return false;
   const capability = action === "content" ? "contentEdit" : action;
   const roleCaps = BUILTIN_ACTION_CAPS[state.role];
@@ -115,9 +129,18 @@ function financeDue(order) {
   return Math.max(Number(order?.totalAmount || 0) - financePaid(order) - orderDiscount(order), 0);
 }
 function confirmedRefund(order) {
-  return data.afterSales
-    .filter((item) => item.orderId === order?.id && normalizeAfterSaleStatus(item.status) === "已完成" && normalizeReviewStatus(item.financeStatus) === "已审" && Number(item.refundAmount || item.amount || 0) > 0)
-    .reduce((sum, item) => sum + Number(item.refundAmount || item.amount || 0), Number(order?.refundAmount || 0));
+  const tickets = data.afterSales.filter((item) => String(item.orderId || "") === String(order?.id || order?._id || ""));
+  const successfulAmount = (item) => {
+    if (Array.isArray(item.refundAttempts)) return item.refundAttempts
+      .filter((attempt) => String(attempt.status || "").toUpperCase() === "SUCCESS")
+      .reduce((sum, attempt) => sum + Math.max(0, Number(attempt.amountFen || 0)), 0) / 100;
+    const succeeded = ["refunded", "manual_refunded", "已退款", "已人工退款"].includes(String(item.refundStatus || "").toLowerCase());
+    return succeeded && item.refundConfirmed === true ? Math.max(0, Number(item.refundAmount || item.amount || 0)) : 0;
+  };
+  // A multi-payment refund may have successful funds before the ticket reaches
+  // its terminal state. An in-flight attempt is never confirmed money.
+  if (tickets.length) return tickets.reduce((sum, item) => sum + successfulAmount(item), 0);
+  return successfulAmount(order || {});
 }
 function retainedCancelledAmount(order) {
   if (!isOrderCancelledStatus(order)) return 0;
@@ -167,13 +190,7 @@ function log(action, target, detail, operator = roleProfile.value.name, meta = {
     objectName: meta.objectName || target,
     snapshot: meta.snapshot || "",
   };
-  state.logs.unshift(entry);
-  // Server-side domain actions own the authoritative audit trail. Browser
-  // entries only keep the current mock-session experience responsive and are
-  // never sent as fire-and-forget audit writes.
-  if (!ctx.isServerConnected() && !(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) {
-    schedulePersist();
-  }
+  // 审计列表仅展示服务端下发的真实记录；界面动作不制造业务日志。
   return entry;
 }
 function currentOperatorName() {
@@ -230,75 +247,22 @@ function addOrderTimeline(order, action, operator) {
 // keeps the UI object in sync with the authoritative response and makes a
 // failed write visible instead of leaving a success-only local mutation.
 async function persistOrderAction(order, action, payload = {}) {
+  if (isOrderLedgerReadonly()) throw new Error("订单流水仅供查询与统计，请前往客服工作台处理订单");
   const id = order && (order.id || order._id);
   if (!id) throw new Error("订单缺少标识，无法保存");
   if (!isCreatedBooking(order)) throw new Error("该预约尚未创建订单，请客人在小程序提交预约并完成定金支付");
   if (action === "accept") throw new Error("预约订单由定金支付回调创建，无需后台确认定金");
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   const connected = window.LXM_AUTH && window.LXM_AUTH.hasSession && window.LXM_AUTH.hasSession()
-    && window.LXM_CLOUD_MODE !== "mock" && reachable !== false;
+    && window.LXM_CLOUD_MODE === "mysql" && reachable !== false;
   if (!connected || !window.LXM_CLOUD || !window.LXM_CLOUD.orderAction) {
-    if (payload && payload.fields && typeof payload.fields === "object") Object.assign(order, payload.fields);
-    if (action === "claim") { order.assigneeId = payload.assigneeId || order.assigneeId || ""; }
-    if (action === "start") {
-      if (!hasOrderPhotographerAssignment(order)) throw new Error("请先安排摄影师，再登记开始拍摄");
-      Object.assign(order, { status: "shooting", workflowStage: "shooting", shootingStartedAt: LXMFormat.nowText(), businessStatus: "shooting", customerStatus: "拍摄中" });
-    }
-    if (action === "assign") {
-      if (!String(payload.photographerId || order.photographerId || "").trim()) throw new Error("请选择摄影师");
-      Object.assign(order, {
-        photographerId: payload.photographerId || order.photographerId || "",
-        appointmentAt: payload.appointmentAt || order.appointmentAt || "",
-        appointmentLocation: payload.appointmentLocation || order.appointmentLocation || "",
-        peopleCount: payload.peopleCount || order.peopleCount || 1,
-        dispatchStatus: "assigned",
-        depositRefundable: false,
-        workflowStage: "awaiting_shoot",
-        status: "assigned",
-        customerStatus: "待拍摄",
-        businessStatus: "awaiting_shoot"
-      });
-    }
-    if (action === "shootcomplete") {
-      Object.assign(order, { status: "shooting", workflowStage: "shooting", shootingCompletedAt: LXMFormat.nowText(), selectionStatus: "pending", customerStatus: "拍摄中", businessStatus: "shooting" });
-    }
-    if (action === "selectionconfirm") {
-      Object.assign(order, { status: "shooting", workflowStage: "shooting", selectionStatus: "confirmed", selectionConfirmedAt: LXMFormat.nowText(), customerStatus: "拍摄中", businessStatus: "shooting" });
-    }
-    if (action === "payment" && payload.phase === "deposit" && String(payload.paymentStatus || "") === "confirmed") {
-      const depositRefundable = order.depositRefundable !== false && !order.photographerId && !order.dispatchRecord
-        && !(Array.isArray(order.dispatchRecords) && order.dispatchRecords.length);
-      const businessStatus = orderBusinessStatus(order);
-      Object.assign(order, { depositRefundable, depositFinanceStatus: "confirmed", depositPaymentStatus: "confirmed" });
-      if (!["awaiting_shoot", "shooting", "completed", "cancelled"].includes(businessStatus)) {
-        Object.assign(order, { status: "deposit_paid", workflowStage: "awaiting_dispatch", customerStatus: "待确认", businessStatus: "reserved" });
-      }
-    }
-    if (action === "payment" && payload.phase === "final" && String(payload.paymentStatus || "") === "confirmed") {
-      Object.assign(order, { status: "completed", workflowStage: "completed", customerStatus: "已完成", businessStatus: "completed", finalPaid: Number(payload.amount ?? order.finalPaid ?? 0), finalFinanceStatus: "confirmed", finalPaymentStatus: "confirmed", completedAt: LXMFormat.nowText() });
-    }
-    if (action === "deliveryrecord") {
-      const record = { id: payload.deliveryId || `delivery_${Date.now().toString(36)}`, fileIds: Array.isArray(payload.fileIds) ? payload.fileIds.slice() : [], visibility: payload.visibility || "customer", method: payload.deliveryMethod || "企业微信", note: payload.note || payload.reason || "", createdAt: LXMFormat.nowText(), operator: currentOperatorName() };
-      order.deliveryRecords = [...(Array.isArray(order.deliveryRecords) ? order.deliveryRecords : []), record];
-      order.deliveryRecord = record;
-    }
-    if (action === "deliver") { order.deliveredAt = LXMFormat.nowText(); }
-    if (action === "complete") { order.status = "completed"; order.customerStatus = "已完成"; order.businessStatus = "completed"; }
-    if (action === "cancel") { order.status = "cancelled"; order.customerStatus = "已取消"; order.deleted = true; order.isDeleted = true; }
-    if (action === "unassign") { order.photographerId = ""; order.dispatchRecord = null; order.dispatchStatus = "pending_reassignment"; order.status = "deposit_paid"; order.customerStatus = "待确认"; order.businessStatus = "reserved"; order.workflowStage = "awaiting_dispatch"; }
-    if (action === "followup" && payload.content) {
-      const recordId = payload.followupId || `followup_${Date.now().toString(36)}`;
-      const previous = (order.followRecords || []).find((item) => item.id === recordId);
-      const item = { ...previous, id: recordId, type: "customer_followup", followupType: payload.type || "service", content: payload.content, status: payload.status || "pending", reason: payload.reason || payload.content, operator: currentOperatorName(), operatorId: roleProfile.value.staffId || state.currentStaffId || "", createTime: previous?.createTime || LXMFormat.nowText() };
-      order.followRecords = [...(Array.isArray(order.followRecords) ? order.followRecords : []).filter((entry) => entry.id !== recordId), item];
-    }
-    if (action === "note" && payload.reason) order.internalNote = [order.internalNote, payload.reason].filter(Boolean).join("\n");
-    if (!(window.LXM_CLOUD && window.LXM_CLOUD.loadAdminData)) schedulePersist();
-    return null;
+    throw new Error("真实后端连接不可用，订单操作未保存");
   }
   try {
     const updated = await window.LXM_CLOUD.orderAction(id, action, payload);
-    if (updated && typeof updated === "object") Object.assign(order, updated);
+    if (!updated || typeof updated !== "object" || Array.isArray(updated) || updated.error || updated.ok === false
+      || !(updated.ok === true || updated.id || updated._id)) throw new Error(updated && updated.error || "服务端未确认订单操作");
+    if (updated.id || updated._id) Object.assign(order, updated);
     return updated;
   } catch (error) {
     const message = (error && error.message) || "订单保存失败";
@@ -405,7 +369,7 @@ function orderSourceName(order) {
   return shopName(shopId);
 }
 function staffName(id) {
-  return (data.staff.find((s) => s.id === id) || {}).name || "总部摄影";
+  return (ctx.photoState?.options?.find((row) => row.id === id) || data.staff.find((s) => s.id === id) || {}).name || "总部摄影";
 }
 function spotName(id) {
   return (data.spots.find((s) => s.id === id) || {}).name || "-";
@@ -676,8 +640,14 @@ function serviceOwnerName(order) {
 function photographerDisplayName(id) {
   return id ? staffName(id) : "总部摄影";
 }
+function isOrderLedgerReadonly() {
+  if (LXM_CONFIG.orderLedgerReadOnly === false) return false;
+  const menu = (LXM_CONFIG.menus || []).find((item) => item.key === state.active);
+  return state.active === "orders" || (menu && (menu.routeKey || menu.targetKey) === "orders")
+    || !!(state.orderDrawer && state.orderLedgerDetail);
+}
 function canEditOrder() {
-  return can("orderEdit");
+  return !isOrderLedgerReadonly() && can("orderEdit");
 }
 function isServiceQueueOrder(order = {}) {
   return isCreatedBooking(order) && state.role === "service" && !isOrderTerminalStatus(order)
@@ -687,7 +657,7 @@ function isCurrentServiceOrder(order = {}) {
   return !!order && String(order.assigneeId || order.staffId || "") === String(roleProfile.value.staffId || state.currentStaffId || "");
 }
 function canClaimOrder(order = {}) {
-  return isServiceQueueOrder(order) && state.role === "service" && can("orderEdit")
+  return !isOrderLedgerReadonly() && isServiceQueueOrder(order) && state.role === "service" && can("orderEdit")
     && !String(order.assigneeId || order.staffId || "").trim()
     && !isOrderAfterSaleLocked(order);
 }
@@ -1050,11 +1020,12 @@ function largeSettlementThreshold() {
   return Math.max(amount, 0);
 }
 async function normalizeFinanceSettings() {
+  if (!ctx.isServerConnected()) return ElMessage.error("真实后端连接不可用，财务参数未保存");
   data.financeSettings.settlementObservationDays = settlementObservationDays();
   data.financeSettings.largeSettlementThreshold = largeSettlementThreshold();
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   const remote = !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.upsertDoc
-    && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+    && window.LXM_CLOUD_MODE === "mysql" && reachable !== false);
   if (remote) {
     try {
       const saved = await window.LXM_CLOUD.upsertDoc("financeSettings", "global", {
@@ -1197,7 +1168,7 @@ function canCompleteOrderPayment(order) {
 }
 
 // 登录：优先走后端 /api/auth/login（scrypt 校验，前端不持有明文密码）。
-// 若后端不可达（如直接双击打开 index.html 的 mock 模式），回退到本地演示数据比对，保证 demo 可登录。
+// 后端不可达时拒绝登录，不使用本地账号或业务数据。
 
   return {
     can,
@@ -1290,6 +1261,7 @@ function canCompleteOrderPayment(order) {
     visibleWechat,
     serviceOwnerName,
     photographerDisplayName,
+    isOrderLedgerReadonly,
     canEditOrder,
     isServiceQueueOrder,
     isCurrentServiceOrder,

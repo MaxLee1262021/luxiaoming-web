@@ -1,39 +1,99 @@
-<div class="lxm-page">
-  <header class="lxm-page-head">
-    <div>
-      <span class="lxm-eyebrow">攻略运营</span>
-      <h3 class="lxm-page-head__title">攻略管理</h3>
-      <p class="lxm-page-head__desc">游玩攻略与拍摄建议，帮助游客规划路线，可关联打卡点与拍摄风格。配置后在小程序「旅拍灵感」板块展示。</p>
-    </div>
-    <div class="lxm-page-head__actions">
-      <el-button plain @click="openContentLogs('攻略')">操作日志</el-button>
-      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('guides')">新增攻略</el-button>
+<div class="inspiration-app">
+  <header class="inspiration-topbar">
+    <div class="inspiration-brand"><span class="inspiration-mark">旅</span><strong>旅拍灵感</strong><span class="inspiration-crumb">/ {{ ui.mode==='edit' ? (idOf(ui.form) ? '编辑灵感' : '新建灵感') : '内容管理' }}</span></div>
+    <div class="inspiration-top-actions" v-if="ui.mode==='edit'">
+      <button class="ig-btn" :disabled="ui.saving || uploadBusy" @click="backToList">← 返回列表</button>
+      <span class="ig-save-status" :class="{dirty:ui.dirty}" role="status">{{ saveStatus }}</span>
+      <button class="ig-btn" @click="openPreview()">预览</button>
+      <button class="ig-btn" :disabled="ui.saving || uploadBusy" @click="saveArticle(false)">存草稿</button>
+      <button class="ig-btn primary" :disabled="ui.saving || uploadBusy" @click="saveArticle(true)">{{ ui.saving ? '保存中…' : isPublished(ui.form) && idOf(ui.form) ? '更新发布' : '发布' }}</button>
     </div>
   </header>
+  <div v-if="ui.loading" class="ig-loading" role="status">正在加载旅拍灵感与关联商品…</div>
+  <div v-if="ui.loadError" class="ig-load-error" role="alert">{{ ui.loadError }}<button class="ig-btn" @click="loadGuideData">重新加载</button></div>
 
-  <div class="lxm-toolbar">
-    <el-input v-model="state.filters.keyword" clearable placeholder="搜索攻略标题" style="max-width:320px" />
-    <el-button @click="state.filters.keyword=''">重置</el-button>
-  </div>
-
-  <div class="lxm-cards">
-    <article v-for="item in data.guides" :key="item.id" class="lxm-card">
-      <div class="lxm-card__cover">
-        <img :src="item.cover" />
-        <span class="lxm-card__badge">{{ item.tag || '攻略' }}</span>
-      </div>
-      <div class="lxm-card__body">
-        <h4 class="lxm-card__title">{{ item.title || item.name }}</h4>
-        <div class="lxm-card__meta"><span>状态 <b>{{ item.status || '草稿' }}</b></span></div>
-      </div>
-      <div class="lxm-card__actions">
-        <el-button v-if="can('contentEdit')" link type="primary" @click="openContent(item)">编辑</el-button>
-      </div>
-    </article>
-    <div v-if="!data.guides.length" class="lxm-empty-inline">
-      <strong>暂无攻略</strong>
-      <span>先新增一篇攻略。</span>
-      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('guides')">新增攻略</el-button>
+  <main class="ig-list-main" v-if="ui.mode==='list'">
+    <div class="ig-list-head"><div><h1>灵感管理</h1><p>共 <b>{{ guideTotal }}</b> 条旅拍灵感，置顶内容会优先展示</p></div><button class="ig-btn primary" v-if="can('contentEdit')" @click="openEditor()">+ 新建灵感</button></div>
+    <div class="ig-filter-bar">
+      <div class="ig-search"><span aria-hidden="true">⌕</span><input v-model="state.filters.keyword" placeholder="搜索标题 / 打卡点" aria-label="搜索标题或打卡点"></div>
+      <div class="ig-segments" aria-label="发布状态筛选"><button v-for="tab in [{key:'all',label:'全部'},{key:'published',label:'已发布'},{key:'draft',label:'草稿'}]" :key="tab.key" :class="{active:ui.filter===tab.key}" @click="ui.filter=tab.key">{{ tab.label }}</button></div>
+      <el-select v-model="state.filters.contentSpotId" class="ig-spot-filter" clearable filterable placeholder="全部打卡点"><el-option v-for="spot in validSpots" :key="idOf(spot)" :label="spot.name" :value="idOf(spot)" /></el-select>
+      <button class="ig-btn" v-if="state.filters.contentSpotId || state.filters.keyword || ui.filter!=='all'" @click="state.filters.contentSpotId='';state.filters.keyword='';ui.filter='all'">重置</button>
     </div>
-  </div>
+    <div class="ig-card-list">
+      <article class="ig-inspiration-card" v-for="item in guideRows" :key="idOf(item)" :class="{pinned:item.isTop,'front-hidden':!frontVisible(item)}">
+        <button class="ig-list-cover" :aria-label="'预览 '+(item.title || item.name)" @click="openPreview(item)">
+          <img v-if="item.cover || item.image" :src="item.cover || item.image" alt="灵感封面"><span class="ig-cover-placeholder" v-else>{{ (item.title || item.name || '灵').slice(0,1) }}</span>
+          <span v-if="item.isTop" class="ig-pin-badge">置顶</span><span v-if="!frontVisible(item)" class="ig-hide-badge">前端隐藏</span>
+        </button>
+        <div class="ig-list-body" @click="can('contentEdit') ? openEditor(item) : openPreview(item)">
+          <div class="ig-list-title-row"><h3>{{ item.title || item.name || '未命名灵感' }}</h3><span class="ig-state-badge" :class="isPublished(item) ? 'published' : 'draft'">{{ isPublished(item) ? '已发布' : '草稿' }}</span><span class="ig-state-badge" :class="frontVisible(item) ? 'visible' : 'hidden'">{{ frontVisible(item) ? '前端显示' : '前端隐藏' }}</span></div>
+          <p class="ig-description">{{ textOf(item.contentHtml || item.content || item.description) || '暂无正文内容' }}</p>
+          <div class="ig-list-meta"><span class="ig-spot-chip" v-for="id in spotIdsOf(item).slice(0,2)" :key="id">{{ spotLabel(id) }}</span><span class="ig-spot-chip more" v-if="spotIdsOf(item).length>2">+{{ spotIdsOf(item).length-2 }}</span><span class="ig-product-meta">🛍 {{ productLabel(item) }}</span><span>👁 {{ item.readCount || item.views || 0 }}</span><span>♡ {{ item.likeCount || item.likes || 0 }}</span><span>更新于 {{ timeLabel(item.updatedAt || item.createdAt) }}</span></div>
+        </div>
+        <div class="ig-list-actions">
+          <button class="ig-action" v-if="can('contentEdit')" @click="openEditor(item)">✎ 编辑</button>
+          <button class="ig-action" :class="{'on-blue':frontVisible(item)}" v-if="can('contentEdit')" :disabled="ui.saving" @click="toggleGuide(item)">{{ frontVisible(item) ? '◉ 前端显示中' : '⊘ 前端已隐藏' }}</button>
+          <button class="ig-action" :class="{on:item.isTop}" v-if="can('contentEdit')" :disabled="ui.saving" @click="pinGuide(item)">{{ item.isTop ? '★ 取消置顶' : '☆ 置顶' }}</button>
+          <button class="ig-action danger" v-if="state.role==='super'" :disabled="ui.saving" @click="deleteGuide(item)">删除</button>
+        </div>
+      </article>
+      <div class="ig-empty-state" v-if="!guideRows.length && !ui.loading && !ui.loadError"><div>▧</div><p>{{ guideTotal ? '没有符合条件的灵感，换个关键词试试' : '还没有旅拍灵感，去创建第一条吧' }}</p><button v-if="can('contentEdit') && !guideTotal" class="ig-btn primary" @click="openEditor()">+ 新建灵感</button></div>
+    </div>
+  </main>
+
+  <main class="ig-edit-main" v-else :inert="ui.saving">
+    <section class="ig-editor-column">
+      <div class="ig-card"><input class="ig-title-input" v-model="ui.form.title" maxlength="50" placeholder="填写标题，一个好标题能获得更多推荐" aria-label="灵感标题" @input="markDirty"><div class="ig-title-count">{{ ui.form.title.length }} / 50</div></div>
+      <div class="ig-card"><div class="ig-card-head"><h3>首页封面图 <span class="ig-badge">{{ ui.form.cover ? '已上传' : '必填' }}</span></h3></div>
+        <div class="ig-cover-uploader" role="button" tabindex="0" aria-label="上传首页封面图" @click="!ui.form.cover && pickFiles('cover')" @keydown.enter="pickFiles('cover')" @dragover.prevent @drop.prevent="dropFiles($event,true)">
+          <template v-if="ui.form.cover"><img :src="ui.form.cover" alt="首页封面图"><div class="ig-cover-mask"><button class="ig-btn" @click.stop="pickFiles('cover')">替换</button><button class="ig-btn danger" @click.stop="ui.form.cover='';markDirty()">删除</button></div></template>
+          <div class="ig-cover-empty" v-else><span>▧</span><strong>点击或拖拽上传封面图</strong><small>建议尺寸 1280 × 720（16:9），大小不超过 5MB</small></div>
+        </div>
+      </div>
+      <div class="ig-card ig-editor-card">
+        <div class="ig-toolbar" role="toolbar" aria-label="正文格式" @mousedown.prevent>
+          <button @click="format('undo')" title="撤销">↶</button><button @click="format('redo')" title="重做">↷</button><i></i>
+          <button @click="format('formatBlock','H2')" title="大标题">H2</button><button @click="format('formatBlock','H3')" title="小标题">H3</button><i></i>
+          <button @click="format('bold')" title="加粗"><b>B</b></button><button @click="format('italic')" title="斜体"><em>I</em></button><button @click="format('underline')" title="下划线"><u>U</u></button><i></i>
+          <button @click="format('insertUnorderedList')" title="无序列表">• 列表</button><button @click="format('insertOrderedList')" title="有序列表">1. 列表</button><button @click="format('formatBlock','BLOCKQUOTE')">❝ 引用</button><i></i>
+          <button :disabled="uploadBusy" @click="pickFiles('image')">▧ 上传图片</button><button :disabled="uploadBusy" @click="rememberSelection();ui.videoUrl='';ui.videoModal=true">▷ 视频</button><button :disabled="uploadBusy" @click="pickFiles('file')">♧ 上传文件</button><button @click="format('insertHorizontalRule')" title="分割线">—</button><i></i><button @click="format('removeFormat')">清除格式</button>
+        </div>
+        <div ref="editorRef" class="ig-rich-editor ig-rich-content" contenteditable="true" role="textbox" aria-label="灵感正文" aria-multiline="true" data-placeholder="在这里记录你的旅拍故事，可以插入图片和视频…" @input="editorInput" @keyup="rememberSelection" @mouseup="rememberSelection" @focus="rememberSelection" @paste="pasteContent" @dragover.prevent @drop.prevent="dropFiles($event)"></div>
+        <div class="ig-editor-foot"><span>支持粘贴 / 拖拽图片、视频或文件；附件支持 PDF、DOCX、XLSX、PPTX、TXT、CSV（20MB 内）</span><span>{{ wordCount }} 字</span></div>
+        <div class="ig-upload-list" v-if="guideUploads.length" aria-label="正文上传进度" aria-live="polite">
+          <div class="ig-upload-row" v-for="job in guideUploads" :key="job.id"><span class="ig-upload-name" :title="job.name">{{ job.name }}</span><progress :value="job.progress" max="100"></progress><span>{{ job.status==='failed' ? '上传失败' : job.status==='done' ? '已上传' : job.status==='queued' ? '等待上传' : job.progress+'%' }}</span><small v-if="job.error">{{ job.error }}</small><button v-if="job.status==='failed'" class="ig-text-btn" :disabled="uploadBusy" @click="retryUpload(job.id)">重试</button><button v-if="job.status==='failed' || job.status==='done'" class="ig-text-btn" @click="dismissUpload(job.id)">{{ job.status==='failed' ? '移除' : '关闭' }}</button></div>
+        </div>
+      </div>
+    </section>
+    <aside class="ig-settings-column">
+      <div class="ig-card"><div class="ig-card-head"><h3>关联打卡点</h3><button class="ig-text-btn" @click="ui.spotKeyword='';ui.spotModal=true">+ 添加</button></div>
+        <div class="ig-spot-tags"><span class="ig-spot-tag" v-for="id in ui.form.spotIds" :key="id">{{ spotLabel(id) }}<button :aria-label="'移除'+spotLabel(id)" @click="removeSpot(id)">×</button></span></div><p class="ig-hint">关联打卡点后，可在该打卡点下选择要展示的商品</p>
+      </div>
+      <div class="ig-card"><div class="ig-card-head"><h3>关联商品 <span class="ig-badge" v-if="ui.form.targetProductId">已选 1 件</span></h3></div>
+        <div class="ig-picked-bar" v-if="ui.form.targetProductId"><span>{{ pickedProduct ? pickedProduct.name : '原关联商品已失效' }}</span><b v-if="pickedProduct">¥{{ pickedProduct.price || pickedProduct.specialPrice || 0 }}</b><button aria-label="清除关联商品" @click="clearProduct">×</button></div>
+        <p class="ig-panel-empty" v-if="!ui.form.spotIds.length">请先添加关联打卡点</p>
+        <template v-else><p class="ig-hint ig-product-hint">可从以下打卡点中选择 1 件商品</p>
+          <div class="ig-spot-block" v-for="group in productGroups" :key="group.id"><div class="ig-spot-block-head"><span class="ig-dot"></span>{{ group.name }}<span class="ig-badge" v-if="ui.form.targetProductSpotId===group.id && ui.form.targetProductId">已选商品</span></div>
+            <button class="ig-product-row" :class="{selected:ui.form.targetProductSpotId===group.id && ui.form.targetProductId===idOf(product) && ui.form.targetProductType===product.targetType}" v-for="product in group.products" :key="product.targetType+idOf(product)" @click="selectProduct(group.id,product)">
+              <input type="checkbox" :checked="ui.form.targetProductSpotId===group.id && ui.form.targetProductId===idOf(product) && ui.form.targetProductType===product.targetType" tabindex="-1" aria-hidden="true"><span>{{ product.name || product.title }}<small>{{ product.typeLabel }}</small></span><b>¥{{ product.price || product.specialPrice || 0 }}</b>
+            </button><p class="ig-no-products" v-if="!group.products.length">暂无可预约商品</p>
+          </div>
+        </template>
+      </div>
+    </aside>
+  </main>
+
+  <el-dialog v-model="ui.spotModal" title="选择打卡点" width="560px" class="ig-dialog" append-to-body>
+    <input class="ig-dialog-search" v-model="ui.spotKeyword" placeholder="搜索打卡点名称 / 城市" aria-label="搜索打卡点">
+    <div class="ig-spot-choices"><button class="ig-spot-choice" v-for="spot in spotChoices" :key="idOf(spot)" @click="addSpot(spot)"><span class="ig-spot-icon"><img v-if="spot.cover" :src="spot.cover" alt=""><template v-else>{{ (spot.name || '点').slice(0,1) }}</template></span><span class="ig-spot-info"><strong>{{ spot.name }}</strong><small>{{ spot.cityName || spot.city || '打卡点' }} · {{ productsForSpot(idOf(spot)).length }} 个商品</small></span><span class="ig-plus">+</span></button><p class="ig-panel-empty" v-if="!spotChoices.length">没有可添加的打卡点</p></div>
+  </el-dialog>
+  <el-dialog v-model="ui.videoModal" title="插入视频" width="460px" class="ig-dialog" append-to-body>
+    <label class="ig-video-field">视频链接<input v-model="ui.videoUrl" placeholder="粘贴 mp4 等直链地址" @keyup.enter="insertVideoUrl"></label><div class="ig-or">或</div><button class="ig-btn ig-block" :disabled="uploadBusy" @click="pickFiles('video')">从本地上传视频</button><p class="ig-hint">支持 100MB 以内的 MP4 视频文件</p>
+    <template #footer><button class="ig-btn" @click="ui.videoModal=false">取消</button><button class="ig-btn primary" @click="insertVideoUrl">插入</button></template>
+  </el-dialog>
+  <el-dialog v-model="ui.preview" title="预览" width="700px" class="ig-dialog ig-preview-dialog" append-to-body>
+    <div class="ig-preview-wrap" v-if="ui.previewForm"><img class="ig-preview-cover" v-if="ui.previewForm.cover" :src="ui.previewForm.cover" alt="首页封面图"><h1>{{ ui.previewForm.title || '（未填写标题）' }}</h1><div class="ig-rich-content" v-html="ui.previewForm.contentHtml"></div><div class="ig-preview-section" v-if="spotIdsOf(ui.previewForm).length"><h4>关联打卡点</h4><div class="ig-spot-tags"><span class="ig-spot-tag" v-for="id in spotIdsOf(ui.previewForm)" :key="id">{{ spotLabel(id) }}</span></div></div><div class="ig-preview-section" v-if="ui.previewForm.targetProductId"><h4>关联商品</h4><div class="ig-picked-bar"><span>{{ productLabel(ui.previewForm) }} · {{ spotLabel(ui.previewForm.targetProductSpotId || ui.previewForm.spotId) }}</span><b v-if="selectedProduct(ui.previewForm)">¥{{ selectedProduct(ui.previewForm).price || 0 }}</b></div></div></div>
+    <template #footer><button class="ig-btn" @click="ui.preview=false">关闭</button><button class="ig-btn primary" v-if="ui.mode==='edit'" :disabled="ui.saving || uploadBusy" @click="saveArticle(true)">确认发布</button></template>
+  </el-dialog>
 </div>

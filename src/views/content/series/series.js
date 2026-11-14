@@ -105,7 +105,7 @@ window.LXM_PAGES.register({
       source.isShow = next;
       const saved = typeof ctx.persistContentMutation === "function"
         ? await ctx.persistContentMutation("series", source, previous)
-        : true;
+        : false;
       if (!saved) {
         Object.assign(source, previous);
         return;

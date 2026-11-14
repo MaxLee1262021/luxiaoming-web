@@ -10,7 +10,9 @@ const root = path.resolve(__dirname, "../..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const ids = (rows) => Array.from(rows, (row) => row.id || row._id);
-const single = (id, extra = {}) => ({ id, title: id, type: "video", isVideoSingle: true, status: "上架", isShow: true, ...extra });
+const single = (id, extra = {}) => ({ id, title: id, type: "video", isVideoSingle: true, status: "上架", isShow: true,
+  videoUrl: "/test.mp4", tags: ["测试风格"], shootingNotes: "测试拍摄说明", price: 10, videoDuration: 30,
+  finishedVideoCount: 1, deliveryCycle: "1–3 个工作日", makeupIncluded: false, hasAerial: false, fullEdit: false, ...extra });
 
 function fixture(options = {}) {
   const messages = [];
@@ -40,6 +42,7 @@ function fixture(options = {}) {
     remoteOn: () => remoteStored,
     setRemote: (value) => { remoteStored = value; },
     async loadCollection(key) {
+      if (!session) throw new Error("需要登录后读取管理数据");
       assert.equal(key, "packages");
       assert.equal(remoteStored, true, "enable remote before the guarded collection request");
       return load();
@@ -64,8 +67,8 @@ function fixture(options = {}) {
   };
   const ctx = {
     computed, ElMessage: message,
-    data: { packages: clone(options.localRows || []), series: [], spots: [] },
-    state: { authSource: session ? "server" : "demo", filters: {}, videoSingleDialog: false },
+    data: { packages: clone(options.localRows || []), series: [], spots: [], tagLibrary: [{ id: "style", name: "测试风格", category: "风格", status: "启用" }] },
+    state: { authSource: session ? "server" : "demo", role: "super", filters: {}, videoSingleDialog: false },
     log() {}, currentOperatorName: () => "测试管理员",
     money: (value) => value, seriesName: (value) => value, spotName: (value) => value,
     persistTrashRecord: async (row) => { if (failTrash) return false; trash.push(row); return true; }
@@ -96,7 +99,7 @@ function fixture(options = {}) {
   };
 }
 
-test("local and remote video singles accept either explicit marker and exclude legacy packages and deleted rows", async () => {
+test("only server video singles accept either explicit marker and exclude legacy packages and deleted rows", async () => {
   const rows = [
     single("flag"),
     { id: "kind", type: "video", productKind: "video_single" },
@@ -107,8 +110,8 @@ test("local and remote video singles accept either explicit marker and exclude l
     { id: "photo", type: "photo", isVideoSingle: true },
     { id: "truthy", type: "video", isVideoSingle: "true" }
   ];
-  const f = fixture({ remote: false, localRows: rows });
-  assert.deepEqual(ids(f.page.listSource.value), ["flag", "kind", "category"]);
+  const f = fixture({ localRows: rows, serverRows: rows });
+  assert.deepEqual(ids(f.page.listSource.value), []);
   assert.deepEqual(ids(f.ctx.videoSingleRows.value), ["flag", "kind", "category"]);
   f.setRows(rows);
   await f.page.toggleRemote();
@@ -179,18 +182,18 @@ test("remote filters drive totals and selected rows together, including spotIds,
   assert.equal(f.page.videoSingleSummary.value.total, 8);
 });
 
-test("only an explicit demo context can turn off remote mode, restoring its own original data", async () => {
+test("legacy demo contexts cannot restore local data or disable real backend mode", async () => {
   const f = fixture({ remote: false, localRows: [single("demo")], serverRows: [single("real")] });
-  assert.deepEqual(ids(f.page.listSource.value), ["demo"]);
+  assert.deepEqual(ids(f.page.listSource.value), []);
   await f.page.toggleRemote();
-  assert.deepEqual(ids(f.page.listSource.value), ["real"]);
-  f.page.toggleRemote();
-  assert.equal(f.page.remoteOn.value, false);
-  assert.deepEqual(ids(f.ctx.data.packages), ["demo"]);
+  assert.deepEqual(ids(f.page.listSource.value), []);
+  await f.page.toggleRemote();
+  assert.equal(f.page.remoteOn.value, true);
+  assert.deepEqual(ids(f.page.listSource.value), []);
   const server = fixture({ serverRows: [single("server")] });
   await server.mount();
   await server.expireSession();
-  server.page.toggleRemote();
+  await server.page.toggleRemote();
   assert.equal(server.page.remoteOn.value, true, "an expired server session cannot relabel server rows as demo data");
 });
 
@@ -208,6 +211,8 @@ test("save, shelf changes, delete, advanced edits, and additions update the same
   assert.equal(a.status, "下架");
   assert.equal(await f.page.toggleVideoSingleShelf(a), true);
   assert.equal(f.page.videoSingleSummary.value.onSale, 2);
+  assert.equal(await f.page.deleteVideoSingle(a), false, "显示状态不得直接删除");
+  await f.page.toggleVideoSingleShelf(a);
   assert.equal(await f.page.deleteVideoSingle(a), true);
   assert.deepEqual(ids(f.page.listSource.value), ["b"]);
   assert.equal(f.page.videoSingleSummary.value.total, 1);
@@ -219,6 +224,7 @@ test("save, shelf changes, delete, advanced edits, and additions update the same
   assert.equal(f.page.selectedVideoSingle.value.title, "高级编辑");
   f.page.openVideoSingle();
   f.ctx.state.videoSingleForm.title = "新单品";
+  Object.assign(f.ctx.state.videoSingleForm, { tags: ["测试风格"], shootingNotes: "拍摄说明", videoDuration: 30, videoUrl: "/test.mp4" });
   assert.equal(await f.ctx.saveVideoSingle(), true);
   assert.equal(f.page.videoSingleSummary.value.total, 2);
   assert.equal(f.page.listSource.value[0].title, "新单品");
@@ -244,7 +250,7 @@ test("disconnected real sessions block both page actions and an already open adv
 });
 
 test("failed persistence restores delete and shelf state in the shared list", async () => {
-  const f = fixture({ serverRows: [single("real")] });
+  const f = fixture({ serverRows: [single("real", { isShow: false, status: "下架" })] });
   await f.mount();
   const row = f.page.selectedVideoSingle.value;
   f.failWrites();
@@ -253,13 +259,13 @@ test("failed persistence restores delete and shelf state in the shared list", as
   assert.equal(row.deleted, false);
   assert.equal(row.isDeleted, false);
   assert.equal(await f.page.toggleVideoSingleShelf(row), false);
-  assert.equal(row.status, "上架");
-  assert.equal(f.page.videoSingleSummary.value.onSale, 1);
+  assert.equal(row.status, "下架");
+  assert.equal(f.page.videoSingleSummary.value.onSale, 0);
   assert.equal(f.trash.length, 0);
 });
 
 test("a failed trash write rolls back deletion with explicit false flags on the server", async () => {
-  const f = fixture({ serverRows: [single("real")] });
+  const f = fixture({ serverRows: [single("real", { isShow: false, status: "下架" })] });
   await f.mount();
   f.failTrash();
   assert.equal(await f.page.deleteVideoSingle(f.page.selectedVideoSingle.value), false);
@@ -289,17 +295,19 @@ test("stale, unmounted, and expired-session requests cannot replace newer shared
   await expired;
   assert.deepEqual(ids(f.ctx.data.packages), ["new"]);
   assert.equal(f.page.listSource.value.length, 0);
+  const active = fixture({ serverRows: [single("new")] });
+  await active.mount();
   let resolveUnmounted;
-  f.setLoad(() => new Promise((resolve) => { resolveUnmounted = resolve; }));
-  const unmounted = f.page.refreshFromServer();
-  f.unmount();
+  active.setLoad(() => new Promise((resolve) => { resolveUnmounted = resolve; }));
+  const unmounted = active.page.refreshFromServer();
+  active.unmount();
   resolveUnmounted([single("unmounted")]);
   await unmounted;
-  assert.deepEqual(ids(f.ctx.data.packages), ["new"]);
+  assert.deepEqual(ids(active.ctx.data.packages), ["new"]);
 });
 
 test("video upload callbacks cannot modify disconnected or replaced source rows", async () => {
-  const f = fixture({ serverRows: [single("real")] });
+  const f = fixture({ serverRows: [single("real", { videoUrl: undefined })] });
   await f.mount();
   const first = f.page.selectedVideoSingle.value;
   f.page.onVideoFilePick({ target: { files: [{}], value: "file" } });
@@ -318,6 +326,68 @@ test("video upload callbacks cannot modify disconnected or replaced source rows"
   assert.equal(f.page.selectedVideoSingle.value.videoUrl, "/accepted.mp4");
 });
 
+test("a new video product uploads, saves, and reloads without a cover", async () => {
+  const f = fixture();
+  await f.mount();
+  f.page.openVideoEditor();
+  const draft = f.page.videoDraft.value;
+  Object.assign(draft, { title: "城市短片", tags: ["测试风格"], shootingNotes: "城市漫游拍摄" });
+  assert.equal(await f.page.saveSelectedVideoSingle(), false, "a video product needs playable media");
+  assert.equal(f.writes.length, 0);
+  assert.match(f.messages.at(-1), /上传商品视频/);
+  const input = { files: [{ name: "city.mp4", type: "video/mp4", size: 100 }], value: "city.mp4" };
+  f.page.onVideoFilePick({ target: input });
+  assert.equal(input.value, "");
+  assert.equal(f.uploads[0].purpose, "content");
+  assert.equal(f.uploads[0].collection, "packages");
+  assert.equal(f.uploads[0].videoOnly, true);
+  f.uploads[0].onUploaded({ url: "/api/media/city-video" });
+  assert.equal(f.page.videoSource(draft), "/api/media/city-video");
+  assert.equal(await f.page.saveSelectedVideoSingle(), true);
+  const saved = f.writes.at(-1).payload;
+  assert.equal(saved.videoUrl, "/api/media/city-video");
+  assert.ok(!saved.cover);
+  f.setRows([{ ...saved, id: f.writes.at(-1).id }]);
+  await f.page.refreshFromServer();
+  assert.equal(f.page.videoSource(f.page.listSource.value[0]), "/api/media/city-video");
+});
+
+test("an upload finishing after cancellation cannot change a different video draft", async () => {
+  const f = fixture();
+  await f.mount();
+  f.page.openVideoEditor();
+  const original = f.page.videoDraft.value;
+  f.page.onVideoFilePick({ target: { files: [{}], value: "file" } });
+  f.page.closeEditor();
+  f.page.openVideoEditor();
+  const next = f.page.videoDraft.value;
+  f.uploads[0].onUploaded({ url: "/cancelled.mp4" });
+  assert.equal(original.videoUrl, "");
+  assert.equal(next.videoUrl, "");
+  f.ctx.can = () => false;
+  f.page.onVideoFilePick({ target: { files: [{}], value: "file" } });
+  assert.equal(f.uploads.length, 1, "view-only users cannot start an upload");
+});
+
+test("legacy video objects can be previewed and republished without an image", async () => {
+  const f = fixture({ serverRows: [single("legacy-media", {
+    videoUrl: "", status: "下架", isShow: false,
+    videos: [{ url: "/image.jpg", type: "image" }, { src: "/api/media/legacy-video", mimeType: "video/mp4" }]
+  })] });
+  await f.mount();
+  const row = f.page.listSource.value[0];
+  assert.equal(f.page.videoSource(row), "/api/media/legacy-video");
+  f.page.openVideoEditor(row);
+  assert.equal(f.page.videoDraft.value.videoUrl, "/api/media/legacy-video");
+  f.page.videoDraft.value.isShow = true;
+  assert.equal(await f.page.saveSelectedVideoSingle(), true);
+  assert.equal(f.writes.at(-1).payload.videoUrl, "/api/media/legacy-video");
+  assert.equal(f.writes.at(-1).payload.isShow, true);
+  const complete = { ...f.writes.at(-1).payload, videoUrl: "", videos: [], cover: "/cover.jpg" };
+  assert.match(f.ctx.validateContentPublishing("packages", complete), /上传商品视频/);
+  assert.match(f.ctx.validateContentPublishing("packages", { ...complete, videoUrl: "/photo.jpg?version=1" }), /上传商品视频/);
+});
+
 test("the template binds every KPI to the same computed summary and exposes retry on load errors", () => {
   const template = read("src/views/content/videoSingle/videoSingle.html");
   assert.doesNotMatch(template, /videoSingleRows/);
@@ -325,6 +395,6 @@ test("the template binds every KPI to the same computed summary and exposes retr
   assert.match(template, /v-for="item in listSource"/);
   assert.match(template, /v-if="remoteError"/);
   assert.match(template, /重新加载/);
-  assert.match(template, /真实数据：已开启/);
-  assert.match(template, /演示数据：已开启/);
+  assert.match(template, /真实数据库/);
+  assert.doesNotMatch(template, /演示数据|@change="toggleRemote"/);
 });

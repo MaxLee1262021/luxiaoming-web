@@ -17,7 +17,7 @@
 function remoteTrashEnabled() {
   const reachable = window.LXM_API_STATE && window.LXM_API_STATE.reachable;
   return !!(window.LXM_AUTH?.hasSession?.() && window.LXM_CLOUD?.create && window.LXM_CLOUD?.update && window.LXM_CLOUD?.remove
-    && window.LXM_CLOUD_MODE !== "mock" && reachable !== false);
+    && window.LXM_CLOUD_MODE === "mysql" && reachable !== false);
 }
 function trashRowKey(row) {
   if (!row) return "";
@@ -34,9 +34,9 @@ function addTrashLocal(row) {
   return row;
 }
 async function persistTrashRecord(row) {
+  if (!remoteTrashEnabled()) { ElMessage.error("真实后端连接不可用，回收站记录未保存"); return null; }
   const inserted = addTrashLocal(row);
   if (inserted !== row) return inserted;
-  if (!remoteTrashEnabled()) return row;
   try {
     const saved = await window.LXM_CLOUD.create("trash", row);
     if (saved && typeof saved === "object") Object.assign(row, saved);
@@ -49,20 +49,22 @@ async function persistTrashRecord(row) {
   }
 }
 async function removeTrashRecordRemote(row) {
-  if (!remoteTrashEnabled() || !row || !(row.id || row._id)) return true;
+  if (!remoteTrashEnabled()) throw new Error("真实后端连接不可用，回收站记录未删除");
+  if (!row || !(row.id || row._id)) throw new Error("回收站记录缺少标识");
   await window.LXM_CLOUD.remove("trash", row.id || row._id);
   return true;
 }
 function trashSourceKey(row) {
   if (row && row.sourceKey) return row.sourceKey;
   return ({
-    "打卡": "spots", "打卡点": "spots", "照片单品": "albums", "摄影周边": "peripherals",
+    "打卡": "spots", "打卡点": "spots", "照片单品": "albums", "摄影周边": "peripherals", "旅拍灵感": "guides", "标签": "tagLibrary",
     "样片": "samples", "图片样片": "samples", "视频样片": "samples", "拍摄风格": "series", "城市": "cities",
     "照片套餐": "packages", "短视频": "packages", "短视频套": "packages", "增值服务": "addonServices", "增值服": "addonServices",
   })[row && row.type] || "";
 }
 async function restoreSourceRecordRemote(row) {
-  if (!remoteTrashEnabled() || !row || !row.source) return true;
+  if (!remoteTrashEnabled()) throw new Error("真实后端连接不可用，记录未恢复");
+  if (!row || !row.source) return true;
   const key = trashSourceKey(row);
   const id = row.source.id || row.source._id;
   if (!key || !id) return true;
@@ -75,11 +77,19 @@ async function restoreSourceRecordRemote(row) {
     patch.isShow = true;
     if (["peripherals", "addonServices"].includes(key)) patch.enabled = true;
   }
-  await window.LXM_CLOUD.update(key, id, patch);
+  if (["spots", "albums", "packages", "peripherals", "guides", "tagLibrary"].includes(key)) {
+    // Restore the business record first; publishing remains an explicit action
+    // with the normal required-field and dependency checks.
+    patch.isShow = false;
+    patch.status = ["spots", "guides", "tagLibrary"].includes(key) ? "停用" : "下架";
+  }
+  const saved = await window.LXM_CLOUD.update(key, id, patch);
+  if (saved && typeof saved === "object") row.source = { ...row.source, ...saved };
   return true;
 }
 
 async function restoreTrash(row) {
+  if (!remoteTrashEnabled()) return ElMessage.error("真实后端连接不可用，回收站操作未保存");
   if (state.role !== "super") return ElMessage.error("只有总部超管可以恢复回收站数");
   const order = data.orders.find((o) => o.id === row.refId || o.orderNo === row.name);
   if (remoteTrashEnabled() && row.type === "订单" && order) {
@@ -99,12 +109,6 @@ async function restoreTrash(row) {
       await removeTrashRecordRemote(row);
     }
     catch (error) { return ElMessage.error((error && error.message) || "回收站记录删除失败，请稍后重试"); }
-  }
-  if (row.type === "订单" && order) {
-    order.deleted = false;
-    order.isDeleted = false;
-    order.status = "new";
-    addOrderTimeline(order, "从回收站恢复订单，状态回到待确认", roleProfile.value.name);
   }
   if (row.type === "打卡" && row.source) {
     const sourceId = row.source.id || row.source._id;
@@ -127,27 +131,31 @@ async function restoreTrash(row) {
   const sourceKey = row.sourceKey || trashSourceKey(row);
   if (sourceKey && row.source) {
     const restoreMap = {
+      spots: data.spots,
+      albums: data.albums,
+      peripherals: data.peripherals,
       packages: data.packages,
       addonServices: data.addonServices,
       tagLibrary: data.tagLibrary,
       series: data.series,
       samples: data.samples,
       cities: data.cities,
+      guides: data.guides,
+      stories: data.stories,
     };
     const target = restoreMap[sourceKey];
     if (target) {
       const sourceId = row.source.id || row.source._id;
       const existing = target.find((item) => (item.id || item._id) === sourceId);
       const restored = { ...row.source, deleted: false, isDeleted: false };
-      if (sourceKey === "packages") {
-        restored.status = restored.status === "下架" ? "上架" : restored.status || "上架";
-        restored.isShow = restored.isShow !== false;
+      if (["spots", "albums", "packages", "peripherals", "guides", "tagLibrary"].includes(sourceKey)) {
+        restored.isShow = false;
+        restored.status = ["spots", "guides", "tagLibrary"].includes(sourceKey) ? "停用" : "下架";
       }
       if (sourceKey === "addonServices") {
         restored.enabled = true;
         restored.status = restored.status === "下架" ? "上架" : restored.status || "上架";
       }
-      if (sourceKey === "tagLibrary") restored.status = restored.status || "启用";
       if (existing) Object.assign(existing, restored);
       else target.unshift(restored);
     }
@@ -159,6 +167,7 @@ async function restoreTrash(row) {
   return true;
 }
 async function restoreAllTrash() {
+  if (!remoteTrashEnabled()) return ElMessage.error("真实后端连接不可用，回收站操作未保存");
   if (state.role !== "super") return ElMessage.error("只有总部超管可以恢复回收站数");
   if (!state.trash.length) return ElMessage.warning("回收站暂无可恢复数据");
   window.LXMActionConfirm.confirm(ElMessageBox, `确认恢复回收站内 ${state.trash.length} 条数据？订单将回到待确认状态。`, "全部恢复", {
@@ -177,6 +186,7 @@ async function restoreAllTrash() {
   }).catch(() => {});
 }
 async function purgeTrash(row) {
+  if (!remoteTrashEnabled()) return ElMessage.error("真实后端连接不可用，回收站操作未保存");
   if (state.role !== "super") return ElMessage.error("只有总部超管可以彻底删除");
   window.LXMActionConfirm.confirm(ElMessageBox, `记录「${row.name || row.id}」将永久删除，删除后无法在后台恢复。`, "永久删除记录", {
     confirmButtonClass: "lxm-action-confirm--danger",
@@ -187,11 +197,18 @@ async function purgeTrash(row) {
     catch (error) { return ElMessage.error((error && error.message) || "回收站删除失败，请稍后重试"); }
     const index = state.trash.indexOf(row);
     if (index >= 0) state.trash.splice(index, 1);
+    const sourceKey = trashSourceKey(row);
+    const sourceId = row.source && (row.source.id || row.source._id);
+    if (sourceKey && sourceId && Array.isArray(data[sourceKey])) {
+      const sourceIndex = data[sourceKey].findIndex((item) => String(item.id || item._id) === String(sourceId));
+      if (sourceIndex >= 0) data[sourceKey].splice(sourceIndex, 1);
+    }
     log("彻底删除回收站数", row.name, row.reason || "");
     ElMessage.success("已彻底删除该条回收站记录");
   }).catch(() => {});
 }
 async function clearTrash() {
+  if (!remoteTrashEnabled()) return ElMessage.error("真实后端连接不可用，回收站操作未保存");
   if (state.role !== "super") return ElMessage.error("只有总部超管可以清空回收");
   if (!state.trash.length) return ElMessage.warning("回收站已经是空的");
   window.LXMActionConfirm.confirm(ElMessageBox, `确认清空回收站内 ${state.trash.length} 条数据？清空后不可在后台恢复。`, "清空回收站", {

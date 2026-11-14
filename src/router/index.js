@@ -1,5 +1,9 @@
 window.LXM_PAGES = (() => {
   const manifest = [
+  ...[
+    ['svcWorkbench', 'workbench'], ['svcIntake', 'intake'], ['svcFollowup', 'followup'], ['svcComplaints', 'complaints'],
+    ['svcRules', 'rules'], ['svcLedger', 'ledger'], ['svcSettlements', 'settlements'], ['svcStaff', 'staff'], ['svcMine', 'mine']
+  ].map(([key, slug]) => ({ key, folder: 'service/' + slug, slug, component: 'LxmPage' + key[0].toUpperCase() + key.slice(1) })),
   {
     "key": "login",
     "folder": "login",
@@ -85,10 +89,23 @@ window.LXM_PAGES = (() => {
     "component": "LxmPageDistributor"
   },
   {
-    "key": "shops",
-    "folder": "channel/shop",
-    "slug": "shop",
-    "component": "LxmPageShop"
+    "key": "shareRules", "folder": "share/rules", "slug": "rules", "component": "LxmPageShareRules"
+  },
+  {
+    "key": "shareDetails", "folder": "share/details", "slug": "details", "component": "LxmPageShareDetails"
+  },
+  {
+    "key": "shareMine", "folder": "share/mine", "slug": "mine", "component": "LxmPageShareMine"
+  },
+  { "key": "photoRules", "folder": "photo-share/rules", "slug": "rules", "component": "LxmPagePhotoRules"
+  },
+  { "key": "photoLedger", "folder": "photo-share/ledger", "slug": "ledger", "component": "LxmPagePhotoLedger"
+  },
+  { "key": "photoSettlement", "folder": "photo-share/settlement", "slug": "settlement", "component": "LxmPagePhotoSettlement"
+  },
+  { "key": "photoParty", "folder": "photo-share/party", "slug": "party", "component": "LxmPagePhotoParty"
+  },
+  { "key": "photoMine", "folder": "photo-share/mine", "slug": "mine", "component": "LxmPagePhotoMine"
   },
   {
     "key": "contentOverview",
@@ -169,16 +186,16 @@ window.LXM_PAGES = (() => {
     "component": "LxmPageVideoSingle"
   },
   {
+    "key": "bookingConfig",
+    "folder": "operationConfig/booking-config",
+    "slug": "booking-config",
+    "component": "LxmPageBookingConfig"
+  },
+  {
     "key": "miniDecor",
     "folder": "operationConfig/mini-decor",
     "slug": "mini-decor",
     "component": "LxmPageMiniDecor"
-  },
-  {
-    "key": "miniConfig",
-    "folder": "operationConfig/mini-config",
-    "slug": "mini-config",
-    "component": "LxmPageMiniConfig"
   },
   {
     "key": "guides",
@@ -211,8 +228,11 @@ window.LXM_PAGES = (() => {
     "component": "LxmPageTrash"
   }
 ];
-  const templates = {};
   const registry = {};
+  const resourceLoads = new Map();
+  const resourceAttempts = new Map();
+  const pageLoads = new Map();
+  const resourceTimeout = 10000;
 
   function register(meta) {
     if (meta && meta.key) registry[meta.key] = { ...(registry[meta.key] || {}), ...meta };
@@ -222,57 +242,147 @@ window.LXM_PAGES = (() => {
     return `${page.slug}.${ext}`;
   }
 
-  function loadCss(href) {
-    if (document.querySelector(`link[data-page-style="${href}"]`)) return;
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = href;
-    link.dataset.pageStyle = href;
-    // Keep the shared operations layer last so asynchronously loaded page CSS
-    // cannot reintroduce a different surface or focus treatment.
-    const sharedLayer = document.head.querySelector('link[data-admin-ops]');
-    if (sharedLayer) document.head.insertBefore(link, sharedLayer);
-    else document.head.appendChild(link);
+  function cachedLoad(cache, key, load) {
+    if (!cache.has(key)) {
+      const pending = Promise.resolve().then(load).catch((error) => {
+        cache.delete(key);
+        throw error;
+      });
+      cache.set(key, pending);
+    }
+    return cache.get(key);
   }
 
-  function loadScript(src) {
-    return new Promise((resolve, reject) => {
-      if (document.querySelector(`script[data-page-script="${src}"]`)) return resolve();
-      const script = document.createElement('script');
-      script.src = src;
-      script.dataset.pageScript = src;
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error(`Failed to load page script: ${src}`));
-      document.body.appendChild(script);
+  async function retryResource(load) {
+    try {
+      return await load();
+    } catch (_) {
+      // A failed attempt must finish cleaning up before creating its replacement.
+      return load();
+    }
+  }
+
+  function requestPath(src) {
+    const attempt = resourceAttempts.get(src) || 0;
+    resourceAttempts.set(src, attempt + 1);
+    // Removing a timed-out script does not always cancel its download. Use a new
+    // URL so the browser cannot attach the retry to that still-pending request.
+    return attempt ? `${src}?__lxm_retry=${attempt}` : src;
+  }
+
+  function loadElement(src, kind, page) {
+    return cachedLoad(resourceLoads, src, () => retryResource(() => new Promise((resolve, reject) => {
+      const style = kind === 'style';
+      const element = document.createElement(style ? 'link' : 'script');
+      const request = requestPath(src);
+      if (style) {
+        element.rel = 'stylesheet';
+        element.href = request;
+        element.dataset.pageStyle = src;
+      } else {
+        element.src = request;
+        element.dataset.pageScript = src;
+      }
+      const finish = (error) => {
+        clearTimeout(timer);
+        element.onload = element.onerror = null;
+        if (error) {
+          element.remove();
+          reject(error);
+        } else resolve();
+      };
+      const failure = (reason) => new Error(`Failed to load page ${kind}: ${src}${reason ? ` (${reason})` : ''}`);
+      const timer = setTimeout(() => finish(failure('timeout')), resourceTimeout);
+      element.onload = () => finish(!style && !registry[page.key] ? failure('page not registered') : null);
+      element.onerror = () => finish(failure());
+      if (style) {
+        // Shared operations styles must stay after asynchronously loaded page CSS.
+        const sharedLayer = document.head.querySelector('link[data-admin-ops]');
+        if (sharedLayer) document.head.insertBefore(element, sharedLayer);
+        else document.head.appendChild(element);
+      } else document.body.appendChild(element);
+    })));
+  }
+
+  function loadTemplate(src) {
+    return cachedLoad(resourceLoads, src, () => retryResource(() => {
+      const controller = new AbortController();
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`Failed to load page template: ${src} (timeout)`));
+          controller.abort();
+        }, resourceTimeout);
+      });
+      const request = Promise.resolve().then(async () => {
+        const response = await fetch(requestPath(src), { signal: controller.signal });
+        if (!response.ok) throw new Error(`Failed to load page template: ${src} (HTTP ${response.status})`);
+        return response.text();
+      });
+      // Keep the timeout active while reading the body, including stalled transfers.
+      return Promise.race([request, timeout]).finally(() => clearTimeout(timer));
+    }));
+  }
+
+  function resolvePage(key) {
+    if (key === 'miniConfig') key = 'miniDecor';
+    if (key === 'svcStaffNew') key = 'svcStaff';
+    if (key === 'photoNew') key = 'photoParty';
+    return manifest.find((item) => item.key === key) || manifest.find((item) => item.key === 'dashboard');
+  }
+
+  function pageComponent(page, template) {
+    return {
+      name: page.component,
+      template: `<section class="page-route page-route-${page.slug}" data-page-key="${page.key}">${template}</section>`,
+      setup() {
+        const ctx = Vue.inject('lxm');
+        const pageMeta = pageFor(page.key);
+        const pageSetup = typeof pageMeta.setup === 'function' ? pageMeta.setup(ctx, pageMeta) : {};
+        return { ...ctx, pageMeta, ...pageSetup };
+      }
+    };
+  }
+
+  function loadPage(key) {
+    const page = resolvePage(key);
+    return cachedLoad(pageLoads, page.key, async () => {
+      const base = `./src/views/${page.folder}/`;
+      const resources = await Promise.allSettled([
+        loadElement(base + assetPath(page, 'css'), 'style', page),
+        loadTemplate(base + assetPath(page, 'html')),
+        loadElement(base + assetPath(page, 'js'), 'script', page)
+      ]);
+      const failure = resources.find((result) => result.status === 'rejected');
+      if (failure) throw failure.reason;
+      return pageComponent(page, resources[1].value);
     });
   }
 
   async function loadAll() {
     const failures = [];
-    await Promise.all(manifest.map(async (page) => {
-      try {
-        const base = `./src/views/${page.folder}/`;
-        loadCss(base + assetPath(page, 'css'));
-        const response = await fetch(base + assetPath(page, 'html'));
-        if (!response.ok) throw new Error(`Failed to load page template: ${page.key}`);
-        templates[page.key] = await response.text();
-        await loadScript(base + assetPath(page, 'js'));
-      } catch (err) {
-        // 单个页面加载失败不拖垮其他页面：记录并继续，避免 Promise.all 整体中断
-        failures.push(page.key);
-        console.warn(`[router] 页面 ${page.key} 加载失败：${err && err.message}`);
+    let next = 0;
+    await Promise.all(Array.from({ length: 4 }, async () => {
+      while (next < manifest.length) {
+        const page = manifest[next++];
+        try {
+          await loadPage(page.key);
+        } catch (err) {
+          failures.push(page.key);
+          console.warn(`[router] 页面 ${page.key} 加载失败：${err && err.message}`);
+        }
       }
     }));
     if (failures.length) console.warn(`[router] 共 ${failures.length} 个页面加载失败：${failures.join('、')}`);
+    return failures;
   }
 
   function componentNameFor(key) {
-    const page = manifest.find((item) => item.key === key) || manifest.find((item) => item.key === 'dashboard');
-    return page.component;
+    return resolvePage(key).component;
   }
 
   function pageFor(key) {
-    const page = manifest.find((item) => item.key === key) || manifest.find((item) => item.key === 'dashboard');
+    const page = resolvePage(key);
     return { ...page, ...(registry[page.key] || {}) };
   }
 
@@ -280,17 +390,40 @@ window.LXM_PAGES = (() => {
     return Object.fromEntries(manifest.map((page) => [
       page.component,
       {
-        name: page.component,
-        template: `<section class="page-route page-route-${page.slug}" data-page-key="${page.key}">${templates[page.key] || '<div class="empty-state">Page template loading</div>'}</section>`,
+        name: `${page.component}Loader`,
         setup() {
-          const ctx = Vue.inject('lxm');
-          const pageMeta = pageFor(page.key);
-          const pageSetup = typeof pageMeta.setup === 'function' ? pageMeta.setup(ctx, pageMeta) : {};
-          return { ...ctx, pageMeta, ...pageSetup };
+          const component = Vue.shallowRef(null);
+          const loading = Vue.ref(true);
+          const failed = Vue.ref(false);
+          let active = true;
+          async function reload() {
+            loading.value = true;
+            failed.value = false;
+            try {
+              const loaded = await loadPage(page.key);
+              if (active) component.value = loaded;
+            } catch (error) {
+              if (active) {
+                failed.value = true;
+                console.warn(`[router] 页面 ${page.key} 加载失败：${error && error.message}`);
+              }
+            } finally {
+              if (active) loading.value = false;
+            }
+          }
+          Vue.onMounted(reload);
+          Vue.onBeforeUnmount(() => { active = false; });
+          return () => {
+            if (component.value) return Vue.h(component.value);
+            return Vue.h('div', { class: 'empty-state', role: failed.value ? 'alert' : 'status' }, [
+              Vue.h('p', loading.value ? '正在加载页面…' : '页面加载失败，请检查网络连接后重试。'),
+              failed.value ? Vue.h('button', { type: 'button', onClick: reload }, '重新加载') : null
+            ]);
+          };
         }
       }
     ]));
   }
 
-  return { manifest, registry, register, loadAll, componentNameFor, pageFor, components };
+  return { manifest, registry, register, loadPage, loadAll, componentNameFor, pageFor, components };
 })();

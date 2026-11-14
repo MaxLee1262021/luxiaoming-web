@@ -18,6 +18,7 @@ const targets = [...new Set([
   "src/config/business-config.js",
   "src/config/api.js",
   "src/api/cloud.js",
+  "src/utils/spot-order.js",
   "server/lib/api.cjs",
   "server/lib/rpc.cjs",
   "server/lib/orderWorkflow.cjs",

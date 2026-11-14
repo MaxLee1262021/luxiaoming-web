@@ -9,7 +9,7 @@ const test = require("node:test");
 const createApi = require("../lib/api.cjs");
 const rpc = require("../lib/rpc.cjs");
 const workflow = require("../lib/orderWorkflow.cjs");
-const { createTestWechatPay } = require("./helpers/wechatPay.cjs");
+const { createTestWechatPay, createTestRefundGateway, confirmTestPayment } = require("./helpers/wechatPay.cjs");
 
 const TEST_WECHAT_PAY = createTestWechatPay();
 
@@ -28,7 +28,7 @@ function makeSource() {
     series: {},
     shops: {},
     merchantCodes: {},
-    siteConfig: { global: { id: "global", customPrice: { depositRatio: 30 } } },
+    siteConfig: { global: { id: "global", bookingNotice: ["Synthetic test booking notice"], bookingNoticeVersion: "v1.0", customPrice: { depositRatio: 30 } } },
     orders: {},
     afterSales: {},
     logs: {},
@@ -295,191 +295,30 @@ test("customer cancellation uses one guarded contract for both public RPC names"
   assert.equal(frozen.success, false);
 });
 
-test("test payment is opt-in, owner-only, phase-gated, idempotent, and auditable", { concurrency: false }, async (t) => {
+test("runtime payment flags cannot enable simulated confirmations or fake WeChat gateways", { concurrency: false }, async () => {
   const source = makeSource();
   source.collections.orders.deposit = confirmedOrder("deposit", "owner");
-  source.collections.orders.finalBeforeDelivery = {
-    ...confirmedOrder("final-before-delivery", "owner"),
-    status: "final_pending",
-    depositPaid: 30,
-    depositFinanceStatus: "confirmed",
-    selectionStatus: "confirmed",
-    selectionConfirmedAt: "2026-09-18T01:00:00.000Z",
-    paymentRecords: [{ id: "deposit-confirmed", phase: "deposit", amount: 30, status: "confirmed", provider: "manual" }],
-  };
-  source.collections.orders.frozen = confirmedOrder("frozen", "owner");
-  source.collections.afterSales.frozenTicket = { id: "frozen-ticket", orderId: "frozen", status: "pending" };
-
-  const sessions = {
-    "owner-token": { kind: "public", openid: "owner" },
-    "other-token": { kind: "public", openid: "other" },
-  };
-  const auth = { async init() {}, async getSession(token) { return clone(sessions[token]); } };
-  const handler = createApi(source, "json", { auth, sourceStatus: { ready: true }, permissionStore: null });
-  const server = http.createServer((req, res) => handler(req, res, (req.url || "").split("?")[0]));
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const paymentRequest = async (token, data) => {
-    const response = await fetch(`${base}/api/rpc/testPayment`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify(data),
+  const before = clone(source.collections.orders.deposit);
+  for (const environment of [
+    { NODE_ENV: "test", DATA_MODE: "json", LXM_ALLOW_TEST_JSON_SOURCE: "true", TEST_PAYMENT_ENABLED: "true", PAYMENT_MODE: "mock", WECHAT_PAY_MOCK_MODE: "true" },
+    { NODE_ENV: "production", DATA_MODE: "mysql", TEST_PAYMENT_ENABLED: "true", PAYMENT_MODE: "test", WECHAT_PAY_MOCK_MODE: "true" },
+  ]) {
+    await withPaymentEnvironment(environment, async () => {
+      const gateway = require("../lib/wechatPay.cjs").createWechatPay({ env: environment, testStub: true });
+      assert.equal(gateway.isConfigured(), false, "runtime environment flags cannot manufacture a configured gateway");
+      const context = { identity: { kind: "public", openid: "owner" }, wechatPay: gateway };
+      const testResult = await rpc(source, "testPayment", { orderId: "deposit", phase: "deposit", idempotencyKey: "retired-test-payment" }, context);
+      assert.equal(testResult.success, false);
+      const result = await rpc(source, "createPayment", { orderId: "deposit", phase: "deposit", idempotencyKey: "real-config-required" }, context);
+      assert.equal(result.success, false); assert.match(result.error, /微信支付.*配置/);
+      assert.deepEqual(source.collections.orders.deposit, before, "failed real payment cannot change payment facts");
     });
-    return { status: response.status, body: await response.json() };
-  };
-
-  await withPaymentEnvironment({ TEST_PAYMENT_ENABLED: undefined, PAYMENT_MODE: undefined, NODE_ENV: "test", LXM_ALLOW_TEST_JSON_SOURCE: "true", DATA_MODE: "json" }, async () => {
-    const disabled = await paymentRequest("owner-token", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-0001" });
-    assert.equal(disabled.status, 200);
-    assert.equal(disabled.body.success, false);
-    assert.equal((await source.get("orders", "deposit")).depositPaid, 0);
-  });
-
-  await withPaymentEnvironment({ TEST_PAYMENT_ENABLED: "true", PAYMENT_MODE: undefined, NODE_ENV: "production", LXM_ALLOW_TEST_JSON_SOURCE: "true", DATA_MODE: "json" }, async () => {
-    const productionBlocked = await paymentRequest("owner-token", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-production-blocked-0001" });
-    assert.equal(productionBlocked.body.success, false);
-    assert.equal((await source.get("orders", "deposit")).depositPaid, 0);
-  });
-
-  await withPaymentEnvironment({ TEST_PAYMENT_ENABLED: "true", PAYMENT_MODE: undefined, NODE_ENV: "test", LXM_ALLOW_TEST_JSON_SOURCE: "true", DATA_MODE: "json" }, async () => {
-    assert.equal((await paymentRequest("", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-0001" })).status, 401);
-    const foreign = await paymentRequest("other-token", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-0001" });
-    assert.equal(foreign.body.success, false);
-    const wrongPhase = await paymentRequest("owner-token", { orderId: "final-before-delivery", phase: "final", selectionAccepted: true, idempotencyKey: "test-final-0001" });
-    assert.equal(wrongPhase.body.success, false);
-    const afterSaleFrozen = await paymentRequest("owner-token", { orderId: "frozen", phase: "deposit", idempotencyKey: "test-frozen-0001" });
-    assert.equal(afterSaleFrozen.body.success, false);
-
-    const paid = await paymentRequest("owner-token", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-0001" });
-    assert.equal(paid.body.success, true, JSON.stringify(paid.body));
-    assert.equal(paid.body.data.provider, "test_payment");
-    assert.equal(paid.body.data.testPayment, true);
-    assert.equal(paid.body.data.invokeWeChatPay, false);
-    const replay = await paymentRequest("owner-token", { orderId: "deposit", phase: "deposit", idempotencyKey: "test-payment-0001" });
-    assert.equal(replay.body.success, true);
-    assert.equal(replay.body.data.idempotent, true);
-  });
-
-  const paidOrder = await source.get("orders", "deposit");
-  const records = paidOrder.paymentRecords.filter((record) => record.phase === "deposit");
-  assert.equal(records.length, 1);
-  assert.equal(records[0].provider, "test_payment");
-  assert.match(records[0].externalTransactionId, /^test:/);
-  assert.equal(records[0].status, "confirmed");
-  assert.equal(workflow.hasConfirmedPayment(paidOrder, "deposit"), true);
-  assert.equal(workflow.canonicalStage(paidOrder), workflow.WORKFLOW_STAGES.AWAITING_DISPATCH);
-  const auditRows = Object.values(source.collections.logs).filter((row) => row.auditEvent === "test_payment");
-  assert.equal(auditRows.length, 1);
-  assert.match(auditRows[0].detail, /provider=test_payment/);
+  }
 });
 
-test("mock payment mode confirms the normal customer payment request without touching WeChat Pay", { concurrency: false }, async () => {
+test("dispatch conflicts, publication gates, and online refunds enforce server-side facts", async (t) => {
   const source = makeSource();
-  source.collections.orders.deposit = confirmedOrder("deposit", "owner");
-  source.collections.orders.final = {
-    ...confirmedOrder("final", "owner"),
-    status: "final_pending",
-    depositPaid: 30,
-    depositFinanceStatus: "confirmed",
-    selectionStatus: "confirmed",
-    selectionConfirmedAt: "2026-09-23T00:00:00.000Z",
-    paymentRecords: [{ id: "final-deposit", phase: "deposit", amount: 30, status: "confirmed", provider: "mock_payment" }],
-  };
-  source.collections.orders.stale = {
-    ...confirmedOrder("stale", "owner"),
-    paymentRecords: [{
-      id: "stale-wechat", phase: "deposit", amount: 30, status: "pending", provider: "wechat_pay",
-      idempotencyKey: "old-wechat-payment-0001", outTradeNo: "old-wechat-trade-0001", prepayId: "old-prepay-id",
-    }],
-  };
-  let gatewayCalled = false;
-  const unavailableGateway = {
-    isConfigured() { return false; },
-    async createJsapiTransaction() { gatewayCalled = true; throw new Error("should not create a WeChat prepay order"); },
-  };
-
-  await withPaymentEnvironment({ PAYMENT_MODE: "mock", TEST_PAYMENT_ENABLED: undefined, NODE_ENV: "test", DATA_MODE: "json", LXM_ALLOW_TEST_JSON_SOURCE: "true" }, async () => {
-    const context = { identity: { kind: "public", openid: "owner" }, wechatPay: unavailableGateway };
-    const paid = await rpc(source, "createPayment", {
-      data: { orderId: "deposit", phase: "deposit", idempotencyKey: "mock-payment-0001" },
-    }, context);
-    assert.equal(paid.success, true, JSON.stringify(paid));
-    assert.equal(paid.data.status, "confirmed");
-    assert.equal(paid.data.provider, "mock_payment");
-    assert.equal(paid.data.paymentMode, "mock");
-    assert.equal(paid.data.simulatedPayment, true);
-    assert.equal(paid.data.invokeWeChatPay, false);
-    assert.equal(paid.data.paymentParams, null);
-    assert.equal(gatewayCalled, false);
-
-    const replay = await rpc(source, "createPayment", {
-      data: { orderId: "deposit", phase: "deposit", idempotencyKey: "mock-payment-0001" },
-    }, context);
-    assert.equal(replay.success, true, JSON.stringify(replay));
-    assert.equal(replay.data.idempotent, true);
-
-    const detail = await rpc(source, "getOrderDetail", { data: { orderId: "deposit" } }, context);
-    assert.equal(detail.success, true, JSON.stringify(detail));
-    assert.equal(detail.data.paymentSimulationEnabled, true);
-    assert.equal(detail.data.paymentMode, "mock");
-
-    const finalPaid = await rpc(source, "createPayment", {
-      data: { orderId: "final", phase: "final", selectionAccepted: true, idempotencyKey: "mock-final-payment-0001" },
-    }, context);
-    assert.equal(finalPaid.success, true, JSON.stringify(finalPaid));
-    assert.equal(finalPaid.data.status, "confirmed");
-    assert.equal(finalPaid.data.provider, "mock_payment");
-
-    const recovered = await rpc(source, "createPayment", {
-      data: { orderId: "stale", phase: "deposit", idempotencyKey: "mock-recover-payment-0001" },
-    }, context);
-    assert.equal(recovered.success, true, JSON.stringify(recovered));
-    assert.equal(recovered.data.provider, "mock_payment");
-  });
-
-  const saved = await source.get("orders", "deposit");
-  assert.equal(saved.depositPaid, 30);
-  assert.equal(saved.depositFinanceStatus, "已审");
-  assert.equal(saved.status, "deposit_paid");
-  assert.equal(workflow.canonicalStage(saved), workflow.WORKFLOW_STAGES.AWAITING_DISPATCH);
-  assert.equal(saved.paymentRecords.length, 1);
-  assert.equal(saved.paymentRecords[0].provider, "mock_payment");
-  assert.equal(saved.paymentRecords[0].status, "confirmed");
-  assert.match(saved.paymentRecords[0].externalTransactionId, /^mock:/);
-  assert.equal(saved.paymentRecords[0].simulatedPayment, true);
-  const auditRows = Object.values(source.collections.logs).filter((row) => row.auditEvent === "payment_mock");
-  assert.equal(auditRows.length, 3);
-  assert.ok(auditRows.every((row) => /provider=mock_payment/.test(row.detail)));
-
-  const finalOrder = await source.get("orders", "final");
-  assert.equal(finalOrder.finalPaid, 70);
-  assert.equal(finalOrder.finalFinanceStatus, "已审");
-  assert.equal(finalOrder.status, "completed");
-  assert.equal(workflow.canonicalStage(finalOrder), workflow.WORKFLOW_STAGES.COMPLETED);
-  assert.equal(finalOrder.paymentRecords.filter((record) => record.phase === "final")[0].provider, "mock_payment");
-  const recoveredOrder = await source.get("orders", "stale");
-  assert.equal(recoveredOrder.paymentRecords.length, 1);
-  assert.equal(recoveredOrder.paymentRecords[0].provider, "mock_payment");
-  assert.equal(Object.prototype.hasOwnProperty.call(recoveredOrder.paymentRecords[0], "prepayId"), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(recoveredOrder.paymentRecords[0], "outTradeNo"), false);
-
-  const realSource = makeSource();
-  realSource.collections.orders.deposit = confirmedOrder("deposit", "owner");
-  await withPaymentEnvironment({ PAYMENT_MODE: "wechat" }, async () => {
-    const real = await rpc(realSource, "createPayment", {
-      data: { orderId: "deposit", phase: "deposit", idempotencyKey: "real-payment-0001" },
-    }, publicIdentity("owner"));
-    assert.equal(real.success, true, JSON.stringify(real));
-    assert.equal(real.data.status, "pending");
-    assert.equal(real.data.provider, "wechat_pay");
-    assert.equal(real.data.invokeWeChatPay, true);
-    assert.ok(real.data.paymentParams);
-  });
-});
-
-test("dispatch conflicts, publication gates, and manual refunds enforce server-side facts", async (t) => {
-  const source = makeSource();
+  t.after(() => require("../lib/wechatPay.cjs").drainMerchantShare(source));
   source.collections.orders["dispatch-target"] = depositPaidOrder("dispatch-target", "owner");
   source.collections.orders["busy-photographer"] = {
     ...depositPaidOrder("busy-photographer", "other-owner"),
@@ -519,6 +358,9 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
   };
   source.collections.orders.refund = depositPaidOrder("refund", "owner");
   source.collections.orders["refund-duplicate"] = depositPaidOrder("refund-duplicate", "other-owner");
+  for (const id of ["refund", "refund-duplicate"]) Object.assign(source.collections.orders[id].paymentRecords[0], {
+    provider: "wechat_pay", outTradeNo: `PAY_${id}`, externalTransactionId: `WX_TX_${id}`,
+  });
   source.collections.afterSales["refund-ticket"] = { id: "refund-ticket", orderId: "refund", status: "处理", financeStatus: "", refundAmount: 0, logs: [] };
   source.collections.afterSales["refund-duplicate-ticket"] = { id: "refund-duplicate-ticket", orderId: "refund-duplicate", status: "处理", financeStatus: "", refundAmount: 0, logs: [] };
 
@@ -530,7 +372,8 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
     "finance-token": { kind: "admin", subjectId: "finance", account: "finance", role: "finance", menuKeys: ["financeReview", "afterSales"] },
   };
   const auth = { async init() {}, async getSession(token) { return clone(sessions[token]); } };
-  const handler = createApi(source, "json", { auth, sourceStatus: { ready: true }, permissionStore: null });
+  const wechatPay = createTestRefundGateway(source);
+  const handler = createApi(source, "json", { auth, sourceStatus: { ready: true }, permissionStore: null, wechatPay });
   const server = http.createServer((req, res) => handler(req, res, (req.url || "").split("?")[0]));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
@@ -578,11 +421,22 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
     data: { orderId: "selection", phase: "final", selectionAccepted: true, idempotencyKey: "final-before-publication-0001" },
   }, publicIdentity("owner"));
   assert.equal(finalIntent.success, true, JSON.stringify(finalIntent));
+  const beforeManualConfirmation = await source.get("orders", "selection");
   const finalConfirmed = await post("finance-token", "/api/orders/selection/action", {
     action: "payment", phase: "final", selectionAccepted: true, paymentStatus: "confirmed", amount: 70,
     externalTransactionId: "selection-final-tx-0001", idempotencyKey: "selection-final-confirm-0001", reason: "confirm final payment",
   });
-  assert.equal(finalConfirmed.status, 200, JSON.stringify(finalConfirmed.body));
+  assert.equal(finalConfirmed.status, 409, JSON.stringify(finalConfirmed.body));
+  assert.deepEqual(await source.get("orders", "selection"), beforeManualConfirmation, "a supplied manual transaction id cannot confirm an online payment");
+  const onlineConfirmed = await confirmTestPayment(source, { data: {
+    orderId: "selection", phase: "final", selectionAccepted: true, idempotencyKey: "final-before-publication-0001",
+  } }, publicIdentity("owner"));
+  assert.equal(onlineConfirmed.success, true, JSON.stringify(onlineConfirmed));
+  const onlineOrder = await source.get("orders", "selection");
+  const onlineReceipt = onlineOrder.paymentRecords.find(record => record.phase === "final" && record.status === "confirmed");
+  assert.equal(onlineReceipt.provider, "wechat_pay");
+  assert.match(onlineReceipt.externalTransactionId, /^fixture-/);
+  assert.equal(onlineOrder.finalPaid, 70);
   const published = await post("super-token", "/api/orders/selection/action", {
     action: "deliver", deliveryMethod: "enterprise_wechat", reason: "publish completed files",
   });
@@ -594,28 +448,32 @@ test("dispatch conflicts, publication gates, and manual refunds enforce server-s
   });
   assert.equal(overConfirmedFunds.status, 409);
   const requestRefund = await post("super-token", "/api/after-sales/refund-ticket/action", {
-    action: "complete", reason: "request manual refund", refundAmount: 20, refundConfirmed: true,
+    action: "complete", reason: "request online refund", refundAmount: 20, refundConfirmed: true,
   });
   assert.equal(requestRefund.status, 200, JSON.stringify(requestRefund.body));
   assert.equal((await source.get("afterSales", "refund-ticket")).financeStatus, "待审");
-  const missingRefundReference = await post("finance-token", "/api/after-sales/refund-ticket/action", {
-    action: "review", approved: true, reason: "approve manual refund",
-  });
-  assert.equal(missingRefundReference.status, 400);
+  assert.equal((await source.get("afterSales", "refund-ticket")).refundConfirmed, false, "a client supplied confirmation cannot move money");
   const approvedRefund = await post("finance-token", "/api/after-sales/refund-ticket/action", {
-    action: "review", approved: true, reason: "approve manual refund", refundTransactionId: "refund-reference-0001", refundMethod: "manual",
+    action: "review", approved: true, reason: "approve online refund",
   });
   assert.equal(approvedRefund.status, 200, JSON.stringify(approvedRefund.body));
   const paidRefund = await source.get("afterSales", "refund-ticket");
-  assert.equal(paidRefund.refundStatus, "manual_refunded");
-  assert.equal(paidRefund.refundTransactionId, "refund-reference-0001");
+  assert.equal(paidRefund.refundStatus, "refunded");
+  assert.match(paidRefund.refundTransactionId, /^wx-LXMR/);
 
   const requestDuplicateRefund = await post("super-token", "/api/after-sales/refund-duplicate-ticket/action", {
-    action: "complete", reason: "request duplicate reference", refundAmount: 10, refundConfirmed: true,
+    action: "complete", reason: "request another order refund", refundAmount: 10, refundConfirmed: true,
   });
   assert.equal(requestDuplicateRefund.status, 200);
   const duplicateRefundReference = await post("finance-token", "/api/after-sales/refund-duplicate-ticket/action", {
-    action: "review", approved: true, reason: "approve duplicate reference", refundTransactionId: "refund-reference-0001", refundMethod: "manual",
+    action: "review", approved: true, reason: "approve another online refund", refundTransactionId: paidRefund.refundTransactionId, refundMethod: "manual",
   });
-  assert.equal(duplicateRefundReference.status, 409);
+  assert.equal(duplicateRefundReference.status, 200, JSON.stringify(duplicateRefundReference.body));
+  const otherRefund = await source.get("afterSales", "refund-duplicate-ticket");
+  assert.notEqual(otherRefund.refundTransactionId, paidRefund.refundTransactionId, "a supplied manual reference cannot impersonate the provider refund id");
+  assert.equal(otherRefund.refundMethod, "微信原路退款");
+  const refundPosts = wechatPay.refundRequests.filter((request) => request.method === "POST").map((request) => JSON.parse(request.body));
+  assert.equal(refundPosts.length, 2);
+  assert.notEqual(refundPosts[0].out_refund_no, refundPosts[1].out_refund_no);
+  assert.notEqual(refundPosts[0].transaction_id, refundPosts[1].transaction_id);
 });

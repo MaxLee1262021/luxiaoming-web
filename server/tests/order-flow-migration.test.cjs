@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { migrationPatch, migrateSource } = require("../lib/orderFlowMigration.cjs");
 const schema = require("../lib/mysqlSchema.cjs");
-const createSource = require("../lib/dbSource.cjs");
+const createSource = require("./fixtures/jsonSource.cjs");
 const { spawnSync } = require("node:child_process");
 
 test("migration keeps paid orders with empty assignment records pending confirmation", () => {
@@ -69,22 +69,14 @@ test("new flow facts, consent, gift items and independent records round-trip in 
   assert.equal(restored.products[0].isGift, true);
 });
 
-test("migration CLI applies and restores an isolated fixture from its automatic backup", (t) => {
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"lxm-flow-cli-"));
-  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
-  const file=path.join(dir,"orders.json");
-  const order={id:"test",_id:"test",status:"deposit_paid",totalAmount:100,depositDue:30,finalDue:70,depositPaid:30,depositFinanceStatus:"confirmed"};
-  fs.writeFileSync(file,JSON.stringify({collections:{orders:{test:order}}}));
-  const runner=path.join(__dirname,"../../scripts/migrate-order-flow.cjs");
-  const invoke=(args)=>{
-    const result=spawnSync(process.execPath,[runner,`--json=${file}`,...args],{encoding:"utf8",windowsHide:true});
-    assert.equal(result.status,0,result.stderr);return JSON.parse(result.stdout);
-  };
-  const report=invoke(["--apply"]);
-  t.after(()=>fs.rmSync(report.backupFile,{force:true}));
-  assert.equal(report.changed,1);
-  assert.equal(JSON.parse(fs.readFileSync(file,"utf8")).collections.orders.test.businessStatus,"reserved");
-  const restored=invoke([`--restore=${report.backupFile}`,"--apply"]);
-  assert.equal(restored.restored,1);
-  assert.deepEqual(JSON.parse(fs.readFileSync(file,"utf8")).collections.orders.test,order);
+test("migration CLI rejects retired JSON sources without touching the file", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lxm-flow-cli-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "orders.json");
+  const snapshot = JSON.stringify({ collections: { orders: { test: { id: "test", status: "deposit_paid" } } } });
+  fs.writeFileSync(file, snapshot);
+  const runner = path.join(__dirname, "../../scripts/migrate-order-flow.cjs");
+  const result = spawnSync(process.execPath, [runner, `--json=${file}`, "--apply"], { encoding: "utf8", windowsHide: true });
+  assert.notEqual(result.status, 0); assert.match(result.stderr, /只连接真实 MySQL/);
+  assert.equal(fs.readFileSync(file, "utf8"), snapshot);
 });

@@ -1,152 +1,106 @@
-<div class="album-manage-page">
-  <div class="album-toolbar">
-    <div>
-      <span class="eyebrow">照片留影</span>
-      <h3>照片留影 · 照片单品管理</h3>
-      <p>客人端「照片留影」板块的照片单品商品。既可作公开售卖商品，也可作套餐引用素材；售卖开关与素材展示开关互相独立。</p>
+<div class="catalog-page">
+  <header class="catalog-head">
+    <div><h2>{{ editorOpen ? (creating ? '创建照片留影商品' : '编辑照片留影商品') : '照片留影' }}</h2><p>{{ editorOpen ? '上传商品照片，设置服务与价格，保存后生效' : '管理照片留影商品，查看基础信息、显示状态与关联打卡点' }}</p></div>
+    <div class="catalog-actions">
+      <template v-if="!editorOpen">
+        <span class="catalog-source">真实数据库</span>
+        <el-button v-if="remoteOn" plain :loading="remoteLoading" @click="refreshFromServer">刷新</el-button><el-button plain @click="openContentTrash">回收站</el-button><el-button type="primary" v-if="can('contentEdit')" @click="createAlbum">＋ 创建照片留影</el-button>
+      </template>
+      <template v-else><el-button :disabled="saving || photoUploadBusy" @click="closeEditor">返回列表</el-button><el-button v-if="can('contentEdit')" type="primary" :loading="saving" :disabled="photoUploadBusy" @click="saveSelectedAlbum">保存确定</el-button></template>
     </div>
-    <div class="album-toolbar-actions">
-      <label v-if="state.role==='super'" class="remote-switch" :class="{on: remoteOn}">
-        <input type="checkbox" :checked="remoteOn" @change="toggleRemote" />
-        <span class="remote-dot"></span>{{ remoteOn ? '数据源：真实后端' : '数据源：演示数据' }}
-      </label>
-      <el-button v-if="state.role==='super' && remoteOn" plain @click="refreshFromServer">刷新真实数据</el-button>
-      <el-button plain @click="clearContentFilters">重置筛选</el-button>
-      <el-button plain @click="openContentLogs('照片单品')">操作日志</el-button>
-      <el-button plain @click="openContentTrash">回收站</el-button>
-      <el-button plain @click="switchMenu('contentTags')">标签管理</el-button>
-      <el-button type="primary" v-if="can('contentEdit')" @click="openContentQuick('albums')">新增照片单品</el-button>
+  </header>
+  <el-alert class="catalog-alert" v-if="remoteError" :title="'数据刷新失败：'+remoteError" type="error" :closable="false" show-icon />
+  <template v-if="!editorOpen">
+    <div class="catalog-filters">
+      <el-input v-model="state.filters.keyword" clearable placeholder="搜索商品名称 / 标签" />
+      <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="全部打卡点"><el-option v-for="s in data.spots.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select>
+      <el-select v-model="state.filters.contentSeriesId" clearable filterable placeholder="全部风格"><el-option v-for="s in albumSeriesOptions" :key="s.value" :label="s.label" :value="s.value" /></el-select>
+      <el-button plain @click="clearContentFilters">重置</el-button><span class="catalog-count">共 <b>{{ listSource.length }}</b> 个商品</span>
+      <div class="album-view-switch" role="group" aria-label="展示方式"><button type="button" :class="{'is-active':viewMode==='cards'}" :aria-pressed="viewMode==='cards'" @click="viewMode='cards'">卡片</button><button type="button" :class="{'is-active':viewMode==='list'}" :aria-pressed="viewMode==='list'" @click="viewMode='list'">列表</button></div>
     </div>
-  </div>
-
-  <div class="album-stat-grid">
-    <div><span>照片单品总数</span><strong>{{ albumSummary.total }}</strong><em>内容资产与可售照片单品统一管理</em></div>
-    <div><span>允许售卖</span><strong>{{ albumSummary.sellable }}</strong><em>可进入商品货架对外下单</em></div>
-    <div><span>素材可引用</span><strong>{{ albumSummary.materialEnabled }}</strong><em>可被套餐作为素材展示</em></div>
-    <div><span>照片素材</span><strong>{{ albumSummary.photoSamples }}</strong><em>照片套餐专用素材</em></div>
-    <div><span>短视频</span><strong>{{ albumSummary.videoSamples }}</strong><em>短视频专用素材</em></div>
-    <div><span>关联套餐</span><strong>{{ albumSummary.linkedPackages }}</strong><em>正在引用照片单品素材</em></div>
-  </div>
-
-  <div class="album-filter-row">
-    <el-input v-model="state.filters.keyword" clearable placeholder="搜索照片单品名称、标签、简介" />
-    <el-select v-model="state.filters.contentSpotId" clearable filterable placeholder="打卡点">
-      <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
-    </el-select>
-    <el-select v-model="state.filters.contentSeriesId" clearable filterable placeholder="拍摄风格">
-      <el-option v-for="s in data.series" :key="s.id" :label="s.name" :value="s.id" />
-    </el-select>
-    <el-select v-model="state.filters.contentStatus" clearable placeholder="售卖状态">
-      <el-option label="上架" value="上架" />
-      <el-option label="下架" value="下架" />
-      <el-option label="草稿" value="草稿" />
-    </el-select>
-  </div>
-
-  <div class="album-editor">
-    <!-- 左：列表 -->
-    <aside class="album-list">
-      <div class="album-list-head">
-        <strong>照片单品</strong>
-        <span>{{ (remoteOn ? (remoteAlbums||[]) : albumRows).length }} 项</span>
-      </div>
-      <div class="album-list-scroll" v-loading="remoteLoading" element-loading-text="正在从后端载入…">
-        <button v-for="a in (remoteOn ? (remoteAlbums||[]) : albumRows)" :key="a._id||a.id"
-                class="album-list-item" :class="{active:(selectedAlbum&&(selectedAlbum._id||selectedAlbum.id))===(a._id||a.id)}"
-                @click="selectAlbum(a)">
-          <span class="ali-cover"><img v-if="a.cover" :src="a.cover" /><i v-else>照</i></span>
-          <span class="ali-main">
-            <strong>{{ a.name }}</strong>
-            <em>{{ money(a.price||0) }} · {{ a.isSellable===false ? '不可售卖' : '可售卖' }}</em>
-          </span>
-        </button>
-        <div v-if="(remoteOn ? (remoteAlbums||[]).length : albumRows.length)===0" class="empty-state">
-          <strong>暂无照片单品</strong><span>先新增照片单品再配置。</span>
+    <div v-if="viewMode==='cards'" class="catalog-grid" v-loading="remoteLoading">
+      <article v-for="a in listSource" :key="a.id || a._id" class="catalog-card" :class="{'is-hidden':!contentEffectiveVisible(a)}">
+        <div class="catalog-cover"><img v-if="a.cover" :src="a.cover" :alt="a.name" loading="lazy" /><div v-else class="catalog-placeholder">{{ a.name || '照片留影' }}<small>待上传商品照片</small></div><span class="catalog-badge" :class="{'is-off':!contentEffectiveVisible(a)}">{{ contentEffectiveVisible(a) ? '显示中' : '已隐藏' }}</span><span class="catalog-kind">照片</span></div>
+        <div class="catalog-card-body"><h3>{{ a.name || '未命名照片留影商品' }}</h3><div class="catalog-chips"><span class="catalog-chip" v-for="tag in (a.tags || []).slice(0,4)" :key="tag">{{ tag }}</span><span class="catalog-chip is-muted" v-if="!(a.tags || []).length">未设置标签</span></div>
+          <div class="catalog-meta"><div class="catalog-meta-row"><span>风格系列</span><strong>{{ albumSeriesLabel(a) }}</strong></div><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ a.spotId ? spotName(a.spotId) : '不关联打卡点' }}</strong></div><div class="catalog-meta-row"><span>商品价格</span><strong class="catalog-price">{{ money(a.price || 0) }}</strong></div><div class="catalog-meta-row"><span>定金比例</span><strong>{{ albumDepositLabel(a) }}</strong></div><div class="catalog-meta-row"><span>照片 / 修图</span><strong>{{ a.photoCount || 0 }} 张 · {{ retouchLabel(a) }}</strong></div><div class="catalog-meta-row"><span>妆造</span><strong>{{ a.makeupIncluded ? '包含' : '不包含' }}</strong></div></div>
         </div>
-      </div>
+        <div class="catalog-card-footer"><el-button plain type="primary" @click="selectAlbum(a)">{{ can('contentEdit') ? '编辑' : '查看' }}</el-button><el-button v-if="can('contentEdit')" plain @click="selectAlbum(a)">显示设置</el-button><el-button v-if="can('contentEdit')" plain @click="selectAlbum(a)">关联打卡点</el-button><el-button v-if="can('contentEdit')" plain @click="selectAlbum(a)">标签</el-button><el-button v-if="state.role==='super'" plain type="danger" @click="requestDeleteAlbum(a)">删除</el-button></div>
+      </article>
+      <div v-if="!listSource.length" class="catalog-empty"><strong>暂无照片留影商品</strong>调整筛选条件，或创建一个照片留影商品。</div>
+    </div>
+    <div v-else class="album-table-wrap" v-loading="remoteLoading">
+      <table class="album-table">
+        <thead><tr><th scope="col">商品信息</th><th scope="col">风格 / 标签</th><th scope="col">照片与服务</th><th scope="col">关联打卡点</th><th scope="col">显示状态</th><th scope="col">价格</th><th scope="col">操作</th></tr></thead>
+        <tbody>
+          <tr v-for="a in listSource" :key="a.id || a._id">
+            <td><div class="album-table-product"><img v-if="a.cover" :src="a.cover" :alt="a.name" loading="lazy" /><span v-else class="album-table-placeholder">暂无首图</span><strong>{{ a.name || '未命名照片留影商品' }}</strong></div></td>
+            <td><div class="album-table-style">{{ albumSeriesLabel(a) }}</div><div class="catalog-chips"><span class="catalog-chip" v-for="tag in (a.tags || [])" :key="tag">{{ tag }}</span><span v-if="!(a.tags || []).length" class="album-table-muted">未设置标签</span></div></td>
+            <td><span>{{ a.photoCount || 0 }} 张照片</span><small>{{ retouchLabel(a) }} · {{ a.makeupIncluded ? '含妆造' : '不含妆造' }}</small></td>
+            <td>{{ a.spotId ? spotName(a.spotId) : '不关联打卡点' }}</td>
+            <td><span class="album-visibility" :class="{'is-off':!contentEffectiveVisible(a)}">{{ contentEffectiveVisible(a) ? '显示中' : '已隐藏' }}</span></td>
+            <td><strong class="catalog-price">{{ money(a.price || 0) }}</strong><small>定金：{{ albumDepositLabel(a) }}</small></td>
+            <td><div class="album-table-actions"><el-button link type="primary" @click="selectAlbum(a)">{{ can('contentEdit') ? '编辑' : '查看' }}</el-button><el-button v-if="can('contentEdit')" link type="primary" @click="selectAlbum(a)">显示设置</el-button><el-button v-if="can('contentEdit')" link type="primary" @click="selectAlbum(a)">关联打卡点</el-button><el-button v-if="can('contentEdit')" link type="primary" @click="selectAlbum(a)">标签</el-button><el-button v-if="state.role==='super'" link type="danger" @click="requestDeleteAlbum(a)">删除</el-button></div></td>
+          </tr>
+          <tr v-if="!listSource.length"><td colspan="7"><div class="catalog-empty"><strong>暂无照片留影商品</strong>调整筛选条件，或创建一个照片留影商品。</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </template>
+  <div v-else-if="selectedAlbum" class="catalog-editor">
+    <div class="catalog-form">
+      <section class="catalog-panel">
+        <h3>名称与风格</h3>
+        <label class="catalog-field"><span>照片留影商品名称</span><el-input v-model="selectedAlbum.name" placeholder="例如：古风汉服留影" :disabled="!can('contentEdit') || saving || photoUploadBusy" /></label>
+        <label class="catalog-field"><span>风格系列</span><el-select v-model="selectedAlbum.seriesId" clearable filterable allow-create default-first-option placeholder="选择已有风格，或输入新风格后回车" :disabled="!can('contentEdit') || saving || photoUploadBusy" @change="changeAlbumSeries"><el-option v-for="s in albumSeriesOptions" :key="s.value" :label="s.label" :value="s.value" /></el-select></label>
+        <label class="catalog-field"><span>商品标签</span><el-select v-model="selectedAlbum.tags" multiple filterable allow-create default-first-option placeholder="如主推、爆款、新品，也可输入新标签后回车" :disabled="!can('contentEdit') || saving || photoUploadBusy"><el-option v-for="name in albumTagOptions" :key="name" :label="name" :value="name" /></el-select></label>
+        <p class="catalog-hint">风格系列和标签都可以自定义，保存后可在其他商品中复用。</p>
+      </section>
+      <section class="catalog-panel album-photos-panel">
+        <div class="catalog-panel-head"><h3>上传照片与选择首图</h3><span class="album-photo-total">已上传 <strong>{{ photoCount }}</strong> 张照片</span></div>
+        <p class="catalog-hint">点击「＋」可一次选择多张照片，也可上传文件夹。首张自动设为首图，可在下方重新选择，用于小程序照片留影卡片展示。</p>
+        <div class="album-photo-strip" role="region" aria-label="已上传商品照片，可横向滚动" tabindex="0">
+          <article v-for="(url,index) in albumPhotoUrls(selectedAlbum)" :key="url" class="catalog-media album-photo-tile" :class="{'is-cover':selectedAlbum.cover===url,'is-selected':selectedPhotoUrls.includes(url)}">
+            <el-image :src="url" :alt="'商品照片 '+(index+1)" fit="cover" :preview-src-list="albumPhotoUrls(selectedAlbum)" :initial-index="index" preview-teleported />
+            <span v-if="selectedAlbum.cover===url" class="catalog-badge">首图</span>
+            <el-checkbox v-if="can('contentEdit')" class="album-photo-checkbox" :model-value="selectedPhotoUrls.includes(url)" :aria-label="'选择第 '+(index+1)+' 张照片'" :disabled="saving || photoUploadBusy" @change="togglePhotoSelection(url,$event)" />
+            <div v-if="can('contentEdit')" class="catalog-media-tools"><el-button link type="primary" :disabled="saving || photoUploadBusy || selectedAlbum.cover===url" @click="setAlbumCover(selectedAlbum,url)">{{ selectedAlbum.cover===url ? '当前首图' : '设为首图' }}</el-button><el-button link type="primary" :disabled="saving || photoUploadBusy" @click="replaceAlbumPhoto(selectedAlbum,url)">替换</el-button><el-button link type="danger" :disabled="saving || photoUploadBusy" @click="removePhoto(url)">删除</el-button></div>
+          </article>
+          <button v-if="can('contentEdit')" type="button" class="album-upload-tile" :disabled="saving || photoUploadBusy" @click="uploadAlbumPhotos(false)" aria-label="上传商品照片，可一次选择多张"><span class="album-upload-plus" aria-hidden="true">＋</span><strong>{{ photoUploadBusy ? '正在上传…' : '上传照片' }}</strong><small>支持一次选择多张</small></button>
+          <div v-if="!photoCount && !can('contentEdit')" class="catalog-upload-empty">暂无商品照片</div>
+        </div>
+        <div v-if="can('contentEdit')" class="album-photo-toolbar">
+          <el-checkbox :model-value="allPhotosSelected" :indeterminate="selectedPhotoUrls.length>0 && !allPhotosSelected" :disabled="saving || photoUploadBusy || !photoCount" @change="toggleAllPhotos">全选</el-checkbox><span class="album-selected-count">已选 {{ selectedPhotoUrls.length }} 张</span><el-button plain type="danger" :disabled="saving || photoUploadBusy || !selectedPhotoUrls.length" @click="removeSelectedPhotos">删除所选照片</el-button><el-button class="album-upload-folder" plain :disabled="saving || photoUploadBusy" @click="uploadAlbumPhotos(true)">上传文件夹</el-button>
+        </div>
+        <p class="catalog-hint">照片按顺序在同一行展示，较多时可横向滚动。可删除单张或勾选多张批量删除，张数自动统计。</p>
+      </section>
+      <section class="catalog-panel">
+        <h3>价格与服务内容</h3>
+        <div class="catalog-row"><label class="catalog-field"><span>商品价格（元）</span><el-input-number v-model="selectedAlbum.price" :min="0" :precision="2" :step="1" :disabled="!can('contentEdit') || saving || photoUploadBusy" /></label><div class="catalog-field"><span>照片张数（自动统计）</span><div class="album-auto-count"><strong>{{ photoCount }}</strong> 张照片</div></div></div>
+        <label class="catalog-field"><span>定金比例（%）</span><el-input-number v-model="selectedAlbum.depositRatioPercent" :min="0" :max="100" :precision="2" :step="5" controls-position="right" placeholder="使用全局比例" aria-label="照片定金比例，百分比" :disabled="!can('contentEdit') || saving || photoUploadBusy" /><small class="catalog-hint">留空使用「预约配置」中的全局定金比例；填写 0 表示不收定金。</small></label>
+        <div class="catalog-row"><label class="catalog-field"><span>修图</span><el-select v-model="selectedAlbum.retouchMode" :disabled="!can('contentEdit') || saving || photoUploadBusy"><el-option label="按张数" value="count" /><el-option label="包含修图" value="included" /><el-option label="不包含修图" value="excluded" /></el-select></label><label v-if="selectedAlbum.retouchMode==='count'" class="catalog-field"><span>修图张数</span><el-input-number v-model="selectedAlbum.retouchCount" :min="1" :precision="0" :disabled="!can('contentEdit') || saving || photoUploadBusy" /></label></div>
+        <label class="catalog-switch"><span>是否包含妆造</span><el-switch v-model="selectedAlbum.makeupIncluded" inline-prompt active-text="含" inactive-text="不含" :disabled="!can('contentEdit') || saving || photoUploadBusy" /></label>
+      </section>
+      <section class="catalog-panel">
+        <div class="catalog-panel-head"><h3>拍摄说明</h3><el-button v-if="can('contentEdit')" link type="primary" :disabled="saving || photoUploadBusy" @click="applyAlbumShootingTemplate(selectedAlbum)">使用默认模板</el-button></div>
+        <el-input type="textarea" :rows="4" v-model="selectedAlbum.shootingNotes" placeholder="可使用默认模板，也可自定义拍摄内容、服务范围及注意事项" :disabled="!can('contentEdit') || saving || photoUploadBusy" />
+      </section>
+      <section class="catalog-panel">
+        <h3>显示与关联打卡点</h3>
+        <label class="catalog-switch"><span>是否在小程序显示<small>新建商品默认隐藏，开启并保存后显示。</small></span><el-switch v-model="selectedAlbum.isShow" active-text="显示" inactive-text="隐藏" :disabled="!can('contentEdit') || saving || photoUploadBusy" /></label>
+        <label class="catalog-field album-spot-field"><span>关联打卡点（可选）</span><el-select v-model="selectedAlbum.spotId" clearable filterable placeholder="不关联打卡点" :disabled="!can('contentEdit') || saving || photoUploadBusy" @change="changeAlbumSpot"><el-option v-for="s in data.spots.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select></label>
+        <p class="catalog-hint">默认不关联打卡点；清空可解除关联。关联打卡点隐藏时，商品也会随之隐藏。</p>
+        <details class="catalog-advanced"><summary>其他设置</summary>
+          <label class="catalog-field"><span>所属城市</span><el-select v-model="selectedAlbum.cityId" clearable filterable :disabled="!can('contentEdit') || saving || photoUploadBusy"><el-option v-for="c in data.cities.filter(i=>!i.deleted && !i.isDeleted)" :key="c.id || c._id" :label="c.name" :value="c.id || c._id" /></el-select></label>
+          <label class="catalog-switch"><span>作为商品售卖</span><el-switch v-model="selectedAlbum.isSellable" :disabled="!can('contentEdit') || saving || photoUploadBusy" /></label><label class="catalog-switch"><span>允许套餐引用素材</span><el-switch v-model="selectedAlbum.allowMaterialUse" :disabled="!can('contentEdit') || saving || photoUploadBusy" /></label>
+          <p class="catalog-hint">关闭商品售卖会使商品隐藏；套餐素材引用设置独立保留。</p><div class="catalog-review"><span>套餐引用：{{ (selectedSource && selectedSource.summary && selectedSource.summary.packages) || 0 }}</span></div><el-button v-if="selectedSource && state.role==='super'" type="danger" plain :disabled="saving || photoUploadBusy" @click="requestDeleteAlbum(selectedSource)">删除商品</el-button>
+        </details>
+      </section>
+      <div class="catalog-editor-footer"><el-button :disabled="saving || photoUploadBusy" @click="resetAlbumDraft" v-if="!creating">还原修改</el-button><el-button :disabled="saving || photoUploadBusy" @click="closeEditor">取消</el-button><el-button v-if="can('contentEdit')" type="primary" :loading="saving" :disabled="photoUploadBusy" @click="saveSelectedAlbum">保存确定</el-button></div>
+    </div>
+    <aside class="catalog-preview"><div class="catalog-preview-title">小程序卡片预览<span>实时更新</span></div>
+      <article class="catalog-card"><div class="catalog-cover"><img v-if="selectedAlbum.cover" :src="selectedAlbum.cover" :alt="selectedAlbum.name" /><div class="catalog-placeholder" v-else>待上传照片</div><span class="catalog-badge" :class="{'is-off':!previewVisible(selectedAlbum)}">{{ previewVisible(selectedAlbum) ? '显示中' : '已隐藏' }}</span><span class="catalog-kind">照片</span></div>
+        <div class="catalog-card-body"><h3>{{ selectedAlbum.name || '照片留影商品名称' }}</h3><div class="catalog-chips"><span class="catalog-chip" v-for="tag in selectedAlbum.tags" :key="tag">{{ tag }}</span></div><div class="catalog-meta"><div class="catalog-meta-row"><span>风格系列</span><strong>{{ albumSeriesLabel(selectedAlbum) }}</strong></div><div class="catalog-meta-row"><span>商品价格</span><strong class="catalog-price">{{ money(selectedAlbum.price || 0) }}</strong></div><div class="catalog-meta-row"><span>定金比例</span><strong>{{ albumDepositLabel(selectedAlbum, true) }}</strong></div><div class="catalog-meta-row"><span>照片张数</span><strong>{{ photoCount }} 张</strong></div><div class="catalog-meta-row"><span>修图 / 妆造</span><strong>{{ retouchLabel(selectedAlbum) }} · {{ selectedAlbum.makeupIncluded ? '含妆造' : '不含妆造' }}</strong></div><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ selectedAlbum.spotId ? spotName(selectedAlbum.spotId) : '不关联打卡点' }}</strong></div></div><p class="catalog-preview-desc">{{ selectedAlbum.shootingNotes || '待填写拍摄说明' }}</p></div>
+      </article><p class="catalog-preview-note">预览当前草稿 · 所有修改保存后生效</p>
     </aside>
-
-    <!-- 中：表单 -->
-    <section class="album-form" v-if="selectedAlbum">
-      <div class="album-form-head">
-        <div>
-          <strong>编辑照片单品</strong>
-          <p>改完点「保存」；开关类直接切换即时生效。</p>
-        </div>
-        <div class="album-form-actions">
-           <el-button v-if="can('contentEdit')" type="primary" @click="saveSelectedAlbum">保存</el-button>
-           <el-button v-if="can('contentEdit')" type="primary" plain @click="openContent(selectedAlbum)">高级编辑</el-button>
-          <el-button @click="previewContent(selectedAlbum)">预览</el-button>
-          <el-button type="danger" plain v-if="can('contentEdit')" @click="requestDeleteAlbum(selectedAlbum)">删除</el-button>
-        </div>
-      </div>
-
-      <div class="album-form-body">
-         <label class="af-field"><span>名称</span><el-input v-model="selectedAlbum.name" :disabled="!can('contentEdit')" /></label>
-        <div class="af-row">
-          <label class="af-field"><span>打卡点</span>
-             <el-select v-model="selectedAlbum.spotId" filterable placeholder="选择打卡点" :disabled="!can('contentEdit')">
-              <el-option v-for="s in data.spots" :key="s.id" :label="s.name" :value="s.id" />
-            </el-select>
-          </label>
-          <label class="af-field"><span>拍摄风格</span>
-             <el-select v-model="selectedAlbum.seriesId" filterable placeholder="选择拍摄风格" :disabled="!can('contentEdit')">
-              <el-option v-for="s in data.series" :key="s.id" :label="s.name" :value="s.id" />
-            </el-select>
-          </label>
-        </div>
-         <label class="af-field"><span>价格（元）</span><el-input-number v-model="selectedAlbum.price" :min="0" :step="10" :disabled="!can('contentEdit')" /></label>
-         <label class="af-field"><span>简介 / 拍摄说明</span><el-input type="textarea" :rows="3" v-model="selectedAlbum.intro" :disabled="!can('contentEdit')" /></label>
-
-        <div class="af-switches">
-           <label><span>作为商品售卖</span><el-switch v-model="selectedAlbum.isSellable" :disabled="!can('contentEdit')" @change="toggleAlbumSellable(selectedAlbum)" /></label>
-           <label><span>允许素材展示</span><el-switch v-model="selectedAlbum.allowMaterialUse" :disabled="!can('contentEdit')" @change="toggleAlbumMaterialUse(selectedAlbum)" /></label>
-        </div>
-
-        <div class="af-meta">
-          <span>图片：{{ (selectedAlbum.summary&&selectedAlbum.summary.photoSamples)||0 }}</span>
-          <span>视频：{{ (selectedAlbum.summary&&selectedAlbum.summary.videoSamples)||0 }}</span>
-          <span>套餐引用：{{ (selectedAlbum.summary&&selectedAlbum.summary.packages)||0 }}</span>
-        </div>
-
-        <div class="af-upload" v-if="can('contentEdit')">
-          <el-button link type="primary" @click="uploadAlbumSample(selectedAlbum,'photo')">上传图片</el-button>
-          <el-button link type="primary" @click="uploadAlbumSample(selectedAlbum,'video')">上传视频</el-button>
-          <el-button link type="primary" @click="openAlbumReplace(selectedAlbum)">替换引用</el-button>
-        </div>
-      </div>
-    </section>
-
-    <!-- 右：手机实时预览（小程序客人端真实效果） -->
-    <aside class="album-preview" v-if="selectedAlbum">
-      <div class="lxm-phone">
-        <div class="lxm-phone-notch"></div>
-        <div class="lxm-phone-screen">
-          <div class="phone-banner">照片留影</div>
-          <div class="pd-card">
-            <div class="pd-cover" :class="{off:selectedAlbum.isSellable===false}">
-              <img v-if="selectedAlbum.cover" :src="selectedAlbum.cover" />
-              <i v-else>照</i>
-              <span v-if="selectedAlbum.isSellable!==false" class="pd-badge">可售卖</span>
-              <span v-else class="pd-badge off">不可售卖</span>
-            </div>
-            <div class="pd-info">
-              <strong class="pd-title">{{ selectedAlbum.name }}</strong>
-              <div class="pd-price">{{ money(selectedAlbum.price||0) }}</div>
-              <div class="pd-note">{{ selectedAlbum.intro || '暂无照片单品说明' }}</div>
-              <div class="pd-tags">
-                <span v-if="selectedAlbum.allowMaterialUse!==false" class="ok">素材可引用</span>
-                <span v-else class="warn">素材禁用</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <p class="preview-tip">↑ 小程序客人端真实效果预览（与小程序展示一致）</p>
-    </aside>
-  </div>
-
-  <div v-if="!selectedAlbum" class="empty-state">
-    <strong>请选择左侧照片单品</strong><span>点击列表项即可在中栏编辑、右栏预览。</span>
   </div>
 </div>

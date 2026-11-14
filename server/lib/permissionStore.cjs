@@ -1,8 +1,6 @@
 // Normalized authorization storage. This module is intentionally independent
 // from the HTTP API so migrations, jobs, and future admin routes share the
 // same menu/role/user contract.
-const fs = require("fs");
-const path = require("path");
 const crypto = require("crypto");
 
 const AUTHZ_KEYS = ["menus", "roles", "roleMenus", "rolePermissions", "users"];
@@ -134,89 +132,15 @@ function normalizeAuthzRole(value) {
   return LEGACY_ROLE_ALIASES[key] || key;
 }
 
-function createJson(options) {
-  const file = options.jsonFile || path.join(__dirname, "..", "data", "db.json");
-  let cache;
-  function load() {
-    if (cache) return cache;
-    try { cache = JSON.parse(fs.readFileSync(file, "utf8")); }
-    catch (e) {
-      if (e.code !== "ENOENT") throw Object.assign(new Error("JSON 数据文件无效"), { code: "DATA_SOURCE_INVALID" });
-      cache = { collections: {} };
-    }
-    if (!cache || typeof cache !== "object") throw Object.assign(new Error("JSON 数据文件格式无效"), { code: "DATA_SOURCE_INVALID" });
-    if (!cache.collections || typeof cache.collections !== "object") cache.collections = {};
-    if (!cache.authz || typeof cache.authz !== "object") cache.authz = {};
-    for (const key of AUTHZ_KEYS) if (!cache.authz[key] || typeof cache.authz[key] !== "object") cache.authz[key] = {};
-    return cache;
-  }
-  function persist() {
-    load(); fs.mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(cache, null, 2), { encoding: "utf8", mode: 0o600 });
-    try { fs.renameSync(tmp, file); } catch (_) { fs.copyFileSync(tmp, file); try { fs.unlinkSync(tmp); } catch (__) {} }
-    try { fs.chmodSync(file, 0o600); } catch (_) {}
-  }
-  function bucket(key) { return load().authz[key]; }
-  function values(key) { return Object.values(bucket(key)).map(clone); }
-  function canonicalMenu(input = {}, current = {}) {
-    const next = normalizeMenu(input, current);
-    const parent = String(next.parentKey || "");
-    if (parent) {
-      const match = Object.values(bucket("menus")).find((menu) => menuKey(menu) === parent || String(menu && menu.id || "") === parent);
-      if (match) {
-        next.parentKey = menuKey(match);
-        next.parentId = next.parentKey;
-      }
-    }
-    return next;
-  }
-  async function listMenus() { return values("menus").map((menu) => canonicalMenu(menu)); }
-  async function listRoles() { return values("roles"); }
-  async function listUsers() { return values("users").map(safeUser); }
-  async function createEntity(key, data, prefix) {
-    const item = { ...data, id: data.id || data._id || id(prefix), createdAt: data.createdAt || now(), updatedAt: now() };
-    if (bucket(key)[item.id]) throw Object.assign(new Error("记录已存在"), { code: "DUPLICATE_RECORD" });
-    bucket(key)[item.id] = item; persist(); return clone(key === "users" ? safeUser(item) : item);
-  }
-  async function updateEntity(key, entityId, patch) {
-    const cur = bucket(key)[entityId]; if (!cur) return null;
-    const next = { ...cur, ...patch, id: entityId, updatedAt: now() }; bucket(key)[entityId] = next; persist();
-    return clone(key === "users" ? safeUser(next) : next);
-  }
-  async function removeEntity(key, entityId) { if (!bucket(key)[entityId]) return false; delete bucket(key)[entityId]; persist(); return true; }
-  return {
-    mode: "json", backend: "json", async ensureSchema() { load(); persist(); return { backend: "json", ready: true }; },
-    listMenus, getMenu: async (x) => { const row = bucket("menus")[x]; return row ? clone(canonicalMenu(row)) : null; }, createMenu: (x) => createEntity("menus", canonicalMenu(x), "menu"), updateMenu: async (x, p) => updateEntity("menus", x, canonicalMenu(p, bucket("menus")[x] || {})), deleteMenu: (x) => removeEntity("menus", x),
-    listRoles, getRole: async (x) => clone(bucket("roles")[x] || null), createRole: (x) => createEntity("roles", x, "role"), updateRole: (x, p) => updateEntity("roles", x, p), deleteRole: async (x) => { if (!bucket("roles")[x]) return false; delete bucket("roles")[x]; delete bucket("roleMenus")[x]; persist(); return true; },
-    listUsers, getUser: async (x) => safeUser(bucket("users")[x]), getUserState: async (x) => clone(bucket("users")[x] || null), createUser: async (x) => { const item = normalizeUser(x); if (item.password && !String(item.password).startsWith("lxm1$")) item.password = hashPassword(item.password); return createEntity("users", item, "usr"); },
-    updateUser: async (x, p) => { const current = bucket("users")[x] || {}; const patch = normalizeUser({ ...current, ...p }); if (patch.password && !String(patch.password).startsWith("lxm1$")) patch.password = hashPassword(patch.password); return updateEntity("users", x, patch); }, deleteUser: (x) => removeEntity("users", x),
-    setRoleMenus: async (roleId, menuIds) => { const item = { roleId, menuIds: [...new Set((menuIds || []).map(String))], updatedAt: now() }; bucket("roleMenus")[roleId] = item; persist(); return clone(item); },
-    getRoleMenus: async (roleId) => clone(bucket("roleMenus")[roleId] || { roleId, menuIds: [] }),
-    // Legacy action grants remain in the JSON document for compatibility, but
-    // the active authorization policy is menu-only.
-    setRolePermissions: async (roleId) => ({ roleId }),
-    getRolePermissions: async (roleId) => ({ roleId }),
-    async authenticate(account, password, options = {}) {
-      const found = values("users").find((user) => user.account === String(account).trim());
-      if (!found || !verifyPassword(found.password || found.passwordHash, password)) return null;
-      const disabled = ["disabled", "停用", "禁用", "inactive"].includes(String(found.status || "").toLowerCase());
-      if (disabled && options.includeDisabled !== true) return null;
-      return safeUser(found);
-    },
-    async snapshot() { return { menus: values("menus"), roles: values("roles"), roleMenus: values("roleMenus"), users: await listUsers() }; },
-    async close() {}
-  };
-}
-
 function createMysql(options) {
   return require("./mysqlPermissionStore.cjs")(options);
 }
 function createPermissionStore(options = {}) {
-  const backend = String(options.backend || process.env.DATA_MODE || process.env.BACKEND || "mysql").toLowerCase();
+  const backend = String(options.backend || "mysql").toLowerCase();
   let store;
   try {
-    store = backend === "mysql" ? createMysql(options) : createJson(options);
+    if (backend !== "mysql") throw Object.assign(new Error("Only MySQL authorization storage is supported at runtime"), { code: "DATA_SOURCE_CONFIG_INVALID" });
+    store = createMysql(options);
   } catch (error) {
     const fail = async () => { throw error; };
     return {
@@ -230,6 +154,9 @@ function createPermissionStore(options = {}) {
       setRoleGrants: fail, syncLegacyAccount: fail, close: async () => {}
     };
   }
+  return decorateStore(store, backend, options);
+}
+function decorateStore(store, backend, options = {}) {
   // Stable facade consumed by API/bootstrap code. Keep the CRUD names explicit
   // and provide aliases for older callers that used remove* verbs.
   store.required = backend === "mysql";
@@ -248,25 +175,37 @@ function createPermissionStore(options = {}) {
   };
   store.getPolicyForUser = async (user) => {
     const roleId = user && (user.roleId || user.role_id || user.role);
-    let role = roleId && await store.getRole(roleId);
-    if (!role && roleId && typeof store.listRoles === "function") role = (await store.listRoles()).find((r) => (r.roleKey || r.code) === roleId) || null;
-    const menuRows = typeof store.listMenus === "function" ? await store.listMenus() : [];
-    const roleKey = String(role && (role.roleKey || role.code || role.key) || "").trim().toLowerCase();
     if (isBuiltinAdminAccount(user)) {
-      const roles = typeof store.listRoles === "function" ? await store.listRoles() : [];
+      const [menuRows, roles] = await Promise.all([
+        typeof store.listMenus === "function" ? store.listMenus() : [],
+        typeof store.listRoles === "function" ? store.listRoles() : [],
+      ]);
       const superRole = (Array.isArray(roles) ? roles : []).find((item) => String(item.roleKey || item.code || item.key || "") === "super") || {};
+      const rolePermissions = typeof store.getRolePermissions === "function" && superRole.id ? await store.getRolePermissions(superRole.id) : {};
       return {
         user: safeUser(user),
         role: { ...superRole, id: superRole.id || "role_super", roleKey: "super", key: "super", name: superRole.name || "系统管理员", status: "active" },
         menuKeys: effectiveMenuKeys(menuRows, (Array.isArray(menuRows) ? menuRows : []).map(menuKey)),
+        menuRows,
+        rolePermissions: rolePermissions.permissionKeys || [],
         isBuiltinAdmin: true
       };
     }
+    const [foundRole, menuRows, initialGrants, initialPermissions] = await Promise.all([
+      roleId ? store.getRole(roleId) : null,
+      typeof store.listMenus === "function" ? store.listMenus() : [],
+      roleId ? store.getRoleGrants(roleId) : { menuKeys: [] },
+      roleId && typeof store.getRolePermissions === "function" ? store.getRolePermissions(roleId) : {},
+    ]);
+    let role = foundRole;
+    if (!role && roleId && typeof store.listRoles === "function") role = (await store.listRoles()).find((r) => (r.roleKey || r.code) === roleId) || null;
+    const roleKey = String(role && (role.roleKey || role.code || role.key) || "").trim().toLowerCase();
     const resolvedRoleId = role && role.id ? role.id : roleId;
     const grants = roleKey === "super"
       ? { menuKeys: (Array.isArray(menuRows) ? menuRows : []).map(menuKey) }
-      : (resolvedRoleId ? await store.getRoleGrants(resolvedRoleId) : { menuKeys: [] });
-    return { user: safeUser(user), role: role || null, menuKeys: effectiveMenuKeys(menuRows, grants.menuKeys) };
+      : (resolvedRoleId && resolvedRoleId !== roleId ? await store.getRoleGrants(resolvedRoleId) : initialGrants);
+    const rolePermissions = resolvedRoleId && resolvedRoleId !== roleId && typeof store.getRolePermissions === "function" ? await store.getRolePermissions(resolvedRoleId) : initialPermissions;
+    return { user: safeUser(user), role: role || null, menuKeys: effectiveMenuKeys(menuRows, grants.menuKeys), menuRows, rolePermissions: rolePermissions.permissionKeys || [] };
   };
   store.getRoleGrants = async (roleId) => {
     const menus = await store.getRoleMenus(roleId);
@@ -308,4 +247,6 @@ createPermissionStore.verifyPassword = verifyPassword;
 createPermissionStore.isBuiltinAdminAccount = isBuiltinAdminAccount;
 createPermissionStore.AUTHZ_KEYS = AUTHZ_KEYS;
 createPermissionStore.BUSINESS_KEYS = BUSINESS_KEYS;
+createPermissionStore.decorateStore = decorateStore;
+createPermissionStore.adapterTools = { AUTHZ_KEYS, clone, id, now, menuKey, normalizeMenu, normalizeUser, hashPassword, verifyPassword, safeUser };
 module.exports = createPermissionStore;

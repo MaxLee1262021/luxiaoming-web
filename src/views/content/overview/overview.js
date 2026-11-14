@@ -28,9 +28,9 @@ window.LXM_PAGES.register({
       { key: "albums", label: "照片留影" },
       { key: "videoSingles", label: "短视频" },
       { key: "packages", label: "旅拍套餐" },
-      { key: "peripherals", label: "影像周边" },
+      { key: "peripherals", label: "商品管理" },
       { key: "guides", label: "旅拍灵感" },
-      { key: "miniDecor", label: "首页装修" }
+      { key: "miniDecor", label: "轮播配置" }
     ];
 
     // 模块卡片：miniView = 客人在小程序哪里看到；step 0 表示配置项不进创建顺序
@@ -54,7 +54,7 @@ window.LXM_PAGES.register({
           { key: "albums", miniView: "首页板块 · 照片留影", desc: "照片单品商品，按拍摄风格分组，客人浏览样片后下单。", count: Vue.computed(() => cnt(ctx.data.albums)) },
           { key: "videoSingles", miniView: "首页板块 · 视频摄像", desc: "短视频产品。与旅拍套餐并列的独立商品种类，不合并、不互套。", count: videoSingleCount },
           { key: "packages", miniView: "首页板块 · 旅拍套餐", desc: "套餐组合商品，可多个内容组合定价销售。", count: photoPackageCount },
-          { key: "peripherals", miniView: "首页板块 · 影像周边", desc: "相册、摆件等实物周边商品。", count: Vue.computed(() => cnt(ctx.data.peripherals)) }
+          { key: "peripherals", miniView: "首页板块 · 影像周边", desc: "管理相册、相框等实物商品的规格、售价、库存与展示资料。", count: Vue.computed(() => cnt(ctx.data.peripherals)) }
         ]
       },
       {
@@ -63,8 +63,7 @@ window.LXM_PAGES.register({
         desc: "帮客人做决策的攻略内容 + 小程序门面装修",
         cards: [
           { key: "guides", miniView: "首页板块 · 旅拍灵感", desc: "旅拍攻略内容，帮客人做决定、促成下单。", count: Vue.computed(() => cnt(ctx.data.guides)) },
-          { key: "miniDecor", miniView: "小程序首页", desc: "首页轮播图（首页轮播 / 探索页轮播）、活动公告、板块开关与排序。", count: null },
-          { key: "miniConfig", miniView: "小程序全局", desc: "客服企业微信、隐私政策等全局配置。", count: null }
+          { key: "miniDecor", miniView: "首页与探索页轮播", desc: "分别配置首页、探索页的图片或视频轮播，以及点击后的跳转目标或不跳转。", count: null }
         ]
       }
     ];

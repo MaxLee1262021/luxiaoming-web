@@ -7,7 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const rpc = require("../lib/rpc.cjs");
-const createSource = require("../lib/dbSource.cjs");
+const createSource = require("./fixtures/jsonSource.cjs");
 
 function identity(openid) { return { identity: { kind: "public", openid } }; }
 

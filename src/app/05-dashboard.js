@@ -48,6 +48,83 @@
     visibleCities
   } = ctx;
 
+// Read-only ledger projection. It contains no extra order/customer payload;
+// every drill-down below still intersects the existing authorized order pool.
+const shareAnalytics = ctx.reactive ? ctx.reactive({ ready: false, loading: false, error: "", merchants: [], orderAttributions: [], totalAmount: null, cityScope: "", scanScope: "", bindingScope: "" })
+  : { ready: false, loading: false, error: "", merchants: [], orderAttributions: [], totalAmount: null, cityScope: "", scanScope: "", bindingScope: "" };
+let analyticsRequest = 0;
+function canReadShareAnalytics() { return state.role === "super" || !!ctx.can?.("shareView"); }
+function clearShareAnalytics() {
+  analyticsRequest += 1; Object.assign(shareAnalytics, { ready: false, loading: false, error: "", merchants: [], orderAttributions: [], totalAmount: null, cityScope: "", scanScope: "", bindingScope: "" });
+}
+function analyticsQuery() {
+  const query = {};
+  const route = typeof ctx.menuRouteKey === "function" ? ctx.menuRouteKey(state.active) : state.active;
+  if (["reconciliation", "report"].includes(route)) query.period = state.filters.reconcileMonth || LXMFormat.date(new Date()).slice(0, 7);
+  else if (Array.isArray(state.filters.dateRange) && state.filters.dateRange[0]) { query.startDate = state.filters.dateRange[0]; query.endDate = state.filters.dateRange[1] || state.filters.dateRange[0]; }
+  if (state.filters.shopId) query.merchantId = state.filters.shopId;
+  const cityId = typeof ctx.statisticsCityId === "function" ? ctx.statisticsCityId() : state.filters.cityId;
+  if (cityId) query.cityId = cityId;
+  return new URLSearchParams(query).toString();
+}
+async function loadShareAnalytics() {
+  clearShareAnalytics();
+  if (!state.authed || !window.LXM_AUTH?.hasSession?.() || !canReadShareAnalytics()) return;
+  const requestId = analyticsRequest; shareAnalytics.loading = true;
+  try {
+    const response = await window.LXM_HTTP.request(`/api/share/analytics?${analyticsQuery()}`);
+    const body = await response.json();
+    if (!response.ok || body.code !== undefined && ![0, "0"].includes(body.code)) throw new Error(body.msg || body.error || "商家分成统计加载失败");
+    if (requestId !== analyticsRequest) return;
+    const result = body.data?.data ?? body.data ?? body;
+    Object.assign(shareAnalytics, { ready: true, merchants: result.merchants || [], orderAttributions: result.orderAttributions || [], totalAmount: result.totalAmount ?? "0.00", cityScope: result.cityScope || "", scanScope: result.scanScope || "", bindingScope: result.bindingScope || "" });
+  } catch (error) { if (requestId === analyticsRequest) shareAnalytics.error = error.message || "商家分成统计暂不可用"; }
+  finally { if (requestId === analyticsRequest) shareAnalytics.loading = false; }
+}
+async function refreshDashboard() {
+  if (!state.authed || !window.LXM_AUTH?.hasSession?.()) return;
+  await Promise.all([ctx.loadAuthenticatedData?.("dashboard", { force: true }), loadShareAnalytics()]);
+}
+function shareAttribution(order) {
+  const id = String(typeof order === "string" ? order : order?.id || order?._id || "");
+  return shareAnalytics.ready ? shareAnalytics.orderAttributions.find((row) => String(row.orderId) === id) || null : null;
+}
+function shareAmountForOrders(orders, field) {
+  if (!shareAnalytics.ready) return null;
+  const ids = new Set(orders.map((order) => String(order.id || order._id)));
+  const rows = shareAnalytics.orderAttributions.filter((row) => ids.has(String(row.orderId)));
+  if (rows.some((row) => row[field] === undefined || row[field] === null || !Number.isFinite(Number(row[field])))) return null;
+  // Aggregate persisted cents; never multiply an order by a current rule.
+  return rows.reduce((sum, row) => sum + Math.round(Number(row[field]) * 100), 0) / 100;
+}
+function shareLedgerForOrders(orders) { return shareAmountForOrders(orders, "ledgerAmount"); }
+function shareBalanceForOrders(orders) { return shareAmountForOrders(orders, "amount"); }
+function shareHeadquarterForOrders(orders) {
+  if (!shareAnalytics.ready) return null;
+  const merchantBalance = shareBalanceForOrders(orders);
+  if (merchantBalance === null) return null;
+  return orders.reduce((sum, order) => {
+    const split = orderSplit(order);
+    return sum + Number(split.netAmount || 0) - Number(split.distributorAmount || 0) - Number(split.photographerAmount || 0);
+  }, 0) - merchantBalance;
+}
+const shareSourceDistribution = computed(() => {
+  if (!shareAnalytics.ready) return [];
+  const groups = [{ key: "T1", label: "商家自主订单", count: 0 }, { key: "T2", label: "商家客服订单", count: 0 }, { key: "platform", label: "归平台", count: 0 }, { key: "pending", label: "尚未生成分成", count: 0 }];
+  scopedOrders.value.forEach((order) => {
+    const hit = shareAttribution(order);
+    const key = !hit || hit.pending ? "pending" : !hit.merchantId || String(hit.merchantId) === "0" ? "platform" : hit.splitType === "T2" ? "T2" : "T1";
+    groups.find((row) => row.key === key).count += 1;
+  });
+  return groups;
+});
+if (ctx.watch) ctx.watch(() => JSON.stringify([state.authed, state.role, state.currentAccount, state.active, state.filters.reconcileMonth, state.filters.dateRange, state.filters.shopId, state.filters.cityId, state.dashboardCityId]), () => {
+  const route = typeof ctx.menuRouteKey === "function" ? ctx.menuRouteKey(state.active) : state.active;
+  if (["dashboard", "performance", "reconciliation", "report"].includes(route)) loadShareAnalytics(); else clearShareAnalytics();
+});
+window.addEventListener?.("lxm-auth-expired", clearShareAnalytics);
+window.addEventListener?.("lxm-auth-changed", clearShareAnalytics);
+
 const dashboard = computed(() => {
   const orders = scopedOrders.value;
   const scans = scopedScans.value;
@@ -64,11 +141,11 @@ const dashboard = computed(() => {
     deposit: convertedOrders.reduce((sum, o) => sum + (normalizeReviewStatus(o.depositFinanceStatus) === "已审" ? Number(o.depositPaid || 0) : 0), 0),
     finalPaid: convertedOrders.reduce((sum, o) => sum + (normalizeReviewStatus(o.finalFinanceStatus) === "已审" ? Number(o.finalPaid || 0) : 0), 0),
     due: convertedOrders.reduce((sum, o) => sum + financeDue(o), 0),
-    shopCommission: convertedOrders.reduce((sum, o) => sum + orderSplit(o).shopAmount, 0),
+    shopCommission: shareLedgerForOrders(orders),
     distributorCommission: convertedOrders.reduce((sum, o) => sum + orderSplit(o).distributorAmount, 0),
     agentCommission: convertedOrders.reduce((sum, o) => sum + commission(o, "agent"), 0),
     photographerCommission: convertedOrders.reduce((sum, o) => sum + orderSplit(o).photographerAmount, 0),
-    headquarterAmount: convertedOrders.reduce((sum, o) => sum + orderSplit(o).headquarterAmount, 0),
+    headquarterAmount: shareHeadquarterForOrders(convertedOrders),
   };
 });
 const dashboardDelta = computed(() => {
@@ -98,7 +175,9 @@ const dashboardDelta = computed(() => {
     return pct > 0 ? { text: `↑ ${Math.abs(pct)}%`, trend: "up" } : { text: `↓ ${Math.abs(pct)}%`, trend: "down" };
   };
   const prevScans = data.scans.filter((s) => scanInRoleScope(s) && inPrev(s.date) && (!state.filters.shopId || sameShop(s, state.filters.shopId)));
-  const prevOrders = data.orders.filter((o) => isCreatedBooking(o) && !o.deleted && inRoleScope(o) && inPrev(o.appointmentAt) && (!state.filters.shopId || sameShop(o, state.filters.shopId)));
+  const prevOrders = data.orders.filter((o) => isCreatedBooking(o) && !o.deleted && inRoleScope(o) && inPrev(o.appointmentAt)
+    && (!state.filters.shopId || (ctx.usesShareStatisticsFilters?.() ? ctx.matchesStatisticsMerchant?.(o, state.filters.shopId) : sameShop(o, state.filters.shopId)))
+    && (!state.filters.cityId || (ctx.usesShareStatisticsFilters?.() ? ctx.matchesOrderBusinessCity?.(o, state.filters.cityId) : sameCity(orderShop(o), state.filters.cityId))));
   const prevConverted = prevOrders.filter((o) => prevScans.some((s) => s.orderId === o.id));
   return {
     label: `对比 ${prevRange[0]} ~ ${prevRange[1]}`,
@@ -139,25 +218,22 @@ const selectedOrderBatchSummary = computed(() => {
   };
 });
 const dashboardScopeShops = computed(() => scopedShops.value.filter((shop) => {
-  if (state.dashboardCityId && !sameCity(shop, state.dashboardCityId)) return false;
+  if (state.dashboardCityId && shareAnalytics.ready && !shareAnalytics.merchants.some((merchant) => String(merchant.merchantId) === String(shop.id || shop._id))) return false;
   if (state.dashboardShopId && !sameShop(shop, state.dashboardShopId)) return false;
   return true;
 }));
 const dashboardScopeScans = computed(() => scopedScans.value.filter((scan) => {
-  const shop = orderShop({ shopId: scan.shopId });
-  if (state.dashboardCityId && !sameCity(shop, state.dashboardCityId)) return false;
   if (state.dashboardShopId && !sameShop(scan, state.dashboardShopId)) return false;
   return true;
 }));
-const shopRank = computed(() => scopedShops.value.filter((shop) => !state.dashboardCityId || sameCity(shop, state.dashboardCityId)).map((shop) => {
-  const orders = data.orders.filter((o) => sameShop(o, shop) && isCreatedBooking(o) && !o.deleted);
-  const scans = data.scans.filter((s) => sameShop(s, shop));
-  return { ...shop, orderCount: orders.length, scanCount: scans.length, amount: orders.reduce((n, o) => n + Number(o.totalAmount || 0), 0) };
+const shopRank = computed(() => !shareAnalytics.ready ? [] : shareAnalytics.merchants.map((merchant) => {
+  const shop = scopedShops.value.find((row) => String(row.id || row._id) === String(merchant.merchantId));
+  return { ...(shop || {}), ...merchant, id: String(merchant.merchantId), amount: Number(merchant.totalAmount || 0), ledgerReadOnly: true };
 }).sort((a, b) => b.amount - a.amount));
 const cityRank = computed(() => visibleCities.value.map((city) => {
-  const shops = scopedShops.value.filter((s) => sameCity(s, city));
-  const orders = data.orders.filter((o) => shops.some((shop) => sameShop(o, shop)) && isCreatedBooking(o) && !o.deleted);
-  return { ...city, shops: shops.length, orders: orders.length, amount: orders.reduce((s, o) => s + o.totalAmount, 0) };
+  const orders = scopedOrders.value.filter((order) => ctx.matchesOrderBusinessCity?.(order, city));
+  const merchants = new Set(orders.map((order) => shareAttribution(order)?.merchantId).filter((id) => id && String(id) !== "0"));
+  return { ...city, shops: merchants.size, orders: orders.length, amount: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0) };
 }).sort((a, b) => b.amount - a.amount));
 const scanHeat = computed(() => Array.from({ length: 24 }, (_, hour) => ({ hour, count: dashboardScopeScans.value.filter((s) => s.hour === hour).length })));
 const scanLineMax = computed(() => Math.max(...scanHeat.value.map((item) => Number(item.count || 0)), 1));
@@ -217,8 +293,8 @@ const drillRows = computed(() => {
   if (state.dashboardDrill === "due") rows = rows.filter((o) => financeDue(o) > 0);
   return rows.map((o) => ({ ...o, date: o.appointmentAt.slice(0, 10), scene: isHeadquarterSource(o) ? (o.sourceScene || "总部二维") : orderShop(o).qrPosition, sourceName: orderSourceName(o), status: statusMeta(o.status).label })).filter((row) => {
     const shop = orderShop(row);
-    if (metricFilters.cityId && !sameCity(shop, metricFilters.cityId)) return false;
-    if (metricFilters.shopId && !sameShop(row, metricFilters.shopId)) return false;
+    if (metricFilters.cityId && !ctx.matchesOrderBusinessCity?.(row, metricFilters.cityId)) return false;
+    if (metricFilters.shopId && !ctx.matchesStatisticsMerchant?.(row, metricFilters.shopId)) return false;
     if (metricFilters.scene && row.scene !== metricFilters.scene) return false;
     if (metricFilters.status && row.status !== metricFilters.status) return false;
     if (metricFilters.keyword && !JSON.stringify({ ...row, shop: shopName(row.shopId), source: orderSourceName(row), city: cityName(shop.cityId), products: (row.products || []).map(productName) }).includes(metricFilters.keyword)) return false;
@@ -380,10 +456,19 @@ const dashboardDailySalesRows = computed(() => {
 });
 const dashboardPeripheralSales = computed(() => {
   const top = dashboardHotProducts.value.filter((row) => row.category === "peripheral").slice(0, 5);
-  const lowStock = data.peripherals.filter((item) => !item.deleted && Number(item.stock ?? item.stockQty ?? 0) <= 5);
+  const active = data.peripherals.filter((item) => item && !item.deleted && !item.isDeleted);
+  const quantity = (value) => value !== null && value !== undefined && String(value).trim() !== ""
+    && Number.isSafeInteger(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+  const stockOf = (item) => quantity(item.stock ?? item.stockQty);
+  const lowStock = active.filter((item) => {
+    const stock = stockOf(item);
+    return stock !== null && stock <= (quantity(item.stockWarning) ?? 5);
+  });
+  // 订单数量不能充当出库事实；缺少实际出库字段时保持未采集。
+  const outbound = active.map((item) => quantity(item.outboundQty ?? item.shippedQty));
   return {
-    outbound: top.reduce((sum, row) => sum + Number(row.orders || 0), 0),
-    stock: data.peripherals.reduce((sum, item) => sum + Number(item.stock ?? item.stockQty ?? 0), 0),
+    outbound: outbound.some((value) => value !== null) ? outbound.reduce((sum, value) => sum + (value ?? 0), 0) : null,
+    stock: active.reduce((sum, item) => sum + (stockOf(item) ?? 0), 0),
     lowStock,
     top,
   };
@@ -445,17 +530,16 @@ function setDashboardDrill(type) {
 const dashboardScopeLabel = computed(() => {
   if (state.role === "merchant") return `当前商家：${shopName(roleProfile.value.shopId)}`;
   if (state.dashboardShopId) return `当前商家：${shopName(state.dashboardShopId)}`;
-  if (state.dashboardCityId) return `当前城市：${cityName(state.dashboardCityId)}`;
+  if (state.dashboardCityId) return `消费城市：${cityName(state.dashboardCityId)}；扫码记录不按消费城市拆分`;
   if (state.role === "agent") return `当前代理后台：${agentName(roleProfile.value.agentId)} · ${cityName(roleProfile.value.cityId)}`;
   return "全部城市 / 全部商家";
 });
 function selectDashboardCity(row) {
   state.dashboardCityId = row.id;
   state.dashboardShopId = "";
-  ElMessage.success(`已切换到${row.name}，商家排行与扫码热力已联动`);
+  ElMessage.success(`已按${row.name}的消费订单更新排行，扫码仍按门店记录展示`);
 }
 function selectDashboardShop(row) {
-  state.dashboardCityId = row.cityId || state.dashboardCityId;
   state.dashboardShopId = row.id;
   ElMessage.success(`已切换到${row.name}，扫码热力已联动`);
 }
@@ -472,25 +556,21 @@ function clearDashboardScope(type = "all") {
 }
 function rankOrders(type, id) {
   return scopedOrders.value.filter((order) => {
-    const shop = orderShop(order);
-    if (type === "shop") return sameShop(order, id);
-    if (type === "city") return sameCity(shop, id);
+    if (type === "shop") return String(shareAttribution(order)?.merchantId || "") === String(id);
+    if (type === "city") return !!ctx.matchesOrderBusinessCity?.(order, id);
     return false;
   });
 }
 function openRankPreview(type, row) {
   const orders = rankOrders(type, row.id);
-  const scans = type === "shop"
-    ? scopedScans.value.filter((scan) => sameShop(scan, row))
-    : scopedScans.value.filter((scan) => sameCity(orderShop({ shopId: scan.shopId }), row));
   state.rankPreview = {
     type,
     id: row.id,
     name: row.name,
-    subtitle: type === "shop" ? `${cityName(row.cityId)} · ${row.qrPosition || row.scene || "商家二维"}` : `${row.shops || 0} 个商家`,
-    scans: scans.length,
+    subtitle: type === "shop" ? "按新分成归属展示；扫码为当前有效码的门店累计，不按消费城市拆分" : `${row.shops || 0} 个归属商家；扫码不按消费城市拆分`,
+    scans: type === "shop" ? Number(row.scanCount || 0) : "—",
     orders: orders.length,
-    amount: orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
+    amount: type === "shop" ? Number(row.totalAmount || 0) : orders.reduce((sum, order) => sum + Number(order.totalAmount || 0), 0),
     rows: orders.map((order) => ({ ...order, statusText: statusMeta(order.status).label })),
   };
   state.rankPreviewDialog = true;
@@ -503,8 +583,13 @@ function clearRankFilter(type = "all") {
 function confirmRankJump() {
   if (!state.rankPreview) return;
   if (state.rankPreview.type === "shop") {
-    state.filters.shopId = state.rankPreview.id;
-    state.filters.cityId = "";
+    if (!ctx.shareState || !ctx.can?.("shareView")) return ElMessage.warning("当前账号没有分成明细权限");
+    ctx.shareState.detailQuery.merchantId = state.rankPreview.id;
+    ctx.shareState.detailQuery.period = state.filters.reconcileMonth || "";
+    ctx.shareState.detailQuery.page = 1;
+    state.rankPreviewDialog = false;
+    const menu = (LXM_CONFIG.menus || []).find((row) => String(row.routeKey || row.targetKey || row.key) === "shareDetails" && (roleProfile.value.menus || []).includes(row.key));
+    return switchMenu(menu?.key || "shareDetails");
   }
   if (state.rankPreview.type === "city") {
     state.filters.cityId = state.rankPreview.id;
@@ -545,6 +630,7 @@ function confirmReminderJump() {
 }
 
   return {
+    shareAnalytics, loadShareAnalytics, refreshDashboard, clearShareAnalytics, canReadShareAnalytics, shareAttribution, shareLedgerForOrders, shareBalanceForOrders, shareHeadquarterForOrders, shareSourceDistribution,
     dashboard,
     dashboardDelta,
     reminders,

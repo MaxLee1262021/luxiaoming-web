@@ -1,0 +1,1 @@
+window.LXM_PAGES.register({ key: "photoSettlement", component: "LxmPagePhotoSettlement", group: "photoShare", title: "结算管理", setup(ctx) { Vue.onMounted(() => ctx.photoEnter("settlement")); return {}; } });

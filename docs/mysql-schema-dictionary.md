@@ -205,6 +205,9 @@
 | `intro` | `TEXT NULL` | 简介 |
 | `description` | `TEXT NULL` | 面向用户的详细描述 |
 | `photoCount` | `INT NULL` | 照片数量 |
+| `retouchMode` | `VARCHAR(255) NULL` | 修图方式（count按张数、included包含、excluded不包含） |
+| `retouchCount` | `INT NULL` | 修图张数 |
+| `makeupIncluded` | `TINYINT(1) NULL` | 是否包含妆造 |
 | `shootingNotes` | `TEXT NULL` | 字段：shooting Notes |
 | `status` | `VARCHAR(255) NULL` | 业务状态 |
 | `isShow` | `TINYINT(1) NULL` | 是否在小程序展示 |
@@ -540,6 +543,12 @@
 | `spotId` | `VARCHAR(255) NULL` | 打卡点标识 |
 | `seriesId` | `VARCHAR(255) NULL` | 系列标识 |
 | `targetPackageId` | `VARCHAR(255) NULL` | 字段：target Package Id |
+| `targetProductType` | `VARCHAR(255) NULL` | 旅拍灵感预约商品类型 |
+| `targetProductId` | `VARCHAR(255) NULL` | 旅拍灵感预约商品标识 |
+| `targetProductSpotId` | `VARCHAR(255) NULL` | 旅拍灵感预约商品所属打卡点 |
+| `contentHtml` | `TEXT NULL` | 旅拍灵感已清洗富文本正文 |
+| `mediaType` | `VARCHAR(255) NULL` | 字段：media Type |
+| `isTop` | `TINYINT(1) NULL` | 字段：is Top |
 | `isHot` | `TINYINT(1) NULL` | 是否热门 |
 | `readCount` | `INT NULL` | 阅读次数 |
 | `score` | `DECIMAL(20,6) NULL` | 评分 |
@@ -1199,7 +1208,7 @@
 | `depositRatio` | `DECIMAL(20,6) NULL` | 定金比例 |
 | `duration` | `INT NULL` | 服务时长 |
 | `durationText` | `VARCHAR(255) NULL` | 服务时长文案 |
-| `retouchCount` | `INT NULL` | 字段：retouch Count |
+| `retouchCount` | `INT NULL` | 修图张数 |
 | `videoDuration` | `INT NULL` | 视频时长 |
 | `finishedVideoCount` | `INT NULL` | 字段：finished Video Count |
 | `hasAerial` | `TINYINT(1) NULL` | 字段：has Aerial |
@@ -1293,6 +1302,8 @@
 | `cover` | `TEXT NULL` | 封面地址 |
 | `mode` | `VARCHAR(255) NULL` | 字段：mode |
 | `spotId` | `VARCHAR(255) NULL` | 打卡点标识 |
+| `storeProductId` | `VARCHAR(255) NULL` | 字段：store Product Id |
+| `storeProductPromotionLink` | `TEXT NULL` | 字段：store Product Promotion Link |
 | `stock` | `INT NULL` | 库存数量 |
 | `stockQty` | `INT NULL` | 库存数量 |
 | `isHot` | `TINYINT(1) NULL` | 是否热门 |
@@ -1771,3 +1782,4 @@
 | `url` | `TEXT` | 资源地址 |
 | `created_at` | `DATETIME(3)` | 创建时间 |
 | `updated_at` | `DATETIME(3)` | 最后更新时间 |
+

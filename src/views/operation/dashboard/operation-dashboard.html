@@ -1,9 +1,11 @@
+<el-alert v-if="canReadShareAnalytics() && (shareAnalytics.loading || shareAnalytics.error)" :title="shareAnalytics.error || '商家分成数据加载中'" :type="shareAnalytics.error ? 'error' : 'info'" :closable="false" show-icon style="margin-bottom:16px"><template #default><el-button v-if="shareAnalytics.error" link @click="loadShareAnalytics">重新加载</el-button></template></el-alert>
 <header class="dashboard-page-head">
   <div>
     <span class="eyebrow">经营中心</span>
     <h2>经营看板</h2>
     <p>按时间、城市和商家查看扫码、订单转化与收款数据。</p>
   </div>
+  <el-button :loading="state.dataLoading || shareAnalytics.loading" @click="refreshDashboard">刷新数据</el-button>
 </header>
 
 <div class="filter-card dashboard-filter">
@@ -66,7 +68,7 @@
 <div class="dashboard-todo-strip">
   <div class="todo-strip-head">
     <strong>关键待办</strong>
-    <span>点击先预览订单，再决定是否进入订单管理</span>
+    <span>点击预览订单，再查看完整流水记录</span>
   </div>
   <div class="todo-strip-list">
     <button v-for="r in reminders" :key="r.status" class="todo-strip-item" @click="openReminderPreview(r)">
@@ -334,7 +336,8 @@
 
     <div class="dash-main-col dash-main-col-right">
       <div v-if="state.role!=='merchant'" class="dashboard-panel">
-        <div class="dashboard-panel-head"><div><h3>商家来源排行</h3><span>点击商家联动热力范围</span></div><button type="button" class="mini-text-btn lxm-action lxm-action--neutral lxm-action--link" @click="clearDashboardScope('shop')">全部</button></div>
+        <div class="dashboard-panel-head"><div><h3>商家来源排行</h3><span>按新分成归属排序，金额为已入账分成净额</span></div><button type="button" class="mini-text-btn lxm-action lxm-action--neutral lxm-action--link" @click="clearDashboardScope('shop')">全部</button></div>
+        <p class="muted" style="padding:0 18px">订单与分成按所选消费城市统计；当前有效码扫码、有效绑定人数为门店累计，不按消费城市拆分。</p>
         <div class="merchant-rank-list">
           <div v-for="(s,index) in shopRank" :key="s.id" class="merchant-rank-item" :class="{active:state.dashboardShopId===s.id}" @click="selectDashboardShop(s)">
             <span class="rank-num" :class="{gold:index===0,silver:index===1,bronze:index===2}">{{ index + 1 }}</span>
@@ -346,12 +349,12 @@
       </div>
 
       <div class="dashboard-panel">
-        <div class="dashboard-panel-head"><div><h3>本月分成预估</h3><span>仅作经营看板预览，最终以月度对账页为准</span></div></div>
+        <div class="dashboard-panel-head"><div><h3>分成与收入概览</h3><span>商家按已入账分成展示，其他角色沿用原核算口径</span></div></div>
         <div class="settlement-preview-list">
-          <div><span>商家应计</span><strong>{{ money(reconciliationSummary.shopCommissionAmount) }}</strong></div>
+          <div><span>商家已入账分成</span><strong>{{ shareAnalytics.ready ? money(reconciliationSummary.shopCommissionAmount) : '—' }}</strong></div>
           <div v-if="['super','finance','distributor'].includes(state.role)"><span>分销员应计</span><strong>{{ money(reconciliationSummary.distributorCommissionAmount) }}</strong></div>
           <div v-if="['super','finance','photo'].includes(state.role)"><span>摄影师应计</span><strong>{{ money(reconciliationSummary.photographerCommissionAmount) }}</strong></div>
-          <div v-if="canUseHeadquarterReconciliation" class="total"><span>总部收入</span><strong>{{ money(reconciliationSummary.headquarterAmount) }}</strong></div>
+          <div v-if="canUseHeadquarterReconciliation" class="total"><span>总部收入</span><strong>{{ shareAnalytics.ready ? money(reconciliationSummary.headquarterAmount) : '—' }}</strong></div>
           <div v-if="state.role==='merchant'" class="total"><span>本店结算记录</span><strong>{{ reconciliationTransferRows.length }} 条</strong></div>
         </div>
       </div>
