@@ -230,14 +230,19 @@ function createShareService(source, options = {}) {
   async function mine(query, session) {
     requireShare(session, "mine");
     const id = session.role === 'merchant' ? str(session.shopId || session.subjectId) : str(query.merchantId);
-    if(!id) return {merchant:null,rule:null,stats:{},list:[],total:0,sum:{netAmount:'0.00'},selectMerchant:true};
+    if(!id) return {merchant:null,rule:null,stats:{},list:[],total:0,sum:{netAmount:'0.00'},orders:[],orderTotal:0,orderStats:{total:0},notices:[],selectMerchant:true};
     const merchant = await requireMerchant(id);
-    const [history,result,stats] = await Promise.all([store.getRules(id),store.listDetails({ ...filters(query, clock()), merchantId:id }),store.getMerchantStats(id)]);
+    const selection = filters(query, clock());
+    const [history,result,stats] = await Promise.all([store.getRules(id),store.listDetails({ ...selection, merchantId:id }),store.getMerchantStats(id)]);
+    const orderView = await require("./merchantOrderProjection.cjs").merchantOrders(source, store, id, { ...query, period: selection.period }, {
+      now: clock(), enabled: enabledNow(), enableAt: enableAt(), configured: history.length > 0,
+    });
     return {
       merchant:{merchantId:id,name:merchant.name,status:merchant.status},
       rule: history[0] ? {ratioT1:history[0].ratioT1,ratioT2:history[0].ratioT2,ttlHours:history[0].ttlHours,refundWindowDays:history[0].refundWindowDays} : null,
-      stats: { boundUsers:stats.boundUsers ?? stats.bindingCount ?? 0, accT1Amount:stats.accT1Amount || "0.00", accT2Amount:stats.accT2Amount || "0.00", monthAmount:result.sum?.netAmount || "0.00", monthOrders:stats.monthOrders ?? result.total },
+      stats: { boundUsers:stats.boundUsers ?? stats.bindingCount ?? 0, accT1Amount:stats.accT1Amount || "0.00", accT2Amount:stats.accT2Amount || "0.00", monthAmount:result.sum?.netAmount || "0.00", monthOrders:result.orderCount ?? result.total },
       list: result.list.map(adminDetail).map(merchantDetail), total:result.total, sum:result.sum,
+      ...orderView,
     };
   }
   async function qr(id, session) { requireShare(session,"view");await requireMerchant(id); return store.getActiveQr(id); }
@@ -316,11 +321,14 @@ function createShareService(source, options = {}) {
       store.listDetails({merchantId:str(query.merchantId),period:str(query.period),all:true,page:1,size:100000}),
       store.listMerchants({}),
       store.readOperationalFacts ? store.readOperationalFacts({tables:['job','snapshot','detail','correction']}) : null,
-      query.cityId ? source.list('orders') : [],
+      query.cityId ? Promise.all([source.list('orders'), (async () => {
+        try { return await require('./physicalCommerce.cjs').serviceFor(source).listShareOrders(); }
+        catch (error) { if (['PHYSICAL_STORE_UNAVAILABLE','PHYSICAL_SCHEMA_MISSING','ER_NO_SUCH_TABLE'].includes(error.code)) return []; throw error; }
+      })()]).then(([orders,physical]) => [...orders,...physical]) : [],
     ]);
     const since=query.startDate?time(`${query.startDate}T00:00:00+08:00`):null;
     const until=query.endDate?time(`${query.endDate}T00:00:00+08:00`)+86400000:null;
-    const cityOrders=query.cityId ? new Set(cityRows.filter(o=>String(o.cityId || o.source?.cityId || o.bookingCityId || o.products?.[0]?.cityId || '')===String(query.cityId)).map(o=>String(o.id || o._id))) : null;
+    const cityOrders=query.cityId ? new Set(cityRows.filter(o=>String(o.orderType==='physical' ? o.cityId || '' : o.cityId || o.source?.cityId || o.bookingCityId || o.products?.[0]?.cityId || '')===String(query.cityId)).map(o=>String(o.id || o._id))) : null;
     const list=result.list.filter(r=>(since===null || time(r.createdAt)>=since)&&(until===null || time(r.createdAt)<until)&&(!cityOrders || cityOrders.has(String(r.orderId))));
     const byMerchant=new Map(merchantRows.filter(m=>!query.merchantId || String(m.merchantId)===String(query.merchantId)).map(m=>[String(m.merchantId),{merchantId:String(m.merchantId),name:m.name,scanCount:m.scanCount||0,boundUsers:m.boundUsers||0,orderCount:0,monthOrders:0,accT1Amount:'0.00',accT2Amount:'0.00',totalAmount:'0.00',monthAmount:'0.00'}]));
     const movements=new Map();
@@ -357,7 +365,7 @@ function createShareService(source, options = {}) {
     }
     const relevant=cityOrders ? new Set([...attributions.map(o=>o.merchantId),...list.map(r=>String(r.merchantId))]) : null;
     const merchants=[...byMerchant.values()].filter(m=>!relevant || relevant.has(m.merchantId));
-    return {merchants,orderAttributions:attributions,attributionScope:'payment_facts',amountScope:'current_order_balance',movementScope:'selected_period',cityScope:'order_business_city',scanScope:'current_qr_all_cities',bindingScope:'active_history_all_cities',totalAmount:formatMoney(merchants.reduce((sum,r)=>sum+moneyToCents(r.totalAmount,{signed:true}),0)),period:query.period||null};
+    return {merchants,orderAttributions:attributions,attributionScope:'payment_facts',amountScope:'current_order_balance',movementScope:'selected_period',cityScope:'order_business_city',scanScope:'current_qr_all_cities',bindingScope:'current_latest_scan_all_cities',totalAmount:formatMoney(merchants.reduce((sum,r)=>sum+moneyToCents(r.totalAmount,{signed:true}),0)),period:query.period||null};
   }
   async function adminOperation(action,input,session) {
     requireShare(session,'admin');
@@ -392,13 +400,15 @@ async function enqueuePaidOrder(source, order) {
   if (!settings.enabled) return {skipped:true,reason:'SHARE_NOT_ENABLED'};
   const finalPayment = [...(Array.isArray(order.paymentRecords)?order.paymentRecords:[])].reverse().find(p=>p.phase==='final' && p.status==='confirmed' && ['wechat_pay','zero_balance'].includes(p.provider));
   if(!finalPayment) return {skipped:true,reason:'ONLINE_FINAL_PAYMENT_REQUIRED'};
-  const payTime = order.finalPaidAt || finalPayment?.confirmedAt || order.completedAt;
+  const payTime = order.finalPaidAt || finalPayment.paidAt || finalPayment.confirmedAt || order.completedAt;
   const { moneyToCents, formatMoney, time } = require('./shareEngine.cjs');
   if (!payTime || time(payTime) < time(settings.enableAt)) return {skipped:true,reason:'BEFORE_ENABLE'};
   const paidTotal = formatMoney(moneyToCents(order.depositPaid || '0') + moneyToCents(order.finalPaid || '0'));
   const lines = order.products || order.productItems || order.items || [];
   const goodsName = (Array.isArray(lines)?lines:[]).map(p=>str(p.name||p.title||p.productName)).filter(Boolean).join('、') || str(order.packageName||order.productName);
+  const orderSource = await require("./merchantOrderEvidence.cjs").orderSourceEvidence(source, service.store, order, payTime);
   const result=await service.store.enqueuePayment({orderId:str(order.id||order._id),userId:str(order.openid||order._openid),payTime,paidTotal,provider:finalPayment.provider,
+    ...(orderSource ? { orderSource } : {}),
     sessionId:order.finalPaymentSessionId || finalPayment.sessionId,sessionStartAt:order.finalPaymentSessionStartAt || finalPayment.sessionStartAt,
     display:{orderNo:str(order.orderNo),customer:str(order.customer||order.contactName||'用户'),productName:goodsName,paidAmount:paidTotal,payTime}});
   return result;
@@ -416,7 +426,42 @@ async function recordOrderRefund(source, {order,refundNo,amount,refundedAt}) {
   }
   return service.store.recordRefund({orderId:str(order.id||order._id),refundNo:str(refundNo),amount,refundAt:refundedAt||new Date().toISOString()});
 }
+async function enqueuePhysicalOrder(source, input) {
+  if (!services.has(source) && !str(process.env.SHARE_ENABLE_AT)) return { skipped: true, reason: 'SHARE_NOT_ENABLED' };
+  const service = serviceFor(source), settings = service.settings();
+  if (!settings.enabled) return { skipped: true, reason: 'SHARE_NOT_ENABLED' };
+  // Always reload dedicated commerce facts; neither client prices nor a
+  // caller-created order/source object may enter the commission ledger.
+  const order = await require('./physicalCommerce.cjs').serviceFor(source).getShareOrder(str(input.id || input._id));
+  if (!order || order.paymentMode === 'package') return { skipped: true, reason: 'INDEPENDENT_PHYSICAL_PAYMENT_REQUIRED' };
+  const payment = order.paymentRecords.find(row => row.status === 'confirmed' && row.provider === 'wechat_pay');
+  if (!payment) return { skipped: true, reason: 'ONLINE_PHYSICAL_PAYMENT_REQUIRED' };
+  const { time, formatMoney } = require('./shareEngine.cjs'), payTime = order.finalPaidAt;
+  if (!payTime || time(payTime) < time(settings.enableAt)) return { skipped: true, reason: 'BEFORE_ENABLE' };
+  const paidTotal = formatMoney(order.goodsAmountFen);
+  let orderSource = null;
+  const origin = order.source || {}, scene = str(origin.scene);
+  if (/^S[A-Za-z0-9]+$/.test(scene) && origin.sourceType === 'merchant_qrcode') {
+    validateScene(scene);
+    const qr = await service.store.getQrByScene(scene), validatedAt = origin.validatedAt || order.createdAt;
+    let at = validatedAt, retainedBinding = false;
+    if (qr && qr.status === 'DISABLED' && qr.disabledAt && validatedAt && time(qr.disabledAt) <= time(validatedAt)) {
+      const binding = await require('./merchantOrderEvidence.cjs').currentMerchantBinding(service.store, order.openid, qr.merchantId, validatedAt);
+      retainedBinding = !!binding && str(binding.lastScanId) === str(origin.bindingScanId) && time(binding.lastScanAt) === time(origin.bindingAt);
+      if (retainedBinding) at = binding.lastScanAt;
+    }
+    if (!qr || str(qr.id) !== str(origin.sourceCodeId) || str(qr.merchantId) !== str(origin.shopId)
+      || !at || time(at) > time(payTime) || (qr.createdAt && time(qr.createdAt) > time(at))
+      || (qr.disabledAt && time(qr.disabledAt) <= time(validatedAt) && !retainedBinding) || (qr.status !== 'ACTIVE' && !qr.disabledAt)) {
+      throw failure('ORDER_SOURCE_INVALID', '实物订单商家来源凭证不一致，请核查', 409);
+    }
+    orderSource = { merchantId: str(qr.merchantId), qrId: str(qr.id), scene, at: new Date(time(at)).toISOString() };
+  }
+  return service.store.enqueuePayment({ orderId: str(order.id), userId: str(order.openid), payTime, paidTotal, provider: 'wechat_pay',
+    ...(orderSource ? { orderSource } : {}), sessionId: payment.sessionId, sessionStartAt: payment.sessionStartAt,
+    display: { orderNo: str(order.orderNo), customer: '用户', productName: order.items.map(item => str(item.name)).filter(Boolean).join('、'), paidAmount: paidTotal, payTime, orderType: 'physical' } });
+}
 async function reportScan(source, session, input) { return serviceFor(source).reportScan(session,input); }
 async function reportClick(source, session, input) { return serviceFor(source).reportClick(session,input); }
 
-module.exports={createShareService,serviceFor,enqueuePaidOrder,recordOrderRefund,reportScan,reportClick,canShare,requireShare,merchantDetail,merchantProjection,filters,ruleFields,validateScene,qrScene,safeCsv,SHARE_ROUTES};
+module.exports={createShareService,serviceFor,enqueuePaidOrder,enqueuePhysicalOrder,recordOrderRefund,reportScan,reportClick,canShare,requireShare,merchantDetail,merchantProjection,filters,ruleFields,validateScene,qrScene,safeCsv,SHARE_ROUTES};

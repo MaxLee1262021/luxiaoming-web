@@ -4,7 +4,7 @@ window.LXM_PAGES.register({
   setup(ctx) {
     const { computed, ref } = window.Vue;
     const reactive = window.Vue.reactive || ctx.reactive || ((value) => value);
-    const ui = reactive({ mode: "list", filter: "all", form: {}, dirty: false, saving: false,
+    const ui = reactive({ mode: "list", filter: "all", categoryFilter: "", form: {}, dirty: false, saving: false,
       savedAt: "", spotModal: false, spotKeyword: "", videoModal: false, videoUrl: "", preview: false, previewForm: null, loading: false, loadError: "", uploadIds: [] });
     const editorRef = ref(null);
     let savedRange = null;
@@ -85,6 +85,9 @@ window.LXM_PAGES.register({
     const isPublished = (row) => row.published === false ? false : !["草稿", "下架", "停用", "禁用", "draft", "offline", "disabled"].includes(String(row.status || "已发布").toLowerCase());
     const falseLike = (value) => value === false || value === 0 || ["false", "0"].includes(String(value).trim().toLowerCase());
     const frontVisible = (row) => ![row.isShow, row.visible, row.enabled].some(falseLike);
+    const categoryOf = (row) => typeof row?.category === "string" ? row.category.trim() : "";
+    const categoryOptions = computed(() => [...new Set((ctx.data.guides || [])
+      .filter((row) => row && !row.deleted && !row.isDeleted).map(categoryOf).filter(Boolean))]);
     const guideTotal = computed(() => (ctx.data.guides || []).filter((row) => row && !row.deleted && !row.isDeleted).length);
     const guideRows = computed(() => {
       const keyword = String(ctx.state.filters.keyword || "").trim().toLowerCase();
@@ -93,8 +96,11 @@ window.LXM_PAGES.register({
         if (!row || row.deleted || row.isDeleted) return false;
         const ids = spotIdsOf(row);
         return (!spotId || ids.includes(spotId)) && (ui.filter === "all" || (ui.filter === "published") === isPublished(row))
+          && (!ui.categoryFilter || ui.categoryFilter === (categoryOf(row) ? `category:${categoryOf(row)}` : "uncategorized"))
           && (!keyword || [row.title, row.name, textOf(row.contentHtml || row.content || row.description), ...ids.map(spotLabel)].join(" ").toLowerCase().includes(keyword));
-      }).slice().sort((a, b) => Number(!!b.isTop) - Number(!!a.isTop) || dateValue(b.updatedAt || b.createdAt) - dateValue(a.updatedAt || a.createdAt));
+      }).slice().sort((a, b) => window.LXM_CONTENT_ORDER
+        ? window.LXM_CONTENT_ORDER.compare("guides", a, b)
+        : Number(!!b.isTop) - Number(!!a.isTop) || dateValue(b.updatedAt || b.createdAt) - dateValue(a.updatedAt || a.createdAt));
     });
     function dateValue(value) { const number = typeof value === "number" ? value : Date.parse(value || ""); return Number.isFinite(number) ? number : 0; }
     function timeLabel(value) {
@@ -168,8 +174,9 @@ window.LXM_PAGES.register({
       const copy = source ? JSON.parse(JSON.stringify(source)) : {};
       delete copy.__source; delete copy.__key;
       const ids = source ? spotIdsOf(copy) : relations.spotIds || (relations.spotId ? [relations.spotId] : []);
-      ui.form = { ...copy, title: copy.title || copy.name || "", cover: copy.cover || copy.coverUrl || copy.image || "",
+      ui.form = { ...copy, title: copy.title || copy.name || "", category: categoryOf(copy), cover: copy.cover || copy.coverUrl || copy.image || "",
         contentHtml: source ? cleanHtml(legacyHtml(copy)) : "", spotIds: [...ids], spotId: ids[0] || "", isShow: source ? frontVisible(copy) : true,
+        readCount: copy.readCount ?? copy.views ?? 0, score: copy.score ?? 0,
         isTop: copy.isTop === true, targetProductId: copy.targetProductId || copy.targetPackageId || "",
         targetProductType: copy.targetProductType || (copy.targetPackageId ? "package" : ""), targetProductSpotId: copy.targetProductSpotId || "" };
       if (!ui.form.targetProductSpotId && ui.form.targetProductId) ui.form.targetProductSpotId = ids.find((id) => productsForSpot(id).some((p) => idOf(p) === ui.form.targetProductId && p.targetType === ui.form.targetProductType)) || "";
@@ -285,7 +292,9 @@ window.LXM_PAGES.register({
       const box = document.createElement("div"); box.innerHTML = html;
       const mediaItems = Array.from(box.querySelectorAll("img,video")).map((node) => ({ url: node.getAttribute("src") || node.querySelector("source")?.getAttribute("src") || "", type: node.tagName === "VIDEO" ? "video" : "image" })).filter((item) => item.url);
       const attachments = Array.from(box.querySelectorAll("a[data-file-id]")).map(attachmentInfo).filter(Boolean);
-      return { ...ui.form, title: ui.form.title.trim(), name: ui.form.title.trim(), cover: safeUrl(ui.form.cover), contentHtml: html,
+      const metricNumber = (value) => typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+      return { ...ui.form, title: ui.form.title.trim(), name: ui.form.title.trim(), category: categoryOf(ui.form), cover: safeUrl(ui.form.cover), contentHtml: html,
+        readCount: metricNumber(ui.form.readCount ?? ui.form.views ?? 0), score: metricNumber(ui.form.score ?? 0),
         content: textOf(html), description: textOf(html).slice(0, 200), mediaItems, mediaUrls: mediaItems.map((item) => item.url), attachments,
         mediaType: mediaItems.some((item) => item.type === "video") ? "video" : "image", spotId: ui.form.spotIds[0] || "", spotIds: [...ui.form.spotIds], seriesId: "",
         targetPackageId: ["package", "video"].includes(ui.form.targetProductType) ? ui.form.targetProductId : "" };
@@ -293,6 +302,9 @@ window.LXM_PAGES.register({
     function validate(form) {
       if (!form.title) return "请填写标题";
       if (form.title.length > 50) return "标题不能超过 50 个字";
+      if (form.category.length > 40) return "分类不能超过 40 个字";
+      if (!Number.isSafeInteger(form.readCount) || form.readCount < 0 || form.readCount > 2147483647) return "初始浏览人数请填写 0–2147483647 之间的整数";
+      if (!Number.isFinite(form.score) || form.score < 0 || form.score > 5 || !Number.isInteger(form.score * 10)) return "初始评分请填写 0–5 分，最多保留一位小数";
       if (!form.cover) return "请上传首页封面图";
       if (!textOf(form.contentHtml) && !form.mediaItems.length) return "正文内容不能为空";
       if (!form.spotIds.length || form.spotIds.some((id) => !validSpots.value.some((row) => idOf(row) === id))) return "请至少关联一个有效打卡点，并移除失效点位";
@@ -370,7 +382,7 @@ window.LXM_PAGES.register({
     ctx.state.guideLeaveGuard = () => ui.mode !== "edit" || confirmLeave();
     window.Vue.onBeforeUnmount?.(() => { formVersion++; ctx.state.guideLeaveGuard = null; window.removeEventListener("beforeunload", beforeUnload); });
     if (ctx.state.authSource === "server") loadGuideData({ joinPending: true });
-    return { ui, editorRef, guideRows, guideTotal, spotLabel, spotIdsOf, idOf, textOf, timeLabel, isPublished, frontVisible, productLabel,
+    return { ui, editorRef, guideRows, guideTotal, categoryOf, categoryOptions, spotLabel, spotIdsOf, idOf, textOf, timeLabel, isPublished, frontVisible, productLabel,
       validSpots, spotChoices, productGroups, productsForSpot, pickedProduct, selectedProduct, selectProduct, clearProduct, addSpot, removeSpot,
       openEditor, backToList, markDirty, wordCount, editorInput, rememberSelection, format, pickFiles, pasteContent, dropFiles, insertVideoUrl, uploadFiles, collectForm, cleanHtml, guideUploads,
       saveArticle, openPreview, toggleGuide, pinGuide, deleteGuide, saveStatus, loadGuideData };

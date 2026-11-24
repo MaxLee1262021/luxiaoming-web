@@ -7,8 +7,12 @@ const SUPERVISORS = new Set(["supervisor", "service_supervisor"]);
 const LIST = /^\/api\/kf\/orders\/(all|pool|mine|reserved)$/;
 const DETAIL = /^\/api\/kf\/orders\/([^/]+)$/;
 const RELATED = ["ledger", "reserves", "operationLogs"];
+const GENERAL_PATH = "/api/kf/workbench/general";
+const GENERAL_FACTS = ["shootingCompletedAt", "rescheduleRequest.id", "rescheduleRequest.status", "rescheduleRequest.appointmentAt", "rescheduleRequest.timePeriod", "rescheduleRequest.reason", "rescheduleRequest.requestedAt", "rescheduleRequest.reviewReason", "rescheduleRequest.reviewedAt"];
 const {recordDatabaseOperation} = require("./observability.cjs");
 function planFor(path) {
+  if (path === GENERAL_PATH || path === GENERAL_PATH + "/queues") return { keys: ["staff", ...RELATED], orders: true, products: true, general: true };
+  if (/^\/api\/kf\/photographers\/[^/]+\/occupancy$/.test(path)) return { keys: ["staff"], orders: true, occupancy: true };
   if (path === "/api/kf/rebuy/config") return { keys: ["configs"] };
   if (path === "/api/kf/photographers") return { keys: [], photographers: true };
   if (path === "/api/kf/staff") return { keys: ["staff"] };
@@ -53,9 +57,9 @@ function mergeProducts(state, products) {
     order.product_name = product.name || order.product_name; order.product_id = product.product_id;
   }
 }
-async function loadWorkbench(conn, context, {TABLES, SERVICE_FIELDS, normal, orderRow, projection, loadPhotographers}) {
+async function loadWorkbench(conn, context, {TABLES, SERVICE_FIELDS, REQUESTED_TIME_FACT_PATHS, normal, orderRow, projection, loadPhotographers, hydrateOrderRows}) {
   const plan = planFor(context.path); if (!plan) return null;
-  const intakeAll = context.path === "/api/kf/orders/all" || context.path === "/api/kf/workbench/overview" && context.input?.mode === "intake" && (!context.input.tab || context.input.tab === "all");
+  const intakeAll = plan.general || context.path === "/api/kf/orders/all" || context.path === "/api/kf/workbench/overview" && context.input?.mode === "intake" && (!context.input.tab || context.input.tab === "all");
   const state = { ...Object.fromEntries(Object.keys(TABLES).map(key => [key, []])), orders: [], photographers: [], photoNative: true };
   const query = async (sql, params = []) => {
     const started=process.hrtime.bigint();
@@ -99,14 +103,15 @@ async function loadWorkbench(conn, context, {TABLES, SERVICE_FIELDS, normal, ord
     const select = projection("lxm_orders", SERVICE_FIELDS).replace(" FROM `lxm_orders`", `, ${managed} AS _svc_event_managed FROM \`lxm_orders\` o`);
     const orderRows = await query(select + clause + " ORDER BY o.id", params);
     state.events = orderRows.filter(row=>row._svc_event_managed).map(row=>({order_no:row.orderNo}));
-    state.orders = orderRows.map(row=>{const {_svc_event_managed,...order}=row;return orderRow(order);});
+    const displayRows = await hydrateOrderRows(conn, orderRows, { paths: [...REQUESTED_TIME_FACT_PATHS, "customerArrivedAt", "customerArrivedBy", "shootingStartedAt", ...(plan.general ? GENERAL_FACTS : [])], includePayments: false });
+    state.orders = displayRows.map(row=>{const {_svc_event_managed,...order}=row;return orderRow(order);});
     if (plan.products && state.orders.length) {
       const ids = inValues("order_id", state.orders.map(order => order.id));
       mergeProducts(state, await query("SELECT order_id,product_type,name,product_id FROM lxm_order_products WHERE " + ids.sql + " ORDER BY item_no", ids.params));
     }
   }
   const orderNos = state.orders.map(order => order.order_no);
-  if(plan.products&&state.orders.some(order=>order.photo_id))state.photographers=await loadPhotographers(conn);
+  if(plan.occupancy || plan.products&&state.orders.some(order=>order.photo_id))state.photographers=await loadPhotographers(conn);
   const ids = scopeIds(state.staff, context.session || {});
   for (const key of plan.keys) {
     if (key === "staff") continue;
@@ -129,6 +134,25 @@ async function loadWorkbench(conn, context, {TABLES, SERVICE_FIELDS, normal, ord
   }
   const sourceOrders=inValues('orderNo',state.reserves.map(row=>row.source_order_no).filter(Boolean));
   if(sourceOrders.sql!=='0=1')state.reserveSources=await query("SELECT orderNo,DATE_FORMAT(done_at,'%Y-%m-%d %H:%i:%s') done_at,completedAt FROM lxm_orders WHERE "+sourceOrders.sql,sourceOrders.params);
+  if (plan.general) {
+    // These facts are specific to the new desk. The old complaint summary
+    // remains its existing responsibility/commission projection.
+    state.afterSales = [];
+    const ids = [...new Set(state.orders.map(order => String(order.id)))];
+    const schema = require("./mysqlSchema.cjs");
+    for (let start = 0; start < ids.length; start += 200) {
+      const filter = inValues("orderId", ids.slice(start, start + 200));
+      const rows = await query("SELECT * FROM `" + schema.TABLES.afterSales + "` WHERE COALESCE(deleted,0)=0 AND COALESCE(isDeleted,0)=0 AND " + filter.sql, filter.params);
+      state.afterSales.push(...rows.map(normal));
+    }
+    const tickets = new Map(state.afterSales.map(ticket => [String(ticket.id), ticket]));
+    const ticketIds = [...tickets.keys()];
+    for (let start = 0; start < ticketIds.length; start += 200) {
+      const filter = inValues("record_id", ticketIds.slice(start, start + 200));
+      const leaves = await query("SELECT record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM lxm_collection_values WHERE collection_name=? AND " + filter.sql + " AND path IN (?)", ["afterSales", ...filter.params, "reviewLane"]);
+      for (const leaf of leaves) { const ticket = tickets.get(String(leaf.record_id)); if (ticket) schema.hydrateAttributeRows(ticket, [leaf]); }
+    }
+  }
   return state;
 }
 module.exports = {planFor,scopeIds,inValues,orderScope,mergeProducts,loadWorkbench};

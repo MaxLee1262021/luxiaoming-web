@@ -1,0 +1,153 @@
+<div class="gw-page" data-testid="general-workbench">
+  <header class="gw-heading">
+    <div><p class="gw-eyebrow">客服工作台 / 总工作台</p><h2>总工作台</h2><p>集中处理订单与客服事项</p></div>
+    <div class="gw-toolbar">
+      <el-button @click="gwTool('link')" :loading="gw.toolLoading">企微发链</el-button>
+      <el-button @click="gwWorkspace('products')">商品小程序外链</el-button>
+      <el-button @click="gwTool('bindings')">客户绑定</el-button>
+      <el-button v-if="gw.capabilities.review_reschedule" @click="gwWorkspace('reschedule')">客人改期申请</el-button>
+      <el-button v-if="gwAdmin" @click="gwTool('config')">复购参数</el-button>
+      <el-button @click="gwLoad()" :loading="gw.loading">刷新</el-button>
+    </div>
+  </header>
+  <div class="gw-context"><span>{{ gwMask(gw.scope || '按当前账号授权范围展示') }}</span><span>最近更新：{{ gwTime(gw.serverTime) }}</span></div>
+  <el-alert v-if="gw.error" :title="gwMask(gw.error)" type="error" :closable="false" class="gw-alert" />
+  <el-alert v-if="gw.toolError" :title="gwMask(gw.toolError)" type="error" :closable="false" class="gw-alert" />
+  <div class="gw-cards" role="group" aria-label="客服任务统计">
+    <button v-for="item in gwCards" :key="item.key" type="button" :class="{selected: gw.card === item.key && gw.workspace === 'service'}" :disabled="item.disabled" @click="gwFilterCard(item.key)" :aria-pressed="!item.jump && gw.card === item.key" :data-testid="'gw-card-' + item.key">
+      <strong>{{ item.value }}</strong><span>{{ item.label }}<small v-if="item.jump"> ↗</small></span><small>{{ item.note }}</small>
+    </button>
+  </div>
+  <div class="gw-workspaces" role="group" aria-label="工作区">
+    <el-button :type="gw.workspace === 'service' ? 'primary' : 'default'" @click="gwWorkspace('service')">服务订单</el-button>
+    <el-button :type="gw.workspace === 'complaints' ? 'primary' : 'default'" :disabled="gw.capabilities.handle_aftersales === false" @click="gwWorkspace('complaints')">售后处理</el-button>
+    <el-button :type="gw.workspace === 'records' ? 'primary' : 'default'" @click="gwWorkspace('records')">客诉与判责记录</el-button>
+    <el-button :type="gw.workspace === 'physical' ? 'primary' : 'default'" @click="gwWorkspace('physical')">实物订单</el-button>
+    <el-button :type="gw.workspace === 'products' ? 'primary' : 'default'" @click="gwWorkspace('products')">商品外链</el-button>
+  </div>
+
+  <template v-if="gw.workspace === 'service'">
+    <section class="gw-reserves gw-panel" aria-label="复购预占">
+      <div class="gw-panel-head"><div><h3>复购预占 <el-tag size="small">{{ gw.reserveTotal }} 单</el-tag></h3><p>夜间静默期显示 --:--，以服务端倒计时为准。</p></div><el-button @click="gwTab('reserved')">查看全部</el-button></div>
+      <el-alert v-if="gw.reserveError" :title="gwMask(gw.reserveError)" type="warning" :closable="false" />
+      <div v-if="!gw.reserves.length" class="gw-empty-note">暂无等待接单的复购订单</div>
+      <div class="gw-reserve-row" v-for="row in gw.reserves.slice(0,3)" :key="gwNo(row)">
+        <div><el-button link @click="gwDetail(row)">{{ gwMask(gwNo(row)) }}</el-button><small>{{ gwMask(row.customer_name) }} · {{ gwMask(row.product_name) }}</small></div>
+        <div class="gw-countdown"><strong>{{ gwCountdown(row) }}</strong><small v-if="row.status === 'holding' || row.reserve_status === 'holding' || row.reserve_defer">夜间单，等待起算</small></div>
+        <div class="gw-row-actions"><el-button type="primary" :disabled="!gwOwns(row) || !gwCanOperate || gw.busy" @click="gwReserve(row,'take')">接单</el-button><el-button :disabled="!gwOwns(row) || !gwCanOperate || gw.busy" @click="gwReserve(row,'giveup')">放弃</el-button><el-button @click="gwDetail(row)">详情</el-button></div>
+      </div>
+    </section>
+    <section class="gw-panel">
+      <div class="gw-list-tabs" role="group" aria-label="服务订单视图">
+        <button type="button" :class="{selected:gw.tab === 'all' && !gw.card}" @click="gwTab('all')">全部订单</button>
+        <button type="button" :class="{selected:gw.tab === 'pool' || gw.card === 'pool'}" @click="gwTab('pool')">公共待认领池</button>
+        <button type="button" :class="{selected:gw.tab === 'mine' || gw.card === 'mine'}" @click="gwTab('mine')">我的跟进</button>
+        <button type="button" :class="{selected:gw.tab === 'reserved'}" @click="gwTab('reserved')">复购预占</button>
+      </div>
+      <form class="gw-filters" @submit.prevent="gwLoad(true)">
+        <el-input v-model="gw.query.keyword" clearable placeholder="订单号 / 客人 / 商品" aria-label="搜索服务订单" />
+        <el-select v-model="gw.query.type" clearable placeholder="全部服务类型" aria-label="服务类型" @change="gwLoad(true)"><el-option v-for="(label,key) in gwCategories" :key="key" :value="key" :label="label" /></el-select>
+        <el-select v-model="gw.query.status" clearable placeholder="全部服务状态" aria-label="服务状态" @change="gwStatusChanged"><el-option v-for="(label,key) in gwStatusNames" :key="key" :value="key" :label="label" /></el-select>
+        <el-select v-model="gw.query.photo" clearable filterable placeholder="全部摄影师" aria-label="筛选摄影师" @change="gwLoad(true)"><el-option v-for="person in gw.photographers" :key="person.id" :value="person.id" :label="gwMask(person.name)" /></el-select>
+        <el-button native-type="submit" type="primary">查询</el-button><el-button @click="gwReset">重置</el-button>
+      </form>
+      <div class="gw-list-summary"><strong>{{ gw.card ? ({pool:'待认领订单',mine:'我的跟进',pending:'待安排 · 待确认时间',today:'今日拍摄'})[gw.card] : gw.tab === 'reserved' ? '复购预占订单' : '服务订单' }}</strong><span>当前条件共 {{ gw.total }} 条</span></div>
+      <el-table :data="gw.rows" v-loading="gw.loading" stripe empty-text="当前条件下暂无订单" class="gw-orders" data-testid="gw-order-table">
+        <el-table-column label="订单号" min-width="170"><template #default="{row}"><el-button link @click="gwDetail(row)">{{ gwMask(gwNo(row)) }}</el-button></template></el-table-column>
+        <el-table-column label="客人" min-width="100"><template #default="{row}">{{ gwMask(row.customer_name) }}</template></el-table-column>
+        <el-table-column label="联系电话" min-width="125"><template #default="{row}"><span class="gw-phone">{{ gwPhone(row.phone) }}</span></template></el-table-column>
+        <el-table-column label="商品 / 服务" min-width="190"><template #default="{row}">{{ gwMask(row.product_name) }}<small class="gw-block">{{ gwCategories[row.category] || '服务订单' }}</small></template></el-table-column>
+        <el-table-column label="预约时间" min-width="170"><template #default="{row}">{{ gwTime(row.schedule_time || row.requested_time) }}<small v-if="!row.schedule_time" class="gw-block gw-muted">客人期望，待确认</small></template></el-table-column>
+        <el-table-column label="摄影师" min-width="105"><template #default="{row}">{{ gwMask(row.photo_name || row.photo_id || '待安排') }}</template></el-table-column>
+        <el-table-column label="跟进客服" min-width="105"><template #default="{row}">{{ gwMask(row.assignee_name || row.assignee_id || row.reserve_staff_name || (gwStatus(row) === 'new' ? '公共池' : '—')) }}</template></el-table-column>
+        <el-table-column label="状态" min-width="110"><template #default="{row}"><el-tag size="small">{{ gwStatusLabel(row) }}</el-tag><small v-if="gwStatus(row) === 'reserved'" class="gw-block">{{ gwCountdown(row) }}</small></template></el-table-column>
+        <el-table-column label="操作" min-width="360" fixed="right"><template #default="{row}"><div class="gw-row-actions" :data-order="gwMask(gwNo(row))">
+          <template v-if="gwStatus(row) === 'reserved'"><el-button size="small" type="primary" :disabled="!gwOwns(row) || gw.busy" @click="gwReserve(row,'take')">接单</el-button><el-button size="small" :disabled="!gwOwns(row) || gw.busy" @click="gwReserve(row,'giveup')">放弃</el-button></template>
+          <el-button v-for="button in gwActions(row)" :key="button.kind" size="small" :type="button.primary ? 'primary' : 'default'" :disabled="!!button.reason || gw.busy" :title="button.reason || undefined" :data-action="button.kind" @click="gwOpen(button.kind,row)">{{ button.label }}</el-button>
+        </div></template></el-table-column>
+      </el-table>
+      <div class="gw-pager"><el-pagination v-model:current-page="gw.query.page" v-model:page-size="gw.query.size" :total="gw.total" :page-sizes="[20,50,100]" layout="total, sizes, prev, pager, next" @current-change="gwLoad()" @size-change="gwLoad(true)" /></div>
+    </section>
+  </template>
+
+  <section v-else-if="gw.workspace === 'reschedule' || gw.workspace === 'complaints'" class="gw-panel">
+    <div class="gw-panel-head"><div><h3>{{ gw.workspace === 'reschedule' ? '客人改期申请' : '未结售后工单' }}</h3><p>共 {{ gw.queueTotal }} 条，按当前账号原有权限办理。</p></div><div class="gw-row-actions"><el-button v-if="gw.workspace === 'complaints'" @click="gwTool('complaint')">登记客诉</el-button><el-button :loading="gw.queueLoading" @click="gwLoadQueue">刷新</el-button></div></div>
+    <el-alert v-if="gw.queueError" :title="gwMask(gw.queueError)" type="error" :closable="false" />
+    <el-table :data="gw.queueRows" v-loading="gw.queueLoading" stripe :empty-text="gw.workspace === 'reschedule' ? '暂无待审核申请' : '暂无未结售后工单'">
+      <el-table-column label="订单 / 客人" min-width="180"><template #default="{row}"><strong>{{ gwMask(gwNo(row) || gwNo(row.order)) }}</strong><small class="gw-block">{{ gwMask(row.customer_name || row.customer || row.contactName || row.order?.customer_name) }}</small></template></el-table-column>
+      <el-table-column v-if="gw.workspace === 'reschedule'" label="原时间 / 申请时间" min-width="230"><template #default="{row}">{{ gwTime(row.appointmentAt || row.schedule_time) }}<small class="gw-block">申请：{{ gwTime(row.rescheduleRequest?.appointmentAt) }} {{ gwMask(row.rescheduleRequest?.timePeriod || '') }}</small></template></el-table-column>
+      <el-table-column label="说明" min-width="230"><template #default="{row}">{{ gwMask(row.rescheduleRequest?.reason || row.reason || row.description) }}</template></el-table-column>
+      <el-table-column label="状态" min-width="100"><template #default="{row}">{{ gw.workspace === 'reschedule' ? '待审核' : gwMask(row.statusLabel || row.status) }}</template></el-table-column>
+      <el-table-column label="操作" width="225" fixed="right"><template #default="{row}"><div class="gw-row-actions"><template v-if="gw.workspace === 'reschedule'"><el-button size="small" type="primary" :disabled="gw.queueBusy" @click="gwReview(row,true)">同意改期</el-button><el-button size="small" :disabled="gw.queueBusy" @click="gwReview(row,false)">驳回</el-button></template><template v-else><el-button size="small" type="primary" @click="gwAftersale(row.order || row)">继续处理</el-button><el-button size="small" @click="gwDetail(row.order || row)">订单详情</el-button></template></div></template></el-table-column>
+    </el-table>
+    <div class="gw-pager"><el-pagination v-model:current-page="gw.queuePage" :total="gw.queueTotal" :page-size="20" layout="total, prev, pager, next" @current-change="gwLoadQueue" /></div>
+  </section>
+  <section v-else class="gw-panel gw-embedded-panel" v-loading="gw.workspaceLoading">
+    <el-alert v-if="gw.workspaceError" :title="gwMask(gw.workspaceError)" type="error" :closable="false" /><el-button v-if="gw.workspaceError" @click="gwWorkspace(gw.workspace)">重新加载工作区</el-button>
+    <component v-if="gw.embedded" :is="gw.embedded" :key="gw.workspace" />
+  </section>
+
+  <el-drawer v-model="gw.drawer" title="订单详情" size="min(760px,100vw)" class="gw-drawer" :destroy-on-close="true" @close="gwCloseDetail">
+    <div v-loading="gw.detailLoading"><el-alert v-if="gw.detailError" :title="gwMask(gw.detailError)" type="error" :closable="false" />
+      <template v-if="gw.detail"><h2 class="gw-detail-title">{{ gwMask(gwNo(gw.detail)) }} <el-tag>{{ gwStatusLabel(gw.detail) }}</el-tag></h2>
+        <el-descriptions :column="1" border>
+          <el-descriptions-item label="客人">{{ gwMask(gw.detail.customer_name) }}</el-descriptions-item>
+          <el-descriptions-item label="联系电话">{{ gwPhone(gw.detail.phone) }}</el-descriptions-item>
+          <el-descriptions-item label="商品">{{ gwMask(gw.detail.product_name) }} · {{ gwCategories[gw.detail.category] }}</el-descriptions-item>
+          <el-descriptions-item label="客人期望时间">{{ gwTime(gw.detail.requested_time) }}</el-descriptions-item>
+          <el-descriptions-item label="已确认时间">{{ gwTime(gw.detail.schedule_time) }}</el-descriptions-item>
+          <el-descriptions-item label="摄影师">{{ gwMask(gw.detail.photo_name || gw.detail.photo_id || '待安排') }}</el-descriptions-item>
+          <el-descriptions-item label="跟进客服">{{ gwMask(gw.detail.assignee_name || gw.detail.assignee_id) }}</el-descriptions-item>
+          <el-descriptions-item label="支付状态">{{ gwMask(gw.detail.payment_status_label || (gw.detail.paid_at ? '已支付' : '未支付')) }}</el-descriptions-item>
+          <el-descriptions-item label="实收">{{ gwMoney(gw.detail.net_amount_fen) }}</el-descriptions-item>
+          <el-descriptions-item label="我的提成">{{ gwMoney(gw.detail.commission_fen) }}</el-descriptions-item>
+          <el-descriptions-item label="备注">{{ gwMask(gw.detail.note || gw.detail.remark || gw.detail.remarks || gw.detail.description) }}</el-descriptions-item>
+        </el-descriptions>
+        <div class="gw-row-actions gw-detail-actions">
+          <el-button v-if="gwCanAct(gw.detail) && gwPeripheral(gw.detail)" type="primary" @click="gwReceipt(gw.detail)">登记收货完成</el-button>
+          <el-button v-for="button in gwDetailActions(gw.detail)" :key="button.kind" :disabled="!!button.reason" :title="button.reason || undefined" @click="gwOpen(button.kind,gw.detail)">{{ button.label }}</el-button>
+          <el-button v-if="gw.detail.can_complaint !== false" @click="gwAftersale(gw.detail)">提交售后</el-button>
+        </div>
+        <h3>服务记录</h3><el-timeline v-if="gw.detail.timeline?.length"><el-timeline-item v-for="(event,index) in gw.detail.timeline" :key="event.id || index" :timestamp="gwTime(event.created_at || event.at)"><strong>{{ gwMask(event.label || event.title || event.action || '服务记录') }}</strong><p>{{ gwMask(event.reason || event.description || event.note) }}</p><small>{{ gwMask(event.operator || event.by || '系统') }}</small></el-timeline-item></el-timeline><el-empty v-else description="暂无服务记录" :image-size="60" />
+      </template>
+    </div>
+    <template #footer><div class="gw-row-actions"><el-button type="primary" :loading="gw.contactLoading" :disabled="!gw.detail" @click="gwContact(gw.detail)">企微联系客人</el-button><el-button :disabled="!gw.detail" @click="gwTool('link',gw.detail)">生成服务链接</el-button><el-button @click="gwCloseDetail">关闭</el-button></div><el-alert v-if="gw.contactError" :title="gwMask(gw.contactError)" type="error" :closable="false" class="gw-contact-result" /><el-alert v-if="gw.contactMessage" :title="gwMask(gw.contactMessage)" type="success" :closable="false" class="gw-contact-result" /></template>
+  </el-drawer>
+
+  <el-dialog v-model="gw.record" title="已有派单记录" width="min(650px,94vw)" class="gw-modal" :destroy-on-close="true">
+    <div v-loading="gw.recordLoading"><el-alert v-if="gw.recordError" :title="gwMask(gw.recordError)" type="error" :closable="false" /><el-descriptions v-if="gw.recordOrder" :column="1" border><el-descriptions-item label="订单号">{{ gwMask(gwNo(gw.recordOrder)) }}</el-descriptions-item><el-descriptions-item label="已确认时间">{{ gwTime(gw.recordOrder.schedule_time) }}</el-descriptions-item><el-descriptions-item label="当前摄影师">{{ gwMask(gw.recordOrder.photo_name || gw.recordOrder.photo_id) }}</el-descriptions-item></el-descriptions><el-timeline v-if="gwRecordEvents.length" class="gw-record-events"><el-timeline-item v-for="(event,index) in gwRecordEvents" :key="event.id || index" :timestamp="gwTime(event.created_at || event.at)">{{ gwMask(event.title || event.action) }} · {{ gwMask(event.reason || event.note) }}</el-timeline-item></el-timeline><p v-else-if="gw.recordOrder" class="gw-muted">暂无可展示的历史登记记录</p></div>
+    <template #footer><el-button @click="gw.record=false">关闭</el-button><el-button type="primary" :disabled="!gw.recordOrder || !!gwActionReason('transfer',gw.recordOrder)" @click="gw.record=false; gwOpen('transfer',gw.recordOrder)">进入转派</el-button></template>
+  </el-dialog>
+
+  <el-dialog :model-value="!!gw.action" @update:model-value="value => { if(!value) gwCloseAction(); }" :title="gw.action === 'wizard' ? '登记派单' : ({confirm:'确认拍摄时间',assign:'登记派单',transfer:'转派订单',reschedule:'改期'})[gw.action] || '服务操作'" width="min(760px,94vw)" class="gw-modal" :close-on-click-modal="false" :close-on-press-escape="!gw.actionBusy" :show-close="!gw.actionBusy" :destroy-on-close="true">
+    <el-steps v-if="gw.action === 'wizard'" :active="gw.wizardStep === 'confirm' ? 0 : 1" finish-status="success" simple class="gw-steps"><el-step title="确认拍摄时间" /><el-step title="登记派单" /></el-steps>
+    <el-alert v-if="gw.confirmedInWizard" title="拍摄时间已保存。关闭本窗口不会撤销已确认时间；尚需提交摄影师安排。" type="success" :closable="false" class="gw-alert" />
+    <el-alert v-if="gw.actionError" :title="gwMask(gw.actionError)" type="error" :closable="false" class="gw-alert" />
+    <el-alert v-if="gwEffectiveAction === 'transfer'" title="仅更换摄影师，原摄影师报酬按结算状态处理；客服归属、提成和绑定保持不变。" type="info" :closable="false" class="gw-alert" />
+    <el-form label-position="top" @submit.prevent="gwSubmit" :disabled="gw.actionBusy" class="gw-form">
+      <el-form-item label="订单号">{{ gwMask(gwNo(gw.actionRow)) }}</el-form-item>
+      <el-form-item v-if="['assign','transfer'].includes(gwEffectiveAction)" :label="gwEffectiveAction === 'transfer' ? '转派给' : '摄影师（已线下确认承接）'" required><el-select v-model="gw.form.to_photo" filterable placeholder="请选择在职摄影师" aria-label="选择实际接单摄影师" @change="gwLoadOccupancy"><el-option v-for="person in gwPhotoChoices" :key="person.id" :value="person.id" :label="gwMask(person.name)" /></el-select></el-form-item>
+      <el-form-item v-else-if="!gw.actionRow?.photo_id" label="查看摄影师档期（仅供参考，不会自动派单）"><el-select v-model="gw.form.preview_photo" clearable filterable placeholder="可选：查看摄影师档期" aria-label="查看参考摄影师档期" @change="gwLoadOccupancy"><el-option v-for="person in gw.photographers" :key="person.id" :value="person.id" :label="gwMask(person.name)" /></el-select></el-form-item>
+      <section class="gw-scheduler" aria-label="摄影师档期辅助">
+        <div class="gw-scheduler-heading"><strong>未来14天档期</strong><small>当前权限范围内占用，可能不含其他组安排</small></div>
+        <el-alert v-if="gw.slot.error" :title="gw.slot.error" type="warning" :closable="false" />
+        <p v-if="!gwSelectedPhoto" class="gw-muted">选择摄影师可查看参考档期；无需等待或使用排期器也可填写原表单。</p>
+        <p v-else-if="gw.slot.loading" class="gw-muted">档期加载中…</p>
+        <template v-else-if="!gw.slot.error && gwSelectedPhoto">
+          <div class="gw-dates"><button v-for="day in gwDays" :key="day.value" type="button" :disabled="gw.actionBusy" :class="{selected:gw.slot.selectedDate === day.value}" :aria-label="day.value" @click="gwChooseDate(day.value)"><small>{{ day.day }}</small><strong>{{ day.label }}</strong></button></div>
+          <div class="gw-buckets"><button v-for="bucket in gwBuckets" :key="bucket.key" type="button" :class="{busy:bucket.count>0,selected:gwFinalBucket?.key === bucket.key && String(gwFinalTime).slice(0,10) === gw.slot.selectedDate}" :disabled="gw.actionBusy" @click="gwChooseBucket(bucket)"><strong>{{ bucket.label }} <small>{{ bucket.range }}</small></strong><span>{{ bucket.count ? '已有 '+bucket.count+' 单' : '当前范围暂无占用记录' }}</span></button></div>
+          <p v-if="['assign','transfer'].includes(gwEffectiveAction)" class="gw-muted">档期仅预览，派单和转派不改变已确认时间。如需改期，请使用独立“改期”操作。</p>
+        </template>
+      </section>
+      <el-form-item v-if="['confirm','reschedule'].includes(gwEffectiveAction)" :label="gwEffectiveAction === 'reschedule' ? '新的拍摄日期时间' : '预约时间'" required><el-date-picker v-model="gw.form.new_time" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" format="YYYY-MM-DD HH:mm" :editable="true" placeholder="选择或输入拍摄时间" aria-label="最终拍摄时间" @change="gwTimeChanged" /></el-form-item>
+      <el-form-item v-else label="已确认拍摄时间">{{ gwTime(gw.actionRow?.schedule_time) }}</el-form-item>
+      <p v-if="gwEffectiveAction === 'confirm'" class="gw-muted">客人提交：{{ gwTime(gw.actionRow?.requested_time) }}。上方时间可手动调整，变更时须填写调整原因。</p>
+      <el-alert v-if="gwConflictCount > 0" :title="'该摄影师在当前可见范围内该时段已有 '+gwConflictCount+' 单，提交前需确认继续，系统不强制拦截。'" type="warning" :closable="false" class="gw-alert" />
+      <p v-else-if="gwSelectedPhoto && gwFinalTime && (!gwFinalBucket || !gwInSlotWindow)" class="gw-muted">该时间不在档期提示范围内，仍按原时间规则校验。</p>
+      <el-form-item :label="({confirm:'调整原因（时间变更时必填）',reschedule:'改期原因',assign:'登记原因',transfer:'转派原因'})[gwEffectiveAction]" :required="gwEffectiveAction !== 'confirm'"><el-input v-model="gw.form.reason" type="textarea" :rows="3" maxlength="64" show-word-limit aria-label="操作原因" /></el-form-item>
+      <el-form-item :label="gwEffectiveAction === 'reschedule' ? '通知方式' : '确认渠道'" required><el-radio-group v-model="gw.form.channel"><el-radio value="wechat">微信</el-radio><el-radio value="phone">电话</el-radio><el-radio value="face">当面</el-radio></el-radio-group></el-form-item>
+    </el-form>
+    <template #footer><el-button :disabled="gw.actionBusy" @click="gwCloseAction">取消</el-button><el-button v-if="gw.actionUnknown" :loading="gw.actionBusy" @click="gwCheckAction" data-testid="gw-check-action">核对订单状态</el-button><el-button type="primary" :loading="gw.actionBusy" :disabled="gw.actionUnknown" @click="gwSubmit" data-testid="gw-submit-action">{{ gw.action === 'wizard' && gw.wizardStep === 'confirm' ? '确认时间并下一步' : ({confirm:'确认时间',assign:'提交派单',reschedule:'确认改期',transfer:'确认转派'})[gwEffectiveAction] }}</el-button></template>
+  </el-dialog>
+  <component v-if="gw.toolComponent" :is="gw.toolComponent" ref="gwToolHost" />
+</div>

@@ -59,6 +59,7 @@
   }
 
   function clearRuntimeData() {
+    ctx.clearContentPhotographers?.();
     state.svcCreateRequested = false;
     state.sharePermissions = [];
     state.photoPermissions = [];
@@ -205,34 +206,43 @@ async function login() {
   }
 }
 
-function mergeServerDefinitions(session) {
-  const definitions = Array.isArray(session && session.menuDefinitions) ? session.menuDefinitions : [];
+// Login and permission-page refreshes must apply the same navigation rules.
+// Capture presentation above from the shipped catalog, not mutable server rows.
+function normalizeNavigationDefinitions(definitions = []) {
   const retired = retiredMenuKeys(definitions);
-  LXM_CONFIG.menus = (LXM_CONFIG.menus || []).filter((item) => !retired.has(String(item.key)));
-  retired.forEach((key) => knownMenuKeys.delete(key));
-  definitions.forEach((item) => {
-    const key = String(item && item.key || "").trim();
-    if (!key) return;
+  return definitions.map((item) => {
+    const key = String(item && (item.key || item.menuKey || item.id) || "").trim();
+    if (!key) return null;
     const routeKey = String(item.routeKey || item.targetKey || key);
     // Retired global settings must not return through stored server menus.
-    if (key === "miniConfig" || routeKey === "miniConfig" || retired.has(key) || routeKey === "shops") return;
-    const existing = (LXM_CONFIG.menus || []).find((menu) => menu.key === key);
-    const next = {
+    if (key === "miniConfig" || routeKey === "miniConfig" || retired.has(key) || routeKey === "shops") return null;
+    return {
       key,
       routeKey: String(item.routeKey || item.targetKey || key),
       targetKey: String(item.targetKey || item.routeKey || key),
       label: String(item.label || item.name || key),
-      group: ["photoRules", "photoLedger", "photoSettlement", "photoParty", "photoNew", "photoMine"].includes(routeKey) ? "摄影师分成管理" : ["shareRules", "shareDetails", "shareMine"].includes(routeKey) ? "商家分成管理" : String(item.group || "其他功能"),
+      group: String(item.group || item.meta?.group || "其他功能").trim() || "其他功能",
       parentKey: String(item.parentKey || item.parentId || ""),
       parentId: String(item.parentId || item.parentKey || ""),
       path: String(item.path || `/${key}`),
       icon: String(item.icon || ""),
       sort: Number(item.sort ?? item.sortNo ?? 0),
-      status: item.status === "disabled" || item.status === "停用" ? "停用" : "启用",
+      status: ["停用", "disabled", "inactive"].includes(String(item.status || "").trim().toLowerCase()) ? "停用" : "启用",
       containerOnly: item.containerOnly === true,
       ...(navigationPresentation.get(routeKey) || {}),
       ...(commissionPresentation.get(routeKey) || {})
     };
+  }).filter(Boolean);
+}
+
+function mergeServerDefinitions(session) {
+  const definitions = Array.isArray(session && session.menuDefinitions) ? session.menuDefinitions : [];
+  const retired = retiredMenuKeys(definitions);
+  LXM_CONFIG.menus = (LXM_CONFIG.menus || []).filter((item) => !retired.has(String(item.key)));
+  retired.forEach((key) => knownMenuKeys.delete(key));
+  normalizeNavigationDefinitions(definitions).forEach((next) => {
+    const key = next.key;
+    const existing = (LXM_CONFIG.menus || []).find((menu) => menu.key === key);
     if (!next.containerOnly) knownMenuKeys.add(key);
     if (existing) Object.assign(existing, next);
     else LXM_CONFIG.menus.push(next);
@@ -553,6 +563,7 @@ restoreSession();
   return {
     login,
     applyLogin,
+    normalizeNavigationDefinitions,
     loadAuthenticatedData,
     menuRouteKey,
     restoreSession,

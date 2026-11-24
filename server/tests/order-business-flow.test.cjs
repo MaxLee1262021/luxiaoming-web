@@ -171,10 +171,10 @@ test("package deposit ratio is normalized and bounded by the admin API", async (
     const send = (body) => fetch(base + "/api/collection/packages", {
       method: "POST", headers: { Authorization: "Bearer super-token", "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    const valid = await send({ id: "p2", name: "Video", price: 200, depositRatio: 25, status: "草稿", isShow: false });
+    const valid = await send({ id: "p2", name: "Video", tags: ["测试套餐"], price: 200, depositRatio: 25, status: "草稿", isShow: false });
     assert.equal(valid.status, 201);
     assert.equal((await valid.json()).depositRatio, 0.25);
-    const invalid = await send({ id: "p3", name: "Invalid", price: 200, depositRatio: 101, status: "草稿", isShow: false });
+    const invalid = await send({ id: "p3", name: "Invalid", tags: ["测试套餐"], price: 200, depositRatio: 101, status: "草稿", isShow: false });
     assert.equal(invalid.status, 400);
   });
 });

@@ -22,7 +22,21 @@ function fixture() {
   for (const file of ["01-core-state.js", "02-order-basis.js", "03-auth.js"]) {
     vm.runInContext(read(`src/app/${file}`), sandbox); Object.assign(ctx, window.LXM_APP_PARTS.pop()(ctx));
   }
-  return { window, ctx, loads, notices, sessions, config: sandbox.LXM_CONFIG };
+  async function mountPermissions(rows) {
+    const mounted = [];
+    sandbox.Vue = { computed: ctx.computed, reactive: ctx.reactive, ref: value => ({ value }), onMounted: fn => mounted.push(fn) };
+    sandbox.ElementPlus = { ElMessage: ctx.ElMessage, ElMessageBox: {} };
+    window.LXM_PERMISSIONS = { async menus() { return plain(rows); }, async roles() { return []; }, async users() { return []; } };
+    const register = window.LXM_PAGES.register;
+    let page;
+    window.LXM_PAGES.register = value => { page = value; };
+    vm.runInContext(read("src/views/system/permissions/permissions.js"), sandbox);
+    window.LXM_PAGES.register = register;
+    const ui = page.setup(ctx);
+    await Promise.all(mounted.map(fn => fn()));
+    return ui;
+  }
+  return { window, ctx, loads, notices, sessions, config: sandbox.LXM_CONFIG, mountPermissions };
 }
 test("only the three agreed share routes are registered, and the old merchant page is retired", () => {
   const f = fixture(); const manifest = f.window.LXM_PAGES.manifest;
@@ -61,6 +75,14 @@ test("confirmed refunds count successful attempts before ticket completion and e
   f.ctx.data.afterSales = [{ orderId: "o", refundAmount: 12, refundStatus: "manual_refunded", refundConfirmed: true }];
   assert.equal(f.ctx.confirmedRefund(order), 12);
   f.ctx.data.afterSales[0].refundConfirmed = false; assert.equal(f.ctx.confirmedRefund(order), 0);
+  order.onlineRefundedAmount = 20;
+  assert.equal(f.ctx.confirmedRefund(order), 20, "hidden automatic refunds remain verified order money");
+  f.ctx.data.afterSales = [{ orderId: "o", refundAmount: 12, refundStatus: "manual_refunded", refundConfirmed: true },
+    { orderId: "o", refundAttempts: [{ status: "SUCCESS", amountFen: 1000 }, { status: "PROCESSING", amountFen: 99999 }] }];
+  assert.equal(f.ctx.confirmedRefund(order), 32, "visible online successes overlap the order total; manual refunds add separately");
+  f.ctx.data.afterSales = [];
+  order.customerCancellationRefundAmount = 999;
+  assert.equal(f.ctx.confirmedRefund(order), 20, "a requested cancellation amount cannot become confirmed money");
 });
 
 test("commission navigation keeps direct client pages and list order after stale server definitions arrive", () => {
@@ -82,6 +104,81 @@ test("commission navigation keeps direct client pages and list order after stale
   assert.deepEqual(plain(f.ctx.breadcrumbTrail.value),['客服分成管理','客服端']);
   f.ctx.state.menuSearch='客服端';
   assert.deepEqual(plain(f.ctx.searchedMenus.value).map((row)=>row.key),['svcMine']);
+});
+
+test("opening and reloading permissions cannot restore legacy commission groups or undo navigation order", async () => {
+  const f = fixture();
+  const rows = plain(f.config.menus).map((row, index) => {
+    const { navigationOrder, ...menu } = row;
+    const key = row.key === "photoParty" ? "customPhotoList" : row.key;
+    return { ...menu, id: `menu_${key}`, key, routeKey: row.key, label: `旧${row.label}`, name: `旧${row.label}`,
+      group: row.group === "摄影师分成管理" ? "摄影师分成" : row.group,
+      parentKey: row.key === "photoMine" ? "photoClient" : row.key === "svcMine" ? "svcClient" : "", sort: 1000 - index };
+  });
+  rows.push(
+    { id: "oldPhotoClient", key: "photoClient", name: "摄影端", group: "摄影师分成", containerOnly: true },
+    { id: "oldSvcClient", key: "svcClient", name: "客服端", group: "客服分成管理", containerOnly: true },
+    { id: "oldPhotoNew", key: "photoNew", name: "新增摄影师", group: "摄影师分成" },
+    { id: "oldSvcNew", key: "svcStaffNew", name: "新增客服", group: "客服分成管理" }
+  );
+  const session = { token: "test", role: "super", menuKeys: rows.map(row => row.key), menuDefinitions: rows };
+  f.ctx.applyLogin(session, { source: "server" });
+  const expectedGroups = ["经营中心", "订单履约", "内容管理", "客服工作台", "客服分成管理", "摄影师分成管理", "商家分成管理", "财务管理", "内容运营", "系统安全", "渠道增长"];
+  const assertNavigation = () => {
+    const sections = plain(f.ctx.sidebarSections.value);
+    assert.deepEqual(sections.map(section => section.label), expectedGroups);
+    for (const [group, listLabel, client, clientKey] of [
+      ["客服分成管理", "客服列表", "客服端", "svcMine"],
+      ["摄影师分成管理", "摄影师列表", "摄影端", "photoMine"]
+    ]) {
+      const items = sections.find(section => section.label === group).items;
+      assert.deepEqual(items.map(item => item.label), ["分成配置", "分成明细", listLabel, "结算管理", client]);
+      assert.equal(items.at(-1).key, clientKey);
+      assert.equal(items.at(-1).navigable, true);
+      assert.deepEqual(items.at(-1).children, []);
+    }
+    assert.equal(sections.find(section => section.label === "摄影师分成管理").items[2].key, "customPhotoList");
+    assert.equal(f.config.menus.some(row => ["svcStaffNew", "photoNew", "svcClient", "photoClient"].includes(row.key)), false);
+  };
+  assertNavigation();
+  const ui = await f.mountPermissions(rows);
+  assertNavigation();
+  await ui.loadAll();
+  assertNavigation();
+  f.ctx.applyLogin(session, { source: "server" });
+  assertNavigation();
+});
+
+test("permissions synchronization preserves custom menu structure while reflecting deletion and disabled state", async () => {
+  const f = fixture();
+  const rows = [
+    { id: "dashboard", key: "dashboard", routeKey: "dashboard", name: "经营看板", group: "经营中心", sort: 99 },
+    { id: "disabledPhoto", key: "photoRules", routeKey: "photoRules", name: "旧分成比例", group: "摄影师分成", status: "disabled", sort: 3 },
+    { id: "early", key: "customEarly", routeKey: "series", name: "自定义首项", group: "自定义业务", sort: 1 },
+    { id: "folder", key: "customFolder", name: "自定义目录", group: "自定义业务", sort: 2, containerOnly: true },
+    { id: "child", key: "customChild", routeKey: "staff", name: "自定义子项", group: "自定义业务", parentKey: "customFolder", sort: 8 },
+    { id: "removed", key: "customRemoved", routeKey: "distributors", name: "待删除菜单", group: "自定义业务", sort: 3 },
+    { id: "late", key: "customLate", routeKey: "staff", name: "待停用菜单", group: "自定义业务", sort: 7 }
+  ];
+  f.ctx.applyLogin({ token: "test", role: "super", menuKeys: rows.map(row => row.key), menuDefinitions: rows }, { source: "server" });
+  const ui = await f.mountPermissions(rows);
+  const customItems = () => plain(f.ctx.sidebarSections.value).find(section => section.label === "自定义业务").items;
+  assert.deepEqual(customItems().map(item => item.key), ["customEarly", "customFolder", "customRemoved", "customLate"]);
+  assert.equal(customItems()[1].navigable, false);
+  assert.deepEqual(customItems()[1].children.map(item => item.label), ["自定义子项"]);
+  assert.equal(f.ctx.sidebarSections.value.some(section => section.label === "摄影师分成管理"), false);
+  assert.equal(f.config.menus.find(row => row.key === "photoRules").status, "停用");
+  rows.splice(rows.findIndex(row => row.key === "customRemoved"), 1);
+  rows.find(row => row.key === "customLate").status = "disabled";
+  f.ctx.state.active = "customRemoved";
+  await ui.loadAll();
+  assert.deepEqual(customItems().map(item => item.key), ["customEarly", "customFolder"]);
+  assert.equal(f.config.menus.some(row => row.key === "customRemoved"), false);
+  assert.equal(f.config.menus.find(row => row.key === "customLate").status, "停用");
+  assert.equal(f.ctx.roleProfile.value.menus.includes("customLate"), false);
+  assert.notEqual(f.ctx.state.active, "customRemoved");
+  await f.ctx.switchMenu("customLate");
+  assert.equal(f.notices.at(-1).kind, "warning");
 });
 
 test("personal commission grants display only their direct client page and keep management inaccessible", async () => {

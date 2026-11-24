@@ -11,7 +11,7 @@ const pageSource = fs.readFileSync(path.resolve(__dirname, "../views/content/alb
 function fixture(row = {}) {
   const writes = [];
   const messages = [];
-  const album = { id: "album-1", name: "Photo", price: 100, sampleUrls: ["/photo.jpg"], cover: "/photo.jpg", tags: [], ...row };
+  const album = { id: "album-1", name: "Photo", price: 100, sampleUrls: ["/photo.jpg"], cover: "/photo.jpg", tags: ["测试标签"], ...row };
   const ctx = {
     state: { role: "super" },
     data: { albums: [album], series: [] },
@@ -82,7 +82,7 @@ test("new photos inherit global deposit and resetting restores the saved percent
   const f = fixture({ depositRatio: 0.3 });
   f.page.createAlbum();
   assert.equal(f.page.selectedAlbum.value.depositRatioPercent, undefined);
-  Object.assign(f.page.selectedAlbum.value, { name: "New photo", sampleUrls: ["/new.jpg"] });
+  Object.assign(f.page.selectedAlbum.value, { name: "New photo", tags: ["测试标签"], sampleUrls: ["/new.jpg"] });
   assert.equal(await f.page.saveSelectedAlbum(), true);
   assert.equal(f.writes[0].payload.depositRatio, null);
   f.page.selectAlbum(f.album);

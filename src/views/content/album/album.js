@@ -4,6 +4,12 @@ window.LXM_PAGES.register({
   description: "Photo product management", styleScope: "page-route-album",
   setup(ctx) {
     const Vue = window.Vue;
+    const {
+      contentPhotographerOptions = Vue.ref([]), contentPhotographersLoading = Vue.ref(false),
+      contentPhotographersError = Vue.ref(""), contentPhotographerName = () => "未设置",
+      loadContentPhotographers = () => {}
+    } = ctx;
+    loadContentPhotographers();
     const tip = (message) => {
       const notify = window.ElementPlus?.ElMessage || window.ElMessage || ctx.ElMessage || ctx.toast;
       if (notify) notify(message);
@@ -46,11 +52,15 @@ window.LXM_PAGES.register({
       const source = selectedSource.value;
       if (!source) { selectedAlbum.value = null; return; }
       const draft = clone(source);
+      draft.recommendedPhotographerId = String(draft.recommendedPhotographerId || "");
       draft.shootingNotes = String(draft.shootingNotes ?? draft.intro ?? "");
       draft.tags = Array.isArray(draft.tags) ? draft.tags.slice() : String(draft.tags || "").split(/[，,、|\n]/).map((tag) => tag.trim()).filter(Boolean);
       draft.retouchMode = typeof ctx.albumRetouchMode === "function" ? ctx.albumRetouchMode(draft)
         : ["count", "included", "excluded"].includes(draft.retouchMode) ? draft.retouchMode : Number(draft.retouchCount) > 0 ? "count" : "excluded";
       draft.makeupIncluded = draft.makeupIncluded === true;
+      draft.photoCountText = photoCountLabel(source);
+      draft.retouchText = retouchLabel(source);
+      draft.makeupText = makeupLabel(source);
       draft.seriesId = String(draft.seriesId || draft.seriesName || "");
       draft.photoCount = ctx.albumPhotoUrls(draft).length;
       draft.depositRatioPercent = albumDepositPercent(source);
@@ -72,7 +82,7 @@ window.LXM_PAGES.register({
       if (!ctx.can("contentEdit") || saving.value || photoUploadBusy.value) return;
       creating.value = true;
       selectedPhotoUrls.value = [];
-      selectedAlbum.value = { name: "", seriesId: "", seriesName: "", tags: [], sampleUrls: [], cover: "", shootingNotes: "", price: 0, depositRatioPercent: undefined, photoCount: 0, retouchMode: "excluded", retouchCount: 0, makeupIncluded: false, spotId: "", spotIds: [], spotBindingExplicit: true, isShow: false, isSellable: true, allowMaterialUse: true };
+      selectedAlbum.value = { name: "", recommendedPhotographerId: "", seriesId: "", seriesName: "", tags: [], sampleUrls: [], cover: "", shootingNotes: "", price: 0, depositRatioPercent: undefined, photoCount: 0, photoCountText: "", retouchText: "", makeupText: "", retouchMode: "excluded", retouchCount: 0, makeupIncluded: false, spotId: "", spotIds: [], spotBindingExplicit: true, isShow: false, isSellable: true, allowMaterialUse: true };
       ctx.applyAlbumShootingTemplate?.(selectedAlbum.value);
       editorOpen.value = true;
     }
@@ -85,8 +95,15 @@ window.LXM_PAGES.register({
       draft.spotBindingExplicit = true;
       if (typeof ctx.markContentSpotChange === "function") ctx.markContentSpotChange(draft);
     }
-    function retouchLabel(row) {
-      const mode = row.retouchMode || (Number(row.retouchCount) > 0 ? "count" : "excluded");
+    function photoCountLabel(row = {}) {
+      return typeof row.photoCountText === "string" && row.photoCountText.trim() || `${Number(row.photoCount) || 0} 张照片`;
+    }
+    function makeupLabel(row = {}) {
+      return typeof row.makeupText === "string" && row.makeupText.trim() || (row.makeupIncluded === true ? "包含" : "不包含");
+    }
+    function retouchLabel(row = {}) {
+      if (typeof row.retouchText === "string" && row.retouchText.trim()) return row.retouchText.trim();
+      const mode = row.retouchMode || (Number(row.retouchCount) > 0 ? "count" : row.retouchIncluded === true ? "included" : "excluded");
       return mode === "included" ? "包含修图" : mode === "excluded" ? "不含修图" : "修图 " + Number(row.retouchCount || 0) + " 张";
     }
     function previewVisible(row) {
@@ -176,15 +193,23 @@ window.LXM_PAGES.register({
       if (window.LXM_UPLOAD?.ready && !window.LXM_UPLOAD.ready()) return false;
       const source = selectedSource.value;
       const payload = clone(selectedAlbum.value);
+      payload.recommendedPhotographerId = String(payload.recommendedPhotographerId || "");
       const previous = source ? clone(source) : null;
       payload.name = String(payload.name || "").trim();
       if (!payload.name) return tip("请填写照片留影名称");
+      payload.tags = [...new Set((Array.isArray(payload.tags) ? payload.tags : typeof payload.tags === "string" ? payload.tags.split(/[，,、|\r\n]/) : [])
+        .filter((tag) => typeof tag === "string").map((tag) => tag.trim()).filter(Boolean))];
+      if (!payload.tags.length) return tip("请至少添加一个标签");
       payload.sampleUrls = ctx.albumPhotoUrls(payload);
       payload.photoCount = payload.sampleUrls.length;
       if (!payload.photoCount) return tip("请至少上传一张商品照片");
       if (!payload.sampleUrls.includes(payload.cover)) ctx.setAlbumCover(payload, payload.sampleUrls[0]);
       if (payload.price === null || payload.price === "" || !Number.isFinite(Number(payload.price)) || Number(payload.price) < 0) return tip("请填写有效的商品价格");
       payload.price = Number(payload.price);
+      for (const [field, label] of [["photoCountText", "照片张数"], ["retouchText", "修图"], ["makeupText", "妆造"]]) {
+        payload[field] = String(payload[field] ?? "").trim();
+        if (payload[field].length > 160) return tip(`${label}不能超过160个字符`);
+      }
       const depositPercent = selectedAlbum.value.depositRatioPercent;
       if (!emptyDeposit(depositPercent) && (!["number", "string"].includes(typeof depositPercent) || !Number.isFinite(Number(depositPercent)) || Number(depositPercent) < 0 || Number(depositPercent) > 100)) {
         tip("定金比例应为 0 到 100，或留空使用全局比例");
@@ -197,7 +222,6 @@ window.LXM_PAGES.register({
       payload.seriesId = selectedSeries ? idOf(selectedSeries) : "";
       if (payload.seriesName.length > 160) return tip("风格系列名称不能超过160个字");
       if (!payload.id && !payload._id) { payload.id = `album_${Date.now().toString(36)}`; payload._id = payload.id; }
-      payload.tags = [...new Set((payload.tags || []).map((name) => String(name).trim()).filter(Boolean))];
       payload.shootingNotes = String(payload.shootingNotes || "").trim();
       payload.intro = payload.shootingNotes;
       payload.spotIds = payload.spotId ? [String(payload.spotId)] : [];
@@ -230,10 +254,11 @@ window.LXM_PAGES.register({
       finally { saving.value = false; if (!editorOpen.value) resetAlbumDraft(); }
     }
     return {
+      contentPhotographerOptions, contentPhotographersLoading, contentPhotographersError, contentPhotographerName, loadContentPhotographers,
       selectedAlbumId, selectedAlbum, selectedSource, listSource, remoteOn, remoteLoading, remoteError, saving, editorOpen, creating, createAlbum, closeEditor,
       viewMode, selectedPhotoUrls, allPhotosSelected, togglePhotoSelection, toggleAllPhotos, removeSelectedPhotos, removePhoto, photoCount, uploadAlbumPhotos, photoUploadBusy,
       albumSeriesOptions, albumSeriesLabel, changeAlbumSeries, albumDepositLabel,
-      albumTagOptions, retouchLabel, previewVisible, isSelected, selectAlbum, changeAlbumSpot, resetAlbumDraft, refreshFromServer, toggleRemote, saveSelectedAlbum
+      albumTagOptions, photoCountLabel, retouchLabel, makeupLabel, previewVisible, isSelected, selectAlbum, changeAlbumSpot, resetAlbumDraft, refreshFromServer, toggleRemote, saveSelectedAlbum
     };
   }
 });

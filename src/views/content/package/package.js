@@ -9,7 +9,14 @@ window.LXM_PAGES.register({
   setup(ctx) {
     const Vue = window.Vue;
     const {
-      data, can, money, requestDeletePackage, persistContentMutation
+      contentPhotographerOptions = Vue.ref([]), contentPhotographersLoading = Vue.ref(false),
+      contentPhotographersError = Vue.ref(""), contentPhotographerName = () => "未设置",
+      loadContentPhotographers = () => {}
+    } = ctx;
+    loadContentPhotographers();
+    const {
+      data, can, money, requestDeletePackage, persistContentMutation,
+      packageTitleLimit, packageTitleLength, normalizePackageTitle, packageTitleError
     } = ctx;
     const notify = (type, message) => {
       try {
@@ -80,6 +87,7 @@ window.LXM_PAGES.register({
         : 30;
       return {
         ...source,
+        recommendedPhotographerId: String(source.recommendedPhotographerId || ""),
         id: rowId(source),
         _id: rowId(source),
         type: "photo",
@@ -120,9 +128,10 @@ window.LXM_PAGES.register({
     }
     function canEdit() { return !!(typeof can === "function" && can("contentEdit")); }
     function currentRows() {
-      return (data.packages || [])
-        .filter((row) => row && row.type !== "video" && !row.deleted && !row.isDeleted)
+      const rows = (data.packages || [])
+        .filter((row) => row && row.type !== "video" && !(typeof ctx.isVideoSingleProduct === "function" && ctx.isVideoSingleProduct(row)) && !row.deleted && !row.isDeleted)
         .map(normalizeRow);
+      return ctx.sortedContentRows ? ctx.sortedContentRows("packages", rows) : rows;
     }
     const tableRows = Vue.computed(() => {
       const term = String(keyword.value || "").trim().toLowerCase();
@@ -147,7 +156,7 @@ window.LXM_PAGES.register({
 
     function buildForm(row = null) {
       const source = row ? normalizeRow(row) : {
-        id: "", name: "", cover: "", price: 0, originalPrice: 0,
+        id: "", name: "", recommendedPhotographerId: "", cover: "", price: 0, originalPrice: 0,
         description: "", spotIds: [], spotId: "", seriesId: "", albumId: "",
         depositRatio: 30, isShow: true, includedItems: []
       };
@@ -248,15 +257,66 @@ window.LXM_PAGES.register({
     }
     function productOptions(type) {
       const pool = type === "album" ? data.albums : type === "video" ? data.packages : data.peripherals;
-      return (pool || []).filter((item) => item && !item.deleted && !item.isDeleted && (type !== "video" || item.type === "video")).map((item) => {
+      return (pool || []).filter((item) => item && !item.deleted && !item.isDeleted && (type !== "video" || item.type === "video")).flatMap((item) => {
         const id = rowId(item);
         const spotIds = spotIdsOf(item);
         const spotId = spotIds[0] || "";
         const target = type === "album" ? { page: "photoCollection", albumId: id, seriesId: item.seriesId || "", spotId }
           : type === "video" ? { page: "videoProductDetail", productId: id, spotId }
             : { page: "peripheral", id, peripheralId: id };
-        return { id, name: item.name || item.title || itemTypeLabel(type), price: Number(item.price ?? item.specialPrice ?? 0), spotId, spotIds, target };
+        const option = { id, key: id, name: item.name || item.title || itemTypeLabel(type), price: Number(item.price ?? item.specialPrice ?? 0), spotId, spotIds, target };
+        if (type !== "peripheral") return [option];
+        if (item.specMode !== "multiple") {
+          const specs = (Array.isArray(item.specs) ? item.specs.join(" / ") : String(item.specs || "")).trim() || "默认规格";
+          return [{ ...option, spec: specs, style: String(item.skuStyle || "").trim(), label: itemDisplayName({ ...option, spec: specs, style: item.skuStyle }) }];
+        }
+        return (Array.isArray(item.skus) ? item.skus : []).filter((sku) => sku && String(sku.spec || "").trim()).map((sku) => {
+          const skuId = String(sku.id || sku.skuId || sku.skuCode || "").trim();
+          const spec = String(sku.spec || "").trim(), style = String(sku.style || "").trim();
+          const selection = { skuId, skuCode: String(sku.skuCode || "").trim(), spec, style };
+          return { ...option, ...selection, skuAliases: [sku.id, sku.skuId, sku.skuCode].filter(Boolean).map((value) => String(value).trim()), key: JSON.stringify([id, skuId || [spec, style]]), price: Number(sku.price), label: itemDisplayName({ ...option, ...selection }), target: { ...target, ...selection } };
+        });
       });
+    }
+    function itemSpecLabel(item = {}) {
+      if (item.type && item.type !== "peripheral") return "";
+      const spec = String(item.spec || item.target?.spec || "").trim();
+      const style = String(item.style ?? item.target?.style ?? "").trim();
+      return style ? `${spec || "默认规格"}【${style}】` : spec;
+    }
+    function itemDisplayName(item = {}) {
+      const spec = itemSpecLabel(item);
+      return `${item.name || "未选择商品"}${spec ? ` · ${spec}` : ""}`;
+    }
+    function optionForItem(item = {}) {
+      const target = item.target || {};
+      const productId = String(item.productId || item.albumId || item.peripheralId || target.albumId || target.peripheralId || target.productId || target.id || "");
+      const options = productOptions(item.type);
+      // A stale ID must never silently select a different product with the same name.
+      const candidates = options.filter((option) => productId ? option.id === productId : option.name === item.name);
+      if (item.type !== "peripheral") return candidates[0];
+      const product = productRecord("peripheral", productId || candidates[0]?.id);
+      const selector = String(item.skuId || item.specId || item.skuCode || target.skuId || target.specId || target.skuCode || "").trim();
+      const spec = String(item.spec || target.spec || "").trim();
+      const hasStyle = item.style !== undefined || target.style !== undefined;
+      const style = String(item.style ?? target.style ?? "").trim();
+      if (product?.specMode !== "multiple") {
+        // Explicit old multi-SKU selections cannot be changed into a default SKU.
+        if (selector) return undefined;
+        const option = candidates[0];
+        return option && (!spec || [option.spec, itemSpecLabel(option)].includes(spec)) && (!hasStyle || option.style === style) ? option : undefined;
+      }
+      const matches = candidates.filter((option) => selector ? option.skuAliases.includes(selector)
+        : spec ? [option.spec, itemSpecLabel(option)].includes(spec) && (!hasStyle || option.style === style) : false);
+      return matches.length === 1 ? matches[0] : undefined;
+    }
+    function sameProductItem(item, type, option) {
+      if (item.type !== type || String(item.productId) !== option.id) return false;
+      return type !== "peripheral" || optionForItem(item)?.key === option.key;
+    }
+    function includedFromOption(type, option) {
+      return normalizeIncludedItem({ type, productId: option.id, quantity: 1,
+        ...(type === "peripheral" ? { skuId: option.skuId || "", skuCode: option.skuCode || "", spec: option.spec || "", style: option.style || "" } : {}) });
     }
     function productRecord(type, id) {
       const pool = type === "album" ? data.albums : type === "video" ? data.packages : data.peripherals;
@@ -291,18 +351,19 @@ window.LXM_PAGES.register({
     const peripheralOptions = Vue.computed(() => productOptions("peripheral"));
     function changePickerCity() { picker.spotId = ""; changePickerSpot(); }
     function changePickerSpot() { picker.productKey = ""; picker.productKeys = []; }
-    function isProductIncluded(type, id) {
-      return (form.value?.includedItems || []).some((item) => item.type === type && String(item.productId) === String(id));
+    function isProductIncluded(type, id, key = id) {
+      const option = productOptions(type).find((entry) => entry.id === String(id) && entry.key === key);
+      return !!option && (form.value?.includedItems || []).some((item) => sameProductItem(item, type, option));
     }
     function appendProduct(type, option) {
       if (!canEdit() || saving.value || !form.value || !option) return false;
-      if (form.value.includedItems.some((item) => item.type === type && String(item.productId) === option.id)) {
+      if (form.value.includedItems.some((item) => sameProductItem(item, type, option))) {
         notify("warning", "该商品已在套餐中，可直接调整数量");
         return false;
       }
-      form.value.includedItems.push(normalizeIncludedItem({ type, productId: option.id, quantity: 1 }));
+      form.value.includedItems.push(includedFromOption(type, option));
       recalculatePrice();
-      notify("success", `已添加：${option.name}`);
+      notify("success", `已添加：${option.label || option.name}`);
       return true;
     }
     function addSpotProduct() {
@@ -311,14 +372,14 @@ window.LXM_PAGES.register({
       return appendProduct(option.type, option);
     }
     function addPeripheralProduct() {
-      const option = peripheralOptions.value.find((row) => row.id === picker.peripheralId);
+      const option = peripheralOptions.value.find((row) => row.key === picker.peripheralId);
       if (!option) return notify("warning", "请选择影像周边商品");
       return appendProduct("peripheral", option);
     }
     function appendProducts(entries) {
       if (!canEdit() || saving.value || !form.value) return false;
       const items = form.value.includedItems;
-      const existingRows = entries.map(({ type, option }) => items.find((item) => item.type === type && String(item.productId) === option.id));
+      const existingRows = entries.map(({ type, option }) => items.find((item) => sameProductItem(item, type, option)));
       if (existingRows.some((item) => item && (!Number.isSafeInteger(Number(item.quantity)) || Number(item.quantity) < 1 || !Number.isSafeInteger(Number(item.quantity) + 1)))) {
         notify("warning", "请先为已选商品填写有效的整数数量");
         return false;
@@ -330,7 +391,7 @@ window.LXM_PAGES.register({
           existing.quantity = Number(existing.quantity) + 1;
           increased += 1;
         } else {
-          items.push(normalizeIncludedItem({ type, productId: option.id, quantity: 1 }));
+          items.push(includedFromOption(type, option));
         }
       });
       recalculatePrice();
@@ -355,7 +416,7 @@ window.LXM_PAGES.register({
       const ids = [...new Set(picker.peripheralIds || [])];
       if (!ids.length) return notify("warning", "请选择一个或多个影像周边商品");
       const entries = ids.map((id) => {
-        const option = peripheralOptions.value.find((row) => row.id === id);
+        const option = peripheralOptions.value.find((row) => row.key === id);
         return option ? { type: "peripheral", option } : null;
       });
       if (entries.some((entry) => !entry)) return notify("warning", "所选周边已被删除，请重新选择");
@@ -420,12 +481,8 @@ window.LXM_PAGES.register({
     }
     function syncIncludedItem(item) {
       if (!canEdit() || saving.value) return;
-      const option = productOptions(item.type).find((candidate) => candidate.id === String(item.productId || ""));
-      if (!option) { resetIncludedItem(item); return; }
-      item.name = option.name;
-      item.price = option.price;
-      item.target = option.target;
-      item.spotId = option.spotId;
+      if (!optionForItem(item)) return;
+      Object.assign(item, normalizeIncludedItem(item));
       recalculatePrice();
     }
     function resetIncludedItem(item) {
@@ -433,6 +490,10 @@ window.LXM_PAGES.register({
       item.productId = "";
       item.name = "";
       item.price = 0;
+      item.skuId = "";
+      item.skuCode = "";
+      item.spec = "";
+      item.style = "";
       item.spotId = "";
       item.target = {};
       recalculatePrice();
@@ -440,8 +501,13 @@ window.LXM_PAGES.register({
     function normalizeIncludedItem(item = {}) {
       const target = item.target || {};
       const productId = String(item.productId || item.albumId || item.peripheralId || target.albumId || target.peripheralId || target.productId || target.id || "");
-      const option = productOptions(item.type).find((entry) => entry.id === productId) || productOptions(item.type).find((entry) => entry.name === item.name);
-      return { ...clone(item), ...(option ? { productId: option.id, name: option.name, price: option.price, spotId: option.spotId, spotIds: option.spotIds, target: clone(option.target) } : { productId }), quantity: Number(item.quantity ?? item.qty ?? 1) };
+      const option = optionForItem(item);
+      const selection = option && item.type === "peripheral" ? { skuId: option.skuId || "", skuCode: option.skuCode || "", spec: option.spec || "", style: option.style || "" } : {};
+      return { ...clone(item), ...(option ? { productId: option.id, name: option.name, price: option.price, spotId: option.spotId, spotIds: option.spotIds, ...selection, target: { ...clone(option.target), ...selection } } : { productId }), quantity: Number(item.quantity ?? item.qty ?? 1) };
+    }
+    function itemSelectionError(item) {
+      if (item.type !== "peripheral" || optionForItem(item)) return "";
+      return "周边商品或规格未选择、已变更，请移除后重新选择";
     }
     function sumItems(items = []) {
       return items.reduce((sum, item) => sum + Math.round(Number(item.price || 0) * 100) * Number(item.quantity ?? 1), 0) / 100;
@@ -454,7 +520,7 @@ window.LXM_PAGES.register({
     }
     function setManualPrice() { if (form.value) form.value.priceManuallySet = true; }
     function itemDetails(row = {}) {
-      return (row.includedItems || row.items || []).map((item) => `${({ album: "照片留影", video: "视频摄像", peripheral: "影像周边" })[item.type] || "商品"} · ${item.name || "未选择"} × ${item.quantity ?? 1}`).join("；");
+      return (row.includedItems || row.items || []).map((item) => `${itemTypeLabel(item.type)} · ${itemDisplayName(item)} × ${item.quantity ?? 1}`).join("；");
     }
     function formSpotNames() {
       return packageSpotNames({ includedItems: form.value?.includedItems || [] });
@@ -476,7 +542,8 @@ window.LXM_PAGES.register({
         ...(original ? clone(original) : {}),
         id,
         _id: id,
-        name: String(source.name || "").trim(),
+        name: normalizePackageTitle(source.name),
+        recommendedPhotographerId: String(source.recommendedPhotographerId || ""),
         type: "photo",
         productType: "photo",
         serviceType: "photo",
@@ -502,12 +569,6 @@ window.LXM_PAGES.register({
         auditStatus: source.isShow === false ? "已下" : "已上"
       };
       for (const key of ["enabled", "visible", "isSellable"]) if (key in record) record[key] = record.isShow;
-      record.includedItems = (record.includedItems || []).map((item) => {
-        const option = productOptions(item.type).find((candidate) => candidate.id === String(item.productId || item.id || ""))
-          || productOptions(item.type).find((candidate) => candidate.name === item.name);
-        return option ? { ...item, productId: option.id, name: option.name, price: option.price, target: option.target, spotId: option.spotId } : item;
-      });
-      record.items = record.includedItems.map((item) => clone(item));
       if (!spotIds.length && record.includedItems.length) {
         record.spotIds = [...new Set(record.includedItems.map((item) => String(item.spotId || "")).filter(Boolean))];
         record.spotId = record.spotIds[0] || "";
@@ -515,6 +576,8 @@ window.LXM_PAGES.register({
       return record;
     }
     async function persist(record, previous = null) {
+      const titleError = packageTitleError(record, previous);
+      if (titleError) { notify("warning", titleError); return false; }
       if (typeof persistContentMutation !== "function") { notify("error", "服务端保存接口不可用，请刷新后重试"); return false; }
       return persistContentMutation("packages", record, previous);
     }
@@ -524,12 +587,16 @@ window.LXM_PAGES.register({
       if (!source) return;
       if (tagInput.value.trim() && !addTag()) return;
       if (!String(source.name || "").trim()) return notify("warning", "请填写套餐名称");
+      const existing = source.id ? (data.packages || []).find((item) => rowId(item) === String(source.id)) : null;
+      const titleError = packageTitleError(source, existing);
+      if (titleError) return notify("warning", titleError);
+      if (!formTags.value.length) return notify("warning", "请至少添加一个标签");
       if (!Number.isFinite(Number(source.price)) || Number(source.price) < 0) return notify("warning", "请填写正确的售价");
       if (!(source.includedItems || []).length) return notify("warning", "请至少选择一个组合商品");
       if (source.includedItems.some((item) => !item.productId || !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1)) return notify("warning", "请为每项选择商品并填写大于零的整数数量");
       if (source.includedItems.some((item) => !productOptions(item.type).some((option) => option.id === String(item.productId)))) return notify("warning", "套餐中有已删除或不可用的商品，请移除后重新选择");
+      if (source.includedItems.some((item) => itemSelectionError(item))) return notify("warning", "套餐中的周边规格未选择或已失效，请移除后重新选择具体规格");
       if (!Number.isFinite(Number(source.depositRatio)) || Number(source.depositRatio) < 0 || Number(source.depositRatio) > 100) return notify("warning", "订金比例应为 0 到 100");
-      const existing = source.id ? (data.packages || []).find((item) => rowId(item) === String(source.id)) : null;
       const previous = existing ? clone(existing) : null;
       const record = buildRecord(source, existing);
       saving.value = true;
@@ -623,11 +690,13 @@ window.LXM_PAGES.register({
     }
 
     return {
+      contentPhotographerOptions, contentPhotographersLoading, contentPhotographersError, contentPhotographerName, loadContentPhotographers,
       data, can, money, requestDeletePackage,
+      packageTitleLimit, packageTitleLength,
       loading, keyword, spotFilter, visibilityFilter, dialogVisible, saving, form, goodsSpotFilter,
       picker, tagInput, tagPresets, formTags, addTag, removeTag, pendingIds,
       cityOptions, pickerSpots, spotProductOptions, peripheralOptions, changePickerCity, changePickerSpot,
-      addSpotProduct, addPeripheralProduct, groupItems, selectedQuantity, setItemQuantity, itemTypeLabel, itemLocation,
+      addSpotProduct, addPeripheralProduct, groupItems, selectedQuantity, setItemQuantity, itemTypeLabel, itemLocation, itemSpecLabel, itemDisplayName, itemSelectionError,
       addSpotProducts, addPeripheralProducts, isProductIncluded,
       manualVisible, visibilityHint, beforeDialogClose, resetEditor,
       tableRows, summary, canEdit, packageSpotNames, packageAlbumName, statusText,

@@ -11,6 +11,8 @@
 .booking-config-version { max-width: 400px; }
 .booking-config-prices { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .booking-config-actions { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 4px 0 24px; color: #667085; font-size: 13px; }
+.booking-config-privacy-actions { margin-top: 20px; padding-bottom: 0; }
+.booking-config-card .el-textarea__inner { line-height: 1.7; }
 @media (max-width: 640px) {
   .booking-config-heading { align-items: flex-start; gap: 12px; }
   .booking-config-heading h2 { font-size: 20px; }

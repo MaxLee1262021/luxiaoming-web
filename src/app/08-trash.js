@@ -170,7 +170,7 @@ async function restoreAllTrash() {
   if (!remoteTrashEnabled()) return ElMessage.error("真实后端连接不可用，回收站操作未保存");
   if (state.role !== "super") return ElMessage.error("只有总部超管可以恢复回收站数");
   if (!state.trash.length) return ElMessage.warning("回收站暂无可恢复数据");
-  window.LXMActionConfirm.confirm(ElMessageBox, `确认恢复回收站内 ${state.trash.length} 条数据？订单将回到待确认状态。`, "全部恢复", {
+  window.LXMActionConfirm.confirm(ElMessageBox, `确认恢复回收站内 ${state.trash.length} 条数据？订单恢复后请核对履约状态。`, "全部恢复", {
     confirmButtonClass: "lxm-action-confirm--success",
     cancelButtonClass: "lxm-action-cancel",
     type: "warning", confirmButtonText: "确认恢复", cancelButtonText: "暂不恢复" }).then(async () => {

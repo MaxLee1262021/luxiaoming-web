@@ -58,7 +58,7 @@ async function assertPublicCompleted(source, expectedIds, finalPaid = 0) {
   }
 }
 
-test("service shooting completion opens final payment; only the verified receipt completes both order views", async t => {
+test("visitor arrival opens final payment; only the verified receipt completes both order views", async t => {
   const store = createSvcMemoryStore({
     staff: [{ id: "service", account_id: "service-account", staff_status: "active" }],
     orders: [{ id: "service-order", orderNo: "SYNC-1", order_no: "SYNC-1", customer_openid: "sync-owner",
@@ -72,19 +72,17 @@ test("service shooting completion opens final payment; only the verified receipt
   const source = sourceFor(() => store.snapshot().orders, store);
   require("../lib/customerService.cjs").serviceFor(source, { store, benefit: {} });
   t.after(() => require("../lib/wechatPay.cjs").drainMerchantShare(source));
-  const session = { kind: "admin", role: "service", authzUserId: "service-account" };
-  await app.execute("POST", "/api/kf/orders/SYNC-1/shoot/start", { expected_status: "confirmed" }, session);
+  assert.equal((await rpc(source, "confirmOrderArrival", { data: { orderId: "service-order" } }, owner)).success, true);
   const shooting = await rpc(source, "getMyOrders", { data: { businessStatus: "shooting" } }, owner);
   assert.equal(shooting.data[0].businessStatus, "shooting");
   assert.equal(shooting.data[0].workflowStage, "shooting");
-  const finished = await app.execute("POST", "/api/kf/orders/SYNC-1/shoot/finish", { expected_status: "shooting" }, session);
-  assert.equal(finished.service_status, "final_pending");
+  assert.equal(store.snapshot().orders[0].service_status, "shooting");
   assert.equal(store.snapshot().orders[0].done_at || null, null);
   assert.equal(store.snapshot().orders[0].completedAt || null, null);
   const detail = await rpc(source, "getOrderDetail", { data: { orderId: "service-order" } }, owner);
-  assert.equal(detail.data.workflowStage, "awaiting_final_payment");
+  assert.equal(detail.data.workflowStage, "shooting");
   assert.equal(detail.data.businessStatus, "shooting");
-  assert.equal(detail.data.shootingCompleted, true);
+  assert.equal(detail.data.shootingCompleted, false);
   assert.equal(detail.data.canPayFinal, true);
   const counts = await rpc(source, "getOrderStatusCount", {}, owner);
   assert.equal(counts.data.businessStatus.completed, 0);
@@ -92,7 +90,7 @@ test("service shooting completion opens final payment; only the verified receipt
   assert.equal((await rpc(source, "getMyOrders", { data: { businessStatus: "completed" } }, owner)).data.length, 0);
   assert.equal(store.snapshot().bindings.length, 0, "shooting completion must not start customer protection");
   const saved = store.snapshot().orders[0];
-  assert.equal(saved.status, "final_pending");
+  assert.equal(saved.status, "shooting");
   assert.equal(saved.finalPaid, undefined);
   assert.equal(saved.finalFinanceStatus, undefined);
   assert.deepEqual(saved.paymentRecords, []);
@@ -126,7 +124,6 @@ test("zero-balance service orders wait for customer acknowledgement and complete
   const source = sourceFor(() => store.snapshot().orders, store);
   const app = require("../lib/customerService.cjs").serviceFor(source, { store, benefit: {}, clock: () => at }).workbench;
   t.after(() => require("../lib/wechatPay.cjs").drainMerchantShare(source));
-  await app.execute("POST", "/api/kf/orders/SYNC-ZERO/shoot/finish", { expected_status: "shooting" }, { kind: "admin", role: "service", authzUserId: "service-account" });
   const before = await rpc(source, "getOrderDetail", { data: { orderId: "zero-order" } }, owner);
   assert.equal(before.data.businessStatus, "shooting");
   assert.equal(before.data.canPay, false);

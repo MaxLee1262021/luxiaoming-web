@@ -9,6 +9,7 @@ const root = path.resolve(__dirname, "../..");
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const spotOrder = require("../utils/spot-order.js");
 const { planSpotMutation } = require("../../server/lib/spotOrder.cjs");
+const contentPolicy = require("../../server/lib/contentPolicy.cjs");
 
 function fixture(options = {}) {
   const messages = [];
@@ -20,7 +21,7 @@ function fixture(options = {}) {
   const message = (text) => messages.push(text);
   Object.assign(message, { warning: message, error: message, success: message });
   const Vue = { ref: (value) => ({ value }), reactive: (value) => value, computed, watch() {}, unref: (value) => value?.value ?? value };
-  const window = { Vue, ElMessage: message, LXM_APP_PARTS: [], LXM_AUTH: { hasSession: () => false }, LXM_SPOT_ORDER: spotOrder, LXM_UPLOAD: { ready: () => !options.uploadBusy && options.uploadReady !== false, busy: () => !!options.uploadBusy }, LXM_PAGES: { register(page) { window.page = page; } } };
+  const window = { Vue, ElMessage: message, LXM_APP_PARTS: [], LXM_AUTH: { hasSession: () => false }, LXM_SPOT_ORDER: spotOrder, LXM_CONTENT_ORDER: require("../utils/content-order.js"), LXM_UPLOAD: { ready: () => !options.uploadBusy && options.uploadReady !== false, busy: () => !!options.uploadBusy }, LXM_PAGES: { register(page) { window.page = page; } } };
   window.LXM_AUTH.hasSession = () => true;
   window.LXM_CLOUD_MODE = "mysql";
   window.LXM_API_STATE = { reachable: true };
@@ -34,8 +35,8 @@ function fixture(options = {}) {
     data: {
       cities: [{ id: "c1", name: "长沙" }, { id: "c2", name: "杭州" }],
       spots: [{ id: "a", name: "点A", cityId: "c1", sort: 1, isShow: true }, { id: "b", name: "点B", cityId: "c1", sort: 2, isShow: true }, { id: "c", name: "点C", cityId: "c2", sort: 1, isShow: true }],
-      albums: [{ id: "photo", name: "照片", price: 12.34, spotId: "a", tags: [], isShow: true, cover: "/test.jpg", intro: "拍摄说明", photoCount: 5, retouchCount: 5, makeupIncluded: false }],
-      packages: [{ id: "video", name: "短片", type: "video", price: 20, spotId: "b", isShow: true }],
+      albums: [{ id: "photo", name: "照片", price: 12.34, spotId: "a", tags: ["测试风格"], isShow: true, cover: "/test.jpg", intro: "拍摄说明", photoCount: 5, retouchCount: 5, makeupIncluded: false }],
+      packages: [{ id: "video", name: "短片", type: "video", tags: ["测试风格"], price: 20, spotId: "b", isShow: true }],
       peripherals: [{ id: "gift", name: "相框", price: 5, spotId: "", isShow: true }],
       guides: [{ id: "guide", title: "灵感", spotId: "a", isShow: true }],
       orders: [{ id: "historical", spotId: "a", products: [{ id: "photo", name: "历史照片", price: 10 }] }],
@@ -71,6 +72,136 @@ function fixture(options = {}) {
   }
   return { ctx, page, writes, messages, trackWrites, window, sandbox, options, apiCalls };
 }
+
+// Exercise the actual editor persistence helper against the server's catalog
+// preparation and validation, without a database or a mocked success shortcut.
+function connectPeripheralPolicyServer(f) {
+  const rows = clone(f.ctx.data.peripherals), calls = [];
+  const source = { async list(key) { return clone(key === "peripherals" ? rows : f.ctx.data[key] || []); } };
+  async function save(method, key, id, input) {
+    assert.equal(key, "peripherals");
+    const body = clone(input);
+    calls.push({ method, key, id, body });
+    const current = rows.find((row) => String(row.id || row._id) === String(id));
+    if (method === "update" && !current) throw Object.assign(new Error("记录不存在"), { status: 404 });
+    const context = await contentPolicy.createContentContext(source);
+    const patch = await contentPolicy.prepareContentPatch(source, key, body, current || {}, context);
+    const saved = { ...current, ...patch, id, _id: id };
+    const error = contentPolicy.validateContentPublication(key, saved, current, context, body);
+    if (error) throw Object.assign(new Error(error), { status: 400 });
+    if (current) Object.assign(current, saved); else rows.push(saved);
+    return clone(saved);
+  }
+  f.window.LXM_CLOUD.update = (key, id, body) => save("update", key, id, body);
+  f.window.LXM_CLOUD.create = (key, body) => save("create", key, body.id, body);
+  return { rows, calls };
+}
+
+test("影像周边编辑页只隐藏历史商品时真实保存链保持纯可见性请求", async () => {
+  for (const field of ["isShow", "internalOnly"]) {
+    const f = fixture();
+    f.ctx.data.peripherals = [{ id: "legacy", name: "历史商品", price: 0, isShow: true }];
+    const server = connectPeripheralPolicyServer(f);
+    const page = f.page("src/views/content/peripheral/peripheral.js");
+    const source = f.ctx.data.peripherals[0];
+    page.selectPeripheral(source);
+    page.selectedPeripheral.value[field] = field === "isShow" ? false : true;
+    assert.equal(await page.saveSelectedPeripheral(), true, f.messages.join("；"));
+    assert.equal(server.calls.length, 1);
+    assert.ok(server.calls[0].body.isShow === false || server.calls[0].body.internalOnly === true);
+    assert.ok(Object.keys(server.calls[0].body).every((key) => ["isShow", "internalOnly", "status", "auditStatus"].includes(key)));
+    for (const key of ["stock", "stockQty", "shippingFee", "unit", "cover", "images", "videos", "intro", "description"]) {
+      assert.equal(Object.hasOwn(server.calls[0].body, key), false, `${field}: 请求不能补入 ${key}`);
+      assert.equal(Object.hasOwn(server.rows[0], key), false, `${field}: 历史记录不能补入 ${key}`);
+    }
+    assert.equal(source.price, 0);
+    assert.equal(page.editorOpen.value, false);
+  }
+});
+
+test("全量历史周边仅下架时不归一化内容、不新增标签，保留无效旧售价", async () => {
+  const f = fixture();
+  f.ctx.data.peripherals = [{ id: "legacy", name: "历史商品", price: 0, tags: ["旧标签"], isShow: true }];
+  const server = connectPeripheralPolicyServer(f);
+  const source = f.ctx.data.peripherals[0], previous = clone(source);
+  source.isShow = false;
+  assert.equal(await f.ctx.persistContentMutation("peripherals", source, previous), true, f.messages.join("；"));
+  assert.equal(server.calls.length, 1);
+  assert.deepEqual(server.calls[0].body, { isShow: false });
+  assert.equal(source.price, 0);
+  assert.equal(Object.hasOwn(source, "stock"), false);
+  assert.equal(Object.hasOwn(source, "description"), false);
+  assert.deepEqual(f.ctx.data.tagLibrary, []);
+});
+
+test("历史影像周边货架下架保留审核元数据，仍禁止借下架改商品资料", async () => {
+  const f = fixture();
+  f.ctx.data.peripherals = [{ id: "legacy", name: "历史商品", price: 0, status: "上架", isShow: true }];
+  const server = connectPeripheralPolicyServer(f);
+  const source = f.ctx.data.peripherals[0];
+  // The shelf switch updates isShow before invoking the shared change handler.
+  source.isShow = false;
+  await f.ctx.toggleShelf({ __key: "peripherals", __source: source, name: source.name });
+  assert.equal(server.calls.length, 1, f.messages.join("；"));
+  const body = server.calls[0].body;
+  assert.equal(server.rows[0].isShow, false);
+  assert.equal(body.status, "下架");
+  assert.equal(body.auditType, "商品下架");
+  assert.equal(body.auditSubmitter, "管理员");
+  assert.ok(body.auditSubmitAt);
+  assert.equal(body.auditReason, "商品下架");
+  assert.equal(Object.hasOwn(body, "price"), false);
+  for (const field of ["stock", "shippingFee", "unit", "intro", "description"]) assert.equal(Object.hasOwn(server.rows[0], field), false, field);
+
+  const bad = fixture();
+  bad.ctx.data.peripherals = [{ id: "legacy", name: "历史商品", price: 0, status: "上架", isShow: true }];
+  const rejecting = connectPeripheralPolicyServer(bad);
+  const current = bad.ctx.data.peripherals[0], previous = clone(current);
+  Object.assign(current, { isShow: false, status: "下架", name: "试图绕过必填的新名称" });
+  bad.ctx.markProductAudit(current, "商品下架");
+  assert.equal(await bad.ctx.persistContentMutation("peripherals", current, previous), false);
+  assert.equal(rejecting.calls.length, 1, "必须送普通资料修改到服务端校验");
+  assert.equal(rejecting.calls[0].body.name, "试图绕过必填的新名称");
+  assert.equal(rejecting.rows[0].name, "历史商品");
+  assert.equal(rejecting.rows[0].isShow, true);
+  assert.equal(current.name, "历史商品");
+});
+
+test("视频作为唯一素材的新周边经真实保存链通过并保留零库存包邮", async () => {
+  const f = fixture();
+  f.ctx.data.peripherals = [];
+  const server = connectPeripheralPolicyServer(f);
+  const page = f.page("src/views/content/peripheral/peripheral.js");
+  page.createPeripheral();
+  Object.assign(page.selectedPeripheral.value, {
+    name: "视频展示商品", price: 29.9, stock: 0, shippingFee: 0,
+    intro: "现货商品说明", videos: ["/api/media/peripheral-video"]
+  });
+  assert.equal(await page.saveSelectedPeripheral(), true, f.messages.join("；"));
+  assert.equal(server.calls.at(-1).method, "create");
+  assert.equal(server.rows.length, 1);
+  assert.deepEqual(server.rows[0].videos, ["/api/media/peripheral-video"]);
+  assert.equal(server.rows[0].stock, 0);
+  assert.equal(server.rows[0].shippingFee, 0);
+  assert.equal(server.rows[0].cover, "");
+});
+
+test("影像周边隐藏时同时修改资料仍须补齐必填信息且不发保存请求", async () => {
+  const f = fixture();
+  f.ctx.data.peripherals = [{ id: "legacy", name: "历史商品", price: 20, isShow: true }];
+  const server = connectPeripheralPolicyServer(f);
+  const page = f.page("src/views/content/peripheral/peripheral.js");
+  const source = f.ctx.data.peripherals[0];
+  page.selectPeripheral(source);
+  Object.assign(page.selectedPeripheral.value, { isShow: false, name: "未补齐配置的新名称" });
+  assert.equal(await page.saveSelectedPeripheral(), false);
+  assert.equal(server.calls.length, 0);
+  assert.equal(server.rows[0].name, "历史商品");
+  assert.equal(source.name, "历史商品");
+  assert.equal(source.isShow, true);
+  assert.equal(page.editorOpen.value, true);
+  assert.match(f.messages.at(-1), /运费/);
+});
 
 test("新增打卡点上传封面后才允许展示保存，图片别名保持一致", async () => {
   const f = fixture();
@@ -223,7 +354,7 @@ test("照片创建默认隐藏且不关联打卡点，九张照片统计、首�
   assert.equal(draft.photoCount, 0);
   assert.equal(page.photoCount.value, 0);
   assert.equal(page.allPhotosSelected.value, false);
-  Object.assign(draft, { name: "九张照片商品", price: 499, retouchMode: "count", retouchCount: 3, makeupIncluded: true });
+  Object.assign(draft, { name: "九张照片商品", tags: ["测试标签"], price: 499, retouchMode: "count", retouchCount: 3, makeupIncluded: true });
   const photos = Array.from({ length: 9 }, (_, index) => `/photo-${index + 1}.jpg`);
   photos.forEach((url) => f.ctx.addAlbumPhoto(draft, url));
   assert.equal(draft.photoCount, 9);
@@ -337,7 +468,7 @@ test("照片选择已有风格保留风格ID且不会继承其打卡点", async 
   const page = f.page("src/views/content/album/album.js");
   page.createAlbum();
   const draft = page.selectedAlbum.value;
-  Object.assign(draft, { name: "清新系列商品", seriesId: "garden", price: 299, isShow: true });
+  Object.assign(draft, { name: "清新系列商品", seriesId: "garden", tags: ["测试标签"], price: 299, isShow: true });
   page.changeAlbumSeries("garden");
   f.ctx.addAlbumPhoto(draft, "/garden.jpg");
   assert.equal(draft.seriesName, "春日清新系列");
@@ -358,6 +489,7 @@ test("照片在旧筛选条件下创建成功后仍立即出现在列表", async
   assert.equal(page.listSource.value.length, 0);
   page.createAlbum();
   page.selectedAlbum.value.name = "筛选后新增照片";
+  page.selectedAlbum.value.tags = ["测试标签"];
   f.ctx.addAlbumPhoto(page.selectedAlbum.value, "/filtered-create.jpg");
   assert.equal(await page.saveSelectedAlbum(), true, f.messages.join("；"));
   const saved = f.ctx.data.albums[0];
@@ -376,7 +508,7 @@ test("照片风格筛选同时匹配已有系列ID和同名自定义系列", () 
     { id: "custom-other", name: "自定义胶片商品", seriesId: "", seriesName: "复古胶片", isShow: false }
   );
   f.ctx.state.filters.contentSeriesId = "summer";
-  assert.deepEqual(Array.from(f.ctx.albumRows.value, (row) => row.id), ["photo", "custom-summer"]);
+  assert.deepEqual(Array.from(f.ctx.albumRows.value, (row) => row.id), ["custom-summer", "photo"]);
 });
 
 test("照片上传期间阻止离开、还原、切换、修改选择与保存，文件夹参数完整转发", async () => {
@@ -388,6 +520,7 @@ test("照片上传期间阻止离开、还原、切换、修改选择与保存�
   page.createAlbum();
   const draft = page.selectedAlbum.value;
   draft.name = "上传中的商品";
+  draft.tags = ["测试标签"];
   f.ctx.addAlbumPhoto(draft, "/upload-one.jpg");
   f.ctx.addAlbumPhoto(draft, "/upload-two.jpg");
   page.togglePhotoSelection("/upload-one.jpg", true);
@@ -443,6 +576,84 @@ test("点位页快捷新增照片商品使用商品草稿，拍摄说明清空�
   assert.equal(f.ctx.data.albums[0].intro, "");
 });
 
+test("照片服务自定义文案保存、重新编辑和增删预览照片时保持一致", async () => {
+  const f = fixture();
+  const page = f.page("src/views/content/album/album.js");
+  page.createAlbum();
+  const draft = page.selectedAlbum.value;
+  Object.assign(draft, { name: "自由交付照片", tags: ["留影"], price: 198, photoCountText: " 底片全送 ", retouchText: " 像素蛋糕，AI精修9张，PS精修3张 ", makeupText: " 含简妆，自备服装 " });
+  f.ctx.addAlbumPhoto(draft, "/first.jpg");
+  f.ctx.addAlbumPhoto(draft, "/second.jpg");
+  page.removePhoto("/first.jpg");
+  assert.equal(await page.saveSelectedAlbum(), true, f.messages.join("；"));
+  const saved = f.ctx.data.albums[0];
+  assert.equal(saved.photoCount, 1);
+  assert.equal(saved.photoCountText, "底片全送");
+  assert.equal(saved.retouchText, "像素蛋糕，AI精修9张，PS精修3张");
+  assert.equal(saved.makeupText, "含简妆，自备服装");
+  assert.equal(saved.price, 198);
+  page.selectAlbum(saved);
+  assert.equal(page.selectedAlbum.value.photoCountText, "底片全送");
+  assert.equal(page.photoCountLabel(saved), "底片全送");
+  assert.equal(page.retouchLabel(saved), "像素蛋糕，AI精修9张，PS精修3张");
+  assert.equal(page.makeupLabel(saved), "含简妆，自备服装");
+  f.ctx.addAlbumPhoto(page.selectedAlbum.value, "/third.jpg");
+  assert.equal(page.photoCount.value, 2);
+  assert.equal(await page.saveSelectedAlbum(), true, f.messages.join("；"));
+  assert.equal(saved.photoCountText, "底片全送");
+  assert.equal(saved.photoCount, 2);
+});
+
+test("旧照片服务回填原文案，清空自定义时回退原数量和妆造状态", () => {
+  const f = fixture();
+  const page = f.page("src/views/content/album/album.js");
+  const saved = f.ctx.data.albums[0];
+  Object.assign(saved, { retouchCount: 3, makeupIncluded: true });
+  page.selectAlbum(saved);
+  assert.equal(page.selectedAlbum.value.photoCountText, "5 张照片");
+  assert.equal(page.selectedAlbum.value.retouchText, "修图 3 张");
+  assert.equal(page.selectedAlbum.value.makeupText, "包含");
+  const cleared = { ...saved, photoCountText: " ", retouchText: "", makeupText: null };
+  assert.equal(page.photoCountLabel(cleared), "5 张照片");
+  assert.equal(page.retouchLabel(cleared), "修图 3 张");
+  assert.equal(page.makeupLabel(cleared), "包含");
+});
+
+test("快捷照片编辑保存自定义文案，隐藏的旧修图张数不阻塞自定义修图", async () => {
+  const f = fixture();
+  f.ctx.state.active = "spots";
+  f.ctx.openContentQuick("albums");
+  const draft = f.ctx.state.editContent;
+  assert.equal(draft.photoCountText, "", "新建时应等待输入，不能锁定为零张照片");
+  Object.assign(draft, { name: "交付照片", tags: ["留影"], price: 99, photoCountText: "交付9张", retouchText: "修9张", makeupText: "自备妆造", retouchMode: "count", retouchCount: 0 });
+  f.ctx.addAlbumPhoto(draft, "/preview.jpg");
+  f.ctx.applyAlbumShootingTemplate(draft);
+  await f.ctx.saveContent();
+  const saved = f.ctx.data.albums.find(row => row.name === "交付照片");
+  assert.ok(saved, f.messages.join("；"));
+  assert.equal(saved.photoCountText, "交付9张");
+  assert.equal(saved.retouchText, "修9张");
+  assert.equal(saved.makeupText, "自备妆造");
+  f.ctx.openContent(saved);
+  assert.equal(f.ctx.state.editContent.photoCountText, "交付9张");
+  assert.equal(f.ctx.state.editContent.retouchText, "修9张");
+});
+
+test("照片自定义服务文案超长时不保存且保留编辑草稿", async () => {
+  for (const field of ["photoCountText", "retouchText", "makeupText"]) {
+    const f = fixture();
+    f.trackWrites();
+    const page = f.page("src/views/content/album/album.js");
+    page.selectAlbum(f.ctx.data.albums[0]);
+    page.selectedAlbum.value[field] = "字".repeat(161);
+    await page.saveSelectedAlbum();
+    assert.equal(f.writes.length, 0, field);
+    assert.match(f.messages.at(-1), /不能超过160个字符/);
+    assert.equal(page.editorOpen.value, true);
+    assert.equal(page.selectedAlbum.value[field].length, 161);
+  }
+});
+
 test("照片商品修图可明确不包含，按张数时拒绝零和小数", async () => {
   const f = fixture();
   const row = { ...f.ctx.data.albums[0], retouchMode: "excluded", retouchCount: 9 };
@@ -459,6 +670,7 @@ test("组合商品数量与单价计算原价，手改售价保留，编辑明�
   f.trackWrites();
   const page = f.page("src/views/content/package/package.js");
   page.openCreate();
+  page.form.value.tagText = "测试标签";
   page.form.value.name = "跨点位套餐";
   page.addIncludedItem();
   Object.assign(page.form.value.includedItems[0], { productId: "photo", quantity: 3 });
@@ -528,6 +740,7 @@ test("套餐添加商品去重但保留数量，周边加入与恢复自动价�
   f.trackWrites();
   const page = f.page("src/views/content/package/package.js");
   page.openCreate();
+  page.form.value.tagText = "测试标签";
   page.form.value.name = "演示交互组合套餐";
   Object.assign(page.picker, { city: "c1", spotId: "a", productKey: "album:photo", peripheralId: "gift" });
   page.addSpotProduct();
@@ -646,6 +859,7 @@ test("套餐通用照片在未关联点位入口可选，城市筛选不会误�
   f.ctx.data.albums.push({ id: "unbound-photo", name: "通用照片", price: 15.5, seriesId: "legacy-series", spotId: "", spotIds: [], spotBindingExplicit: true, isShow: true });
   const page = f.page("src/views/content/package/package.js");
   page.openCreate();
+  page.form.value.tagText = "测试标签";
   assert.ok(page.pickerSpots.value.some((spot) => spot.id === "__unbound__"));
   Object.assign(page.picker, { spotId: "__unbound__", productKey: "album:unbound-photo" });
   assert.deepEqual(Array.from(page.spotProductOptions.value, (option) => option.id), ["unbound-photo"]);
@@ -680,6 +894,7 @@ test("创建套餐等待服务端保存成功后自动回到列表，清除旧�
   page.spotFilter.value = "b";
   page.visibilityFilter.value = "hidden";
   page.openCreate();
+  page.form.value.tagText = "测试标签";
   page.form.value.name = "新建后返回列表";
   page.addIncludedItem();
   Object.assign(page.form.value.includedItems[0], { productId: "photo", quantity: 1 });
@@ -706,6 +921,7 @@ test("创建套餐等待服务端保存成功后自动回到列表，清除旧�
   assert.equal(confirmations, 0, "成功保存后不弹放弃修改确认");
   page.resetEditor();
   page.openCreate();
+  page.form.value.tagText = "测试标签";
   assert.equal(page.form.value.name, "");
   assert.equal(page.form.value.includedItems.length, 0);
 });
@@ -800,6 +1016,7 @@ test("套餐订金百分数保存为统一比例，零、一和百分之百重�
     const f = fixture();
     const page = f.page("src/views/content/package/package.js");
     page.openCreate();
+  page.form.value.tagText = "测试标签";
     page.form.value.name = `订金${percent}%套餐`;
     page.form.value.depositRatio = percent;
     Object.assign(page.picker, { city: "c1", spotId: "a", productKey: "album:photo" });
@@ -826,6 +1043,7 @@ test("套餐可批量加入同点位多个商品，再跨点位跨城市追加�
   f.ctx.data.peripherals.push({ id: "gift2", name: "照片书", price: 6, isShow: true });
   const page = f.page("src/views/content/package/package.js");
   page.openCreate();
+  page.form.value.tagText = "测试标签";
   page.form.value.name = "跨城市批量组合";
   Object.assign(page.picker, { city: "c1", spotId: "a", productKeys: ["album:photo", "album:photo-a2", "video:video-a"], peripheralIds: ["gift", "gift2"] });
   page.addSpotProducts();
@@ -1025,15 +1243,15 @@ test("旧商品仅通过风格继承点位时普通编辑保留关联，明确�
 
 test("新发布与隐藏后恢复显示校验必填，旧已发布内容的普通编辑保持兼容", () => {
   const f = fixture();
-  assert.match(f.ctx.validateContentPublishing("albums", { name: "新照片", price: 10, isShow: true }), /说明/);
-  assert.equal(f.ctx.validateContentPublishing("albums", { name: "草稿", isShow: false }), "");
-  assert.equal(f.ctx.validateContentPublishing("albums", { name: "旧照片", price: 15, isShow: true }, { isShow: true }), "");
-  assert.match(f.ctx.validateContentPublishing("albums", { name: "恢复照片", price: 10, isShow: true }, { isShow: false }), /说明/);
+  assert.match(f.ctx.validateContentPublishing("albums", { name: "新照片", tags: ["风格"], price: 10, isShow: true }), /说明/);
+  assert.equal(f.ctx.validateContentPublishing("albums", { name: "草稿", tags: ["风格"], isShow: false }), "");
+  assert.equal(f.ctx.validateContentPublishing("albums", { name: "旧照片", tags: ["风格"], price: 15, isShow: true }, { isShow: true }), "");
+  assert.match(f.ctx.validateContentPublishing("albums", { name: "恢复照片", tags: ["风格"], price: 10, isShow: true }, { isShow: false }), /说明/);
   const complete = { ...f.ctx.data.albums[0], tags: ["风格"], spotId: "" };
   assert.equal(f.ctx.validateContentPublishing("albums", complete), "", "点位可不关联");
 });
 
-test("照片留影新增可仅关联拍摄风格保存，不要求重复填写风格标签", async () => {
+test("照片留影关联拍摄风格后仍须填写商品标签才能保存", async () => {
   const f = fixture();
   f.ctx.data.series.push({ _id: "linked-style", name: "渔人码头", spotId: "a" });
   f.ctx.state.active = "albums";
@@ -1042,15 +1260,19 @@ test("照片留影新增可仅关联拍摄风格保存，不要求重复填写�
   assert.equal(f.ctx.state.editContent.seriesId, "linked-style");
   assert.equal(f.ctx.state.editContent.tags.length, 0);
   await f.ctx.saveContent();
+  assert.equal(f.ctx.data.albums.some((row) => row.name === "渔人码头"), false);
+  assert.equal(f.messages.at(-1), "请至少添加一个标签");
+  f.ctx.state.editContent.tags = ["江景"];
+  await f.ctx.saveContent();
   const saved = f.ctx.data.albums.find((row) => row.name === "渔人码头");
   assert.ok(saved, f.messages.join("；"));
   assert.equal(saved.seriesId, "linked-style");
-  assert.equal(saved.tags.length, 0);
+  assert.deepEqual(Array.from(saved.tags), ["江景"]);
   assert.equal(f.ctx.state.contentDialog, false);
-  assert.ok(!f.ctx.data.tagLibrary.some((tag) => tag.category === "风格"));
+  assert.ok(f.ctx.data.tagLibrary.some((tag) => tag.name === "江景" && tag.category === "风格"));
 });
 
-test("风格关联与自定义标签均可发布，失效关联不能绕过新增和恢复显示校验", () => {
+test("风格关联不能替代商品标签，自定义标签仍可独立发布", () => {
   const f = fixture();
   f.ctx.data.series.push({ id: "linked-style" }, { id: "deleted-style", deleted: true }, { id: "removed-style", isDeleted: true });
   const products = [
@@ -1059,12 +1281,45 @@ test("风格关联与自定义标签均可发布，失效关联不能绕过新�
   ];
   for (const [key, row] of products) {
     for (const previous of [null, { isShow: false }]) {
-      assert.equal(f.ctx.validateContentPublishing(key, { ...row, seriesId: "linked-style" }, previous), "");
+      assert.equal(f.ctx.validateContentPublishing(key, { ...row, seriesId: "linked-style" }, previous), "请至少添加一个标签");
       assert.equal(f.ctx.validateContentPublishing(key, { ...row, tags: ["清新"] }, previous), "");
       for (const seriesId of ["", "missing-style", "deleted-style", "removed-style"]) {
-        assert.match(f.ctx.validateContentPublishing(key, { ...row, seriesId }, previous), /请选择关联拍摄风格或输入风格标签/);
+        assert.equal(f.ctx.validateContentPublishing(key, { ...row, seriesId }, previous), "请至少添加一个标签");
       }
     }
+  }
+});
+
+test("三类商品保存均要求有效标签，草稿和旧商品清空也不能用风格或服务字段替代", () => {
+  const f = fixture();
+  f.ctx.data.series.push({ id: "linked-style" });
+  const products = [
+    ["albums", f.ctx.data.albums[0]],
+    ["packages", { name: "视频摄像", type: "video", productKind: "video_single", price: 10, videoUrl: "/video.mp4", shootingNotes: "拍摄说明", videoDuration: 30, finishedVideoCount: 1, deliveryCycle: "2个工作日" }],
+    ["packages", { name: "旅拍套餐", type: "photo", price: 100 }]
+  ];
+  for (const [key, product] of products) {
+    for (const status of ["草稿", "下架", "上架"]) {
+      const row = { ...product, status, isShow: status === "上架", seriesId: "linked-style", seriesName: "旧风格", tag: "旧运营", serviceTags: ["旧服务"], styleTags: ["旧风格"] };
+      for (const tags of [undefined, null, [], [" ", "\n"], [null, false, {}, 0], " ， | "]) {
+        assert.equal(f.ctx.validateContentPublishing(key, { ...row, tags }), "请至少添加一个标签");
+        const previous = { ...row, tags: ["旧标签"] };
+        assert.equal(f.ctx.validateContentPublishing(key, { ...row, tags }, previous), "请至少添加一个标签");
+      }
+      assert.equal(f.ctx.validateContentPublishing(key, { ...row, tags: ["  自定义标签  "] }), "");
+    }
+  }
+});
+
+test("存量无标签商品可纯状态下架，明确编辑保存或同时改内容仍必须补标签", () => {
+  const f = fixture();
+  for (const key of ["albums", "packages"]) {
+    const previous = { id: "legacy", name: "旧商品", type: "photo", tags: [], isShow: true, status: "上架" };
+    const hidden = { ...previous, isShow: false, status: "下架" };
+    assert.equal(f.ctx.validateContentPublishing(key, hidden, previous), "");
+    assert.equal(f.ctx.validateContentPublishing(key, hidden, previous, { forceTags: true }), "请至少添加一个标签");
+    assert.equal(f.ctx.validateContentPublishing(key, { ...hidden, name: "改了资料" }, previous), "请至少添加一个标签");
+    assert.equal(f.ctx.validateContentPublishing(key, previous, hidden), "请至少添加一个标签");
   }
 });
 
@@ -1080,7 +1335,7 @@ test("照片留影不绑定拍摄风格时也可填写自定义标签保存", as
   assert.ok(f.ctx.data.tagLibrary.some((tag) => tag.name === "江景" && tag.category === "风格"));
 });
 
-test("组合套餐未关联风格、未填写标签时仍可通过实际保存校验", async () => {
+test("组合套餐不关联风格也必须至少填写一个标签", async () => {
   const f = fixture();
   const page = f.page("src/views/content/package/package.js");
   page.openCreate();
@@ -1089,11 +1344,85 @@ test("组合套餐未关联风格、未填写标签时仍可通过实际保存�
   Object.assign(page.form.value.includedItems[0], { productId: "photo", quantity: 2 });
   page.syncIncludedItem(page.form.value.includedItems[0]);
   await page.saveForm();
+  assert.equal(f.ctx.data.packages.some((row) => row.name === "照片组合套餐"), false);
+  assert.equal(f.messages.at(-1), "请至少添加一个标签");
+  page.addTag("双人");
+  await page.saveForm();
   const saved = f.ctx.data.packages.find((row) => row.name === "照片组合套餐");
   assert.ok(saved, f.messages.join("；"));
   assert.equal(saved.price, 24.68);
   assert.equal(saved.seriesId, "");
-  assert.equal(saved.tags.length, 0);
+  assert.deepEqual(Array.from(saved.tags), ["双人"]);
+});
+
+test("套餐编辑按三行容量限制27字符，超限不保存，边界标题不截断", async () => {
+  const f = fixture();
+  f.trackWrites();
+  const page = f.page("src/views/content/package/package.js");
+  assert.equal(page.packageTitleLimit, 27);
+  page.openCreate();
+  page.form.value.name = "旅".repeat(28);
+  page.addTag("双人");
+  page.addIncludedItem();
+  Object.assign(page.form.value.includedItems[0], { productId: "photo", quantity: 1 });
+  page.syncIncludedItem(page.form.value.includedItems[0]);
+  await page.saveForm();
+  assert.equal(f.writes.length, 0);
+  assert.match(f.messages.at(-1), /最多 27 个字符/);
+  assert.equal(page.form.value.name.length, 28);
+  const name = "旅".repeat(21) + "ABC123";
+  assert.equal(name.length, 27);
+  page.form.value.name = name;
+  assert.equal(await page.saveForm(), true, f.messages.join("；"));
+  assert.equal(f.writes[0].row.name, name);
+});
+
+test("套餐快捷编辑覆盖字数校验和单行归一，视频单品沿用原标题范围", async () => {
+  const f = fixture();
+  const calls = [];
+  f.window.LXM_CLOUD.create = async (key, payload) => { calls.push(clone(payload)); return { ...clone(payload), id: payload.id || "new-package" }; };
+  f.window.LXM_CLOUD.update = async (key, id, payload) => { calls.push(clone(payload)); return { ...clone(payload), id }; };
+  f.ctx.openContentQuick("packages");
+  Object.assign(f.ctx.state.editContent, { name: "A".repeat(28), tags: ["组合"], isShow: false, status: "草稿" });
+  await f.ctx.saveContent();
+  assert.equal(calls.length, 0);
+  assert.match(f.messages.at(-1), /最多 27 个字符/);
+  f.ctx.state.editContent.name = "  城市\n  旅拍\t套餐  ";
+  await f.ctx.saveContent();
+  assert.equal(calls.at(-1).name, "城市 旅拍 套餐");
+  const video = { __key: "packages", id: "video", name: "视频".repeat(25), type: "video", productKind: "video_single", tags: ["电影"], isShow: true };
+  assert.equal(f.ctx.packageTitleError(video), "");
+  assert.equal(f.ctx.packageTitleLength("旅".repeat(25) + "😀"), 27, "和输入框maxlength采用相同UTF-16字符数");
+});
+
+test("旧长套餐名不静默截断，可原名调价和下架，重新显示或改名须缩短", async () => {
+  const f = fixture();
+  f.trackWrites();
+  const source = { id: "long-bundle", name: "旅".repeat(40), type: "photo", isShow: true, status: "上架", price: 12.34, tags: ["组合"], includedItems: [{ type: "album", productId: "photo", quantity: 1 }] };
+  f.ctx.data.packages.push(source);
+  const page = f.page("src/views/content/package/package.js");
+  page.openEdit(source);
+  page.form.value.price = 10;
+  assert.equal(await page.saveForm(), true, f.messages.join("；"));
+  assert.equal(source.name.length, 40);
+  assert.equal(source.price, 10);
+  await page.toggleVisible(source);
+  assert.equal(source.isShow, false);
+  const writes = f.writes.length;
+  await page.toggleVisible(source);
+  assert.equal(source.isShow, false);
+  assert.equal(f.writes.length, writes);
+  assert.match(f.messages.at(-1), /最多 27 个字符/);
+  page.openEdit(source);
+  page.form.value.name = "新".repeat(28);
+  await page.saveForm();
+  assert.equal(source.name.length, 40);
+  assert.equal(f.writes.length, writes);
+  page.form.value.name = "城市旅拍组合套餐";
+  page.form.value.isShow = true;
+  assert.equal(await page.saveForm(), true, f.messages.join("；"));
+  assert.equal(source.name, "城市旅拍组合套餐");
+  assert.equal(source.isShow, true);
 });
 
 function rankedSpotFixture() {

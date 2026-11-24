@@ -13,12 +13,13 @@
   <div v-if="ui.loadError" class="ig-load-error" role="alert">{{ ui.loadError }}<button class="ig-btn" @click="loadGuideData">重新加载</button></div>
 
   <main class="ig-list-main" v-if="ui.mode==='list'">
-    <div class="ig-list-head"><div><h1>灵感管理</h1><p>共 <b>{{ guideTotal }}</b> 条旅拍灵感，置顶内容会优先展示</p></div><button class="ig-btn primary" v-if="can('contentEdit')" @click="openEditor()">+ 新建灵感</button></div>
+    <div class="ig-list-head"><div><h1>灵感管理</h1><p>共 <b>{{ guideTotal }}</b> 条旅拍灵感，升序向前插一位，降序向后插一位</p></div><button class="ig-btn primary" v-if="can('contentEdit')" @click="openEditor()">+ 新建灵感</button></div>
     <div class="ig-filter-bar">
       <div class="ig-search"><span aria-hidden="true">⌕</span><input v-model="state.filters.keyword" placeholder="搜索标题 / 打卡点" aria-label="搜索标题或打卡点"></div>
       <div class="ig-segments" aria-label="发布状态筛选"><button v-for="tab in [{key:'all',label:'全部'},{key:'published',label:'已发布'},{key:'draft',label:'草稿'}]" :key="tab.key" :class="{active:ui.filter===tab.key}" @click="ui.filter=tab.key">{{ tab.label }}</button></div>
       <el-select v-model="state.filters.contentSpotId" class="ig-spot-filter" clearable filterable placeholder="全部打卡点"><el-option v-for="spot in validSpots" :key="idOf(spot)" :label="spot.name" :value="idOf(spot)" /></el-select>
-      <button class="ig-btn" v-if="state.filters.contentSpotId || state.filters.keyword || ui.filter!=='all'" @click="state.filters.contentSpotId='';state.filters.keyword='';ui.filter='all'">重置</button>
+      <el-select v-model="ui.categoryFilter" class="ig-category-filter" clearable filterable placeholder="全部分类" aria-label="筛选文章分类"><el-option label="未分类" value="uncategorized" /><el-option v-for="category in categoryOptions" :key="category" :label="category" :value="'category:'+category" /></el-select>
+      <button class="ig-btn" v-if="state.filters.contentSpotId || state.filters.keyword || ui.filter!=='all' || ui.categoryFilter" @click="state.filters.contentSpotId='';state.filters.keyword='';ui.filter='all';ui.categoryFilter=''">重置</button>
     </div>
     <div class="ig-card-list">
       <article class="ig-inspiration-card" v-for="item in guideRows" :key="idOf(item)" :class="{pinned:item.isTop,'front-hidden':!frontVisible(item)}">
@@ -27,11 +28,11 @@
           <span v-if="item.isTop" class="ig-pin-badge">置顶</span><span v-if="!frontVisible(item)" class="ig-hide-badge">前端隐藏</span>
         </button>
         <div class="ig-list-body" @click="can('contentEdit') ? openEditor(item) : openPreview(item)">
-          <div class="ig-list-title-row"><h3>{{ item.title || item.name || '未命名灵感' }}</h3><span class="ig-state-badge" :class="isPublished(item) ? 'published' : 'draft'">{{ isPublished(item) ? '已发布' : '草稿' }}</span><span class="ig-state-badge" :class="frontVisible(item) ? 'visible' : 'hidden'">{{ frontVisible(item) ? '前端显示' : '前端隐藏' }}</span></div>
+          <div class="ig-list-title-row"><h3>{{ item.title || item.name || '未命名灵感' }}</h3><span class="ig-state-badge" :class="isPublished(item) ? 'published' : 'draft'">{{ isPublished(item) ? '已发布' : '草稿' }}</span><span class="ig-state-badge" :class="frontVisible(item) ? 'visible' : 'hidden'">{{ frontVisible(item) ? '前端显示' : '前端隐藏' }}</span><span class="ig-category-chip">{{ categoryOf(item) || '未分类' }}</span></div>
           <p class="ig-description">{{ textOf(item.contentHtml || item.content || item.description) || '暂无正文内容' }}</p>
-          <div class="ig-list-meta"><span class="ig-spot-chip" v-for="id in spotIdsOf(item).slice(0,2)" :key="id">{{ spotLabel(id) }}</span><span class="ig-spot-chip more" v-if="spotIdsOf(item).length>2">+{{ spotIdsOf(item).length-2 }}</span><span class="ig-product-meta">🛍 {{ productLabel(item) }}</span><span>👁 {{ item.readCount || item.views || 0 }}</span><span>♡ {{ item.likeCount || item.likes || 0 }}</span><span>更新于 {{ timeLabel(item.updatedAt || item.createdAt) }}</span></div>
+          <div class="ig-list-meta"><span class="ig-spot-chip" v-for="id in spotIdsOf(item).slice(0,2)" :key="id">{{ spotLabel(id) }}</span><span class="ig-spot-chip more" v-if="spotIdsOf(item).length>2">+{{ spotIdsOf(item).length-2 }}</span><span class="ig-product-meta">🛍 {{ productLabel(item) }}</span><span>👁 {{ item.readCount ?? item.views ?? 0 }}</span><span>★ {{ item.score ?? 0 }} 分</span><span>♡ {{ item.likeCount || item.likes || 0 }}</span><span>更新于 {{ timeLabel(item.updatedAt || item.createdAt) }}</span></div>
         </div>
-        <div class="ig-list-actions">
+        <div class="ig-list-actions"><div class="content-order-controls" v-if="can('contentEdit')" role="group" aria-label="展示排序"><span class="content-order-position">第 {{ contentSortPosition('guides', item) }} 位</span><button class="ig-action" :disabled="ui.saving || contentSortDisabled('guides', item, -1)" @click="changeContentSort('guides', item, -1)">升序</button><button class="ig-action" :disabled="ui.saving || contentSortDisabled('guides', item, 1)" @click="changeContentSort('guides', item, 1)">降序</button></div>
           <button class="ig-action" v-if="can('contentEdit')" @click="openEditor(item)">✎ 编辑</button>
           <button class="ig-action" :class="{'on-blue':frontVisible(item)}" v-if="can('contentEdit')" :disabled="ui.saving" @click="toggleGuide(item)">{{ frontVisible(item) ? '◉ 前端显示中' : '⊘ 前端已隐藏' }}</button>
           <button class="ig-action" :class="{on:item.isTop}" v-if="can('contentEdit')" :disabled="ui.saving" @click="pinGuide(item)">{{ item.isTop ? '★ 取消置顶' : '☆ 置顶' }}</button>
@@ -67,6 +68,17 @@
       </div>
     </section>
     <aside class="ig-settings-column">
+      <div class="ig-card"><div class="ig-card-head"><h3>浏览人数与评分</h3></div>
+        <div class="ig-metric-settings">
+          <label class="ig-metric-field"><span>初始浏览人数</span><input v-model.number="ui.form.readCount" type="number" min="0" max="2147483647" step="1" inputmode="numeric" aria-label="初始浏览人数" @input="markDirty"><small>填写非负整数，默认 0 人。</small></label>
+          <label class="ig-metric-field"><span>初始评分</span><input v-model.number="ui.form.score" type="number" min="0" max="5" step="0.1" inputmode="decimal" aria-label="初始评分" @input="markDirty"><small>0–5 分，最多一位小数，默认 0 分。</small></label>
+        </div>
+        <p class="ig-hint">保存后用于小程序展示，以及按浏览人数或评分排序。</p>
+      </div>
+      <div class="ig-card"><div class="ig-card-head"><h3>文章分类</h3></div>
+        <div class="ig-category-setting"><el-select v-model="ui.form.category" clearable filterable allow-create default-first-option placeholder="选择分类，或输入新分类后回车" aria-label="文章分类" @change="markDirty"><el-option v-for="category in categoryOptions" :key="category" :label="category" :value="category" /></el-select></div>
+        <p class="ig-hint">小程序按文章分类筛选，留空的文章显示为未分类。最多 40 个字。</p>
+      </div>
       <div class="ig-card"><div class="ig-card-head"><h3>关联打卡点</h3><button class="ig-text-btn" @click="ui.spotKeyword='';ui.spotModal=true">+ 添加</button></div>
         <div class="ig-spot-tags"><span class="ig-spot-tag" v-for="id in ui.form.spotIds" :key="id">{{ spotLabel(id) }}<button :aria-label="'移除'+spotLabel(id)" @click="removeSpot(id)">×</button></span></div><p class="ig-hint">关联打卡点后，可在该打卡点下选择要展示的商品</p>
       </div>

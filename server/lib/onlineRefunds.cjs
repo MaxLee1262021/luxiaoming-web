@@ -39,8 +39,8 @@ async function reservePlan(source, orderId, plan, ticketId) {
   reject("退款余额并发占用，请稍后重试", "ONLINE_REFUND_CONCURRENT", 503);
 }
 
-function refundPlan(order, ticket, allTickets) {
-  const requested = refundAmountInFen(ticket.refundAmount);
+function refundPlan(order, ticket, allTickets, options = {}) {
+  const requested = options.requestedFen || refundAmountInFen(ticket.refundAmount);
   const phase = String(ticket.refundPhase || "").toLowerCase();
   const payments = (order.paymentRecords || []).filter((row) => row && row.provider === "wechat_pay"
     && ["confirmed", "paid", "success", "已审"].includes(String(row.status).toLowerCase())
@@ -49,7 +49,11 @@ function refundPlan(order, ticket, allTickets) {
     || new Set(payments.map((row) => row.externalTransactionId)).size !== payments.length) reject("支付凭据重复，请先核对原交易", "ONLINE_REFUND_PAYMENT_AMBIGUOUS");
   const used = new Map();
   for (const other of allTickets) {
-    if (idOf(other) === idOf(ticket) || String(other.orderId) !== idOf(order)) continue;
+    if (String(other.orderId) !== idOf(order)) continue;
+    if (idOf(other) === idOf(ticket)) {
+      if (options.generation) for (const row of attemptsOf(other).filter(row => row.status === "SUCCESS")) used.set(row.outTradeNo, (used.get(row.outTradeNo) || 0) + row.amountFen);
+      continue;
+    }
     for (const row of attemptsOf(other)) {
       // Unknown/abnormal outcomes remain reserved until a provider query says
       // CLOSED. Never issue a second refund to "fix" an uncertain first one.
@@ -67,7 +71,7 @@ function refundPlan(order, ticket, allTickets) {
     const totalFen = refundAmountInFen(payment.amount);
     const amountFen = Math.min(remaining, Math.max(totalFen - (used.get(payment.outTradeNo) || 0), 0));
     if (!amountFen) continue;
-    plan.push({ refundNo: `LXMR${crypto.createHash("sha256").update(`${idOf(ticket)}:${payment.outTradeNo}`).digest("hex").slice(0, 40)}`,
+    plan.push({ refundNo: `LXMR${crypto.createHash("sha256").update(`${idOf(ticket)}:${payment.outTradeNo}${options.generation ? `:retry:${options.generation}` : ""}`).digest("hex").slice(0, 40)}`,
       paymentId: idOf(payment), outTradeNo: payment.outTradeNo, transactionId: payment.externalTransactionId,
       amountFen, totalFen, phase: payment.phase, status: "CREATED", createdAt: nowIso() });
     remaining -= amountFen;
@@ -113,8 +117,9 @@ async function applyUnlocked(source, input) {
       ...row, status: input.status, refundId: input.refundId, updatedAt: nowIso(),
       ...(input.status === "SUCCESS" ? { successTime: input.successTime, sharePending: true } : {}),
     } : row);
-    const done = attempts.every((row) => row.status === "SUCCESS");
-    const failed = attempts.some((row) => ["ABNORMAL", "CLOSED"].includes(row.status));
+    const automatic = ticket.reviewLane === "customer_self_cancel";
+    const done = automatic ? attempts.filter(row => row.status === "SUCCESS").reduce((sum, row) => sum + row.amountFen, 0) >= refundAmountInFen(ticket.refundAmount) : attempts.every((row) => row.status === "SUCCESS");
+    const failed = attempts.some((row) => row.status === "ABNORMAL") || attempts.some(row => row.status === "CLOSED") && (!automatic || !attempts.some(row => ["CREATED", "PROCESSING"].includes(row.status)));
     ticket = await saveTicket(source, ticket, {
       refundAttempts: attempts, refundStatus: done ? "refunded" : failed ? "refund_failed" : "processing",
       refundConfirmed: done, refundedAmount: attempts.filter((row) => row.status === "SUCCESS").reduce((sum, row) => sum + row.amountFen, 0) / 100,
@@ -131,10 +136,17 @@ async function applyUnlocked(source, input) {
     const allTickets = await source.list("afterSales");
     const totalRefundedFen = allTickets.filter((value) => String(value.orderId) === idOf(order)).reduce((sum, value) => sum + successfulFen(value), 0);
     const patch = { onlineRefundedAmount: totalRefundedFen / 100, shareRefundPending: true, updateTime: nowIso() };
+    if (currentOrder.cancellationSource === "customer_self_cancel") {
+      const receivedSinceCancel = totalRefundedFen - Math.round(Number(currentOrder.customerCancellationRefundBaselineOnlineAmount || 0) * 100);
+      const expectedRefund = Math.round(Number(currentOrder.customerCancellationRefundAmount || 0) * 100);
+      const failed = allTickets.some(value => (currentOrder.customerCancelRefundTicketIds || []).includes(idOf(value)) && value.refundStatus === "refund_failed");
+      const refundStatus = receivedSinceCancel >= expectedRefund ? "refunded" : failed ? "refund_failed" : "processing";
+      Object.assign(patch, { customerCancellationRefundStatus: refundStatus, refundStatus });
+    }
     if (ticket.refundConfirmed && String(currentOrder.afterSaleId || "") === idOf(ticket)) patch.afterSaleStatus = "completed";
     if (ticket.refundConfirmed && ticket.reviewLane === "pre_dispatch" && ticket.refundPhase === "deposit") {
       Object.assign(patch, { status: "cancelled", workflowStage: WORKFLOW_STAGES.CANCELLED, customerStatus: "已取消",
-        cancelledAt: currentOrder.cancelledAt || nowIso(), cancellationSource: "pre_dispatch_deposit_refund", cancelReason: ticket.reason || "定金已原路退款" });
+        cancelledAt: currentOrder.cancelledAt || nowIso(), cancellationSource: currentOrder.cancellationSource || "pre_dispatch_deposit_refund", cancelReason: currentOrder.cancelReason || ticket.reason || "定金已原路退款" });
       if (currentOrder.status !== "cancelled") {
         const timeline = { id: `refund_cancel_${idOf(ticket)}`, type: "微信退款", action: "定金原路退款成功，取消订单", from: currentOrder.status, to: "cancelled", operator: "wechat_pay", createTime: nowIso() };
         patch.statusLogs = [...(currentOrder.statusLogs || []), timeline];
@@ -176,6 +188,23 @@ async function startUnlocked(source, ticketId, options) {
   if (options.approved !== true && !["已审", "approved", "passed"].includes(String(ticket.financeStatus))) reject("退款需先通过审核", "ONLINE_REFUND_NOT_APPROVED");
   const order = await source.get("orders", ticket.orderId);
   if (!order) reject("关联订单不存在", "ONLINE_REFUND_ORDER_NOT_FOUND", 404);
+  if (ticket.reviewLane === "customer_self_cancel"
+    && (order.cancellationSource !== "customer_self_cancel" || !["cancelled", "canceled"].includes(order.status)
+      || !(order.customerCancelRefundTicketIds || []).includes(ticketId))) reject("取消订单退款尚未就绪", "ONLINE_REFUND_CANCEL_NOT_READY");
+  if (order.cancellationSource === "customer_self_cancel" && order.customerCancellationServicePending) {
+    try { await require("./customerService.cjs").onCancelled(source, order); await source.update("orders", idOf(order), { customerCancellationServicePending: false }); }
+    catch (_) { /* Refund processing does not depend on the secondary service projection. */ }
+  }
+  // A verified CLOSED receipt proves no funds moved for that attempt. Only
+  // automatic customer cancellation creates a fresh request for the remainder;
+  // unknown and ABNORMAL outcomes retain their original number for queries.
+  const attempts = attemptsOf(ticket);
+  if (ticket.reviewLane === "customer_self_cancel" && attempts.some(row => row.status === "CLOSED")
+    && !attempts.some(row => !["SUCCESS", "CLOSED"].includes(row.status)) && successfulFen(ticket) < refundAmountInFen(ticket.refundAmount)) {
+    const plan = refundPlan(order, ticket, await source.list("afterSales"), { requestedFen: refundAmountInFen(ticket.refundAmount) - successfulFen(ticket), generation: attempts.filter(row => row.status === "CLOSED").length });
+    await reservePlan(source, idOf(order), plan, ticketId);
+    ticket = await saveTicket(source, ticket, { refundAttempts: [...attempts, ...plan], refundStatus: "processing", status: "处理", customerVisibleStatus: "自动重试微信退款", updatedAt: nowIso() });
+  }
   if (!attemptsOf(ticket).length) {
     if (ticket.reviewLane === "pre_dispatch" && hasEffectiveDispatch(order)) reject("摄影师已安排，不能执行安排前定金退款", "ONLINE_REFUND_DISPATCHED");
     const plan = refundPlan(order, ticket, await source.list("afterSales"));
@@ -218,7 +247,9 @@ async function startRefund(source, ticketId, options = {}) {
 async function reconcilePendingRefunds(source, options = {}) {
   if (!options.wechatPay || !options.wechatPay.isConfigured()) return { processed: 0, failed: 0, disabled: true };
   const candidates = (await source.list("afterSales")).filter((ticket) => attemptsOf(ticket).some((row) =>
-    ["CREATED", "PROCESSING", "ABNORMAL"].includes(row.status) || (row.status === "SUCCESS" && row.sharePending)))
+    ["CREATED", "PROCESSING", "ABNORMAL"].includes(row.status) || (row.status === "SUCCESS" && row.sharePending))
+    || ticket.reviewLane === "customer_self_cancel" && ticket.financeStatus === "已审"
+      && (ticket.refundStatus === "processing" && !attemptsOf(ticket).length || ticket.refundStatus === "refund_failed" && attemptsOf(ticket).some(row => row.status === "CLOSED")))
     .sort((a, b) => String(a.updatedAt || a.createdAt || "").localeCompare(String(b.updatedAt || b.createdAt || "")))
     .slice(0, Math.max(1, Math.min(Number(options.limit) || 50, 200)));
   const summary = { processed: 0, failed: 0 };

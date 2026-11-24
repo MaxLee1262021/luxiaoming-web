@@ -1,9 +1,16 @@
 "use strict";
 
+const { isDeepStrictEqual } = require("node:util");
+const { randomBytes } = require("node:crypto");
+const { prepareRecommendedPhotographer } = require("./contentPhotographers.cjs");
+const { skuIdentity } = require("./physicalCommerce.cjs");
+
 // Manual visibility is stored on the record. Relationship visibility is derived,
 // so reopening a point cannot accidentally publish a manually hidden product.
 const CONTENT_POLICY_KEYS = new Set(["spots", "albums", "packages", "peripherals", "guides", "tagLibrary"]);
 const CONTEXT_KEYS = ["spots", "series", "albums", "packages", "peripherals", "guides"];
+const PACKAGE_TITLE_LIMIT = 27;
+const normalizePackageTitle = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
 const idOf = (row) => String(row && (row.id || row._id) || "");
 const unique = (values) => [...new Set(values.filter((x) => x !== undefined && x !== null && String(x).trim()).map(String))];
 const deleted = (row) => !!(row && (row.deleted === true || row.isDeleted === true));
@@ -131,26 +138,63 @@ function policyError(message, status = 400) {
   const error = new Error(message); error.statusCode = status; error.code = "CONTENT_POLICY_INVALID"; return error;
 }
 
+function packagePeripheralSku(product, item) {
+  const text = (value) => String(value ?? "").trim();
+  const target = item.target && typeof item.target === "object" ? item.target : {};
+  const multiple = product.specMode === "multiple";
+  const skus = multiple ? (Array.isArray(product.skus) ? product.skus : []) : [{
+    spec: (Array.isArray(product.specs) ? product.specs : []).join(" / ") || "默认规格",
+    style: product.skuStyle, price: product.price ?? product.specialPrice ?? 0
+  }];
+  const selector = text(item.skuId || item.specId || item.skuCode || target.skuId || target.specId || target.skuCode);
+  const spec = text(item.spec || target.spec);
+  const style = item.style !== undefined ? item.style : target.style;
+  const matches = skus.filter((sku) => {
+    if (selector) return [skuIdentity(product, sku, !multiple), sku.id, sku.skuId, sku.skuCode].map(text).filter(Boolean).includes(selector);
+    if (!spec) return !multiple;
+    const label = text(sku.style) ? `${text(sku.spec)}【${text(sku.style)}】` : text(sku.spec);
+    return [text(sku.spec), label].includes(spec) && (style === undefined || text(sku.style) === text(style));
+  });
+  if (matches.length !== 1) throw policyError(`周边商品「${product.name || product.title || "未命名"}」请选择有效且明确的规格`);
+  const sku = matches[0], selectedSpec = text(sku.spec) || "默认规格", selectedStyle = text(sku.style);
+  return {
+    skuId: text(sku.id || sku.skuId || sku.skuCode), skuCode: text(sku.skuCode), spec: selectedSpec, style: selectedStyle,
+    specLabel: selectedStyle ? `${selectedSpec}【${selectedStyle}】` : selectedSpec,
+    price: multiple ? peripheralAmount(sku.price, "套餐周边规格单价", true) : sku.price
+  };
+}
+
 function stripProjection(body) {
   const patch = { ...body };
   ["effectiveVisible", "visibilityReasons", "effectiveSpotIds", "__key", "__source", "deletedSpotIds"].forEach((field) => { delete patch[field]; });
   return patch;
 }
 
-function peripheralAmount(value, label) {
+function peripheralAmount(value, label, positive = false) {
   if (!["number", "string"].includes(typeof value) || String(value).trim() === "") throw policyError(`请填写${label}`);
   const number = Number(value);
   const cents = Math.round(number * 100);
-  if (!Number.isFinite(number) || number < 0 || !Number.isSafeInteger(cents)) throw policyError(`${label}必须为有效的非负金额`);
+  if (!Number.isFinite(number) || number < 0 || !Number.isSafeInteger(cents) || number > 10000000
+    || Math.abs(number * 100 - cents) > 1e-6 || positive && cents <= 0) {
+    throw policyError(`${label}必须为${positive ? "大于 0" : "非负"}且不超过 10000000 元的金额，最多两位小数`);
+  }
   return cents / 100;
+}
+
+function isPeripheralVisibilityOnlyHide(row, current, body) {
+  if (!idOf(current) || !body || manualContentVisible(row) && row.internalOnly !== true) return false;
+  const fields = new Set(["isShow", "visible", "enabled", "isSellable", "status", "saleStatus", "shelfStatus", "auditStatus", "reviewStatus", "internalOnly", "auditType", "auditSubmitAt", "auditSubmitter", "auditReason"]);
+  const changes = Object.entries(stripProjection(body)).filter(([field]) => !["id", "_id"].includes(field));
+  return changes.some(([field]) => fields.has(field))
+    && changes.every(([field, value]) => fields.has(field) || isDeepStrictEqual(value, current[field]));
 }
 
 function preparePeripheralSalesPatch(patch, current) {
   const has = (field) => Object.prototype.hasOwnProperty.call(patch, field);
   const creating = !idOf(current);
-  const fields = ["specMode", "productCode", "unit", "stock", "stockQty", "stockWarning", "skus", "shippingFee"];
-  // Old content-only clients do not turn an unknown historical stock into zero.
-  if (!creating && current.specMode !== "multiple" && !fields.some(has)) return;
+  // Withdrawing incomplete historical products must not invent inventory or
+  // free shipping. Ordinary edits still need a complete sales configuration.
+  if (isPeripheralVisibilityOnlyHide({ ...current, ...patch }, current, patch)) return;
   const integer = (value, label) => {
     if (!["number", "string"].includes(typeof value) || String(value).trim() === "") throw policyError(`请填写${label}`);
     const number = Number(value);
@@ -169,9 +213,12 @@ function preparePeripheralSalesPatch(patch, current) {
   if (!["single", "multiple"].includes(mode)) throw policyError("请选择单规格或多规格");
   patch.specMode = mode;
   if (has("productCode") || creating) patch.productCode = text(patch.productCode ?? "", "商品编码", 128);
-  if (has("unit") || creating) patch.unit = text(has("unit") ? patch.unit : "件", "销售单位", 20, true);
+  if (has("skuStyle") || creating) patch.skuStyle = text(has("skuStyle") ? patch.skuStyle : "", "商品样式", 80);
+  const unit = text(has("unit") ? patch.unit : creating ? "件" : current.unit, "销售单位", 20, true);
+  if (has("unit") || creating) patch.unit = unit;
   if (has("stockWarning") || creating) patch.stockWarning = integer(has("stockWarning") ? patch.stockWarning : 5, "库存预警值");
-  if (has("shippingFee") || creating) patch.shippingFee = peripheralAmount(has("shippingFee") ? patch.shippingFee : 0, "运费");
+  const shippingFee = peripheralAmount(has("shippingFee") ? patch.shippingFee : current.shippingFee, "运费");
+  if (has("shippingFee") || creating) patch.shippingFee = shippingFee;
   for (const field of ["stock", "stockQty"]) if (has(field)) patch[field] = integer(patch[field], "库存");
   if (has("skus") && !Array.isArray(patch.skus)) throw policyError("商品规格必须为列表");
   if (mode === "multiple") {
@@ -181,19 +228,44 @@ function preparePeripheralSalesPatch(patch, current) {
     patch.skus = source.map((entry, index) => {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw policyError(`第 ${index + 1} 个规格无效`);
       const spec = text(entry.spec, `第 ${index + 1} 个规格名称`, 160, true);
+      const style = text(entry.style === undefined ? "" : entry.style, `第 ${index + 1} 个规格样式`, 80);
       const skuCode = text(entry.skuCode === undefined ? "" : entry.skuCode, `第 ${index + 1} 个规格编码`, 128);
-      if (specs.has(spec)) throw policyError("规格名称不能重复");
+      const combination = JSON.stringify([spec, style]);
+      if (specs.has(combination)) throw policyError("规格名称与样式组合不能重复");
       if (skuCode && codes.has(skuCode)) throw policyError("规格编码不能重复");
-      specs.add(spec); if (skuCode) codes.add(skuCode);
-      return { skuCode, spec, price: peripheralAmount(entry.price, `第 ${index + 1} 个规格售价`), stock: integer(entry.stock, `第 ${index + 1} 个规格库存`) };
+      specs.add(combination); if (skuCode) codes.add(skuCode);
+      return { skuCode, spec, style, price: peripheralAmount(entry.price, `第 ${index + 1} 个规格售价`, true), stock: integer(entry.stock, `第 ${index + 1} 个规格库存`) };
     });
+    // Legacy uncoded rows use the size text as their inventory identity. Keep
+    // one such row intact and give only additional same-size styles a saved
+    // code. Editing a style later therefore never changes its inventory key.
+    for (const spec of new Set(patch.skus.map(sku => sku.spec))) {
+      const uncoded = patch.skus.map((sku, index) => ({ sku, index })).filter(row => row.sku.spec === spec && !row.sku.skuCode);
+      if (uncoded.length < 2) continue;
+      const previous = (current.skus || []).findIndex(sku => !sku.skuCode && sku.spec === spec);
+      const previousStyle = previous < 0 ? null : String(current.skus[previous].style || "").trim();
+      const retained = uncoded.find(row => row.sku.style === previousStyle) || uncoded.find(row => row.index === previous) || uncoded[0];
+      for (const row of uncoded) {
+        if (row === retained) continue;
+        do { row.sku.skuCode = `AUTO-${randomBytes(12).toString("hex")}`; } while (codes.has(row.sku.skuCode));
+        codes.add(row.sku.skuCode);
+      }
+    }
+    const inventoryKeys = new Set();
+    for (const sku of patch.skus) {
+      const key = sku.skuCode || sku.spec;
+      if (inventoryKeys.has(key)) throw policyError("规格编码与其他规格名称冲突，请使用不同编码");
+      inventoryKeys.add(key);
+    }
     patch.stock = integer(patch.skus.reduce((sum, sku) => sum + sku.stock, 0), "总库存");
     patch.stockQty = patch.stock;
     patch.specs = patch.skus.map((sku) => sku.spec);
     patch.price = Math.min(...patch.skus.map((sku) => sku.price));
   } else {
+    patch.price = peripheralAmount(has("price") ? patch.price : current.price, "商品售价", true);
+    const stock = integer(has("stock") ? patch.stock : has("stockQty") ? patch.stockQty : current.stock ?? current.stockQty, "库存");
     if (has("stock") || has("stockQty") || creating || has("specMode")) {
-      patch.stock = integer(patch.stock ?? patch.stockQty ?? current.stock ?? current.stockQty ?? 0, "库存");
+      patch.stock = stock;
       patch.stockQty = patch.stock;
     }
     // Clearing the old rows prevents stale SKU prices from resurfacing after a
@@ -204,6 +276,7 @@ function preparePeripheralSalesPatch(patch, current) {
 
 async function prepareContentPatch(source, key, body, current = {}, context) {
   const patch = stripProjection(body);
+  if (["albums", "packages"].includes(key)) await prepareRecommendedPhotographer(source, patch, current);
   context ||= await createContentContext(source);
   const row = { ...current, ...patch };
   // Editors and public pages share the same text aliases. An explicit empty
@@ -279,6 +352,12 @@ async function prepareContentPatch(source, key, body, current = {}, context) {
     patch[field] = value;
   }
   if (key === "albums") {
+    for (const [field, label] of [["photoCountText", "照片张数"], ["retouchText", "修图"], ["makeupText", "妆造"]]) {
+      if (!has(field)) continue;
+      if (patch[field] !== null && patch[field] !== undefined && typeof patch[field] !== "string") throw policyError(`${label}说明必须为文字`);
+      patch[field] = String(patch[field] ?? "").trim();
+      if (patch[field].length > 160) throw policyError(`${label}说明不能超过 160 个字符`);
+    }
     if (has("seriesName")) {
       if (patch.seriesName !== null && patch.seriesName !== undefined && typeof patch.seriesName !== "string") throw policyError("风格系列名称必须为文字");
       patch.seriesName = String(patch.seriesName ?? "").trim();
@@ -295,7 +374,8 @@ async function prepareContentPatch(source, key, body, current = {}, context) {
     if ("retouchMode" in patch || "retouchCount" in patch || !idOf(current)) {
       patch.retouchMode = patch.retouchMode || current.retouchMode || (Number(row.retouchCount) > 0 ? "count" : "excluded");
       patch.retouchCount = patch.retouchMode === "count" ? Number(patch.retouchCount ?? current.retouchCount ?? 0) : 0;
-      if (patch.retouchMode === "count" && (!Number.isSafeInteger(patch.retouchCount) || patch.retouchCount < 1)) throw policyError("请填写正整数的修图张数");
+      const customRetouch = has("retouchText") ? patch.retouchText : current.retouchText;
+      if (!(typeof customRetouch === "string" && customRetouch.trim()) && patch.retouchMode === "count" && (!Number.isSafeInteger(patch.retouchCount) || patch.retouchCount < 1)) throw policyError("请填写正整数的修图张数");
     }
     if ("sampleUrls" in patch) {
       if (!Array.isArray(patch.sampleUrls) || patch.sampleUrls.some((url) => typeof url !== "string" || !url.trim())) throw policyError("商品照片必须为有效图片地址列表");
@@ -331,20 +411,37 @@ async function prepareContentPatch(source, key, body, current = {}, context) {
     }
   }
   if (key === "packages" && !isVideoSingle(row)) {
+    const titleField = has("name") ? "name" : has("title") ? "title" : "";
+    if (titleField) {
+      if (typeof patch[titleField] !== "string") throw policyError("套餐名称必须为文字");
+      patch.name = normalizePackageTitle(patch[titleField]);
+      if (has("title")) patch.title = patch.name;
+      if ((!idOf(current) || patch.name !== normalizePackageTitle(current.name || current.title)) && patch.name.length > PACKAGE_TITLE_LIMIT) {
+        throw policyError(`套餐名称最多 ${PACKAGE_TITLE_LIMIT} 个字符，请缩短至首页三行以内`);
+      }
+      row.name = patch.name;
+      if (has("title")) row.title = patch.title;
+    }
+    if (idOf(current) && !ownContentVisible(current) && ownContentVisible(row)
+      && normalizePackageTitle(row.name || row.title).length > PACKAGE_TITLE_LIMIT) {
+      throw policyError(`套餐名称最多 ${PACKAGE_TITLE_LIMIT} 个字符，请缩短后再上架`);
+    }
     const refs = packageReferences(row);
     if (("includedItems" in patch || "items" in patch) && !refs.length) throw policyError("套餐至少需要一个具体商品");
-    if (refs.length) {
+    if (refs.length && !isVisibilityOnlyHide(row, current, body)) {
       const items = [];
       for (const ref of refs) {
         const product = (context[ref.key] || []).find((item) => idOf(item) === ref.id);
         if (!product || deleted(product) || ref.key === "packages" && !isVideoSingle(product)) throw policyError("套餐包含的商品不存在、已删除或类型无效");
         const quantity = Number(ref.item.quantity ?? ref.item.qty ?? ref.item.count ?? 1);
         if (!Number.isSafeInteger(quantity) || quantity < 1) throw policyError("套餐商品数量必须为正整数");
-        const unitPrice = Number(product.price ?? product.specialPrice ?? 0);
+        const sku = ref.type === "peripheral" ? packagePeripheralSku(product, ref.item) : null;
+        const unitPrice = Number(sku ? sku.price : product.price ?? product.specialPrice ?? 0);
         if (!Number.isFinite(unitPrice) || unitPrice < 0) throw policyError("套餐商品单价无效");
-        items.push({ ...ref.item, type: ref.type, productId: ref.id, name: String(product.name || product.title || ""), quantity, qty: quantity, price: unitPrice, unitPrice,
+        const skuFields = sku ? { skuId: sku.skuId, skuCode: sku.skuCode, spec: sku.spec, style: sku.style, specLabel: sku.specLabel } : {};
+        items.push({ ...ref.item, ...skuFields, type: ref.type, productId: ref.id, name: String(product.name || product.title || ""), quantity, qty: quantity, price: unitPrice, unitPrice,
           ...(ref.type === "album" ? { albumId: ref.id } : ref.type === "peripheral" ? { peripheralId: ref.id } : {}),
-          target: { ...(ref.item.target || {}), page: ref.type === "album" ? "photoCollection" : ref.type === "video" ? "videoProductDetail" : "peripheral", ...(ref.type === "album" ? { albumId: ref.id, seriesId: product.seriesId || "" } : ref.type === "video" ? { productId: ref.id } : { id: ref.id, peripheralId: ref.id }), spotId: product.spotId || "" } });
+          target: { ...(ref.item.target || {}), ...skuFields, page: ref.type === "album" ? "photoCollection" : ref.type === "video" ? "videoProductDetail" : "peripheral", ...(ref.type === "album" ? { albumId: ref.id, seriesId: product.seriesId || "" } : ref.type === "video" ? { productId: ref.id } : { id: ref.id, peripheralId: ref.id }), spotId: product.spotId || "" } });
       }
       patch.includedItems = items; patch.items = items.map((item) => ({ ...item }));
       patch.originalPrice = Math.round(items.reduce((sum, item) => sum + item.quantity * Math.round(item.price * 100), 0)) / 100;
@@ -358,10 +455,35 @@ async function prepareContentPatch(source, key, body, current = {}, context) {
   return patch;
 }
 
-function validateContentPublication(key, row, current, context = {}) {
+function hasProductTags(row = {}) {
+  const tags = Array.isArray(row.tags) ? row.tags : typeof row.tags === "string" ? row.tags.split(/[,，、|\r\n]/) : [];
+  return tags.some((tag) => typeof tag === "string" && tag.trim());
+}
+
+function isVisibilityOnlyHide(row, current, body) {
+  if (!current || !body || manualContentVisible(row)) return false;
+  const fields = new Set(["isShow", "visible", "enabled", "isSellable", "status", "saleStatus", "shelfStatus", "auditStatus", "reviewStatus", "deleted", "isDeleted"]);
+  const changes = Object.entries(stripProjection(body)).filter(([field]) => !["id", "_id"].includes(field));
+  return changes.some(([field]) => fields.has(field))
+    && changes.every(([field, value]) => fields.has(field) || isDeepStrictEqual(value, current[field]));
+}
+
+function validateContentPublication(key, row, current, context = {}, body) {
   // Guide publication and its independent storefront visibility are validated
   // by prepareGuideForSave, including media-only rich-text articles.
   if (key === "guides") return "";
+  // Product tags are required for every editor save, including private drafts.
+  // Legacy untagged products can still be withdrawn without editing content.
+  if (["albums", "packages"].includes(key) && !hasProductTags(row) && !isVisibilityOnlyHide(row, current, body)) return "请至少添加一个标签";
+  if (key === "peripherals") {
+    if (isPeripheralVisibilityOnlyHide(row, current, body)) return "";
+    if (typeof row.name !== "string" || !row.name.trim()) return "请填写商品名称";
+    const mediaUrl = (value) => typeof value === "string" ? value.trim() : value && typeof value === "object"
+      ? [value.url, value.src, value.imageUrl, value.videoUrl, value.fileUrl].some((url) => typeof url === "string" && url.trim()) : false;
+    if (![row.cover, row.image, ...(Array.isArray(row.images) ? row.images : []), ...(Array.isArray(row.videos) ? row.videos : [])].some(mediaUrl)) return "请上传商品素材";
+    if (![row.intro, row.description].some((value) => typeof value === "string" && value.trim())) return "请填写商品说明";
+    return "";
+  }
   if (key === "tagLibrary" || !ownContentVisible(row) || current && ownContentVisible(current)) return "";
   const text = (value) => value !== undefined && value !== null && String(value).trim() !== "";
   const list = (...values) => values.some((value) => Array.isArray(value) ? value.length > 0 : text(value));
@@ -390,8 +512,10 @@ function validateContentPublication(key, row, current, context = {}) {
     if (key === "albums") {
       if (!text(cover)) return "请设置照片留影首图";
       if (!integer(row.photoCount, 1)) return "请填写正整数的照片张数";
-      if (row.retouchMode === "count" && !integer(row.retouchCount, 1)) return "请填写正整数的修图张数";
-      if (!row.retouchMode && !integer(row.retouchCount, 0)) return "请填写非负整数的修图张数";
+      if (!(typeof row.retouchText === "string" && row.retouchText.trim())) {
+        if (row.retouchMode === "count" && !integer(row.retouchCount, 1)) return "请填写正整数的修图张数";
+        if (!row.retouchMode && !integer(row.retouchCount, 0)) return "请填写非负整数的修图张数";
+      }
     }
     if (key === "packages") {
       if (!text(row.durationText) && !(Number(row.videoDuration) > 0)) return "请填写视频时长";
@@ -454,4 +578,4 @@ function customTagEntries(key, row) {
 }
 
 module.exports = { CONTENT_POLICY_KEYS, ownContentVisible, isVideoSingle, videoProductMediaUrl, contentSpotIds, effectiveProductSpotIds: productSpotIds, packageReferences, createContentContext, createVisibilityContext, effectivePackageSpotIds, effectiveContentVisibility,
-  prepareContentPatch, validateContentPublication, pointDeletionPlan, pointRestorationPlan, customTagNames, customTagEntries, stripProjection, policyError, idOf, deleted };
+  prepareContentPatch, hasProductTags, validateContentPublication, pointDeletionPlan, pointRestorationPlan, customTagNames, customTagEntries, stripProjection, policyError, idOf, deleted };

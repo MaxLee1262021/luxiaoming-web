@@ -228,26 +228,26 @@ function createShareStore(source, options = {}) {
   }
   async function decisionTx(conn, event) {
     const payTime = event.payTime || event.finalPaidAt;
+    const orderSource = engine.orderSourceFacts(event.orderSource, payTime);
+    let orderSourceInvalidated = false;
+    if (orderSource) {
+      // Closing and reopening a shop, or invalidating a user, must not revive
+      // older order-source evidence. Re-evaluate these immutable events on
+      // every replay so even a delayed invalidation fact retains its effect.
+      const userEvents = await rows(conn, "user_event", "WHERE user_id=? AND event_at>=? AND event_at<=?", [event.userId, dbTime(orderSource.at), dbTime(payTime)]);
+      const merchantEvents = await rows(conn, "merchant_event", "WHERE merchant_id=? AND event_at>=? AND event_at<=?", [orderSource.merchantId, dbTime(orderSource.at), dbTime(payTime)]);
+      orderSourceInvalidated = userEvents.length > 0 || merchantEvents.some(row => !engine.activeMerchant(row));
+    }
     const bindings = await getBindingsAsOfTx(conn, event.userId, payTime);
     const clicks = await getClicksAsOfTx(conn, event.userId, payTime);
     const rules = await getRulesTx(conn);
     const merchants = await merchantsAsOfTx(conn, payTime);
-    // Paid T1 jobs count before maturity as well. They are online payment facts,
-    // not estimates; waiting for an accounting window must not change D.
-    const paidJobs = await rows(conn, "job", "WHERE user_id=? AND pay_time<=? ORDER BY pay_time DESC,order_id DESC", [event.userId, dbTime(payTime)]);
-    const selfOrders = [];
-    for (const job of paidJobs) {
-      const corrected = await one(conn, "correction", "WHERE order_id=? ORDER BY revision_no DESC LIMIT 1", [job.orderId]);
-      const decision = corrected ? corrected.nextStateJson : job.decisionJson;
-      if (decision.splitType !== "T1" || job.orderId === String(event.orderId)) continue;
-      const refunded = await refundTotalTx(conn, job.orderId, payTime);
-      selfOrders.push({ ...decision, paid: true, fullyRefunded: moneyToCents(refunded) >= moneyToCents(job.paidTotal) });
-    }
-    return engine.decideAtPayment({ event, bindings, clicks, rules, merchants, selfOrders, options: effectiveOptions });
+    return engine.decideAtPayment({ event: { ...event, orderSource, orderSourceInvalidated }, bindings, clicks, rules, merchants, options: effectiveOptions });
   }
   function eventFromJob(job) {
     return { orderId: job.orderId, userId: job.userId, payTime: job.payTime, paidTotal: job.paidTotal,
-      sessionId: job.decisionJson.sessionId, sessionStartAt: job.decisionJson.sessionStartAt };
+      sessionId: job.decisionJson.sessionId, sessionStartAt: job.decisionJson.sessionStartAt,
+      orderSource: job.decisionJson.orderSource || job.decisionJson.candidateJson?.orderSource };
   }
   async function refreshJobTx(conn, job, at) {
     const decision = await decisionTx(conn, eventFromJob(job));
@@ -347,6 +347,7 @@ function createShareStore(source, options = {}) {
   }
   async function enqueuePayment(input) {
     const event = { ...input, orderId: id(input.orderId, "订单"), userId: id(input.userId, "用户"), payTime: iso(input.payTime || input.finalPaidAt), paidTotal: formatMoney(moneyToCents(input.paidTotal)) };
+    event.orderSource = engine.orderSourceFacts(input.orderSource, event.payTime);
     if (input.provider && !["wechat_pay", "zero_balance"].includes(input.provider)) throw shareError("SHARE_ONLINE_ONLY", "新分成仅接受在线交易", 409);
     return transaction(async conn => {
       await lockOrder(conn, event.orderId);
@@ -354,6 +355,10 @@ function createShareStore(source, options = {}) {
       const existing = await one(conn, "job", "WHERE order_id=? FOR UPDATE", [event.orderId]);
       if (existing) {
         if (existing.userId !== event.userId || existing.paidTotal !== event.paidTotal || time(existing.payTime) !== time(event.payTime)) throw shareError("SHARE_4090", "支付事件与已保存分成任务不一致", 409);
+        const savedSource = existing.decisionJson.orderSource || existing.decisionJson.candidateJson?.orderSource;
+        if (savedSource && event.orderSource && ["merchantId", "qrId", "scene", "at"].some(key => savedSource[key] !== event.orderSource[key])) {
+          throw shareError("SHARE_4090", "订单商家来源与已保存分成任务不一致", 409);
+        }
         return { job: existing, decision: existing.decisionJson, existed: true };
       }
       const decision = await decisionTx(conn, event);
@@ -561,9 +566,13 @@ function createShareStore(source, options = {}) {
       // Stable entry keys identify actual visits. Only older clients without
       // one need the time-window fallback; dropping a new key here would leave
       // its later retry unrecognized and could create attribution after launch.
-      const previous = input.requestKey ? null : !bindEligible
+      let previous = input.requestKey ? null : !bindEligible
         ? await one(conn, "scan", "WHERE user_id=? AND qr_id=? ORDER BY scan_at DESC,id DESC LIMIT 1", [userId, qr.id])
         : binding && binding.status === "ACTIVE" ? await one(conn, "scan", "WHERE id=?", [binding.lastScanId]) : null;
+      if (previous && bindEligible) {
+        const current = await one(conn, "binding", "WHERE user_id=? ORDER BY last_scan_at DESC,last_scan_id DESC LIMIT 1", [userId]);
+        if (!current || String(current.lastScanId) !== String(previous.id)) previous = null;
+      }
       if (previous && previous.qrId === qr.id && time(at) - time(previous.scanAt) >= 0 && time(at) - time(previous.scanAt) < dedupSeconds * 1000) {
         return { scan: previous, binding, deduplicated: true };
       }
@@ -650,9 +659,21 @@ function createShareStore(source, options = {}) {
       bindingCount: bindings.length, boundUsers: bindings.length, ...scanStats(scans), orderCount: orders.size,
       t1OrderCount: typeOrders.T1.size, t2OrderCount: typeOrders.T2.size };
   }
+  async function currentBindingsTx(conn) {
+    // Historical per-merchant rows remain replayable. Count each user only at
+    // their latest scan, including inactive rows in selection so closing the
+    // latest shop cannot resurrect an older shop's count.
+    const latest = new Map();
+    for (const binding of await rows(conn, "binding")) {
+      const prior = latest.get(binding.userId);
+      if (!prior || time(binding.lastScanAt) > time(prior.lastScanAt)
+        || (time(binding.lastScanAt) === time(prior.lastScanAt) && engine.compareSequence(binding.lastScanId, prior.lastScanId) > 0)) latest.set(binding.userId, binding);
+    }
+    return [...latest.values()].filter(binding => binding.status === "ACTIVE");
+  }
   async function statsTx(conn, merchantId) {
     const details = await rows(conn, "detail", "WHERE merchant_id=?", [merchantId]);
-    const bindings = await rows(conn, "binding", "WHERE merchant_id=? AND status='ACTIVE'", [merchantId]);
+    const bindings = (await currentBindingsTx(conn)).filter(binding => binding.merchantId === merchantId);
     const qr = await one(conn, "qr", "WHERE merchant_id=? AND status='ACTIVE'", [merchantId]);
     const scans = qr ? await rows(conn, "scan", "WHERE merchant_id=? AND qr_id=?", [merchantId, qr.id]) : [];
     return merchantStats(merchantId, details, bindings, scans);
@@ -662,7 +683,7 @@ function createShareStore(source, options = {}) {
       const merchants = await rows(conn, "merchant", "ORDER BY created_at DESC,id DESC");
       const rules = merchants.length ? await getRulesTx(conn) : [];
       const details = await rows(conn, "detail");
-      const bindings = merchants.length ? await rows(conn, "binding", "WHERE status='ACTIVE'") : [];
+      const bindings = merchants.length ? await currentBindingsTx(conn) : [];
       const qrs = merchants.length ? await rows(conn, "qr", "WHERE status='ACTIVE'") : [];
       const scans = qrs.length ? await rows(conn, "scan") : [];
       const groupBy = (values, key) => { const map = new Map(); for (const row of values) { const id = row[key]; if (!map.has(id)) map.set(id, []); map.get(id).push(row); } return map; };

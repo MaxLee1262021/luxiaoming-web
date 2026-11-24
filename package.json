@@ -18,6 +18,8 @@
     "migrate:photo-share": "node scripts/migrate-photo-share.cjs",
     "cleanup:photo-share": "node scripts/cleanup-photo-share.cjs",
     "migrate:customer-service": "node scripts/migrate-customer-service.cjs",
+    "migrate:wecom-contacts": "node scripts/migrate-wecom-contacts.cjs",
+    "migrate:physical-commerce": "node scripts/migrate-physical-commerce.cjs",
     "reset:service-demo": "node scripts/reset-service-demo.cjs",
     "package:linux": "node scripts/package-linux.cjs",
     "test": "node --test server/tests/*.test.cjs src/tests/*.test.cjs",

@@ -33,7 +33,7 @@ async function migrate(source, options = {}) {
       await conn.query("INSERT INTO benefit_rule (ver,beneficiary_type,party_id,rule_mode,rate_photo_bp,rate_video_bp,rate_combo_bp,rate_peripheral_bp,eff_at,reason,operator) VALUES (?,'photo',NULL,'global',?,?,?,?,?,'上线初始化','migration')", [version.ver, DEFAULT_RATES.rate_photo_bp, DEFAULT_RATES.rate_video_bp, DEFAULT_RATES.rate_combo_bp, DEFAULT_RATES.rate_peripheral_bp, activeAt]);
     }
     for (const [index, [key, name]] of Object.entries(MENUS).entries()) {
-      await conn.query("INSERT INTO lxm_auth_menus (id,menu_key,name,path,sort_no,status,meta_group,meta_type) VALUES (?,?,?,?,?,'active','摄影师分成','page') ON DUPLICATE KEY UPDATE name=VALUES(name),meta_group=VALUES(meta_group)", ["menu_" + key, key, name, "/photo-share/" + key, 270 + index]);
+      await conn.query("INSERT INTO lxm_auth_menus (id,menu_key,name,path,sort_no,status,meta_group,meta_type) VALUES (?,?,?,?,?,'active',?,'page') ON DUPLICATE KEY UPDATE name=VALUES(name),meta_group=VALUES(meta_group)", ["menu_" + key, key, name, "/photo-share/" + key, 270 + index, "摄影师分成管理"]);
       // Own read-only data access requires a separately bound photographer
       // identity; this migration does not create login credentials or accounts.
       const roles = key === "photoMine" ? ["super", "photo"] : ["photoLedger", "photoSettlement"].includes(key) ? ["super", "finance"] : ["super"];

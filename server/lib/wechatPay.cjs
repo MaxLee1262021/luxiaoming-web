@@ -321,7 +321,7 @@ function refundFromResponse(value = {}) {
 function paymentDescription(order = {}, phase = "") {
   const name = text(order.packageName || order.confirmationSnapshot && (order.confirmationSnapshot.name || order.confirmationSnapshot.packageName) || "旅拍服务")
     .replace(/[\r\n\t]+/g, " ");
-  const suffix = phase === "final" ? "尾款" : "订金";
+  const suffix = phase === "full" ? "商品全款" : phase === "final" ? "尾款" : "订金";
   return `麓小鸣旅拍-${name}-${suffix}`.slice(0, 127);
 }
 
@@ -432,7 +432,7 @@ function canConfirmPhase(order, phase) {
   if (phase === "deposit" && ["cancelled", "cancelling"].includes(order.bookingStatus)) return true;
   if (phase === "deposit") return canonicalStage(order) === WORKFLOW_STAGES.AWAITING_DEPOSIT;
   // The final payment itself acknowledges the customer's selection. The only
-  // server-side prerequisite is that shooting has been marked complete and
+  // server-side prerequisite is that the visitor has entered shooting and
   // any required deposit has already settled.
   return [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.AWAITING_FINAL_PAYMENT].includes(canonicalStage(order))
     && (!depositDue(order) || hasConfirmedPayment(order, "deposit"));
@@ -527,6 +527,7 @@ function createWechatPay(options = {}) {
         timeoutMs: config.timeoutMs,
         headers: {
           Accept: "application/json",
+          "User-Agent": "luxiaoming-admin/1.0.0",
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(body),
           Authorization: buildAuthorization(method, path, body),
@@ -590,6 +591,7 @@ function createWechatPay(options = {}) {
       notify_url: config.notifyUrl,
       amount: { total: amountInFen(payment && payment.amount), currency: "CNY" },
       payer: { openid: text(openid) },
+      ...(phase === "full" && order.expiresAt ? { time_expire: new Date(order.expiresAt).toISOString() } : {}),
     });
     if (!text(openid)) throw new WechatPayError("Payer openid missing", { code: "WECHAT_PAY_OPENID_MISSING", statusCode: 400 });
     const response = await signedRequest("POST", API_PATH, body);
@@ -695,7 +697,13 @@ function createWechatPay(options = {}) {
   }
 
   async function confirmRefundCallback(source, headers, rawBody) {
-    return require("./onlineRefunds.cjs").applyRefundResult(source, parseRefundNotification(headers, rawBody));
+    const refund = parseRefundNotification(headers, rawBody);
+    if (String(refund.refundNo || "").startsWith("PR")) {
+      const physical = require("./physicalCommerce.cjs").serviceFor(source, { wechatPay: api });
+      if (await physical.findRefund(refund.refundNo)) return physical.confirmRefund(refund);
+      throw new WechatPayError("Physical refund not found", { code: "WECHAT_PAY_REFUND_NOT_FOUND", statusCode: 404 });
+    }
+    return require("./onlineRefunds.cjs").applyRefundResult(source, refund);
   }
 
   function parseNotification(headers, rawBody) {
@@ -760,6 +768,11 @@ function createWechatPay(options = {}) {
     assertConfigured();
     const transaction = input && (input.raw || input.outTradeNo || input.tradeState) ? input : transactionFromNotification(input);
     validateTransaction(config, transaction, { requireSuccessfulFields: transaction.tradeState === SUCCESS_TRADE_STATE });
+    if (String(transaction.outTradeNo || "").startsWith("PG")) {
+      const physical = require("./physicalCommerce.cjs").serviceFor(source, { wechatPay: api });
+      if (await physical.findPayment(transaction.outTradeNo)) return physical.confirmPayment(transaction);
+      throw new WechatPayError("Physical payment not found", { code: "WECHAT_PAY_PAYMENT_NOT_FOUND", statusCode: 404 });
+    }
     if (transaction.tradeState !== SUCCESS_TRADE_STATE) {
       if (TERMINAL_UNPAID_STATES.has(transaction.tradeState)) return markTerminalPayment(source, transaction);
       throw new WechatPayError("Wechat Pay transaction is not successful", { code: "WECHAT_PAY_TRANSACTION_NOT_SUCCESS", statusCode: 409 });
@@ -848,12 +861,15 @@ function createWechatPay(options = {}) {
             confirmedAt: selectionAt,
             confirmedBy: order.selectionConfirmedBy || "wechat_pay",
           };
+          patch.shootingCompletedAt = order.shootingCompletedAt || now;
           patch.status = "completed";
           patch.workflowStage = WORKFLOW_STAGES.COMPLETED;
           patch.completedAt = order.completedAt || now;
           patch.completionSource = order.completionSource || "wechat_pay_final";
           patch.businessStatus = "completed";
           patch.businessStatusText = "已完成";
+          patch.publicStatus = "completed";
+          patch.publicStatusText = "已完成";
           patch.customerStatus = "已完成";
           patch.service_status = "done";
           patch.done_at = order.done_at || require('./svcCore.cjs').stamp(patch.completedAt);
@@ -889,7 +905,7 @@ function createWechatPay(options = {}) {
     });
   }
 
-  return {
+  const api = {
     isConfigured: () => config.configured,
     configurationErrors: () => [...config.errors],
     configSummary: () => ({ configured: config.configured, appId: config.appId, mchId: config.mchId, notifyUrl: config.notifyUrl || "" }),
@@ -906,6 +922,7 @@ function createWechatPay(options = {}) {
     confirmTransaction,
     publicMessage,
   };
+  return api;
 }
 
 module.exports = {

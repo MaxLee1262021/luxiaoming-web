@@ -18,7 +18,7 @@
   <el-dialog v-model="photoState.blockOpen" :title="'无法终止：' + (photoState.blockedParty && photoState.blockedParty.name || '') + ' 还有 ' + (photoState.pendingOrders.length || (photoState.blockedParty && photoState.blockedParty.pending_count) || 0) + ' 笔在途订单'" width="620px" class="photo-dialog"><el-alert title="请先逐单处置，在途订单清空后再终止。" type="warning" :closable="false" /><el-table :data="photoState.pendingOrders" empty-text="请前往客服跟进查看最新在途订单"><el-table-column prop="order_no" label="订单号" min-width="180" /><el-table-column label="状态" min-width="100"><template #default="{row}">{{ photoLabel(row.status) }}</template></el-table-column><el-table-column prop="schedule_time" label="预约时间" min-width="170" /></el-table><ul class="photo-block-list"><li><strong>改派：</strong>由客服转派给其他摄影师，原承接人本单置零，新人按自己比例计酬。</li><li><strong>本人拍完：</strong>保持合作状态，由本人完成在途单，完成后正常结算，再办理终止。</li><li><strong>取消：</strong>按客诉退款流程处置，本单不计报酬。</li></ul><template #footer><el-button @click="photoState.blockOpen = false">暂不终止</el-button><el-button type="primary" @click="disposePhotoPending">去处置</el-button></template></el-dialog>
 
   <el-dialog :model-value="photoState.createOpen" @update:model-value="value => { if (!value) cancelPhotoCreate(); }" title="新增摄影师" width="880px" class="photo-share photo-dialog photo-create-dialog" :close-on-click-modal="false" :close-on-press-escape="!photoState.busy" :show-close="!photoState.busy" destroy-on-close>
-    <p class="photo-muted">填写摄影师资料和登录信息，保存后开通账号并绑定本人分成。</p>
+    <p class="photo-muted">填写摄影师资料，选择新建登录账号或关联已有账号，保存后绑定本人分成。</p>
     <section v-if="photoCanCreate" class="photo-new-form" v-loading="photoState.loading.rule">
     <el-form :key="'photo-new-' + photoState.busy" label-position="top" :model="photoState.form" :disabled="photoState.busy">
       <h3>合作资料</h3>
@@ -32,10 +32,11 @@
       </div>
       <p class="photo-form-note">摄影师无观察期，按完成月份归集；等待天数用于列表展示。</p>
       <div class="photo-account-section"><h3 class="photo-section-title">摄影师账号</h3>
-      <p class="photo-muted">一个账号对应一位摄影师，保存后立即开户。请通过既有安全渠道交付登录信息。</p>
+      <p class="photo-muted">一个账号对应一位摄影师。关联已有账号后继续使用原密码登录。</p>
+      <el-form-item label="登录账号设置"><el-radio-group v-model="photoState.form.create_account" @change="photoAccountModeChanged"><el-radio :value="true">新建登录账号</el-radio><el-radio :value="false">关联已有账号</el-radio></el-radio-group></el-form-item>
       <div class="photo-form-grid photo-account-grid">
-        <el-form-item label="登录账号" required prop="account" :error="photoState.formErrors.account"><el-input v-model="photoState.form.account" @input="clearPhotoFormError('account')" :validate-event="false" maxlength="128" autocomplete="off" /></el-form-item>
-        <el-form-item label="登录密码" required prop="password" :error="photoState.formErrors.password"><el-input v-model="photoState.form.password" @input="clearPhotoFormError('password')" :validate-event="false" type="password" show-password maxlength="128" autocomplete="new-password" /><small class="photo-input-help">8–128位，须同时包含字母和数字。</small></el-form-item>
+        <el-form-item label="登录账号" required prop="account" :error="photoState.formErrors.account"><el-input v-model="photoState.form.account" @input="clearPhotoFormError('account')" :validate-event="false" maxlength="128" autocomplete="off" :placeholder="photoState.form.create_account ? '填写新建摄影师登录账号' : '填写已新增的摄影师登录账号'" /><small class="photo-input-help">{{ photoState.form.create_account ? '保存时同时创建登录账号，并自动关联本摄影师。' : '填写权限管理中已启用、尚未关联摄影师档案的摄影师账号。' }}</small></el-form-item>
+        <el-form-item v-if="photoState.form.create_account" label="登录密码" required prop="password" :error="photoState.formErrors.password"><el-input v-model="photoState.form.password" @input="clearPhotoFormError('password')" :validate-event="false" type="password" show-password maxlength="128" autocomplete="new-password" /><small class="photo-input-help">8–128位，须同时包含字母和数字。</small></el-form-item>
       </div></div>
       <h3 class="photo-section-title">初始分成比例</h3><p class="photo-muted">默认填入当前统一比例。四类各自独立，单人比例须四类一次给全。</p>
       <div class="photo-rate-grid"><el-form-item v-for="category in photoCategories" :key="category.key" :label="category.label + '比例（%）'" required><el-input-number v-model="photoState.form[category.key]" :min="0" :max="100" :step="0.1" :precision="1" controls-position="right" /></el-form-item></div>

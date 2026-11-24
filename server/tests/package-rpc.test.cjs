@@ -33,7 +33,7 @@ function makeSource() {
     guides: [],
     packages: [
       {
-        id: "pkg-main", name: "城市夜景套餐", type: "photo", price: 699, originalPrice: 999,
+        id: "pkg-main", sort: 1, name: "城市夜景套餐", type: "photo", price: 699, originalPrice: 999,
         isMainPush: true, isShow: true, status: "上架", spotIds: ["spot-1"], seriesId: "series-1",
         albumId: "album-1", intro: "含妆造建议与夜景拍摄服务", serviceTags: ["拍摄60分钟", "精修12张"]
       },

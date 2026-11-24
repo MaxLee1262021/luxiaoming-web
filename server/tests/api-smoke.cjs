@@ -1026,6 +1026,7 @@ async function runSmoke(options = {}) {
           name: "Smoke Package Updated", type: "photo", price: 199, originalPrice: 299,
           status: "上架", isShow: true, isMainPush: true, spotId: "smoke-spot", spotIds: ["smoke-spot"],
           intro: "Synthetic package description", description: "Synthetic package description",
+          tags: ["测试套餐"],
           serviceTags: ["拍摄60分钟", "精修12张"],
           includedItems: [{ type: "album", name: "Smoke Album", albumId: "smoke-album", target: { page: "photoCollection", albumId: "smoke-album", spotId: "smoke-spot" } }]
         };
@@ -1385,24 +1386,25 @@ async function runSmoke(options = {}) {
         return confirmed.orderId;
       });
 
-      await check(report, "public after-sale creates an independent ticket", async () => {
+      await check(report, "staff after-sale creates an independent issue before contact and finance submission", async () => {
         const orders = await requestJson(server.baseUrl, "/api/collection/orders", { headers: authHeaders(superToken) });
         const created = responseRows(orders.body).find((row) => row && row.openid === "dev_openid" && row.sourceCodeId === "smoke-code");
         assert.ok(created, "booking fixture must exist before after-sale probe");
-        const result = await requestJson(server.baseUrl, "/api/rpc/submitAfterSale", {
+        const result = await requestJson(server.baseUrl, "/api/collection/afterSales", {
           method: "POST",
-          headers: authHeaders(publicToken),
-          body: { data: { orderId: created.id || created._id, reason: "synthetic after-sale reason" } },
+          headers: authHeaders(superToken),
+          body: { orderId: created.id || created._id, reason: "synthetic staff after-sale issue", type: "投诉反馈", refundAmount: 0 },
         });
-        assert.equal(result.status, 200);
-        assert.equal(result.body && result.body.success, true, "after-sale submission must succeed");
-        const ticketId = result.body && result.body.data && (result.body.data.ticketId || result.body.data.id);
+        assert.equal(result.status, 201, JSON.stringify(result.body));
+        assert.equal(result.body.financeStatus, "未提交", "a new issue is not yet a finance refund request");
+        assert.equal(result.body.reviewLane, "service_exception");
+        const ticketId = result.body && (result.body.id || result.body._id);
         assert.ok(ticketId, "after-sale response must include a ticket id");
         persistedTicketId = ticketId;
         const tickets = await requestJson(server.baseUrl, "/api/collection/afterSales", { headers: authHeaders(superToken) });
         assert.ok(responseRows(tickets.body).some((row) => row && (row.id === ticketId || row._id === ticketId)), "after-sale ticket must be persisted separately");
         const action = await requestJson(server.baseUrl, `/api/after-sales/${encodeURIComponent(ticketId)}/action`, {
-          method: "POST", headers: authHeaders(superToken), body: { action: "follow", reason: "synthetic after-sale follow-up" },
+          method: "POST", headers: authHeaders(superToken), body: { action: "follow", customerContacted: true, reason: "synthetic customer contact and after-sale follow-up" },
         });
         assert.equal(action.status, 200, "dedicated after-sale action must succeed");
         const orderLocked = await requestJson(server.baseUrl, `/api/orders/${encodeURIComponent(created.id || created._id)}/action`, {
@@ -1423,7 +1425,7 @@ async function runSmoke(options = {}) {
         assert.equal(bypass.status, 403, "generic after-sale PUT must be rejected");
       });
 
-      await check(report, "deposit before order creation, claim, service start, final completion and independent delivery persist end to end", async () => {
+      await check(report, "deposit before order creation, assignment, visitor arrival, final payment and independent delivery persist end to end", async () => {
         assert.ok(publicToken, "public login token is required");
         const suffix = crypto.randomBytes(5).toString("hex");
         const booking = await requestJson(server.baseUrl, "/api/rpc/createBooking", {
@@ -1450,7 +1452,6 @@ async function runSmoke(options = {}) {
 
         const serviceToken = await login(server.baseUrl, fixture.accounts.service);
         const financeToken = await login(server.baseUrl, fixture.accounts.finance);
-        const photoToken = serviceToken;
         assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.provider, "wechat_pay");
         assert.equal(depositIntent.body && depositIntent.body.data && depositIntent.body.data.invokeWeChatPay, true);
         assert.ok(depositIntent.body && depositIntent.body.data && depositIntent.body.data.paymentParams, "test gateway must return signed payment-shaped parameters");
@@ -1475,7 +1476,7 @@ async function runSmoke(options = {}) {
         });
         assert.equal(initial.body && initial.body.data && initial.body.data.workflowStage, "awaiting_dispatch");
         assert.equal(initial.body.data.businessStatus, "reserved");
-        assert.equal(initial.body.data.statusText, "待确认");
+        assert.equal(initial.body.data.statusText, "已预约");
         assert.equal(initial.body.data.canRefundDeposit, true);
         assert.equal(initial.body && initial.body.data && initial.body.data.canPayDeposit, false);
         const actionPath = `/api/orders/${encodeURIComponent(orderId)}/action`;
@@ -1493,34 +1494,23 @@ async function runSmoke(options = {}) {
         });
         assert.equal(taskAccepted.status, 403, "legacy photographer acceptance is not required or permitted for service accounts");
 
-        for (const [action, reason] of [["start", "workflow start shooting"]]) {
-          const response = await requestJson(server.baseUrl, actionPath, { method: "POST", headers: authHeaders(photoToken), body: { action, reason } });
-          assert.equal(response.status, 200, `${action} must succeed for assigned photographer: ${JSON.stringify(response.body)}`);
+        for (const action of ["start", "shootcomplete"]) {
+          const response = await requestJson(server.baseUrl, actionPath, { method: "POST", headers: authHeaders(serviceToken), body: { action, reason: "retired service shooting transition" } });
+          assert.equal(response.status, 403, `${action} must be automatic for service accounts: ${JSON.stringify(response.body)}`);
         }
+        const arrived = await requestJson(server.baseUrl, "/api/rpc/confirmOrderArrival", {
+          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
+        });
+        assert.equal(arrived.body.success, true, JSON.stringify(arrived.body));
         const beforeFinal = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
         });
         assert.equal(beforeFinal.status, 200);
         assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.workflowStage, "shooting");
-        assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.paymentPhase, "");
-        assert.equal(beforeFinal.body.data.canPayFinal, false);
+        assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.paymentPhase, "final");
+        assert.equal(beforeFinal.body.data.canPayFinal, true);
+        assert.equal(beforeFinal.body.data.shootingCompleted, false);
         assert.equal(beforeFinal.body && beforeFinal.body.data && beforeFinal.body.data.deliveryRecord, undefined);
-
-        const prematureFinal = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
-          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", selectionAccepted: true, idempotencyKey: `workflow-premature-final-${suffix}` } },
-        });
-        assert.equal(prematureFinal.body.success, false, "shooting must finish before final payment can be created");
-        const shootComplete = await requestJson(server.baseUrl, actionPath, {
-          method: "POST", headers: authHeaders(serviceToken), body: { action: "shootcomplete", reason: "workflow service records completed shooting" },
-        });
-        assert.equal(shootComplete.status, 200, JSON.stringify(shootComplete.body));
-        const afterShooting = await requestJson(server.baseUrl, "/api/rpc/getOrderDetail", {
-          method: "POST", headers: authHeaders(publicToken), body: { data: { orderId } },
-        });
-        assert.equal(afterShooting.body.data.businessStatus, "shooting");
-        assert.equal(afterShooting.body.data.statusText, "拍摄中");
-        assert.equal(afterShooting.body.data.paymentPhase, "final");
-        assert.equal(afterShooting.body.data.canPayFinal, true);
 
         const finalIntent = await requestJson(server.baseUrl, "/api/rpc/createPayment", {
           method: "POST", headers: authHeaders(publicToken), body: { data: { orderId, phase: "final", selectionAccepted: true, amount: 70, idempotencyKey: `workflow-final-intent-${suffix}` } },

@@ -39,9 +39,11 @@ function createPhotoStore(source, options = {}) {
     state.assignments = (await query(conn, "SELECT *,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at FROM svc_assign_log ORDER BY created_at,id")).map(normalize);
     state.orders = (await query(conn, `${projection("lxm_orders", "done_at schedule_time requested_time")} WHERE COALESCE(NULLIF(photo_id,''),photographerId,'')<>''`)).map(normalize);
     state.phones = [];
+    state.phoneOwners = [];
     for (const table of ["lxm_staff", "lxm_agents", "lxm_distributors", "lxm_shops", "lxm_userProfiles", "lxm_auth_users", "svc_staff"]) {
-      const list = await query(conn, `SELECT phone FROM ${table} WHERE phone IS NOT NULL AND phone<>''`);
+      const list = await query(conn, `SELECT id,phone FROM ${table} WHERE phone IS NOT NULL AND phone<>''`);
       state.phones.push(...list.map(row => String(row.phone)));
+      state.phoneOwners.push(...list.map(row => ({ table, id: String(row.id), phone: String(row.phone) })));
     }
     // Runtime counts are facts queried from orders. No count is persisted in
     // photo_profile, not even when a caller uses a stale list to request end.

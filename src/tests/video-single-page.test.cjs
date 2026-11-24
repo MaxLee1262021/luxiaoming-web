@@ -49,7 +49,7 @@ function fixture(options = {}) {
     }
   };
   const window = {
-    Vue, LXM_API: api, ElMessage: message,
+    Vue, LXM_API: api, ElMessage: message, LXM_CONTENT_ORDER: require("../utils/content-order.js"),
     LXM_AUTH: { hasSession: () => session },
     get LXM_CLOUD_MODE() { return connected ? "mysql" : "mock"; },
     LXM_API_STATE: { get reachable() { return connected; } },
@@ -74,6 +74,8 @@ function fixture(options = {}) {
     persistTrashRecord: async (row) => { if (failTrash) return false; trash.push(row); return true; }
   };
   const sandbox = { window, LXM_API: api, console, LXMFormat: { nowText: () => "2026-10-22", dateTime: () => "2026-10-22" } };
+  vm.runInNewContext(read("src/app/11-content-lists.js"), sandbox, { filename: "11-content-lists.js" });
+  Object.assign(ctx, window.LXM_APP_PARTS.pop()(ctx));
   vm.runInNewContext(read("src/app/12-content-edit.js"), sandbox, { filename: "12-content-edit.js" });
   Object.assign(ctx, window.LXM_APP_PARTS[0](ctx));
   vm.runInNewContext(read("src/views/content/videoSingle/videoSingle.js"), sandbox, { filename: "videoSingle.js" });
@@ -112,10 +114,10 @@ test("only server video singles accept either explicit marker and exclude legacy
   ];
   const f = fixture({ localRows: rows, serverRows: rows });
   assert.deepEqual(ids(f.page.listSource.value), []);
-  assert.deepEqual(ids(f.ctx.videoSingleRows.value), ["flag", "kind", "category"]);
+  assert.deepEqual(ids(f.ctx.videoSingleRows.value), ["category", "flag", "kind"]);
   f.setRows(rows);
   await f.page.toggleRemote();
-  assert.deepEqual(ids(f.page.listSource.value), ["flag", "kind", "category"]);
+  assert.deepEqual(ids(f.page.listSource.value), ["category", "flag", "kind"]);
   assert.equal(f.page.videoSingleSummary.value.total, 3);
 });
 
@@ -198,7 +200,7 @@ test("legacy demo contexts cannot restore local data or disable real backend mod
 });
 
 test("save, shelf changes, delete, advanced edits, and additions update the same fetched data pool", async () => {
-  const f = fixture({ serverRows: [single("a"), { _id: "b", title: "b", type: "video", productKind: "video_single", status: "上架" }] });
+  const f = fixture({ serverRows: [single("a"), { _id: "b", title: "b", tags: ["测试风格"], type: "video", productKind: "video_single", status: "上架" }] });
   await f.mount();
   const a = f.page.selectedVideoSingle.value;
   a.title = "更新名称";
@@ -227,7 +229,7 @@ test("save, shelf changes, delete, advanced edits, and additions update the same
   Object.assign(f.ctx.state.videoSingleForm, { tags: ["测试风格"], shootingNotes: "拍摄说明", videoDuration: 30, videoUrl: "/test.mp4" });
   assert.equal(await f.ctx.saveVideoSingle(), true);
   assert.equal(f.page.videoSingleSummary.value.total, 2);
-  assert.equal(f.page.listSource.value[0].title, "新单品");
+  assert.ok(f.page.listSource.value.some((row) => row.title === "新单品"));
 });
 
 test("disconnected real sessions block both page actions and an already open advanced dialog", async () => {

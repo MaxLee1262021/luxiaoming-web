@@ -8359,6 +8359,7 @@ tbody tr:hover {
   visibility: hidden;
 }
 
+.field-required { color: #ee2c2c; font-style: normal; }
 .field-opt { display: inline-block; margin-left: 6px; padding: 1px 7px; font-size: 11px; font-weight: 600; font-style: normal; line-height: 1.6; color: #EE2C2C; background: rgba(238, 44, 44, .08); border-radius: 999px; vertical-align: middle; }
 
 .labeled-form .el-input,

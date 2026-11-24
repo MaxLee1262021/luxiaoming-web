@@ -67,6 +67,102 @@ test("optional custom base pricing must be positive, while extra-person pricing 
   f.page.form.single = 0.01; f.page.form.extraPerPerson = 0;
   await f.page.saveConfig(); assert.equal(f.writes[0].customPrice.single, 0.01); assert.equal(f.writes[0].customPrice.extraPerPerson, 0);
 });
+test("privacy can be saved independently before booking settings exist, and reloaded", async () => {
+  const f = fixture(); await f.mount();
+  assert.equal(f.page.privacyForm.title, "隐私政策"); assert.equal(f.page.privacyForm.content, "");
+  await f.page.savePrivacyConfig(); assert.equal(f.writes.length, 0);
+  Object.assign(f.page.privacyForm, { title: " 测试政策标题 ", content: " 测试第一段\n\n测试第二段 " });
+  await f.page.savePrivacyConfig();
+  assert.deepEqual(f.writes, [{ privacyPolicy: { title: "测试政策标题", content: "测试第一段\n\n测试第二段" } }]);
+  assert.equal(f.page.form.depositRatioPercent, undefined); assert.equal(f.page.form.version, "");
+  f.page.privacyForm.content = "未保存草稿"; await f.page.loadConfig();
+  assert.equal(f.page.privacyForm.content, "测试第一段\n\n测试第二段");
+});
+test("each save preserves the other form's unsaved draft and stored fields", async () => {
+  const f = fixture({ ...valid, privacyPolicy: { title: "旧标题", content: "旧正文" } }); await f.mount();
+  f.page.form.notice = "待保存须知"; f.page.form.version = "v2";
+  f.page.privacyForm.content = "新隐私正文"; await f.page.savePrivacyConfig();
+  assert.equal(f.page.form.notice, "待保存须知"); assert.equal(f.page.form.version, "v2");
+  assert.equal(f.ctx.state.siteConfig.bookingNoticeVersion, "v1");
+  f.page.privacyForm.content = "待保存隐私草稿"; await f.page.saveConfig();
+  assert.equal(f.page.privacyForm.content, "待保存隐私草稿");
+  assert.equal(f.ctx.state.siteConfig.privacyPolicy.content, "新隐私正文");
+  assert.equal(Object.hasOwn(f.writes[1], "privacyPolicy"), false);
+});
+test("privacy editor reads legacy text and structured policies without restoring explicitly empty content", async () => {
+  for (const [config, expected] of [
+    [{ privacyText: "历史正文" }, "历史正文"],
+    [{ privacyPolicy: { title: "结构标题", sections: [{ title: "分节", paragraphs: ["第一段", "第二段"] }, null, { paragraphs: [], content: "第三段" }] } }, "分节\n第一段\n第二段\n\n第三段"],
+    [{ privacyText: "过期正文", privacyPolicy: { content: "当前正文", sections: [{ paragraphs: ["过期段落"] }] } }, "当前正文"],
+    [{ privacyText: "过期正文", privacyPolicy: { content: "" } }, ""]
+  ]) {
+    const f = fixture(config); await f.mount(); assert.equal(f.page.privacyForm.content, expected);
+  }
+});
+test("privacy rejects empty and oversized input and respects load, role and connection guards", async () => {
+  const policy = { privacyPolicy: { title: "测试标题", content: "测试正文" } };
+  for (const fields of [{ title: " " }, { content: "\n " }, { title: "字".repeat(129) }, { content: "字".repeat(20001) }]) {
+    const f = fixture(policy); await f.mount(); Object.assign(f.page.privacyForm, fields);
+    await f.page.savePrivacyConfig(); assert.equal(f.writes.length, 0);
+  }
+  for (const options of [{ failedLoad: true }, { editable: false }, { connected: false }]) {
+    const f = fixture(policy, options); await f.mount(); await f.page.savePrivacyConfig(); assert.equal(f.writes.length, 0);
+  }
+});
+test("failed privacy saves retain the draft and previously stored policy", async () => {
+  const f = fixture({ privacyPolicy: { title: "测试标题", content: "旧正文" } }); await f.mount();
+  f.failSave(); f.page.privacyForm.content = "尚未保存的新正文"; await f.page.savePrivacyConfig();
+  assert.equal(f.page.privacyForm.content, "尚未保存的新正文"); assert.equal(f.ctx.state.siteConfig.privacyPolicy.content, "旧正文");
+  assert.equal(f.page.privacySaving.value, false); assert.equal(f.messages.some(message => message.type === "success"), false);
+});
+test("success tips save independently, preserve line breaks, reload and can be cleared", async () => {
+  const f = fixture(); await f.mount();
+  assert.equal(f.page.tipsForm.content, "");
+  f.page.tipsForm.content = " 第一段\r\n\r\n第二段 "; await f.page.saveSuccessTips();
+  assert.deepEqual(f.writes, [{ bookingSuccessTips: "第一段\n\n第二段" }]);
+  assert.equal(f.page.form.version, ""); assert.equal(f.page.form.depositRatioPercent, undefined);
+  f.page.tipsForm.content = "未保存草稿"; await f.page.loadConfig();
+  assert.equal(f.page.tipsForm.content, "第一段\n\n第二段");
+  f.page.tipsForm.content = "\n "; await f.page.saveSuccessTips(); await f.page.loadConfig();
+  assert.equal(f.writes[1].bookingSuccessTips, ""); assert.equal(f.page.tipsForm.content, "");
+});
+
+test("independent saves preserve stored success tips and drafts in the other editors", async () => {
+  const f = fixture({ ...valid, bookingSuccessTips: "原提示", privacyPolicy: { title: "隐私", content: "原隐私" } }); await f.mount();
+  f.page.form.notice = "须知草稿"; f.page.form.version = "v2"; f.page.privacyForm.content = "隐私草稿";
+  f.page.tipsForm.content = "新提示"; await f.page.saveSuccessTips();
+  assert.equal(f.page.form.notice, "须知草稿"); assert.equal(f.page.privacyForm.content, "隐私草稿");
+  assert.equal(f.ctx.state.siteConfig.bookingNoticeVersion, "v1"); assert.equal(f.ctx.state.siteConfig.privacyPolicy.content, "原隐私");
+  f.page.tipsForm.content = "提示草稿"; await f.page.saveConfig(); await f.page.savePrivacyConfig();
+  assert.equal(f.page.tipsForm.content, "提示草稿"); assert.equal(f.ctx.state.siteConfig.bookingSuccessTips, "新提示");
+  assert.equal(Object.hasOwn(f.writes[1], "bookingSuccessTips"), false); assert.equal(Object.hasOwn(f.writes[2], "bookingSuccessTips"), false);
+});
+
+test("success tips enforce size, role, load and connection guards", async () => {
+  for (const options of [{ failedLoad: true }, { editable: false }, { connected: false }]) {
+    const f = fixture({ bookingSuccessTips: "原提示" }, options); await f.mount();
+    f.page.tipsForm.content = "新提示"; await f.page.saveSuccessTips(); assert.equal(f.writes.length, 0);
+  }
+  const f = fixture(); await f.mount(); f.page.tipsForm.content = "字".repeat(20001);
+  await f.page.saveSuccessTips(); assert.equal(f.writes.length, 0);
+  f.page.tipsForm.content = "字".repeat(20000); await f.page.saveSuccessTips(); assert.equal(f.writes.length, 1);
+});
+
+test("failed success tips saves retain the draft and previous stored content", async () => {
+  const f = fixture({ bookingSuccessTips: "原提示" }); await f.mount(); f.failSave(); f.page.tipsForm.content = "新提示";
+  await f.page.saveSuccessTips();
+  assert.equal(f.page.tipsForm.content, "新提示"); assert.equal(f.ctx.state.siteConfig.bookingSuccessTips, "原提示");
+  assert.equal(f.page.tipsSaving.value, false); assert.equal(f.messages.some(message => message.type === "success"), false);
+});
+
+test("a success tips save blocks duplicate saves, unrelated writes and reloads while pending", async () => {
+  const f = fixture({ ...valid, privacyPolicy: { title: "隐私", content: "正文" } }); await f.mount();
+  f.page.tipsForm.content = "新提示";
+  const pending = f.page.saveSuccessTips(); assert.equal(f.page.busy.value, true);
+  await Promise.all([f.page.saveSuccessTips(), f.page.saveConfig(), f.page.savePrivacyConfig(), f.page.loadConfig()]);
+  await pending; assert.equal(f.writes.length, 1); assert.equal(f.page.tipsForm.content, "新提示"); assert.equal(f.page.busy.value, false);
+});
+
 test("a content account granted only booking settings can edit them without unrelated content menus", () => {
   const window = { LXM_APP_PARTS: [] };
   const state = { role: "content" }, roleProfile = { value: { menus: ["bookingConfig"] } };

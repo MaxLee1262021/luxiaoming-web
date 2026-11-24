@@ -14,7 +14,7 @@
                 <el-select v-model="state.filters.afterSaleStatus" clearable placeholder="售后状态"><el-option label="无售后" value="none" /><el-option label="售后处理中" value="active" /><el-option label="售后已结案" value="done" /></el-select>
                 <el-select v-model="state.filters.refundStatus" clearable placeholder="退款状态"><el-option label="无退款" value="无退" /><el-option label="待审核" value="待审" /><el-option label="已审核" value="已审" /><el-option label="已驳回" value="已驳" /></el-select>
                 <el-select v-model="state.filters.transferStatus" clearable placeholder="转派记录"><el-option label="有转派" value="has" /><el-option label="无转派" value="none" /></el-select>
-                <el-select v-model="state.filters.rescheduleStatus" clearable placeholder="改期记录"><el-option label="有改期" value="has" /><el-option label="无改期" value="none" /></el-select>
+                <el-select v-model="state.filters.rescheduleStatus" clearable placeholder="改期记录"><el-option label="客人改期待审核" value="pending" /><el-option label="有改期" value="has" /><el-option label="无改期" value="none" /></el-select>
                 <el-select v-model="state.filters.sourceType" clearable placeholder="订单来源"><el-option label="总部二维码" value="headquarter" /><el-option label="商家二维码" value="shop" /><el-option label="小程序自然下单" value="natural" /><el-option label="客服手动创建" value="manual" /></el-select>
                 <el-select v-model="state.filters.distributorId" clearable filterable placeholder="分销员"><el-option v-for="d in visibleDistributors" :key="d.id" :label="d.name" :value="d.id" /></el-select>
                 <el-select v-model="state.filters.shopId" clearable filterable placeholder="来源商家"><el-option v-for="s in scopedShops" :key="s.id" :label="s.name" :value="s.id" /></el-select>
@@ -54,6 +54,7 @@
                       <el-tag v-if="orderRefundStatus(row)!=='无退'" size="small" :type="orderRefundStatus(row)==='已审' ? 'success' : orderRefundStatus(row)==='已驳' ? 'danger' : 'warning'">退款：{{ orderRefundStatus(row) }}</el-tag>
                       <el-tag v-if="hasTransferRecord(row)" size="small" type="warning" effect="plain">有转派</el-tag>
                       <el-tag v-if="hasRescheduleRecord(row)" size="small" type="info" effect="plain">有改期</el-tag>
+                      <el-tag v-if="row.rescheduleRequest?.status === 'pending'" size="small" type="warning">客人改期待审核</el-tag>
                       <el-tag v-if="isOrderAfterSaleLocked(row)" size="small" type="danger">售后锁定</el-tag>
                       <el-tag v-if="hasRiskBlock(row)" size="small" type="danger">风控冻结</el-tag>
                       <el-tag v-if="isFinanceLocked(row)" size="small" type="warning" effect="plain">财务锁定</el-tag>

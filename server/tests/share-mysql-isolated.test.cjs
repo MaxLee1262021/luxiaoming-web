@@ -152,7 +152,7 @@ test("isolated real MySQL merchant share transactions, maturity, corrections and
       assert.equal(await count("lxm_share_merchant"), 2);
       assert.equal(await count("lxm_share_qa_projection"), 2);
     });
-    await check("real SQL scans use server time; pending paid T1 already belongs to the T2 priority set D", async () => {
+    await check("real SQL scans use server time; T2 uses latest scan regardless of prior pending T1", async () => {
       setTime("2026-11-01T01:00:00Z");
       const scan = await store.reportScan({ userId: "u-priority", scene: "c=m1", scanAt: "2030-01-01T00:00:00Z" });
       assert.equal(new Date(scan.scan.scanAt).toISOString(), "2026-11-01T01:00:00.000Z");
@@ -162,7 +162,7 @@ test("isolated real MySQL merchant share transactions, maturity, corrections and
       await store.reportScan({ userId: "u-priority", scene: "c=m2" });
       await store.reportClick({ userId: "u-priority", staffId: "synthetic-service", linkId: "synthetic-verified-link" });
       const second = await store.enqueuePayment({ orderId: "priority-t2", userId: "u-priority", paidTotal: "100.00", payTime: clock, provider: "wechat_pay" });
-      assert.equal(second.decision.hitMerchantId, "m1"); assert.equal(second.decision.hitReason, "D_LATEST_SCAN");
+      assert.equal(second.decision.hitMerchantId, "m2"); assert.equal(second.decision.hitReason, "BINDING");
       assert.equal(await store.getSnapshot("priority-t1"), null);
       assert.equal(await count("lxm_share_scan"), 2, "a customer-service click cannot create a scan");
     });
@@ -192,7 +192,7 @@ test("isolated real MySQL merchant share transactions, maturity, corrections and
       assert.equal((await store.listDetails({ orderId: "priority-t1", all: true })).sum.netAmount, "0.00");
       assert.deepEqual(await store.getSnapshot("priority-t1"), originalMature);
       const later = await store.enqueuePayment({ orderId: "after-full-refund-t2", userId: "u-priority", paidTotal: "10.00", payTime: clock, provider: "wechat_pay" });
-      assert.equal(later.decision.hitMerchantId, "m2"); assert.equal(later.decision.hitReason, "C_LATEST_SCAN");
+      assert.equal(later.decision.hitMerchantId, "m2"); assert.equal(later.decision.hitReason, "BINDING");
     });
     await check("append-only correction transfers the effective revision; subsequent refunds use the corrected merchant and amount", async () => {
       setTime("2026-11-05T00:00:00Z");
@@ -208,6 +208,10 @@ test("isolated real MySQL merchant share transactions, maturity, corrections and
       await store.recordRefund({ orderId: "correction-t2", refundNo: "correction-before", amount: "20.00" });
       setTime("2026-11-06T00:00:00Z");
       await store.enqueuePayment({ orderId: "late-earlier-t1", userId: "u-correction", paidTotal: "50.00", payTime: "2026-11-05T01:30:00Z", provider: "wechat_pay" });
+      // Simulate recovery of a missing pre-payment scan fact. An earlier
+      // payment alone no longer transfers a later order's attribution.
+      setTime("2026-11-05T02:05:00Z"); await store.reportScan({ userId: "u-correction", scene: "c=m1" });
+      setTime("2026-11-06T00:00:00Z");
       const input = { requestId: "isolated-correction-one", reason: "synthetic recovered earlier payment evidence", operatorId: "synthetic-super" };
       const results = await Promise.all([store.correctSnapshot("correction-t2", input), newStore().correctSnapshot("correction-t2", input)]);
       assert.equal(results.filter(result => !result.existed).length, 1);

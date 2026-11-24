@@ -2,7 +2,7 @@
 
 // Money stays in integer cents and ratios in 1/10000 units until formatting.
 // This module has no I/O: callers supply immutable facts as of the final payment.
-const ENGINE_VERSION = "1.1.0";
+const ENGINE_VERSION = "2.0.0";
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const MAX_CENTS = 999999999999n;
@@ -121,45 +121,44 @@ function resolveSource({ event, clicks = [], options = {} }) {
 function activeMerchant(row) {
   return !!row && !row.deleted && !row.isDeleted && !["CLOSED", "DISABLED", "INACTIVE", "TERMINATED", "CANCELLED", "停业", "关店", "停用", "已停用", "终止合作", "注销"].includes(String(row.status || "OPEN").toUpperCase());
 }
-function decideAtPayment({ event, bindings = [], rules = [], selfOrders = [], clicks = [], merchants = [], options = {} }) {
+function orderSourceFacts(value, payTime) {
+  if (value == null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw shareError("SHARE_4001", "订单商家来源证据无效");
+  const at = iso(value.at);
+  const scene = String(value.scene || "").trim();
+  if (!scene || scene.length > 32 || time(at) > time(payTime)) throw shareError("SHARE_4001", "订单商家来源证据无效");
+  return { merchantId: id(value.merchantId, "来源商家"), qrId: id(value.qrId, "来源二维码"), scene, at };
+}
+function decideAtPayment({ event, bindings = [], rules = [], clicks = [], merchants = [], options = {} }) {
   const orderId = id(event.orderId, "订单"); const userId = id(event.userId, "用户");
   const payTime = iso(event.payTime || event.finalPaidAt); const pay = time(payTime);
   if (options.enableAt && pay < time(options.enableAt)) return { skipped: true, code: "SHARE_4230", orderId };
+  // This evidence is supplied only after the service validates the persisted
+  // checkout against the issued QR history. It is not a new user binding.
+  const orderSource = orderSourceFacts(event.orderSource, payTime);
   const source = resolveSource({ event: { ...event, userId, payTime }, clicks, options });
-  const limit = positiveInt(options.candidateLimit, 20, 100, "候选数");
   const merchantMap = new Map(merchants.map(row => [String(row.id || row.merchantId), row]));
-  // Include an inactive latest binding for T1: closing that store must never
+  // Include an inactive latest binding: closing that store must never
   // resurrect an earlier store as the user's current merchant.
   const ordered = bindings.filter(row => String(row.userId) === userId && time(row.lastScanAt) <= pay)
     .sort((a, b) => newest(a, b, "lastScanAt", "lastScanId"));
   const valid = row => ["1", "ACTIVE"].includes(String(row.status == null ? 1 : row.status).toUpperCase())
     && activeMerchant(merchantMap.get(String(row.merchantId)));
   let candidates = []; let hit = null; let reason = "NO_BINDING";
-  if (source.splitType === "T1") {
-    const current = ordered[0];
-    if (current && valid(current)) {
-      hit = current; reason = "BINDING";
-      candidates = [{ merchantId: String(current.merchantId), lastScanAt: iso(current.lastScanAt), lastScanId: String(current.lastScanId), inWindow: true }];
-    }
-  } else {
-    const recent = ordered.filter(valid);
-    candidates = recent.slice(0, limit).map(binding => {
-      const ttl = resolveTtlAt(rules, binding.merchantId, binding.lastScanAt, options.defaultTtlHours || 720);
-      const end = time(binding.lastScanAt) + ttl.ttlHours * HOUR;
-      const inWindow = ttl.ttlHours > 0 && pay <= end;
-      const eligible = inWindow ? selfOrders.filter(order => String(order.userId) === userId
-        && String(order.hitMerchantId || order.merchantId) === String(binding.merchantId)
-        && String(order.orderId) !== orderId && order.splitType === "T1"
-        && order.paid !== false && !order.fullyRefunded && time(order.payTime) <= pay
-        && (!order.fullRefundAt || time(order.fullRefundAt) > pay)) : [];
-      eligible.sort((a, b) => newest(a, b, "payTime", "orderId"));
-      return { merchantId: String(binding.merchantId), lastScanAt: iso(binding.lastScanAt), lastScanId: String(binding.lastScanId),
-        ttlHours: ttl.ttlHours, ttlRuleVersion: ttl.ruleVersion, windowEnd: new Date(end).toISOString(), inWindow,
-        hasSelfOrder: eligible.length > 0, lastSelfOrderAt: eligible[0] ? iso(eligible[0].payTime) : null };
-    });
-    const inWindow = candidates.filter(candidate => candidate.inWindow);
-    hit = inWindow.find(candidate => candidate.hasSelfOrder) || inWindow[0] || null;
-    reason = hit ? hit.hasSelfOrder ? "D_LATEST_SCAN" : "C_LATEST_SCAN" : "NO_MERCHANT_IN_WINDOW";
+  const current = ordered[0];
+  if (current) {
+    candidates = [{ merchantId: String(current.merchantId), lastScanAt: iso(current.lastScanAt), lastScanId: String(current.lastScanId), inWindow: true, active: valid(current), source: "BINDING" }];
+    reason = valid(current) ? "BINDING" : "LATEST_BINDING_INACTIVE";
+    if (valid(current)) hit = current;
+  } else if (orderSource) {
+    // Checkout validation is not a new scan. A restored or stale checkout
+    // scene must never replace an actual server-recorded scan of another
+    // merchant. Keep this evidence only as a missing-scan fallback.
+    const active = activeMerchant(merchantMap.get(orderSource.merchantId));
+    const invalidated = event.orderSourceInvalidated === true;
+    candidates = [{ ...orderSource, source: "ORDER_SOURCE", inWindow: true, active, invalidated }];
+    reason = invalidated ? "ORDER_SOURCE_INVALIDATED" : active ? "ORDER_SOURCE" : "ORDER_SOURCE_MERCHANT_INACTIVE";
+    if (active && !invalidated) hit = orderSource;
   }
   const merchantId = hit ? String(hit.merchantId) : "0";
   const rule = hit ? resolveRatioAt(rules, merchantId, payTime) : null;
@@ -170,10 +169,11 @@ function decideAtPayment({ event, bindings = [], rules = [], selfOrders = [], cl
   return { orderId, userId, payTime,
     sessionId: event.sessionId ? id(event.sessionId, "支付会话") : null,
     sessionStartAt: event.sessionStartAt ? iso(event.sessionStartAt) : null,
+    ...(orderSource ? { orderSource, orderSourceInvalidated: event.orderSourceInvalidated === true } : {}),
     ...source, hitMerchantId: merchantId, hitReason: reason,
     ratio: formatRatio(ratioUnits), ruleVersion: rule ? Number(rule.versionNo) : 0, engineVersion: ENGINE_VERSION,
     refundWindowDays: windowDays, availableAt: new Date(pay + windowDays * DAY).toISOString(),
-    candidateJson: { candidates, candidateLimit: limit, truncated: source.splitType === "T2" && ordered.filter(valid).length > limit,
+    candidateJson: { candidates, attributionRule: "LATEST_SCAN_UNTIL_NEXT", ...(orderSource ? { orderSource, orderSourceInvalidated: event.orderSourceInvalidated === true } : {}), candidateLimit: 1, truncated: false,
       platformReason: hit ? null : reason } };
 }
 function finalizeDecision(decision, { paidTotal, refundedAmount = "0.00" }) {
@@ -206,4 +206,4 @@ function calculateRefund({ snapshot, cumulativeRefundAmount, alreadyReversed = "
 
 module.exports = { ENGINE_VERSION, HOUR, DAY, shareError, id, moneyToCents, formatMoney, ratioToUnits, formatRatio,
   roundDivide, time, iso, periodAt, positiveInt, refundDays, validateRule, compareSequence, resolveRatioAt, resolveTtlAt,
-  resolveSource, activeMerchant, decideAtPayment, finalizeDecision, judgeShare, calculateRefund };
+  resolveSource, activeMerchant, orderSourceFacts, decideAtPayment, finalizeDecision, judgeShare, calculateRefund };

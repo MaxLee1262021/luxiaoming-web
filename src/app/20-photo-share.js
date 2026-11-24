@@ -4,7 +4,7 @@
   const categories = [{ key: "photo", label: "照片" }, { key: "video", label: "视频" }, { key: "combo", label: "套餐" }, { key: "peripheral", label: "周边" }];
   const settlementCycles = [{ value: "daily", label: "日结" }, { value: "weekly", label: "周结" }, { value: "monthly", label: "月结" }];
   const freshRates = () => ({ photo: undefined, video: undefined, combo: undefined, peripheral: undefined });
-  const freshForm = () => ({ name: "", phone: "", cycle: "monthly", account: "", password: "", rate_mode: "custom", ...freshRates(), reason: "", dispute_days: 5, wait_days: 3 });
+  const freshForm = () => ({ name: "", phone: "", cycle: "monthly", create_account: true, account: "", password: "", rate_mode: "custom", ...freshRates(), reason: "", dispute_days: 5, wait_days: 3 });
   const photoState = ctx.reactive({
     rule: { current: null, versions: [], overrides: [] }, ruleForm: { ...freshRates(), reason: "", ver: 0 }, preview: null,
     ledger: [], ledgerTotal: 0, ledgerSummary: {}, ledgerQuery: { period: monthNow(), photo: "", type: "", status: "", keyword: "", page: 1, size: 20 }, selected: [],
@@ -69,20 +69,26 @@
   async function copyPhotoOpenid(value) { if (!value) return; try { await navigator.clipboard.writeText(value); ctx.ElMessage.success("OpenID已复制"); } catch (_) { ctx.ElMessage.warning("复制失败，可从完整提示中选取OpenID"); } }
   async function savePhotoParty() {
     if (!photoCanCreate.value || photoState.busy) return;
-    const f = photoState.form, errors = {}, account = String(f.account ?? "").trim(), password = String(f.password ?? "");
+    const f = photoState.form, errors = {}, account = String(f.account ?? "").trim(), password = String(f.password ?? ""), createAccount = f.create_account !== false;
     if (!f.name.trim()) errors.name = "请填写姓名";
     if (!/^1[3-9]\d{9}$/.test(f.phone.trim())) errors.phone = "请填写有效的11位手机号";
     if (!settlementCycles.some(cycle => cycle.value === f.cycle)) errors.cycle = "请选择日结、周结或月结";
     if (!account || account.length > 128 || /[\u0000-\u001f\u007f]/.test(account)) errors.account = "请填写128个字符以内的登录账号";
     else if (account.toLowerCase() === "admin") errors.account = "该登录账号为平台保留，请更换摄影师账号";
-    if (password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) errors.password = "密码须为8–128位且包含字母和数字";
+    if (createAccount && (password.length < 8 || password.length > 128 || !/[A-Za-z]/.test(password) || !/\d/.test(password))) errors.password = "密码须为8–128位且包含字母和数字";
     const rateError = photoValidateRates(f); if (rateError) errors.rates = rateError;
     if (!f.reason.trim()) errors.reason = "建档原因必填";
     photoState.formErrors = errors; if (Object.keys(errors).length) return;
-    const payload = { name: f.name.trim(), phone: f.phone.trim(), cycle: f.cycle, account, password, rate_mode: f.rate_mode, ...photoRatePayload(f), reason: f.reason.trim(), dispute_days: f.dispute_days, wait_days: f.wait_days };
-    await write("new", () => request("/party", "POST", payload), async (result) => { photoState.form = freshForm(); photoState.formErrors = {}; if (result?.account_created !== true || result.account !== account) { photoState.errors.new = result?.id ? "摄影师档案已保存，但填写的登录账号尚未确认，请在权限管理中核对账号；请勿重复提交。" : "保存结果尚未确认，请在摄影师列表及权限管理中核对后再操作。"; return; } photoState.createOpen = false; ctx.ElMessage.success("摄影师档案与登录账号已创建"); await loadPhotoParties(true); });
+    const payload = { name: f.name.trim(), phone: f.phone.trim(), cycle: f.cycle, create_account: createAccount, account, ...(createAccount ? { password } : {}), rate_mode: f.rate_mode, ...photoRatePayload(f), reason: f.reason.trim(), dispute_days: f.dispute_days, wait_days: f.wait_days };
+    await write("new", () => request("/party", "POST", payload), async (result) => {
+      photoState.form = freshForm(); photoState.formErrors = {};
+      const confirmed = createAccount ? result?.account_created === true && result.account === account : result?.account_created === false && result.account_linked === true && !!result.account_id && String(result.account || "").toLowerCase() === account.toLowerCase();
+      if (!confirmed) { photoState.errors.new = result?.id ? "摄影师档案已保存，但填写的登录账号尚未确认，请在权限管理中核对账号；请勿重复提交。" : "保存结果尚未确认，请在摄影师列表及权限管理中核对后再操作。"; return; }
+      photoState.createOpen = false; ctx.ElMessage.success(createAccount ? "摄影师档案与登录账号已创建" : "摄影师档案已创建并关联已有账号"); await loadPhotoParties(true);
+    });
   }
   function clearPhotoFormError(field) { delete photoState.formErrors[field]; if (["account", "password"].includes(field)) photoState.errors.new = ""; }
+  function photoAccountModeChanged() { photoState.form.password = ""; clearPhotoFormError("account"); clearPhotoFormError("password"); }
   function clearPhotoNewPassword() { newFormEpoch += 1; photoState.form.password = ""; photoState.createOpen = false; }
   async function openPhotoCreate() { if (!photoCanCreate.value || photoState.busy) return; clearPhotoNewPassword(); const formScope = newFormEpoch; photoState.form = freshForm(); const form = photoState.form, initialRates = Object.fromEntries(categories.map(({ key }) => [key, form[key]])); photoState.formErrors = {}; photoState.formError = ""; photoState.errors.new = ""; photoState.createOpen = true; await loadPhotoRules(); if (formScope === newFormEpoch && photoState.createOpen && photoState.form === form) { const defaults = {}; fillRates(defaults, photoState.rule.current); categories.forEach(({ key }) => { if (Object.is(form[key], initialRates[key])) form[key] = defaults[key]; }); } }
   async function cancelPhotoCreate() { if (photoState.busy) return; clearPhotoNewPassword(); photoState.form = freshForm(); photoState.formErrors = {}; photoState.errors.new = ""; }
@@ -100,5 +106,5 @@
   function clearPhotoState() { newFormEpoch += 1; epoch += 1; photoState.rule = { current: null, versions: [], overrides: [] }; photoState.ruleForm = { ...freshRates(), reason: "", ver: 0 }; photoState.preview = null; photoState.ledger = []; photoState.ledgerTotal = 0; photoState.ledgerSummary = {}; photoState.selected = []; photoState.parties = []; photoState.partyTotal = 0; photoState.options = []; photoState.settlements = []; photoState.settlementTotal = 0; photoState.mine = { photo: {}, kpi: {}, rows: [], settlements: [], photographers: [] }; photoState.form = freshForm(); photoState.formErrors = {}; photoState.errors = {}; photoState.loading = {}; photoState.busy = false; photoState.exporting = false; photoState.party = null; photoState.detail = null; photoState.statusParty = null; photoState.blockedParty = null; photoState.pendingOrders = []; photoState.payStatement = null; photoState.voucherUrl = ""; ["createOpen", "partyOpen", "ledgerOpen", "statusOpen", "blockOpen", "payOpen"].forEach((key) => { photoState[key] = false; }); photoState.ledgerQuery = { period: monthNow(), photo: "", type: "", status: "", keyword: "", page: 1, size: 20 }; photoState.partyQuery = { keyword: "", status: "", page: 1, size: 20 }; photoState.settlementQuery = { period: monthNow(), photo: "", status: "", page: 1, size: 20 }; photoState.mineQuery = { photo: "", period: monthNow(), page: 1, size: 20 }; }
   ctx.watch?.(() => [ctx.state.authed, ctx.state.role, ctx.state.currentAccount], clearPhotoState);
   window.addEventListener?.("lxm-auth-expired", clearPhotoState); window.addEventListener?.("lxm-auth-changed", clearPhotoState);
-  return { photoState, photoCategories: categories, photoSettlementCycles: settlementCycles, photoCycleLabel, photoCanConfig, photoCanCreate, photoCanSettle, photoCanView, photoIsSelf, photoCanPreviewMine, photoCanReadMine, photoMineAll, photoSelectedAmount, photoMoney, photoPercent, photoTime, photoLabel, photoTag, photoRatesText, photoRateValue, photoValidateRates, photoRatePayload, photoEnter, loadPhotoRules, previewPhotoRules, savePhotoRule, loadPhotoLedger, loadPhotoParties, loadPhotoOptions, loadPhotoDispatchOptions, loadPhotoSettlements, loadPhotoMine, photoSelectable, batchPhotoSettle, openPhotoLedger, copyPhotoOpenid, savePhotoParty, openPhotoParty, savePhotoRate, openPhotoStatus, savePhotoStatus, disposePhotoPending, generatePhotoSettlements, pushPhotoSettlement, openPhotoPay, payPhotoSettlement, exportPhotoLedger, clearPhotoState, clearPhotoFormError, clearPhotoNewPassword, openPhotoCreate, cancelPhotoCreate };
+  return { photoState, photoCategories: categories, photoSettlementCycles: settlementCycles, photoCycleLabel, photoCanConfig, photoCanCreate, photoCanSettle, photoCanView, photoIsSelf, photoCanPreviewMine, photoCanReadMine, photoMineAll, photoSelectedAmount, photoMoney, photoPercent, photoTime, photoLabel, photoTag, photoRatesText, photoRateValue, photoValidateRates, photoRatePayload, photoEnter, loadPhotoRules, previewPhotoRules, savePhotoRule, loadPhotoLedger, loadPhotoParties, loadPhotoOptions, loadPhotoDispatchOptions, loadPhotoSettlements, loadPhotoMine, photoSelectable, batchPhotoSettle, openPhotoLedger, copyPhotoOpenid, savePhotoParty, openPhotoParty, savePhotoRate, openPhotoStatus, savePhotoStatus, disposePhotoPending, generatePhotoSettlements, pushPhotoSettlement, openPhotoPay, payPhotoSettlement, exportPhotoLedger, clearPhotoState, clearPhotoFormError, photoAccountModeChanged, clearPhotoNewPassword, openPhotoCreate, cancelPhotoCreate };
 });

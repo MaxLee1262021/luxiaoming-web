@@ -31,6 +31,8 @@ function createShareWorker(source, options = {}) {
   const logger = options.logger || createLogger({ service: "merchant-share-worker" });
   const clock = options.clock || (() => new Date());
   const service = options.service || { settings: () => ({ enabled: !!env.SHARE_ENABLE_AT, enableAt: env.SHARE_ENABLE_AT || null }), get store() { return serviceFor(source).store; } };
+  const physical = () => options.physicalService || require("./physicalCommerce.cjs").serviceFor(source);
+  const isPhysical = value => /^physical[_-]/.test(String(value || ""));
   let running = false, timer = null, lastRecovery = 0, stopping = false;
   const activeTasks = new Set();
   function tracked(work) {
@@ -75,13 +77,14 @@ function createShareWorker(source, options = {}) {
   }
   async function refundScan({ full = true, orders = null, now = clock() } = {}) {
     let tickets;
+    const physicalIds = new Set((orders || []).map(order => String(order.id || order._id)).filter(isPhysical));
     if (full) tickets = await source.list("afterSales");
     else if (orders && orders.length) {
-      const ids = orders.map(order => String(order.id || order._id));
-      const ticketIds = await source.transaction(async conn => {
+      const ids = orders.map(order => String(order.id || order._id)).filter(id => !isPhysical(id));
+      const ticketIds = ids.length ? await source.transaction(async conn => {
         const [rows] = await conn.query("SELECT id FROM lxm_afterSales WHERE orderId IN (" + ids.map(() => "?").join(",") + ")", ids);
         return rows.map(row => row.id);
-      });
+      }) : [];
       tickets = [];
       for (const id of ticketIds) { const ticket = await source.get("afterSales", id); if (ticket) tickets.push(ticket); }
     } else tickets = [];
@@ -96,7 +99,13 @@ function createShareWorker(source, options = {}) {
         facts.set(String(ticket.orderId), [...(facts.get(String(ticket.orderId)) || []), ...refunds]);
       }
     }
-    if (full) for (const orderId of await service.store.listRefundOrderIds()) if (!facts.has(orderId)) facts.set(orderId, []);
+    if (full) for (const orderId of await service.store.listRefundOrderIds()) {
+      if (isPhysical(orderId)) physicalIds.add(orderId);
+      else if (!facts.has(orderId)) facts.set(orderId, []);
+    }
+    // Read durable commerce refunds before a due snapshot, even if its
+    // delivery task has not run yet. Shipping refunds do not reduce goods.
+    for (const orderId of physicalIds) facts.set(orderId, await physical().getShareRefunds(orderId));
     const result = { scanned: facts.size, repaired: 0, overdue: 0, failed: 0 };
     for (const [orderId, refunds] of facts) {
       try {
@@ -130,13 +139,15 @@ function createShareWorker(source, options = {}) {
   }
   async function synchronizeAttribution(event) {
     const orderId = String(event.payloadJson?.orderId || "");
-    if (!orderId || typeof source.get !== "function") throw Object.assign(new Error("分成来源投影缺少订单"), { code: "SHARE_PROJECTION_ORDER_MISSING" });
+    if (!orderId) throw Object.assign(new Error("分成来源投影缺少订单"), { code: "SHARE_PROJECTION_ORDER_MISSING" });
     const effective = await service.store.getEffectiveAttribution(orderId);
     const state = effective.state;
     if (!state) throw Object.assign(new Error("分成正式快照不存在"), { code: "SHARE_PROJECTION_SNAPSHOT_MISSING" });
     const revision = Number(effective.revisionNo || 0);
     const projection = { shareOrderSource: state.splitType === "T2" ? "SERVICE" : "SELF", shareServiceStaffId: state.staffId || null,
       shareCsClickId: state.csClickId || null, shareSourceReason: state.sourceReason || "NONE", shareAttributionRevision: revision };
+    if (isPhysical(orderId)) return physical().markShareAttribution(orderId, projection);
+    if (typeof source.get !== "function") throw Object.assign(new Error("分成来源投影缺少订单"), { code: "SHARE_PROJECTION_ORDER_MISSING" });
     for (let attempt = 0; attempt < 3; attempt++) {
       const order = await source.get("orders", orderId);
       if (!order) throw Object.assign(new Error("分成关联订单不存在"), { code: "SHARE_PROJECTION_ORDER_MISSING" });

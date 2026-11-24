@@ -208,6 +208,84 @@ test("payment projection preserves real pending intents, registered receipts and
   assert.equal(confirmed.canPayFinal, false);
 });
 
+test("confirmed final payment records supply actual receipts when the old paid field is missing or stale", () => {
+  const order = { id: "record-paid-bill", status: "shooting", totalAmount: 100, depositDue: 30, finalDue: 70,
+    depositPaid: 30, depositFinanceStatus: "已审", finalFinanceStatus: "待审",
+    paymentRecords: [{ id: "final-receipt", phase: "final", status: "confirmed", amount: 70 }] };
+  for (const finalPaid of [undefined, 0, 999]) {
+    const projected = workflow.publicOrderProjection({ ...order, finalPaid });
+    assert.equal(projected.finalPaymentStatus, "confirmed");
+    assert.equal(projected.finalPaid, 70);
+    assert.equal(projected.paidAmount, 100);
+    assert.equal(projected.dueAmount, 0);
+  }
+  for (const status of ["pending", "failed"]) {
+    const projected = workflow.publicOrderProjection({ ...order, finalPaid: 70,
+      paymentRecords: [{ id: "not-received", phase: "final", status, amount: 70 }] });
+    assert.equal(projected.finalPaid, 0);
+  }
+});
+
+test("public refunded totals count successful receipts once, including partial online and completed manual refunds", () => {
+  const order = { id: "bill-order", status: "completed", totalAmount: 100, refundAmount: 99,
+    customerCancellationRefundAmount: 99, refundStatus: "processing", onlineRefundedAmount: 12.35, refundedAmount: 16.91 };
+  const online = { id: "online-1", orderId: order.id, refundAmount: 40, refundedAmount: 40, refundStatus: "processing",
+    refundAttempts: [
+      { refundNo: "refund-1", refundId: "wx-1", status: "SUCCESS", amountFen: 1000 },
+      { refundNo: "pending", status: "PROCESSING", amountFen: 3000 },
+      { refundNo: "closed", status: "CLOSED", amountFen: 100 },
+    ] };
+  const manual = { id: "manual-1", orderId: order.id, financeStatus: "已审", refundStatus: "manual_refunded", refundAmount: 4.56 };
+  const tickets = [online, online, manual, manual,
+    { id: "online-2", orderId: order.id, refundAttempts: [
+      { refundNo: "duplicate-number", refundId: "wx-1", status: "SUCCESS", amountFen: 1000 },
+      { refundNo: "refund-2", refundId: "wx-2", status: "SUCCESS", amountFen: 235 },
+      { refundNo: "failed", status: "ABNORMAL", amountFen: 100 },
+    ] },
+    { id: "not-approved", orderId: order.id, financeStatus: "已驳", refundStatus: "manual_refunded", refundAmount: 30 },
+    { id: "not-refunded", orderId: order.id, financeStatus: "已审", refundStatus: "processing", refundAmount: 30 },
+    { id: "pending-review", orderId: order.id, financeStatus: "待审", refundStatus: "pending_review", refundAmount: 30 },
+    { id: "other-order", orderId: "another-order", refundAttempts: [{ status: "SUCCESS", amountFen: 9900 }] },
+  ];
+  const projected = workflow.publicOrderProjection(order, { afterSales: tickets });
+  assert.equal(projected.refundedAmount, 16.91);
+  assert.equal(projected.refundAmount, 99, "requested and completed refund amounts remain separate facts");
+  assert.equal(workflow.publicOrderProjection({ ...order, refundedAmount: undefined }, { afterSales: tickets }).refundedAmount, 16.91);
+  assert.equal(JSON.stringify(projected).includes("refundAttempts"), false);
+});
+
+test("refund totals distinguish known zero from unavailable facts and preserve verified legacy caches", () => {
+  const order = { id: "bill-order", totalAmount: 100, refundAmount: 30, refundStatus: "processing" };
+  assert.equal(workflow.publicOrderProjection(order, { afterSales: [] }).refundedAmount, 0);
+  for (const afterSales of [undefined, null]) {
+    assert.equal(workflow.publicOrderProjection(order, { afterSales }).refundedAmount, null);
+    assert.equal(workflow.publicOrderProjection({ ...order, onlineRefundedAmount: 12.34 }, { afterSales }).refundedAmount, 12.34);
+    assert.equal(workflow.publicOrderProjection({ ...order, refundedAmount: 20.56, onlineRefundedAmount: 12.34 }, { afterSales }).refundedAmount, 20.56);
+    assert.equal(workflow.publicOrderProjection({ ...order, refundConfirmed: true, refundStatus: "manual_refunded" }, { afterSales }).refundedAmount, 30);
+    assert.equal(workflow.publicOrderProjection({ ...order, refundConfirmed: true }, { afterSales }).refundedAmount, null);
+  }
+  for (const onlineRefundedAmount of [undefined, null, "", "   ", "invalid", -1, true, [], {}]) {
+    assert.equal(workflow.publicOrderProjection({ ...order, onlineRefundedAmount }, { afterSales: null }).refundedAmount, null);
+  }
+});
+
+test("order detail exposes only the completed refund total and tolerates unavailable after-sale storage", async () => {
+  const source = makeSource();
+  await source.create("orders", { id: "bill-rpc", openid: "customer-openid", status: "completed", totalAmount: 100, onlineRefundedAmount: 12.34 });
+  await source.create("afterSales", { id: "online", orderId: "bill-rpc", refundAttempts: [{ refundNo: "refund-rpc", status: "SUCCESS", amountFen: 1234 }] });
+  await source.create("afterSales", { id: "manual", orderId: "bill-rpc", financeStatus: "已审", refundStatus: "manual_refunded", refundAmount: 3 });
+  const detail = () => rpc(source, "getOrderDetail", { data: { orderId: "bill-rpc" } }, publicIdentity());
+  const received = await detail();
+  assert.equal(received.success, true, JSON.stringify(received));
+  assert.equal(received.data.refundedAmount, 15.34);
+  assert.equal(JSON.stringify(received.data).includes("refundAttempts"), false);
+  const list = source.list.bind(source);
+  source.list = async (key) => { if (key === "afterSales") throw new Error("unavailable"); return list(key); };
+  assert.equal((await detail()).data.refundedAmount, 12.34);
+  delete source.collections.orders["bill-rpc"].onlineRefundedAmount;
+  assert.equal((await detail()).data.refundedAmount, null);
+});
+
 test("booking rejects a peripheral-only cart even when the client bypasses its form validation", async () => {
   const source = makeSource();
   source.collections.peripherals["peripheral-1"] = { id: "peripheral-1", name: "定制相册", price: 50, status: "已上架" };

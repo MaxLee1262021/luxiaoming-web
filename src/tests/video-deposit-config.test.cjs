@@ -25,7 +25,7 @@ function fixture(row = {}) {
       return true;
     }
   };
-  const api = { setRemote() {}, async loadCollection() { return [{ id: "video-1", name: "Video", price: 100, ...row }]; } };
+  const api = { setRemote() {}, async loadCollection() { return [{ id: "video-1", name: "Video", tags: ["测试标签"], price: 100, ...row }]; } };
   const window = {
     Vue: {
       ref: (value) => ({ value }),
@@ -87,6 +87,7 @@ test("new videos inherit global deposit and reset restores the persisted ratio",
   f.page.openVideoEditor();
   assert.equal(f.page.videoDraft.value.depositRatioPercent, undefined);
   f.page.videoDraft.value.title = "New video";
+  f.page.videoDraft.value.tags = ["测试标签"];
   assert.equal(await f.page.saveSelectedVideoSingle(), true);
   assert.equal(f.writes[0].payload.depositRatio, null);
   f.page.openVideoEditor(f.ctx.data.packages.find((row) => row.id === "video-1"));

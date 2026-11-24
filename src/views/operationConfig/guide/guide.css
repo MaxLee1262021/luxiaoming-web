@@ -207,8 +207,23 @@
   font-weight:600;
   box-shadow:0 1px 3px #0f172a14
 }
-.ig-spot-filter {
+.ig-spot-filter,.ig-category-filter {
   width:170px
+}
+.ig-category-setting {
+  padding:0 20px;
+}
+.ig-category-setting .el-select {
+  width:100%;
+}
+.ig-category-chip {
+  max-width:100%;
+  padding:3px 8px;
+  border-radius:6px;
+  background:#f2f5f9;
+  color:#5b6a83;
+  font-size:12px;
+  overflow-wrap:anywhere;
 }
 .ig-card-list {
   display:flex;
@@ -431,6 +446,34 @@
 }
 .ig-editor-column,.ig-settings-column {
   min-width:0
+}
+.ig-metric-settings {
+  display:grid;
+  gap:14px
+}
+.ig-metric-field {
+  display:grid;
+  gap:7px;
+  font-size:13px;
+  color:#3d4a5e
+}
+.ig-metric-field input {
+  width:100%;
+  min-width:0;
+  height:38px;
+  padding:0 12px;
+  border:1px solid #e3e8f0;
+  border-radius:8px;
+  font:inherit;
+  color:inherit
+}
+.ig-metric-field input:focus {
+  outline:2px solid #bcd6ff;
+  outline-offset:1px
+}
+.ig-metric-field small {
+  font-size:12px;
+  color:#98a2b3
 }
 .ig-card {
   background:#fff;
@@ -975,7 +1018,7 @@
     max-width:none;
     flex-basis:100%
   }
-  .ig-spot-filter {
+  .ig-spot-filter,.ig-category-filter {
     flex:1
   }
   .ig-save-status {

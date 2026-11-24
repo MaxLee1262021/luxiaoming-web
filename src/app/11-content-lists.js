@@ -104,6 +104,56 @@ async function addTrash(key, source, previous, row) {
 function contentList(key = state.active) {
   return { cities: data.cities, spots: data.spots, series: data.series, albums: data.albums, samples: data.samples, packages: data.packages, addonServices: data.addonServices, peripherals: data.peripherals, guides: data.guides, stories: data.stories }[key] || [];
 }
+function contentOrderCollection(key) { return key === "videoSingles" ? "packages" : key; }
+function sortedContentRows(key, rows) {
+  return (rows || []).slice().sort((a, b) => window.LXM_CONTENT_ORDER.compare(contentOrderCollection(key), a, b));
+}
+function contentOrderRows(key, row) {
+  key = contentOrderCollection(key);
+  return window.LXM_CONTENT_ORDER.ordered(key, data[key] || [], row);
+}
+function contentSortPosition(key, row) {
+  const id = window.LXM_CONTENT_ORDER.idOf(row);
+  return contentOrderRows(key, row).findIndex((item) => window.LXM_CONTENT_ORDER.idOf(item) === id) + 1;
+}
+function contentSortDisabled(key, row, direction) {
+  const rows = contentOrderRows(key, row);
+  const index = rows.findIndex((item) => window.LXM_CONTENT_ORDER.idOf(item) === window.LXM_CONTENT_ORDER.idOf(row));
+  return !ctx.can("contentEdit") || !!state.contentSortSaving || ![-1, 1].includes(direction)
+    || index < 0 || index + direction < 0 || index + direction >= rows.length;
+}
+function applyContentOrderResponse(key, response) {
+  const { __contentOrder, ...saved } = response || {};
+  const sources = new Map((data[contentOrderCollection(key)] || []).map((row) => [window.LXM_CONTENT_ORDER.idOf(row), row]));
+  for (const entry of Array.isArray(__contentOrder) ? __contentOrder : []) {
+    const source = sources.get(String(entry.id));
+    if (source) source.sort = entry.sort;
+  }
+  return saved;
+}
+async function changeContentSort(key, row, direction) {
+  if (contentSortDisabled(key, row, direction)) return false;
+  if (!ctx.isServerConnected?.()) { ElMessage.error("真实后端连接不可用，排序未保存"); return false; }
+  key = contentOrderCollection(key);
+  const id = window.LXM_CONTENT_ORDER.idOf(row);
+  const source = (data[key] || []).find((item) => window.LXM_CONTENT_ORDER.idOf(item) === id);
+  if (!source) return false;
+  state.contentSortSaving = true;
+  try {
+    const result = await window.LXM_CLOUD.update(key, id, { sortDirection: direction });
+    if (!result || result.error || !Array.isArray(result.__contentOrder)) throw new Error(result?.error || "服务端未确认排序保存");
+    Object.assign(source, applyContentOrderResponse(key, result));
+    const position = contentSortPosition(key, source);
+    log("调整展示排序", { albums: "照片留影", packages: window.LXM_CONTENT_ORDER.isVideoSingle(source) ? "视频摄影" : "旅拍套餐", guides: "旅拍灵感" }[key], `${source.name || source.title || id} · 第 ${position} 位`);
+    ElMessage.success(`已插入第 ${position} 位，其他内容已依次调整`);
+    return true;
+  } catch (error) {
+    ElMessage.error(error?.message || "排序保存失败，请稍后重试");
+    return false;
+  } finally {
+    state.contentSortSaving = false;
+  }
+}
 function shelfRows() {
   [...data.albums, ...data.packages, ...data.peripherals].filter((item) => !item.deleted).forEach((item) => {
     if (item.isShow === undefined) item.isShow = productStatus(item) !== "下架";
@@ -320,7 +370,7 @@ const albumRows = computed(() => {
     const kw = state.filters.keyword.toLowerCase();
     rows = rows.filter((row) => JSON.stringify(row).toLowerCase().includes(kw));
   }
-  return rows;
+  return sortedContentRows("albums", rows);
 });
 const albumSummary = computed(() => ({
   total: data.albums.length,
@@ -794,6 +844,11 @@ async function requestDeleteSpot(spot) {
 
   return {
     contentManualVisible,
+    sortedContentRows,
+    contentSortPosition,
+    contentSortDisabled,
+    changeContentSort,
+    applyContentOrderResponse,
     contentEffectiveVisible,
     contentSpotIds,
     contentItemProduct,

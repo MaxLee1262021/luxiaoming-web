@@ -76,6 +76,64 @@ test("guide setup joins navigation loading and explicit reload requests fresh da
   assert.deepEqual(f.loadOptions[1], { force: true, joinPending: false });
 });
 
+test("guide metric inputs default to zero and preserve existing values including explicit zero", async () => {
+  const f = await fixture();
+  await f.page.openEditor();
+  assert.equal(f.page.ui.form.readCount, 0);
+  assert.equal(f.page.ui.form.score, 0);
+  await f.page.openEditor({ id: "legacy", views: 123, score: "4.9" });
+  assert.equal(f.page.ui.form.readCount, 123);
+  assert.equal(f.page.ui.form.score, "4.9");
+  await f.page.openEditor({ id: "explicit-zero", readCount: 0, views: 123, score: 0 });
+  assert.equal(f.page.ui.form.readCount, 0);
+  assert.equal(f.page.ui.form.score, 0);
+});
+
+test("guide metrics are saved numerically in drafts and retained when publishing", async () => {
+  const f = await fixture();
+  validForm(f.page, { readCount: "1234", score: "4.9" });
+  assert.equal(await f.page.saveArticle(false), true);
+  assert.equal(f.saves[0].payload.readCount, 1234);
+  assert.equal(f.saves[0].payload.score, 4.9);
+  assert.equal(f.page.ui.form.readCount, 1234);
+  assert.equal(f.page.ui.form.score, 4.9);
+  assert.equal(await f.page.saveArticle(true), true);
+  assert.equal(f.saves[1].payload.readCount, 1234);
+  assert.equal(f.saves[1].payload.score, 4.9);
+  await f.page.openEditor(f.ctx.data.guides[0]);
+  assert.equal(f.page.ui.form.readCount, 1234);
+  assert.equal(f.page.ui.form.score, 4.9);
+});
+
+test("invalid guide metrics block both draft and publication without changing runtime data", async () => {
+  const invalid = [
+    { readCount: -1 }, { readCount: 1.2 }, { readCount: "" }, { readCount: "not a number" },
+    { readCount: Infinity }, { readCount: 2147483648 }, { readCount: true },
+    { score: -0.1 }, { score: 5.1 }, { score: 4.95 }, { score: "" }, { score: "bad" }, { score: Infinity }
+  ];
+  for (const publish of [false, true]) {
+    for (const metrics of invalid) {
+      const f = await fixture();
+      validForm(f.page, { readCount: 0, score: 0, ...metrics });
+      assert.equal(await f.page.saveArticle(publish), false, `accepted ${JSON.stringify(metrics)} for publish=${publish}`);
+      assert.equal(f.saves.length, 0);
+      assert.equal(f.ctx.data.guides.length, 0);
+      assert.equal(f.page.ui.dirty, true);
+      assert.ok(f.messages.some((message) => message.type === "warning" && /初始浏览人数|初始评分/.test(message.message)));
+    }
+  }
+});
+
+test("guide metrics accept zero and the supported upper bounds", async () => {
+  for (const metrics of [{ readCount: 0, score: 0 }, { readCount: 2147483647, score: 5 }]) {
+    const f = await fixture();
+    validForm(f.page, metrics);
+    assert.equal(await f.page.saveArticle(true), true);
+    assert.equal(f.saves[0].payload.readCount, metrics.readCount);
+    assert.equal(f.saves[0].payload.score, metrics.score);
+  }
+});
+
 test("guide list treats publication and visibility independently, with pins before update time", async () => {
   const f = await fixture();
   f.ctx.data.guides.push(
@@ -101,6 +159,47 @@ test("guide list treats publication and visibility independently, with pins befo
   f.ctx.state.filters.contentSpotId = "b";
   f.ctx.state.filters.keyword = "古城";
   assert.deepEqual(ids(f.page.guideRows.value), ["pin", "hidden"]);
+});
+
+test("guide categories filter independently of publication and preserve optional custom values through saves", async () => {
+  const f = await fixture();
+  f.ctx.data.guides.push(
+    { id: "city", title: "城市", category: " 市井日常 ", status: "已发布" },
+    { id: "draft", title: "草稿", category: "市井日常", status: "草稿" },
+    { id: "legacy", title: "旧文章", status: "已发布" },
+    { id: "named", title: "同名分类", category: "未分类", status: "已发布" },
+    { id: "all", title: "全部分类名称", category: "全部", status: "已发布" },
+    { id: "deleted", category: "不再使用", deleted: true }
+  );
+  assert.deepEqual(plain(f.page.categoryOptions.value), ["市井日常", "未分类", "全部"]);
+  f.page.ui.categoryFilter = "category:市井日常";
+  assert.deepEqual(ids(f.page.guideRows.value), ["city", "draft"]);
+  f.page.ui.filter = "published";
+  assert.deepEqual(ids(f.page.guideRows.value), ["city"]);
+  f.page.ui.categoryFilter = "uncategorized";
+  assert.deepEqual(ids(f.page.guideRows.value), ["legacy"]);
+  f.page.ui.categoryFilter = "category:未分类";
+  assert.deepEqual(ids(f.page.guideRows.value), ["named"]);
+  f.page.ui.categoryFilter = "category:全部";
+  assert.deepEqual(ids(f.page.guideRows.value), ["all"]);
+  await f.page.openEditor(f.ctx.data.guides[0]);
+  assert.equal(f.page.ui.form.category, "市井日常");
+  validForm(f.page, { category: " 新建分类 " });
+  assert.equal(await f.page.saveArticle(true), true);
+  assert.equal(f.saves[0].payload.category, "新建分类");
+  const saved = f.saves[0].payload;
+  assert.ok(f.page.categoryOptions.value.includes("新建分类"));
+  await f.page.openEditor(saved);
+  f.page.ui.form.category = "";
+  f.page.markDirty();
+  assert.equal(await f.page.saveArticle(true), true);
+  assert.equal(f.saves[1].payload.category, "");
+  await f.page.openEditor();
+  assert.equal(f.page.ui.form.category, "");
+  validForm(f.page, { category: "字".repeat(41) });
+  assert.equal(await f.page.saveArticle(true), false);
+  assert.equal(f.saves.length, 2);
+  assert.ok(f.messages.some((message) => message.message.includes("分类不能超过")));
 });
 
 test("multiple points offer their own available products and retain one product across all groups", async () => {

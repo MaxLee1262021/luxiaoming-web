@@ -80,11 +80,12 @@ test("claim uses CAS, transfer removes former access and generic updates cannot 
   assert.equal((await request(owner, "o", { action: "note", reason: "former owner mutation" })).status, 403);
   assert.equal((await request(next, "o", undefined)).status, 200);
 });
-test("service starts its assigned order, frozen deposit survives price adjustments and completed followup/delivery stay independent", async (t) => {
+test("visitor starts its assigned order, frozen deposit survives price adjustments and completed followup/delivery stay independent", async (t) => {
   const source = fixture();
-  source.collections.orders.o = { id: "o", status: "assigned", assigneeId: "service", photographerId: "photo", totalAmount: 100, depositDue: 30, depositFrozenAmount: 30, depositPaid: 30, depositFinanceStatus: "confirmed", finalDue: 70, statusLogs: [], followRecords: [] };
+  source.collections.orders.o = { id: "o", openid: "customer", status: "assigned", assigneeId: "service", photographerId: "photo", totalAmount: 100, depositDue: 30, depositFrozenAmount: 30, depositPaid: 30, depositFinanceStatus: "confirmed", finalDue: 70, statusLogs: [], followRecords: [] };
   const request = await api(t, source);
-  assert.equal((await request("service", "o", { action: "start", reason: "customer and photographer met" })).status, 200);
+  assert.equal((await request("service", "o", { action: "start", reason: "customer and photographer met" })).status, 403);
+  assert.equal((await rpc(source, "confirmOrderArrival", { data: { orderId: "o" } }, identity)).success, true);
   assert.equal((await request("photo", "o", { action: "start", reason: "photographer login disabled" })).status, 401);
   assert.equal((await request("service", "o", { action: "update", reason: "extra products", fields: { totalAmount: 160, finalDiscountAmount: 10, priceAdjustReason: "customer extra service" } })).status, 200);
   assert.equal(source.collections.orders.o.depositDue, 30);
@@ -110,12 +111,12 @@ test("service starts its assigned order, frozen deposit survives price adjustmen
 test("zero final balance acknowledges completion without a fabricated WeChat transaction", async t => {
   const source = fixture();
   t.after(() => require("../lib/wechatPay.cjs").drainMerchantShare(source));
-  source.collections.orders.o = { id: "o", openid: "customer", status: "shooting", totalAmount: 100, depositDue: 100, depositPaid: 100, depositFinanceStatus: "confirmed", finalDue: 0, paymentRecords: [], statusLogs: [], followRecords: [] };
+  source.collections.orders.o = { id: "o", openid: "customer", status: "assigned", photographerId: "photo", totalAmount: 100, depositDue: 100, depositPaid: 100, depositFinanceStatus: "confirmed", finalDue: 0, paymentRecords: [], statusLogs: [], followRecords: [] };
   assert.equal(workflow.publicOrderProjection(source.collections.orders.o).canConfirmCompletion, false);
   const premature = await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "zero-premature-0001" } }, { identity: identity.identity });
   assert.equal(premature.success, false);
-  assert.equal(source.collections.orders.o.status, "shooting");
-  source.collections.orders.o.shootingCompletedAt = "2026-10-26T01:00:00Z";
+  assert.equal(source.collections.orders.o.status, "assigned");
+  assert.equal((await rpc(source, "confirmOrderArrival", { data: { orderId: "o" } }, identity)).success, true);
   assert.equal(workflow.publicOrderProjection(source.collections.orders.o).canConfirmCompletion, true);
   const result = await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "zero-complete-0001" } }, { identity: identity.identity });
   assert.equal(result.success, true, JSON.stringify(result));
@@ -126,18 +127,19 @@ test("zero final balance acknowledges completion without a fabricated WeChat tra
   assert.equal((await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "zero-complete-0001" } }, { identity: identity.identity })).data.idempotent, true);
 });
 
-test("an independent delivery record cannot open final payment before shooting is completed", async () => {
+test("an independent delivery record keeps shooting active and final payment available after arrival", async () => {
   const source = fixture();
   source.collections.orders.o = { id: "o", openid: "customer", status: "shooting", shootingStartedAt: "2026-10-26T01:00:00Z", totalAmount: 100,
-    depositDue: 30, depositPaid: 30, depositFinanceStatus: "confirmed", finalDue: 70, paymentRecords: [],
+    depositDue: 30, depositPaid: 30, depositFinanceStatus: "confirmed", finalDue: 70, paymentRecords: [], statusLogs: [], followRecords: [],
     deliveryRecord: { method: "现场补充交付" }, deliveryRecords: [{ method: "现场补充交付" }] };
   const projected = workflow.publicOrderProjection(source.collections.orders.o);
   assert.equal(projected.workflowStage, "shooting");
   assert.equal(projected.shootingCompleted, false);
-  assert.equal(projected.canPayFinal, false);
+  assert.equal(projected.canPayFinal, true);
   const premature = await rpc(source, "createPayment", { data: { orderId: "o", phase: "final", selectionAccepted: true, idempotencyKey: "delivery-premature-final" } }, identity);
-  assert.equal(premature.success, false);
-  assert.deepEqual(source.collections.orders.o.paymentRecords, []);
+  assert.equal(premature.success, true, JSON.stringify(premature));
+  assert.equal(source.collections.orders.o.paymentRecords[0].status, "pending");
+  assert.equal(source.collections.orders.o.shootingCompletedAt, undefined);
 });
 
 test("public projection returns current gifts and intent and excludes internal deliveries", () => {

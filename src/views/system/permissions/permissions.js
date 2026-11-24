@@ -269,22 +269,9 @@
 
     function syncMenuDefinitions(rows) {
       if (!window.LXM_CONFIG || !Array.isArray(rows)) return;
-      const normalized = rows.map((row) => {
-        const parent = row && row.parentKey !== undefined ? row.parentKey : row?.parentId;
-        return {
-          key: text(row.key || row.menuKey || row.id).trim(),
-          label: text(row.name || row.label || row.key).trim(),
-          group: text(row.group || row.meta?.group || "其他功能").trim() || "其他功能",
-          parentId: text(parent).trim(),
-          parentKey: text(parent).trim(),
-          routeKey: text(row.routeKey || row.targetKey || row.key).trim(),
-          targetKey: text(row.targetKey || row.routeKey || row.key).trim(),
-          path: text(row.path || ""),
-          icon: text(row.icon || ""),
-          sort: Number(row.sort ?? row.sortNo ?? 0),
-          status: ["停用", "disabled", "inactive"].includes(text(row.status).trim().toLowerCase()) ? "停用" : "启用"
-        };
-      }).filter((row) => row.key);
+      // Raw stored groups may predate the navigation catalog. Reuse login's
+      // presentation rules before replacing rows so refreshes also honor deletes.
+      const normalized = ctx.normalizeNavigationDefinitions(rows);
       window.LXM_CONFIG.menus.splice(0, window.LXM_CONFIG.menus.length, ...normalized);
       const superRole = window.LXM_CONFIG.roles?.super;
       if (superRole) superRole.menus = normalized.filter((row) => row.status !== "停用").map((row) => row.key);

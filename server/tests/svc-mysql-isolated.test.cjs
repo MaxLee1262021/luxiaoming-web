@@ -86,8 +86,8 @@ test("isolated MySQL service migration, transactional ownership, ledger snapshot
     await check("shooting completion waits for final payment before observation and live binding", async () => {
       await workbench.execute("POST", "/api/kf/orders/QA-ORDER/slot/confirm", { expected_status: "claimed", new_time: "2026-11-11 15:00:00" }, self);
       await workbench.execute("POST", "/api/kf/orders/QA-ORDER/assign", { expected_status: "confirmed", photo_id: "qa-photo", reason: "QA dispatch", channel: "phone" }, self);
-      await workbench.execute("POST", "/api/kf/orders/QA-ORDER/shoot/start", { expected_status: "confirmed" }, self);
-      await workbench.execute("POST", "/api/kf/orders/QA-ORDER/shoot/finish", { expected_status: "shooting" }, self);
+      await workbench.execute("POST", "/api/kf/orders/QA-ORDER/shoot/start", { expected_status: "confirmed" }, { ...self, role: "super" });
+      await workbench.execute("POST", "/api/kf/orders/QA-ORDER/shoot/finish", { expected_status: "shooting" }, { ...self, role: "super" });
       const [[pending]] = await query("SELECT service_status,workflowStage,done_at FROM lxm_orders WHERE id='qa-order'");
       assert.equal(pending.service_status, "final_pending"); assert.equal(pending.workflowStage, "awaiting_final_payment"); assert.equal(pending.done_at, null);
       const [[shootingFact]] = await query("SELECT value_text FROM lxm_collection_values WHERE collection_name='orders' AND record_id='qa-order' AND path='shootingCompletedAt'"); assert.ok(shootingFact.value_text);

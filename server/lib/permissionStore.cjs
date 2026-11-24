@@ -222,11 +222,22 @@ function decorateStore(store, backend, options = {}) {
     if (!doc || !doc.account) return null;
     const legacyId = String(doc.id || doc._id || `${key}_${doc.account}`);
     const role = normalizeAuthzRole(doc.role || (key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "service"));
-    const existing = await store.getUser(legacyId);
+    let existing = await store.getUser(legacyId);
+    if (!existing && key === "staff" && typeof store.listUsers === "function") {
+      // Historical imports may use a separate auth ID. A later staff edit
+      // must update that linked account instead of creating a duplicate login.
+      const linked = (await store.listUsers()).filter(user => user.extra?.legacyKey === key && String(user.extra?.legacyId || "") === legacyId && user.extra?.subjectType === "photo" && /^PH\d{8}$/.test(String(user.extra?.subjectId || "")));
+      if (linked.length > 1) throw Object.assign(new Error("人员账号关联不唯一"), { code: "DATA_SOURCE_INVALID" });
+      existing = linked[0] || null;
+    }
     const previousExtra = existing && existing.extra && typeof existing.extra === "object" ? { ...existing.extra } : {};
     delete previousExtra.permissions;
     delete previousExtra.permissionKeys;
     const extra = { ...previousExtra, legacyKey: key, legacyId, subjectType: key === "shops" ? "merchant" : key === "distributors" ? "distributor" : key === "agents" ? "agent" : "staff", subjectId: legacyId, shopId: doc.shopId || previousExtra.shopId || "", distributorId: doc.distributorId || previousExtra.distributorId || "", agentId: doc.agentId || previousExtra.agentId || "" };
+    if (key === "staff" && previousExtra.subjectType === "photo" && /^PH\d{8}$/.test(String(previousExtra.subjectId || ""))) {
+      extra.subjectType = "photo";
+      extra.subjectId = previousExtra.subjectId;
+    }
     let roleId = doc.roleId || (existing && existing.roleId) || "";
     if (!roleId || String(roleId) === String(role)) {
       try {
@@ -236,9 +247,10 @@ function decorateStore(store, backend, options = {}) {
       } catch (_) {}
     }
     if (!roleId) roleId = String(role).startsWith("role_") ? String(role) : `role_${role}`;
-    const payload = { id: legacyId, account: doc.account, name: doc.name || doc.title || doc.account, role, roleId, status: doc.status || "active", phone: doc.phone || doc.contactPhone || "", email: doc.email || "", extra };
+    const userId = existing ? String(existing.id) : legacyId;
+    const payload = { id: userId, account: doc.account, name: doc.name || doc.title || doc.account, role, roleId, status: doc.status || "active", phone: doc.phone || doc.contactPhone || "", email: doc.email || "", extra };
     if (doc.password || doc.passwordHash) payload.password = doc.password || doc.passwordHash;
-    return existing ? store.updateUser(legacyId, payload) : store.createUser(payload);
+    return existing ? store.updateUser(userId, payload) : store.createUser(payload);
   };
   return store;
 }

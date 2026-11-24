@@ -6,7 +6,9 @@ const { isBuiltinAdminAccount } = require("./permissionStore.cjs");
 const { failure } = require("./svcBenefit.cjs");
 
 const SERVICE_MENUS = Object.freeze([
+  ["svcGeneralWorkbench", "总工作台", "客服工作台"],
   ["svcWorkbench", "工作台", "客服工作台"],
+  ["productLinks", "商品小程序外链", "客服工作台"],
   ["svcIntake", "订单承接", "客服工作台"],
   ["svcFollowup", "跟进与完成", "客服工作台"],
   ["svcComplaints", "客诉与退款", "客服工作台"],

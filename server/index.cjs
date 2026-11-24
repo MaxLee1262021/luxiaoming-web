@@ -23,6 +23,10 @@ const createPermissionStore = require("./lib/permissionStore.cjs");
 const staticHandler = require("./lib/static.cjs")(root);
 const amapRuntime = require("./lib/amapRuntime.cjs").createAmapRuntime();
 const wechatPay = require("./lib/wechatPay.cjs").createWechatPay();
+const physicalOptions = {
+  logistics: require("./lib/kuaidi100.cjs").createKuaidi100(),
+  shipping: require("./lib/wechatShipping.cjs").createWechatShipping(),
+};
 const auth = createAuthStore();
 const permissionStore = createPermissionStore({
   backend: mode,
@@ -35,7 +39,7 @@ const permissionStore = createPermissionStore({
   connectionLimit: Math.min(Math.max(Number(process.env.DB_CONNECTION_LIMIT || 10), 1), 100),
   logger,
 });
-const apiHandler = require("./lib/api.cjs")(source, mode, { auth, permissionStore, sourceStatus, wechatPay, logger });
+const apiHandler = require("./lib/api.cjs")(source, mode, { auth, permissionStore, sourceStatus, wechatPay, logger, physicalOptions });
 
 async function bootstrap() {
   const server = http.createServer((req, res) => {
@@ -88,6 +92,8 @@ async function bootstrap() {
   if (photoWorker) photoWorker.start();
   const svcWorker = require('./lib/customerService.cjs').createWorker(source,{logger});
   svcWorker.start();
+  const physicalWorker = require("./lib/physicalWorker.cjs").createPhysicalWorker(source, { ...physicalOptions, wechatPay, logger });
+  physicalWorker.start();
   let shuttingDown = false;
   const shutdown = async (signal = "shutdown") => {
     if (shuttingDown) return;
@@ -102,6 +108,7 @@ async function bootstrap() {
     await workerStopped;
     await photoWorkerStopped;
     await svcWorker.stop();
+    await physicalWorker.stop();
     try { await auth.close(); } catch (_) {}
     try { await permissionStore.close(); } catch (_) {}
     try { if (source && typeof source.close === "function") await source.close(); } catch (_) {}

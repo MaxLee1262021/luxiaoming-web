@@ -13,7 +13,7 @@ function fixture() {
     ? { get value() { return definition(); } }
     : { get value() { return definition.get(); }, set value(value) { definition.set(value); } };
   const Vue = { computed, ref: (value) => ({ value }), reactive: (value) => value };
-  const window = { Vue, LXM_APP_PARTS: [], LXM_AUTH: { hasSession: () => false }, LXM_PAGES: { register(page) { window.page = page; } } };
+  const window = { LXM_CONTENT_ORDER: require("../utils/content-order.js"), Vue, LXM_APP_PARTS: [], LXM_AUTH: { hasSession: () => false }, LXM_PAGES: { register(page) { window.page = page; } } };
   const data = {
     spots: [{ id: "a", name: "点A" }, { _id: "b", name: "点B" }],
     series: [{ _id: "style-a", name: "江景", spotIds: ["a"] }],
@@ -81,7 +81,7 @@ test("视频点位筛选沿用同一关联规则，支持风格继承和点位�
   ctx.state.filters.contentSpotId = "b";
   assert.deepEqual(ids(ctx.filterVideoSingleRows(ctx.data.packages)), ["video-b"]);
   ctx.state.filters.contentSpotId = "";
-  assert.deepEqual(ids(ctx.filterVideoSingleRows(ctx.data.packages)), ["video-a", "video-inherited", "video-b", "video-unbound"]);
+  assert.deepEqual(ids(ctx.filterVideoSingleRows(ctx.data.packages)), ["video-a", "video-b", "video-inherited", "video-unbound"]);
 });
 
 test("套餐点位筛选接受导航传入值和后续切换，重置解除关联筛选且组合点位可继承", () => {
@@ -92,12 +92,12 @@ test("套餐点位筛选接受导航传入值和后续切换，重置解除关�
   assert.deepEqual(ids(packages.tableRows.value), ["package-a", "package-mixed"]);
   ctx.state.filters.contentSpotId = "b";
   assert.equal(packages.spotFilter.value, "b", "页面已创建时再次跳转也会使用新点位");
-  assert.deepEqual(ids(packages.tableRows.value), ["package-mixed", "package-b"]);
+  assert.deepEqual(ids(packages.tableRows.value), ["package-b", "package-mixed"]);
   packages.spotFilter.value = "a";
   assert.equal(ctx.state.filters.contentSpotId, "a", "手动切换同步共享筛选");
   packages.resetFilters();
   assert.equal(ctx.state.filters.contentSpotId, "");
-  assert.deepEqual(ids(packages.tableRows.value), ["package-a", "package-mixed", "package-b"]);
+  assert.deepEqual(ids(packages.tableRows.value), ["package-a", "package-b", "package-mixed"]);
 });
 
 test("空组合明细保留旧套餐点位，非空别名明细仍会派生组合点位", () => {

@@ -152,6 +152,7 @@ test("administrator creates from the list dialog, clears secrets, and refreshes 
     : { code: 0, data: { rows: [{ id: "PH20260009", name: newForm.name }], total: 1 } };
   await f.ui.savePhotoParty();
   assert.equal(f.calls[0].body.account, "photo-admin-set"); assert.equal(f.calls[0].body.password, newForm.password);
+  assert.equal(f.calls[0].body.create_account, true);
   assert.equal(f.ui.photoState.form.password, ""); assert.equal(f.ui.photoState.form.account, ""); assert.equal(f.ui.photoState.form.name, "");
   assert.equal(f.ui.photoState.createOpen, false); assert.equal(f.ui.photoState.partyQuery.page, 1);
   assert.match(f.calls.at(-1).url, /^\/api\/photo\/party\?/); assert.match(f.calls.at(-1).url, /page=1/);
@@ -160,6 +161,58 @@ test("administrator creates from the list dialog, clears secrets, and refreshes 
   assert.equal(JSON.stringify(f.notices).includes(newForm.password), false);
   assert.equal(Object.hasOwn(f.ui.photoState,"credentials"),false);
   assert.doesNotMatch(source("src/views/photo-share/new/new.html"),/initial_password|credentialsOpen|自动生成的账号/);
+});
+
+test("existing account mode omits passwords and confirms the binding before closing and refreshing", async () => {
+  const f = fixture(); Object.assign(f.ui.photoState.form, newForm, { create_account: false, password: "stale secret" });
+  f.ui.photoState.createOpen = true; f.ui.photoState.partyQuery.page = 3;
+  f.control.handler = async (_url, init) => init?.method === "POST"
+    ? { code: 0, data: { id: "PH20260009", account: "PHOTO-ADMIN-SET", account_id: "existing-user", account_created: false, account_linked: true } }
+    : { code: 0, data: { rows: [{ id: "PH20260009", name: newForm.name }], total: 1 } };
+  await f.ui.savePhotoParty();
+  assert.equal(f.calls[0].body.create_account, false); assert.equal(f.calls[0].body.account, "photo-admin-set");
+  assert.equal(Object.hasOwn(f.calls[0].body, "password"), false);
+  assert.equal(f.ui.photoState.createOpen, false); assert.equal(f.ui.photoState.form.create_account, true);
+  assert.equal(f.ui.photoState.form.password, ""); assert.equal(f.ui.photoState.form.account, "");
+  assert.equal(f.ui.photoState.partyQuery.page, 1); assert.equal(f.ui.photoState.parties[0].id, "PH20260009");
+  assert.match(f.notices.find(n => n.type === "success").message, /关联已有账号/);
+});
+
+test("account mode changes clear credentials and account errors while retaining the photographer draft", async () => {
+  const f = fixture(); Object.assign(f.ui.photoState.form, newForm);
+  f.ui.photoState.formErrors = { account: "账号已存在", password: "密码必填", phone: "手机号错误" }; f.ui.photoState.errors.new = "账号已存在";
+  f.ui.photoState.form.create_account = false; f.ui.photoAccountModeChanged();
+  assert.equal(f.ui.photoState.form.password, ""); assert.equal(f.ui.photoState.form.account, newForm.account);
+  assert.equal(f.ui.photoState.form.name, newForm.name); assert.equal(f.ui.photoState.form.phone, newForm.phone);
+  assert.deepEqual(plain(f.ui.photoState.formErrors), { phone: "手机号错误" }); assert.equal(f.ui.photoState.errors.new, "");
+  f.ui.photoState.form.create_account = true; f.ui.photoAccountModeChanged(); await f.ui.savePhotoParty();
+  assert.equal(f.calls.length, 0); assert.match(f.ui.photoState.formErrors.password, /密码/);
+  for (const name of ["new", "party"]) {
+    const html = source(`src/views/photo-share/${name}/${name}.html`);
+    assert.match(html, /v-model="photoState.form.create_account" @change="photoAccountModeChanged"/);
+    assert.match(html, /:value="false">关联已有账号/);
+    assert.match(html, /v-if="photoState.form.create_account" label="登录密码"/);
+  }
+});
+
+test("failed existing-account links preserve the draft and require a confirmed matching association", async () => {
+  const f = fixture(); Object.assign(f.ui.photoState.form, newForm, { create_account: false, password: "" });
+  f.ui.photoState.createOpen = true;
+  f.control.handler = async () => ({ code: 4315, msg: "该账号已关联摄影师档案", data: { field: "account" } });
+  const before = plain(f.ui.photoState.form); await f.ui.savePhotoParty();
+  assert.deepEqual(plain(f.ui.photoState.form), before); assert.equal(f.ui.photoState.createOpen, true);
+  assert.match(f.ui.photoState.formErrors.account, /已关联/); assert.equal(f.notices.length, 0);
+  for (const data of [
+    { id: "PH20260009", account: "photo-admin-set", account_id: "u", account_created: true },
+    { id: "PH20260009", account: "another-user", account_id: "u", account_created: false, account_linked: true },
+    { id: "PH20260009", account: "photo-admin-set", account_created: false, account_linked: true }
+  ]) {
+    const rejected = fixture(); Object.assign(rejected.ui.photoState.form, before);
+    rejected.control.handler = async () => ({ code: 0, data }); await rejected.ui.savePhotoParty();
+    assert.match(rejected.ui.photoState.errors.new, /档案已保存.*账号尚未确认/); assert.equal(rejected.notices.length, 0);
+    assert.equal(rejected.calls.length, 1); assert.equal(rejected.ui.photoState.form.password, "");
+  }
+  await f.ui.cancelPhotoCreate(); assert.equal(f.ui.photoState.form.create_account, true);
 });
 
 test("manual account and password validation marks the field and rejects invalid credentials before any POST", async () => {

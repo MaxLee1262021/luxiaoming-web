@@ -7,6 +7,7 @@ const { createSvcMemoryStore, createSvcStore, TABLES } = require("../lib/svcStor
 const workflow = require("../lib/orderWorkflow.cjs");
 const schema = require("../lib/mysqlSchema.cjs");
 const session = { kind: "admin", role: "service", authzUserId: "service-account" };
+const manager = { ...session, role: "super" };
 const at = "2026-11-13 12:00:00";
 function initial(finalDue = 70) {
   return { staff: [{ id: "service", account_id: "service-account", staff_status: "active" }],
@@ -22,7 +23,7 @@ function fixture(finalDue) {
     ledgerCalls.push({ no: order.order_no, time, type });
   } } });
   return { store, app, ledgerCalls,
-    finish: () => app.execute("POST", "/api/kf/orders/FINAL-1/shoot/finish", { expected_status: "shooting" }, session) };
+    finish: () => app.execute("POST", "/api/kf/orders/FINAL-1/shoot/finish", { expected_status: "shooting" }, manager) };
 }
 function sqlFixture(orderInput = initial().orders[0]) {
   const split = schema.splitDocument("orders", orderInput);
@@ -34,7 +35,7 @@ function sqlFixture(orderInput = initial().orders[0]) {
   tables.lxm_collection_values = split.attributes.map(row => ({ collection_name: "orders", record_id: order.id, ...row }));
   tables.lxm_order_payment_records = split.relations.order_payment_records || [];
   const source = { transaction: async work => work({ query: async (sql, params = []) => {
-    const table = /(?:FROM|INTO|UPDATE)\s+`?([a-z_]+)`?/i.exec(sql)?.[1];
+    const table = /FROM `lxm_orders`/.test(sql) ? "lxm_orders" : /(?:FROM|INTO|UPDATE)\s+`?([a-z_]+)`?/i.exec(sql)?.[1];
     if (/^UPDATE lxm_orders/.test(sql)) {
       writes.push({ sql, params });
       const fields = [...sql.matchAll(/`([^`]+)`=\?/g)].map(match => match[1]);
@@ -91,7 +92,7 @@ test("shooting completion waits for final receipt without binding or starting co
   assert.equal((await f.finish()).idempotent, true);
   assert.deepEqual(f.store.snapshot(), state);
   assert.equal(f.ledgerCalls.length, 1);
-  await assert.rejects(f.app.execute("POST", "/api/kf/orders/FINAL-1/shoot/start", { expected_status: "done" }, session), { code: 4003 });
+  await assert.rejects(f.app.execute("POST", "/api/kf/orders/FINAL-1/shoot/start", { expected_status: "done" }, manager), { code: 4003 });
 });
 
 test("a zero balance still waits for the customer's explicit zero-balance acknowledgement", async () => {
@@ -127,7 +128,7 @@ test("cancellation and review guards prevent completion side effects even with a
 test("workbench SQL persistence saves shooting completion and customer workflow together without changing receipt fields", async () => {
   const f = sqlFixture({ ...initial().orders[0], deleted: 0, isDeleted: 0, unrelatedInternalFact: "keep" });
   const app = createSvcWorkbench({ store: f.store, benefit: {}, clock: () => at });
-  await app.execute("POST", "/api/kf/orders/FINAL-1/shoot/finish", { expected_status: "shooting" }, session);
+  await app.execute("POST", "/api/kf/orders/FINAL-1/shoot/finish", { expected_status: "shooting" }, manager);
   assert.equal(f.order.service_status, "final_pending");
   assert.equal(f.order.status, "final_pending");
   assert.equal(f.order.workflowStage, "awaiting_final_payment");
@@ -162,4 +163,66 @@ test("SQL completion hydrates review holds, zero-balance acknowledgement and pay
   assert.equal((await app.onCompleted({ orderNo: "FINAL-1" })).service_status, "done");
   assert.equal(f.order.finalPaid, undefined);
   assert.equal(f.order.done_at, at);
+});
+
+test("scoped SQL order details read visitor arrival separately and allow recording the later actual start", async () => {
+  const arrivedAt = "2026-11-13T03:30:00.000Z";
+  const f = sqlFixture({ ...initial().orders[0], schedule_time: "2026-11-13 11:00:00", shootingStartedAt: undefined, customerArrivedAt: arrivedAt, customerArrivedBy: "visitor" });
+  const app = createSvcWorkbench({ store: f.store, benefit: {}, clock: () => at });
+  const before = await app.execute("GET", "/api/kf/orders/FINAL-1", {}, session);
+  assert.equal(before.customerArrivedAt, arrivedAt);
+  assert.equal(before.shootingStartedAt, undefined);
+  assert.equal(before.timeline.find(row => row.action === "customer_arrival").created_at, arrivedAt);
+  assert.equal(before.timeline.find(row => row.action === "customer_arrival").operator, "visitor");
+  await app.execute("POST", "/api/kf/orders/FINAL-1/shoot/start", { expected_status: "confirmed" }, manager);
+  const after = await app.execute("GET", "/api/kf/orders/FINAL-1", {}, session);
+  assert.equal(after.customerArrivedAt, arrivedAt);
+  assert.equal(after.shootingStartedAt, at);
+  assert.equal(after.timeline.filter(row => row.action === "customer_arrival").length, 1);
+  assert.equal(after.timeline.filter(row => row.action === "shoot_start").length, 1);
+});
+
+test("SQL lists, details and confirmation hydrate original customer intent and preserve it after manual adjustment", async () => {
+  const requested = "2026-12-20 15:30:00", adjusted = "2026-12-21 16:00:00";
+  const f = sqlFixture({ ...initial().orders[0], service_status: "claimed", status: "deposit_paid", workflowStage: "awaiting_dispatch",
+    photo_id: null, photographerId: null, intentDate: "2026-12-20", intentTimePeriod: "15:30", unrelatedInternalFact: "keep" });
+  const app = createSvcWorkbench({ store: f.store, benefit: {}, clock: () => at });
+  for (const endpoint of ["/api/kf/orders/all", "/api/kf/workbench/overview", "/api/kf/workbench/general"]) {
+    const row = (await app.execute("GET", endpoint, {}, session)).list.find(row => row.order_no === "FINAL-1");
+    assert.equal(row.requested_time, requested, endpoint);
+    assert.equal(row.schedule_time, null, endpoint);
+  }
+  const before = await app.execute("GET", "/api/kf/orders/FINAL-1", {}, session);
+  assert.equal(before.requested_time, requested);
+  assert.equal(before.intentDate, "2026-12-20");
+  assert.equal(before.intentTimePeriod, "15:30");
+  await assert.rejects(app.execute("POST", "/api/kf/orders/FINAL-1/slot/confirm",
+    { expected_status: "claimed", new_time: adjusted, channel: "phone" }, session), { code: 4014 });
+  assert.equal(f.order.service_status, "claimed");
+  assert.equal(f.writes.length, 0);
+  await app.execute("POST", "/api/kf/orders/FINAL-1/slot/confirm",
+    { expected_status: "claimed", new_time: adjusted, reason: "客人行程调整", channel: "phone" }, session);
+  const after = await app.execute("GET", "/api/kf/orders/FINAL-1", {}, session);
+  assert.equal(after.service_status, "confirmed");
+  assert.equal(after.requested_time, requested);
+  assert.equal(after.schedule_time, adjusted);
+  assert.equal(after.intentDate, before.intentDate);
+  assert.equal(after.intentTimePeriod, before.intentTimePeriod);
+  assert.equal(f.tables.svc_slot_log.length, 1);
+  assert.equal(f.tables.svc_slot_log[0].from_time, requested);
+  assert.equal(f.tables.svc_slot_log[0].to_time, adjusted);
+  assert.equal(f.tables.svc_slot_log[0].reason, "客人行程调整");
+  assert.equal(f.tables.lxm_collection_values.find(row => row.path === "unrelatedInternalFact").value_text, "keep");
+});
+
+test("confirming the submitted customer intent requires no adjustment reason or reschedule log", async () => {
+  const requested = "2026-12-20 15:30:00";
+  const f = sqlFixture({ ...initial().orders[0], service_status: "claimed", status: "deposit_paid", workflowStage: "awaiting_dispatch",
+    photo_id: null, photographerId: null, intentDate: "2026-12-20", intentTimePeriod: "15:30" });
+  const app = createSvcWorkbench({ store: f.store, benefit: {}, clock: () => at });
+  await app.execute("POST", "/api/kf/orders/FINAL-1/slot/confirm", { expected_status: "claimed", new_time: requested, channel: "wechat" }, session);
+  const after = await app.execute("GET", "/api/kf/orders/FINAL-1", {}, session);
+  assert.equal(after.requested_time, requested);
+  assert.equal(after.schedule_time, requested);
+  assert.equal(f.tables.svc_slot_log.length, 0);
 });

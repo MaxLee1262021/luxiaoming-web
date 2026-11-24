@@ -1,1 +1,1 @@
-window.LXM_PAGES.register({ key: 'svcWorkbench', component: 'LxmPageSvcWorkbench', group: 'service', title: '客服工作台', setup(ctx) { return window.LXM_SVC_WORKBENCH_SETUP(ctx, 'workbench'); } });
+window.LXM_PAGES.register({ key: 'svcWorkbench', component: 'LxmPageSvcWorkbench', group: 'service', title: '客服工作台', setup(ctx) { return { ...window.LXM_SVC_WORKBENCH_SETUP(ctx, 'workbench'), ...window.LXM_PHYSICAL_WORKBENCH_SETUP(ctx) }; } });

@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { createWechatPay, refundAmountInFen, enqueueMerchantShare, drainMerchantShare } = require("../lib/wechatPay.cjs");
 const { startRefund, applyRefundResult } = require("../lib/onlineRefunds.cjs");
+const { createTestRefundGateway } = require("./helpers/wechatPay.cjs");
 const copy = (value) => value == null ? value : JSON.parse(JSON.stringify(value));
 function source() {
   const rows = { orders: {}, afterSales: {}, logs: {} };
@@ -93,9 +94,48 @@ test("API v3 refund requests use signed integer amounts and verify signed respon
   assert.equal(value.status, "PROCESSING");
   assert.equal(request.path, "/v3/refund/domestic/refunds");
   assert.match(request.headers.Authorization, /^WECHATPAY2/);
+  assert.equal(request.headers.Accept, "application/json");
+  assert.match(request.headers["User-Agent"], /^[A-Za-z0-9._-]+\/\d+\.\d+\.\d+$/);
   assert.deepEqual(JSON.parse(request.body).amount, { refund: 2512, total: 10000, currency: "CNY" });
   assert.equal(JSON.parse(request.body).notify_url, "https://example.test/api/payments/wechat/refund-notify");
   await assert.rejects(() => gateway.createRefund({ payment, refundNo: "REFUND_123456", amount: "100.01" }));
+});
+
+test("a refund blocked by request headers recovers the CREATED attempt with the original number and cents", async () => {
+  const db = source();
+  const payment = { ...order().paymentRecords[0], amount: 0.09 };
+  await db.create("orders", order({ depositPaid: 0.09, paymentRecords: [payment] }));
+  await db.create("afterSales", ticket({ refundAmount: 0.09 }));
+  const rejectedRequests = [];
+  const rejectedGateway = createWechatPay({ config, transport: async request => {
+    rejectedRequests.push(request);
+    return { statusCode: 400, headers: {}, body: JSON.stringify({ code: "INVALID_REQUEST", message: "Http头缺少Accept或User-Agent" }) };
+  } });
+  await assert.rejects(() => startRefund(db, "ticket", { wechatPay: rejectedGateway }),
+    error => error.code === "WECHAT_PAY_API_ERROR" && error.providerCode === "INVALID_REQUEST");
+  assert.deepEqual(rejectedRequests.map(request => request.method), ["GET"], "an invalid request must not trigger a refund POST");
+  const pending = await db.get("afterSales", "ticket");
+  assert.equal(pending.refundError, "WECHAT_PAY_API_ERROR");
+  assert.equal(pending.refundAttempts[0].status, "CREATED");
+  const originalRefundNo = pending.refundAttempts[0].refundNo;
+  const gateway = createTestRefundGateway(db, { onRequest(request) {
+    assert.equal(request.headers.Accept, "application/json");
+    assert.match(request.headers["User-Agent"], /^[A-Za-z0-9._-]+\/\d+\.\d+\.\d+$/);
+  } });
+  const recovered = await startRefund(db, "ticket", { wechatPay: gateway });
+  assert.deepEqual(gateway.refundRequests.map(request => request.method), ["GET", "POST"]);
+  assert.equal(gateway.refundRequests[0].path, `/v3/refund/domestic/refunds/${originalRefundNo}`);
+  const submitted = JSON.parse(gateway.refundRequests[1].body);
+  assert.equal(submitted.out_refund_no, originalRefundNo);
+  assert.deepEqual(submitted.amount, { refund: 9, total: 9, currency: "CNY" });
+  assert.equal(recovered.refundConfirmed, true);
+  assert.equal(recovered.refundError, "");
+  assert.equal(recovered.refundedAmount, 0.09);
+  assert.equal(recovered.refundAttempts.length, 1);
+  assert.equal(recovered.refundAttempts[0].refundNo, originalRefundNo);
+  assert.equal((await gateway.queryRefund(originalRefundNo)).status, "SUCCESS");
+  await startRefund(db, "ticket", { wechatPay: gateway });
+  assert.equal(gateway.refundRequests.filter(request => request.method === "POST").length, 1, "recovery must not refund twice");
 });
 
 test("processing is not a completed refund; verified callbacks are idempotent and cancel only on success", async () => {

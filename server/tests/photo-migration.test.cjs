@@ -10,6 +10,21 @@ test("photo migration dry run never opens DB; installation requires explicit zon
   assert.equal((await migrate(source)).dryRun, true); await assert.rejects(migrate(source, { apply: true, enableAt: "2026-11-11 00:00:00" }), /含时区/);
 });
 
+test("photo installation writes the canonical navigation group and client label", async () => {
+  const menus = [];
+  const conn = { async query(sql, params = []) {
+    if (sql.startsWith("INSERT INTO lxm_auth_menus")) menus.push(params);
+    if (/SELECT id FROM benefit_rule/.test(sql)) return [[{ id: "existing-global-rule" }]];
+    if (/information_schema/.test(sql)) return [[{ present: true }]];
+    return [[]];
+  } };
+  const source = { transaction: work => work(conn) };
+  await migrate(source, { apply: true, enableAt: "2026-11-14T00:00:00+08:00" });
+  assert.deepEqual(menus.map(row => row[1]), ["photoRules", "photoLedger", "photoParty", "photoSettlement", "photoMine"]);
+  assert.deepEqual(menus.map(row => row[2]), ["分成配置", "分成明细", "摄影师列表", "结算管理", "摄影端"]);
+  assert.ok(menus.every(row => row[5] === "摄影师分成管理"));
+});
+
 test("confirmed cleanup policy disables historical backfill before any database work",async()=>{
   const source={transaction(){throw Error("must not open DB");},list(){throw Error("must not load old orders");}};
   for(const apply of [false,true]){

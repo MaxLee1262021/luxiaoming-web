@@ -14,7 +14,7 @@ test("migration keeps paid orders with empty assignment records pending confirma
   const patch = migrationPatch(paid);
   assert.equal(patch.workflowStage, "awaiting_dispatch");
   assert.equal(patch.businessStatus, "reserved");
-  assert.equal(patch.customerStatus, "待确认");
+  assert.equal(patch.customerStatus, "已预约");
 });
 
 test("historical migration preserves canceled facts and flags delivered orders without inventing payment", () => {

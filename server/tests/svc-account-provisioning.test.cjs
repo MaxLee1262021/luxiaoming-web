@@ -6,7 +6,7 @@ const { createSvcMemoryStore } = require("../lib/svcStore.cjs");
 const { createSvcCommission } = require("../lib/svcCommission.cjs");
 const root = { kind: "admin", role: "super", authzUserId: "qa-root" };
 const input = { name: "测试新客服", phone: "13900139020", joined_at: "2026-11-13", base_salary: 3500, rate_mode: "global", settlement_cycle: "周结", create_account: true, account: "  new-service-qa  ", password: "ServiceQA2026!", assessment_tags: ["新员工"], reason: "QA建档" };
-const expectedMenus = ["svcWorkbench", "svcIntake", "svcFollowup", "svcComplaints", "svcMine"];
+const expectedMenus = ["svcGeneralWorkbench", "svcWorkbench", "productLinks", "svcIntake", "svcFollowup", "svcComplaints", "svcMine"];
 const create = (fixture, patch = {}, session = root) => fixture.commission.execute("POST", "/staff", { ...input, ...patch }, session);
 function noSecret(value, password = input.password) {
   const encoded = JSON.stringify(value);

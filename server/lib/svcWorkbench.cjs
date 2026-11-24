@@ -2,6 +2,7 @@
 
 const c = require("./svcCore.cjs");
 const workflow = require("./orderWorkflow.cjs");
+const generalWorkbench = require("./svcGeneralWorkbench.cjs");
 const { fail, text, stamp, millis, add, nextId, uid, activeConfig, paginate } = c;
 const FINAL = new Set(["refunded", "canceled"]);
 const MANAGERS = new Set(["super", "admin", "administrator"]);
@@ -77,7 +78,8 @@ function stateEnteredAt(state, order, index) {
   const actions = { new: ["reserve_timeout", "reserve_giveup"], claimed: ["claim", "reserve_take"], confirmed: ["slot_confirm"], shooting: ["shoot_start"], final_pending: ["shoot_finish"], done: ["order_complete", "receipt_confirmed", "shoot_finish"], refunded: ["refund"] }[order.service_status] || [];
   const logs = index ? index.operationLogs.get(order.order_no) || [] : (state.operationLogs || []).filter(row => row.order_no === order.order_no);
   const latest = logs.filter(row => actions.includes(row.action)).reduce((last, row) => millis(row.created_at) > millis(last || 0) ? row.created_at : last, null);
-  return latest || order.status_changed_at || (order.service_status === "done" ? order.done_at : null) || order.paid_at || order.created_at || order.createdAt || null;
+  const shootingAt = order.service_status === "shooting" && [order.customerArrivedAt, order.shootingStartedAt, latest].filter(value => value && Number.isFinite(millis(value))).sort((a, b) => millis(a) - millis(b))[0];
+  return shootingAt || latest || order.status_changed_at || (order.service_status === "done" ? order.done_at : null) || order.paid_at || order.created_at || order.createdAt || null;
 }
 function visibleOrder(state, order, at, index) {
   const reserve = index ? index.reserves.get(order.order_no) : state.reserves.find(r => r.order_no === order.order_no && ["holding", "started"].includes(r.status));
@@ -189,7 +191,7 @@ function createSvcWorkbench(options = {}) {
     const no = typeof input === "string" ? input : text(input.order_no || input.orderNo || input.id), at = now();
     return store.transaction(async state => {
       const order = orderBy(state, no); if (order.service_status === "refunded") return { duplicate: true };
-      if (order.service_status === "canceled") throw fail(4003, "已取消订单不可回退");
+      if (order.service_status === "canceled" && !(input && typeof input === "object" && input.customerCancelled === true)) throw fail(4003, "已取消订单不可回退");
       operationLog(state, order, "refund", { id: "system" }, at);
       order.service_status = "refunded";
       order.reserve_staff_id = null;
@@ -197,6 +199,19 @@ function createSvcWorkbench(options = {}) {
       if (reserve) { reserve.status = "canceled"; reserve.end_at = at; }
       if (benefit.onRefund) await benefit.onRefund(state, order, at);
       return { order_no: order.order_no, service_status: "refunded" };
+    });
+  }
+  async function onCancelled(input) {
+    const no = typeof input === "string" ? input : text(input.order_no || input.orderNo || input.id), at = now();
+    return store.transaction(async state => {
+      const order = orderBy(state, no);
+      if (order.service_status === "refunded") return { duplicate: true };
+      if (!(state.operationLogs || []).some(row => row.order_no === order.order_no && row.action === "customer_cancel")) operationLog(state, order, "customer_cancel", { id: "customer" }, at);
+      order.service_status = "canceled"; order.reserve_staff_id = null;
+      for (const reserve of state.reserves.filter(row => row.order_no === order.order_no && ["holding", "started"].includes(row.status))) {
+        reserve.status = "canceled"; reserve.end_at = at;
+      }
+      return { order_no: order.order_no, service_status: "canceled" };
     });
   }
   async function complaintTx(state, input, session, at, order) {
@@ -214,9 +229,11 @@ function createSvcWorkbench(options = {}) {
     method = method.toUpperCase(); path = path.split("?")[0].replace(/\/$/, "");
     if (!session.role || session.kind && session.kind !== "admin") throw fail(401, "请先登录后台");
     if (![...MANAGERS, ...SUPERVISORS, "service", "finance", "photo"].includes(session.role)) throw fail(403, "当前角色无客服工作台访问权限");
+    if (method !== "GET" && (session.role === "service" || SUPERVISORS.has(session.role)) && /\/shoot\/(?:start|finish)$/.test(path)) throw fail(403, "拍摄状态由游客到达点位及尾款支付自动更新，无需客服手动变更");
     const at = now();
     const read = method === "GET";
     if (read && path === "/api/kf/workbench/overview" && (!['workbench','intake'].includes(input.mode || 'workbench') || input.mode === 'intake' && !['all','pool','mine'].includes(input.tab || 'all'))) throw fail(4014, "工作台视图参数无效");
+    if (read && generalWorkbench.isGeneralPath(path)) generalWorkbench.validateInput(path, input);
     return (read ? store.read : store.transaction)(async state => {
       const ids = scopes(state, session);
       const me = staffOf(state, session);
@@ -253,6 +270,7 @@ function createSvcWorkbench(options = {}) {
       const pool = all.filter(claimCandidate);
       const own = managed.filter(o => allowed(o));
       const reserveSeconds = order => { const reserve = index ? index.reserves.get(order.order_no) : state.reserves.find(r => r.order_no === order.order_no && ["holding", "started"].includes(r.status)); return reserve ? c.leftSeconds(reserve, at) : undefined; };
+      if (read && generalWorkbench.isGeneralPath(path)) return generalWorkbench.execute({ state, path, input, session, at, me, all, own, pool, allowed, present, filterOrders, reserveSeconds });
       const summary = () => {
         const day = at.slice(0, 10), currentMonth = at.slice(0, 7), ownNos = new Set(own.map(o => o.order_no));
         return { pool: pool.length, pending: own.filter(o => o.service_status === "claimed").length,assign_pending:own.filter(o=>o.service_status==='confirmed'&&!o.photo_id&&o.category!=='peripheral').length,shooting_pending:own.filter(o=>o.service_status==='shooting'&&o.category!=='peripheral').length,final_pending:own.filter(o=>o.service_status==='final_pending').length,today_shooting: own.filter(o => (o.schedule_time || "").startsWith(day) && ["confirmed", "shooting"].includes(o.service_status)).length, reserved: own.filter(o => o.service_status === "reserved").length, complaints: state.complaints.filter(r => currentResp(r) === "unknown" && ownNos.has(r.order_no)).length,
@@ -270,7 +288,7 @@ function createSvcWorkbench(options = {}) {
           if (order.service_status === "final_pending") return { order, priority: 5, title: "跟进尾款支付", suggested_action: "detail" };
           if (order.service_status === "claimed") return { order, priority: 3, title: "企微确认拍摄时间", suggested_action: "slot_confirm" };
           if (order.service_status === "confirmed" && !order.photo_id) return { order, priority: 4, title: "登记派单摄影师", suggested_action: "assign" };
-          return { order, priority: 5, title: order.service_status === "shooting" ? "跟进拍摄进展" : "跟进拍摄到场", suggested_action: order.service_status === "shooting" ? "shoot_finish" : "shoot_start" };
+          return { order, priority: 5, title: order.service_status === "shooting" ? "跟进尾款支付" : "等待游客到达点位", suggested_action: "detail" };
         });
         if (operator) rows.push(...pool.sort((a, b) => millis(a.paid_at || a.created_at) - millis(b.paid_at || b.created_at) || String(a.order_no).localeCompare(String(b.order_no))).slice(0, 6).map(order => ({ order, priority: 1, title: "认领并联系客户", suggested_action: "claim" })));
         rows.sort((a, b) => a.priority - b.priority || (a.left ?? Infinity) - (b.left ?? Infinity) || millis(stateEnteredAt(state, a.order, index)) - millis(stateEnteredAt(state, b.order, index)) || String(a.order.order_no).localeCompare(String(b.order.order_no)));
@@ -360,7 +378,11 @@ function createSvcWorkbench(options = {}) {
       const no = decodeURIComponent(match[1]), action = match[2];
       if (read && !action) {
         const order = orderBy(state, no); if (!intakeAccessible(state, order, session)) throw fail(403, "无权查看他人订单");
-        const timeline = [...state.slotLogs.filter(l => l.order_no === order.order_no).map(l => ({ ...l, action: "reschedule" })), ...state.assignLogs.filter(l => l.order_no === order.order_no), ...state.bindingLogs.filter(l => l.order_no === order.order_no), ...state.adjustments.filter(l => l.order_no === order.order_no), ...(state.receiptLogs || []).filter(l => l.order_no === order.order_no).map(l => ({ ...l, action: "receipt_confirmed" })), ...(state.operationLogs || []).filter(l => l.order_no === order.order_no)].sort((a, b) => millis(b.created_at) - millis(a.created_at));
+        // Arrival and its public audit event commit on the order together.
+        // Derive the workbench timeline from that same fact, without a second
+        // cross-table write that could lose or duplicate the visitor's report.
+        const arrival = order.customerArrivedAt ? [{ id: `arrival:${order.id}`, order_no: order.order_no, action: "customer_arrival", operator: order.customerArrivedBy || "customer", reason: "游客自行确认到达点位", created_at: order.customerArrivedAt }] : [];
+        const timeline = [...arrival, ...state.slotLogs.filter(l => l.order_no === order.order_no).map(l => ({ ...l, action: "reschedule" })), ...state.assignLogs.filter(l => l.order_no === order.order_no), ...state.bindingLogs.filter(l => l.order_no === order.order_no), ...state.adjustments.filter(l => l.order_no === order.order_no), ...(state.receiptLogs || []).filter(l => l.order_no === order.order_no).map(l => ({ ...l, action: "receipt_confirmed" })), ...(state.operationLogs || []).filter(l => l.order_no === order.order_no)].sort((a, b) => millis(b.created_at) - millis(a.created_at));
         const row = present(order); if (!MANAGERS.has(session.role) && session.role === "photo") for (const key of ["commission_fen", "rate_bp", "rate_mode"]) delete row[key];
         const reservation=state.reserves.find(r=>r.order_no===order.order_no),cfg=activeConfig(state,order.paid_at || at);
         const photoLedger=state.ledger.find(l=>l.biz_no===order.order_no&&l.beneficiary_type==='photo'&&String(l.party_id)===String(order.photo_id));
@@ -425,13 +447,24 @@ function createSvcWorkbench(options = {}) {
         notification(state, `receipt:${order.order_no}`, "receipt_confirmed", order, order.assignee_id, `订单 ${order.order_no} 已确认客户收货，开始提成观察期`, at);
         return { ...present(order), received_at: at, bound: !!binding, bind_expire_at: binding && binding.expire_at || null, observe_until: add(at, Number(ledger?.observe_days ?? c.staffTiming(state.staff.find(staff => String(staff.id) === String(order.assignee_id)), activeConfig(state, order.paid_at)).observe_days)) };
       }
+      if (action === "shoot/start") {
+        const existing = orderBy(state, no);
+        if (!accessible(state, existing, session)) throw fail(403, "无权操作他人订单");
+        if (existing.service_status === "shooting" && existing.shootingStartedAt) return { ...present(existing), idempotent: true };
+      }
       if (action === "shoot/finish") {
         const existing = orderBy(state, no);
         if (!accessible(state, existing, session)) throw fail(403, "无权操作他人订单");
         if (FINAL.has(existing.service_status) || workflow.canonicalStage(existing) === workflow.WORKFLOW_STAGES.CANCELLED) throw fail(4003, "当前状态不允许此操作");
         if (["final_pending", "done"].includes(existing.service_status)) return { ...present(existing), idempotent: true };
       }
-      const order = checkOrder(state, no, input, session, action === "slot/confirm" ? ["claimed"] : action === "assign" ? ["confirmed"] : action === "slot/reschedule" || action === "transfer" ? ["claimed", "confirmed", "shooting"] : action === "shoot/start" ? ["confirmed"] : action === "shoot/finish" ? ["shooting"] : ["claimed", "confirmed", "shooting", "final_pending", "done"]);
+      // The visitor may have arrived after staff loaded a confirmed order.
+      // Normalize only this safe race; other stale expected states still fail.
+      if (action === "shoot/start" && input.expected_status === "confirmed") {
+        const current = orderBy(state, no);
+        if (current.service_status === "shooting" && current.customerArrivedAt) input = { ...input, expected_status: "shooting" };
+      }
+      const order = checkOrder(state, no, input, session, action === "slot/confirm" ? ["claimed"] : action === "assign" ? ["confirmed"] : action === "slot/reschedule" || action === "transfer" ? ["claimed", "confirmed", "shooting"] : action === "shoot/start" ? ["confirmed", "shooting"] : action === "shoot/finish" ? ["shooting"] : ["claimed", "confirmed", "shooting", "final_pending", "done"]);
       if (action === "slot/confirm" || action === "slot/reschedule") {
         const newTime = c.futureTime(input.new_time || input.schedule_time, at), from = order.schedule_time || order.requested_time;
         if (input.channel != null) c.requireChannel(input);
@@ -473,6 +506,11 @@ function createSvcWorkbench(options = {}) {
       const totals = { started: 0, reflowed: 0, expired: 0, reminded: 0, settleable: 0, alerts: [] };
       for (const reserve of state.reserves) {
         const order = state.orders.find(o => o.order_no === reserve.order_no);
+        // A customer cancellation may commit before its secondary service
+        // cleanup succeeds. Terminal orders never reflow into the intake pool.
+        if (order && FINAL.has(order.service_status) && ["holding", "started"].includes(reserve.status)) {
+          reserve.status = "canceled"; reserve.end_at = at; order.reserve_staff_id = null; continue;
+        }
         if (!order || order.service_status !== "reserved") { if (["holding", "started"].includes(reserve.status)) totals.alerts.push({ order_no: reserve.order_no, message: "预占与订单状态不一致，请核验" }); continue; }
         if (["holding", "started"].includes(reserve.status) && millis(reserve.reserve_expire_at) + 30 * 60000 < millis(at)) totals.alerts.push({ order_no: reserve.order_no, message: "预占超过时效30分钟，已自动补跑回流" });
         if (reserve.status === "holding" && millis(reserve.reserve_start_at) <= millis(at)) { reserve.status = "started"; totals.started++; }
@@ -508,6 +546,6 @@ function createSvcWorkbench(options = {}) {
       await store.transaction(state => { const row = state.notifications.find(n => n.id === notice.id); if (!row || row.status !== "pending") return; row.attempts = Number(row.attempts) + 1; if (!error) { row.status = "sent"; row.sent_at = at; } else { row.status = row.attempts >= 3 ? "dead" : "pending"; row.failure_note = text(error.message).slice(0, 500); row.next_attempt_at = add(at, [5, 25, 125][Math.min(row.attempts - 1, 2)], 1000); } });
     }
   }
-  return { store, execute, onPaid, onCompleted, onRefund, runTasks, deliverNotifications };
+  return { store, execute, onPaid, onCompleted, onRefund, onCancelled, runTasks, deliverNotifications };
 }
 module.exports = { createSvcWorkbench, actor, staffOf, scopes, accessible, currentResp, bind, reflow, visibleOrder, canActForStaff };

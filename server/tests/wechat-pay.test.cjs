@@ -353,7 +353,7 @@ test("final callback atomically acknowledges selection and completes without del
   assert.equal(saved.selectionMethod, "payment_acknowledgement");
   assert.ok(saved.completedAt);
   assert.equal(saved.deliveryRecord, undefined);
-  assert.equal(saved.shootingCompletedAt, undefined);
+  assert.equal(saved.shootingCompletedAt, saved.completedAt);
   assert.equal((await gateway.confirmTransaction(source, parsed)).idempotent, true);
   assert.equal((await source.get("orders", order.id)).statusLogs.length, 1);
 });

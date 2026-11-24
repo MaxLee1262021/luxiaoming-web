@@ -110,44 +110,37 @@ async function assertPublicState(source, orderId, businessStatus, text, refundab
   return detail.data;
 }
 
-test("customer order advances only after deposit, valid assignment, manual start and completed shooting plus final payment", async (t) => {
+test("customer order advances from assigned photographer to visitor arrival and verified final payment without manual shooting changes", async (t) => {
   const { source, post, gateway, paymentContext } = await fixture(t);
   const orderId = await createPaidBooking(source, gateway, paymentContext, {
     ...bookingInput, status: "assigned", photographerId: "lifecycle-photo", dispatchStatus: "assigned",
     dispatchRecord: { next: { photographerId: "lifecycle-photo" } }, shootingStartedAt: "2026-10-26T00:00:00Z",
     depositPaid: 30, depositFinanceStatus: "confirmed", finalPaid: 70, finalFinanceStatus: "confirmed",
   });
-  const reserved = await assertPublicState(source, orderId, "reserved", "待确认", true);
+  const reserved = await assertPublicState(source, orderId, "reserved", "已预约", true);
   assert.equal(reserved.workflowStage, "awaiting_dispatch");
   assert.equal(reserved.canPayFinal, false);
   assert.equal((await post("super", orderId, { action: "start", reason: "未安排摄影师尝试开拍" })).status, 409);
   assert.equal((await post("super", orderId, { action: "assign", reason: "缺少摄影师的无效安排" })).status, 400);
-  await assertPublicState(source, orderId, "reserved", "待确认", true);
+  await assertPublicState(source, orderId, "reserved", "已预约", true);
   const assigned = await post("super", orderId, {
     action: "assign", photographerId: "lifecycle-photo", confirmedShootDate: "2026-12-20", confirmedShootTime: "10:00",
     confirmedShootLocation: "橘子洲集合点", participantCount: 2, confirmationMethod: "客服人工确认", customerConfirmationNote: "游客确认档期", reason: "已与摄影师和游客确认",
   });
   assert.equal(assigned.status, 200, JSON.stringify(assigned.body));
-  const awaitingShoot = await assertPublicState(source, orderId, "awaiting_shoot", "待拍摄");
+  const awaitingShoot = await assertPublicState(source, orderId, "awaiting_shoot", "已定档");
   assert.equal(awaitingShoot.workflowStage, "awaiting_shoot");
   assert.equal((await source.get("orders", orderId)).shootingStartedAt || "", "");
   const prematureFinal = await rpc(source, "createPayment", { data: {
     orderId, phase: "final", selectionAccepted: true, idempotencyKey: "lifecycle-before-start-final",
   } }, paymentContext);
   assert.equal(prematureFinal.success, false);
-  const started = await post("super", orderId, { action: "start", reason: "员工手动确认开始拍摄" });
-  assert.equal(started.status, 200, JSON.stringify(started.body));
+  const arrived = await rpc(source, "confirmOrderArrival", { data: { orderId } }, identity);
+  assert.equal(arrived.success, true, JSON.stringify(arrived));
   const shooting = await assertPublicState(source, orderId, "shooting", "拍摄中");
-  assert.equal(shooting.canPayFinal, false);
-  const duringShootFinal = await rpc(source, "createPayment", { data: {
-    orderId, phase: "final", selectionAccepted: true, idempotencyKey: "lifecycle-during-shoot-final",
-  } }, paymentContext);
-  assert.equal(duringShootFinal.success, false);
-  const shot = await post("super", orderId, { action: "shootcomplete", reason: "员工确认本次拍摄完成" });
-  assert.equal(shot.status, 200, JSON.stringify(shot.body));
-  const awaitingFinal = await assertPublicState(source, orderId, "shooting", "拍摄中");
-  assert.equal(awaitingFinal.workflowStage, "awaiting_final_payment");
-  assert.equal(awaitingFinal.canPayFinal, true);
+  assert.equal(shooting.canPayFinal, true);
+  assert.equal(shooting.workflowStage, "shooting");
+  assert.equal(shooting.shootingCompleted, false);
   const finalIntent = await rpc(source, "createPayment", { data: {
     orderId, phase: "final", selectionAccepted: true, idempotencyKey: "lifecycle-final-payment",
   } }, paymentContext);
@@ -164,24 +157,21 @@ test("customer order advances only after deposit, valid assignment, manual start
   assert.equal(saved.depositPaid, 30);
   assert.equal(saved.finalPaid, 70);
   assert.ok(saved.completedAt);
+  assert.ok(saved.shootingCompletedAt);
   assert.equal(saved.paymentRecords.filter((record) => record.status === "confirmed").length, 2);
 });
 
-test("a paid booking supports reviewed deposit refund before any photographer is arranged", async (t) => {
+test("a paid booking automatically refunds its deposit before any photographer is arranged", async (t) => {
   const { source, post, gateway, paymentContext } = await fixture(t);
   const orderId = await createPaidBooking(source, gateway, paymentContext);
-  await assertPublicState(source, orderId, "reserved", "待确认", true);
-  const submitted = await rpc(source, "submitAfterSale", { data: { orderId, type: "定金退款", reason: "行程调整申请全额退还定金" } }, identity);
+  await assertPublicState(source, orderId, "reserved", "已预约", true);
+  const submitted = await rpc(source, "submitAfterSale", { data: { orderId, type: "定金退款", reason: "行程调整申请全额退还定金" } }, { ...identity, wechatPay: createTestRefundGateway(source) });
   assert.equal(submitted.success, true, JSON.stringify(submitted));
-  const reviewed = await post("finance", submitted.data.ticketId, {
-    action: "review", approved: true, reason: "核实未派单并微信原路退还定金",
-  }, true);
-  assert.equal(reviewed.status, 200, JSON.stringify(reviewed.body));
   const detail = await rpc(source, "getOrderDetail", { data: { orderId } }, identity);
   assert.equal(detail.data.businessStatus, "cancelled");
   assert.equal(detail.data.canRefundDeposit, false);
   assert.equal((await source.get("orders", orderId)).depositPaid, 30);
-  assert.equal((await source.get("afterSales", submitted.data.ticketId)).refundStatus, "refunded");
+  assert.equal((await source.get("afterSales", submitted.data.refundTicketId)).refundStatus, "refunded");
 });
 
 test("an assigned status marker without a photographer does not advance the public lifecycle", async (t) => {
@@ -192,5 +182,5 @@ test("an assigned status marker without a photographer does not advance the publ
   assert.equal(detail.success, true);
   assert.equal(detail.data.businessStatus, "reserved");
   assert.equal(detail.data.workflowStage, "awaiting_dispatch");
-  assert.equal(detail.data.statusText, "待确认");
+  assert.equal(detail.data.statusText, "已预约");
 });

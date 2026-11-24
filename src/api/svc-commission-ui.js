@@ -7,7 +7,7 @@
   window.LXM_SVC_COMMISSION_SETUP = function (ctx, mode) {
     const { reactive, computed, onMounted, watch, onUnmounted } = Vue;
     const month = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit' }).format(new Date());
-    const s = reactive({ loading: false, busy: false, error: '', rows: [], total: 0, summary: {}, query: { staff: '', type: '', status: '', keyword: '', period: month, page: 1, size: 20 }, selected: [], rules: {}, rates: { photo_bp: 0, video_bp: 0, combo_bp: 0, peripheral_bp: 0 }, initialRates: '', reason: '', preview: null, config: {}, ver: 0, configVer: 0, staff: [], staffOptions: [], appeals: [], mineStaff: null, mineSettlements: [], mineAdjustments: [], adjustmentsOpen: false, adjustmentPeriod: '', drawer: false, detailLoading: false, settlementItems: [], current: null, dialog: '', form: {}, custom: false });
+    const s = reactive({ loading: false, busy: false, wecomSyncingId: '', error: '', rows: [], total: 0, summary: {}, query: { staff: '', type: '', status: '', keyword: '', period: month, page: 1, size: 20 }, selected: [], rules: {}, rates: { photo_bp: 0, video_bp: 0, combo_bp: 0, peripheral_bp: 0 }, initialRates: '', reason: '', preview: null, config: {}, ver: 0, configVer: 0, staff: [], staffOptions: [], appeals: [], mineStaff: null, mineSettlements: [], mineAdjustments: [], adjustmentsOpen: false, adjustmentPeriod: '', drawer: false, detailLoading: false, settlementItems: [], current: null, dialog: '', form: {}, custom: false });
     const staffRateForm = reactive({ rates: { photo_bp:0,video_bp:0,combo_bp:0,peripheral_bp:0 }, reason:'', rate_mode:'custom' });
     let alive = true, requestId = 0, previewTimer, filterTimer;
     let timingDefaults = {}, timingEdited = {};
@@ -66,9 +66,33 @@
     function filterChanged() { clearTimeout(filterTimer); filterTimer = setTimeout(() => load(true), 300); }
     async function act(path, body, message = '操作成功', reset = false) {
       if (s.busy) return; s.busy = true; s.error = '';
-      try { const data = await api(path, 'POST', body || {}); ctx.ElMessage.success(message); s.dialog = ''; await load(reset); return data; }
+      try { const data = await api(path, 'POST', body || {}); if (typeof message === 'function') message(data); else ctx.ElMessage.success(message); s.dialog = ''; await load(reset); return data; }
       catch (e) { s.error = e.message; ctx.ElMessage.error(e.message); }
       finally { s.busy = false; }
+    }
+    function wecomStatus(row) { return ({ disabled: '未启用', pending: '待同步', syncing: '同步中', synced: '已同步', failed: '同步失败' })[row?.wecom_sync_status] || '未同步'; }
+    function wecomTagType(row) { return row?.wecom_sync_status === 'synced' ? 'success' : row?.wecom_sync_status === 'failed' ? 'danger' : 'warning'; }
+    function canRetryWecom(row) { return !!row && canManage.value && row.staff_status !== 'ended' && (row.wecom_sync_status == null || ['disabled', 'pending', 'syncing', 'failed'].includes(row.wecom_sync_status)); }
+    function notifyWecom(row, savedMessage) {
+      const status = row?.wecom_sync_status;
+      if (status === 'synced') return ctx.ElMessage.success(savedMessage + '；' + (row.wecom_sync_message || '企微客服部门已同步，邀请已提交，成员需确认加入。'));
+      if (['disabled', 'pending', 'syncing', 'failed'].includes(status)) return ctx.ElMessage.warning(savedMessage + '；' + (row.wecom_sync_message || '企微' + wecomStatus(row)) + '。可在客服列表重试企微同步，无需重复新增。');
+      ctx.ElMessage.success(savedMessage);
+    }
+    async function retryWecom(row) {
+      if (s.busy || !canRetryWecom(row)) return;
+      const id = String(row.staff_id || row.id); s.busy = true; s.wecomSyncingId = id; s.error = '';
+      try {
+        const data = await api('staff/' + encodeURIComponent(id) + '/wecom-sync', 'POST', {});
+        if (alive) {
+          Object.assign(row, data);
+          if (String(s.current?.staff_id || s.current?.id) === id) s.current = { ...s.current, ...data };
+          notifyWecom(data, '客服档案已保存');
+          await load();
+        }
+        return data;
+      } catch (e) { s.error = e.message; ctx.ElMessage.error(e.message); }
+      finally { s.wecomSyncingId = ''; s.busy = false; }
     }
     function staffRate(row, key) { const rates = row?.configured_rates || row?.rates || row; return Number(rates?.['rate_' + key + '_bp'] ?? rates?.[key + '_bp'] ?? 0); }
     function staffRateMode(row) { return row?.configured_rates?.rule_mode || row?.rates?.rule_mode || row?.rate_mode || 'global'; }
@@ -149,7 +173,7 @@
         const body = { ...s.form, account, create_account: createAccount };
         delete body.account_id;
         if (!createAccount) delete body.password;
-        const data = await act('staff', body, createAccount ? '客服档案和登录账号已创建' : '客服档案已创建并关联登录账号', true);
+        const data = await act('staff', body, row => notifyWecom(row, createAccount ? '客服档案和登录账号已创建' : '客服档案已创建并关联登录账号'), true);
         if (data) { clearPassword(); if (mode === 'new') ctx.state.active = 'svcStaff'; }
         return data;
       }
@@ -197,6 +221,6 @@
       open('staff');
     }, { immediate: true });
     onMounted(load); onUnmounted(() => { clearPassword(); alive = false; requestId++; clearTimeout(previewTimer); clearTimeout(filterTimer); });
-    return { svcSettlementCycles: settlementCycles, svc: s, svcMode: mode, svcTitle: title, svcCategories: categories, svcStatuses: statuses, svcMoney: money, svcYuan: yuan, svcSalary: salary, svcBaseSalary:baseSalary,svcMonthPay:monthPay,svcTiming:timing,svcVersionStatus:versionStatus,svcCount: count, svcTime: time, svcLoad: load, svcFilterChanged: filterChanged, svcAct: act, svcOpen: open, svcCloseDialog: closeDialog, svcAccountModeChanged: accountModeChanged, svcSubmit: submitDialog, svcSaveRule: saveRule, svcSaveConfig: saveConfig, svcPreview: preview, svcExport: exportCsv, svcCopy: copy, svcMinePreview: minePreview, svcCanManage: canManage, svcCanDelegate: canDelegate, svcCanEditProfile: canEditProfile, svcCanFinance: canFinance, svcCanReview: canReview, svcCanReviewAppeal: canReviewAppeal, svcStaffRate: staffRate, svcStaffRateMode: staffRateMode, svcStaffRateForm: staffRateForm, svcSaveDrawerRate: saveDrawerRate, svcShortOpenid: shortOpenid, svcHighRate: highRate, svcViewSettlement: viewSettlement, svcViewStaff: viewStaff, svcViewLedger: viewLedger, svcToggleRow: toggleRow, svcToggleAll: toggleAll, svcTimingChanged: timingChanged, svcResetNew: resetNew, svcRateSummary: rateSummary, svcLedgerKpis: ledgerKpis, svcStaffKpis: staffKpis, svcStaffVersions: staffVersions, svcTagClass: typeClass, svcSelectedTotal: selectedTotal, svcChanged: changed, svcVersions: versions, svcCustomStaff: customStaff, svcCurrentRule: currentRule, svcConfirm: confirmSettlement, svcStaffStatus: staffStatus };
+    return { svcSettlementCycles: settlementCycles, svc: s, svcMode: mode, svcTitle: title, svcCategories: categories, svcStatuses: statuses, svcMoney: money, svcYuan: yuan, svcSalary: salary, svcBaseSalary:baseSalary,svcMonthPay:monthPay,svcTiming:timing,svcVersionStatus:versionStatus,svcCount: count, svcTime: time, svcLoad: load, svcFilterChanged: filterChanged, svcAct: act, svcOpen: open, svcCloseDialog: closeDialog, svcAccountModeChanged: accountModeChanged, svcSubmit: submitDialog, svcSaveRule: saveRule, svcSaveConfig: saveConfig, svcPreview: preview, svcExport: exportCsv, svcCopy: copy, svcMinePreview: minePreview, svcCanManage: canManage, svcCanDelegate: canDelegate, svcCanEditProfile: canEditProfile, svcCanFinance: canFinance, svcCanReview: canReview, svcCanReviewAppeal: canReviewAppeal, svcStaffRate: staffRate, svcStaffRateMode: staffRateMode, svcStaffRateForm: staffRateForm, svcSaveDrawerRate: saveDrawerRate, svcShortOpenid: shortOpenid, svcHighRate: highRate, svcViewSettlement: viewSettlement, svcViewStaff: viewStaff, svcViewLedger: viewLedger, svcToggleRow: toggleRow, svcToggleAll: toggleAll, svcTimingChanged: timingChanged, svcResetNew: resetNew, svcRateSummary: rateSummary, svcLedgerKpis: ledgerKpis, svcStaffKpis: staffKpis, svcStaffVersions: staffVersions, svcTagClass: typeClass, svcSelectedTotal: selectedTotal, svcChanged: changed, svcVersions: versions, svcCustomStaff: customStaff, svcCurrentRule: currentRule, svcConfirm: confirmSettlement, svcStaffStatus: staffStatus, svcWecomStatus: wecomStatus, svcWecomTagType: wecomTagType, svcCanRetryWecom: canRetryWecom, svcRetryWecom: retryWecom };
   };
 })();

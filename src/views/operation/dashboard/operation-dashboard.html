@@ -337,7 +337,7 @@
     <div class="dash-main-col dash-main-col-right">
       <div v-if="state.role!=='merchant'" class="dashboard-panel">
         <div class="dashboard-panel-head"><div><h3>商家来源排行</h3><span>按新分成归属排序，金额为已入账分成净额</span></div><button type="button" class="mini-text-btn lxm-action lxm-action--neutral lxm-action--link" @click="clearDashboardScope('shop')">全部</button></div>
-        <p class="muted" style="padding:0 18px">订单与分成按所选消费城市统计；当前有效码扫码、有效绑定人数为门店累计，不按消费城市拆分。</p>
+        <p class="muted" style="padding:0 18px">订单与分成按所选消费城市统计；扫码为当前有效码的门店累计，归属人数为当前归属本店的客户，均不按消费城市拆分。</p>
         <div class="merchant-rank-list">
           <div v-for="(s,index) in shopRank" :key="s.id" class="merchant-rank-item" :class="{active:state.dashboardShopId===s.id}" @click="selectDashboardShop(s)">
             <span class="rank-num" :class="{gold:index===0,silver:index===1,bronze:index===2}">{{ index + 1 }}</span>

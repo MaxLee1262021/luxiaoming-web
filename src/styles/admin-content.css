@@ -37,6 +37,12 @@
    </div>
    ============================================================ */
 
+/* 卡片与列表共用的展示顺位操作。筛选不改变同类内容的完整顺位。 */
+.content-order-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.content-order-controls .el-button { margin: 0; }
+.content-order-position { color: var(--lxm-muted); font-size: 12px; white-space: nowrap; }
+.package-card-actions { flex-wrap: wrap; }
+.ig-list-actions .content-order-controls { justify-content: flex-end; }
 /* ---------- 页面根容器 ---------- */
 .lxm-page {
   display: grid;

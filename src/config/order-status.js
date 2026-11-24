@@ -7,10 +7,10 @@ const ORDER_FLOW = [
 ];
 
 const statusMap = {
-  reserved: { text: "待确认", customer: "待确认", className: "paid" },
-  awaiting_shoot: { text: "待拍摄", customer: "待拍摄", className: "assigned" },
-  deposit_paid: { text: "待确认", customer: "待确认", className: "paid" },
-  assigned: { text: "待拍摄", customer: "待拍摄", className: "assigned" },
+  reserved: { text: "已预约", customer: "已预约", className: "paid" },
+  awaiting_shoot: { text: "已定档", customer: "已定档", className: "assigned" },
+  deposit_paid: { text: "已预约", customer: "已预约", className: "paid" },
+  assigned: { text: "已定档", customer: "已定档", className: "assigned" },
   shooting: { text: "拍摄中", customer: "拍摄中", className: "shooting" },
   delivered: { text: "拍摄中", customer: "拍摄中", className: "delivered" },
   final_pending: { text: "拍摄中", customer: "拍摄中", className: "final" },

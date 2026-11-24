@@ -1,0 +1,51 @@
+<div class="product-links-page">
+  <header class="product-links-heading">
+    <div><h2>商品小程序外链</h2><p>找到服务或商品，一键生成直达小程序详情页的链接。</p></div>
+    <el-button @click="load" :loading="loading" :disabled="!!busyKey">刷新列表</el-button>
+  </header>
+  <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon class="product-links-notice" />
+  <el-alert v-else-if="!loading && !configured" title="暂未配置微信小程序凭据，请联系管理员配置后生成外链。" type="warning" :closable="false" show-icon class="product-links-notice" />
+  <el-alert v-if="!loading && !loadError && environment !== 'release'" :title="'当前生成的是小程序' + envLabel(environment) + '链接，访问者需要对应版本的体验权限。'" type="warning" :closable="false" show-icon class="product-links-notice" />
+  <div class="product-links-counts" aria-label="商品分类数量" v-if="!loadError">
+    <button v-for="type in typeCounts" :key="type.value" type="button" :class="{'is-active':filters.type === type.value}" :aria-pressed="filters.type === type.value" @click="filters.type = filters.type === type.value ? '' : type.value">
+      <span>{{ type.label }}</span><strong>{{ loading ? '—' : type.count }}</strong>
+    </button>
+  </div>
+  <section class="product-links-card" v-if="!loadError">
+    <form class="product-links-filters" @submit.prevent="filters.page = 1">
+      <el-input v-model="filters.keyword" clearable placeholder="搜索名称 / 商品编号" aria-label="搜索名称或商品编号" />
+      <el-select v-model="filters.type" clearable placeholder="全部类型" aria-label="筛选商品类型"><el-option v-for="type in types" :key="type.value" :value="type.value" :label="type.label" /></el-select>
+      <el-select v-model="filters.status" clearable placeholder="全部状态" aria-label="筛选商品状态"><el-option v-for="status in statuses" :key="status.value" :value="status.value" :label="status.label" /></el-select>
+      <el-button @click="reset">重置</el-button>
+    </form>
+    <div class="product-links-settings">
+      <span>共 <strong>{{ filtered.length }}</strong> 项<span v-if="filtered.length !== items.length"> / 全部 {{ items.length }} 项</span></span>
+      <label class="product-links-expiry">新链接有效期<el-select v-model="expireDays" aria-label="链接有效期" :disabled="!!busyKey"><el-option :value="1" label="1 天" /><el-option :value="7" label="7 天" /><el-option :value="30" label="30 天" /></el-select></label>
+    </div>
+    <el-table :data="rows" :row-key="rowKey" v-loading="loading" stripe :empty-text="loading ? '正在加载商品…' : '暂无符合条件的服务或商品'">
+      <el-table-column label="服务 / 商品" min-width="310"><template #default="{row}">
+        <div class="product-links-product">
+          <el-image v-if="cover(row)" :src="cover(row)" fit="cover" class="product-links-cover" loading="lazy"><template #error><span class="product-links-cover-fallback">{{ row.typeLabel }}</span></template></el-image>
+          <span v-else class="product-links-cover product-links-cover-fallback">{{ row.typeLabel }}</span>
+          <div class="product-links-product-info"><strong>{{ row.name || '未命名商品' }}</strong><span class="product-links-summary" :title="row.summary">{{ row.summary || '暂无简介' }}</span><small>编号：{{ row.id }}</small></div>
+        </div>
+      </template></el-table-column>
+      <el-table-column prop="typeLabel" label="类型" width="110" />
+      <el-table-column label="价格" width="120" align="right"><template #default="{row}">{{ money(row.price) }}</template></el-table-column>
+      <el-table-column label="状态" min-width="145"><template #default="{row}"><span class="product-links-status" :class="{'is-available':row.canGenerate}">{{ row.statusLabel || row.status || '—' }}</span><small v-if="!row.canGenerate && row.disabledReason" class="product-links-disabled">{{ row.disabledReason }}</small></template></el-table-column>
+      <el-table-column label="操作" width="155" fixed="right"><template #default="{row}"><span :title="unavailable(row)"><el-button type="primary" size="small" :loading="busyKey === rowKey(row)" :disabled="!!unavailable(row) || !!busyKey && busyKey !== rowKey(row)" @click="generate(row)">生成外链</el-button></span></template></el-table-column>
+    </el-table>
+    <div class="product-links-pager"><el-pagination background layout="total, prev, pager, next" :pager-count="5" :total="filtered.length" v-model:current-page="filters.page" :page-size="filters.size" /></div>
+  </section>
+  <div class="product-links-retry" v-else><el-button type="primary" @click="load" :loading="loading">重新加载</el-button></div>
+  <p class="product-links-help">生成后复制链接，即可发送给客户打开对应详情页。下架商品暂停生成；已生成的链接到期后需重新生成。</p>
+  <el-dialog v-model="dialogOpen" title="小程序外链已生成" class="product-links-dialog" width="min(620px, calc(100% - 32px))" append-to-body :close-on-click-modal="false">
+    <template v-if="generated">
+      <div class="product-links-result-product"><span class="product-links-type-label">{{ generated.typeLabel }}</span><strong>{{ generated.name }}</strong></div>
+      <p class="product-links-result-meta">{{ envLabel(generated.environment) }} · 有效至 {{ time(generated.expiresAt) }}（北京时间）</p>
+      <el-input :model-value="generated.url" type="textarea" :rows="3" readonly aria-label="已生成的小程序外链" resize="none" @focus="$event.target.select()" />
+      <p class="product-links-result-hint">复制此链接发送给客户，打开后可访问该服务或商品详情。</p>
+    </template>
+    <template #footer><el-button @click="dialogOpen = false">关闭</el-button><el-button type="primary" @click="copy" :loading="copying">复制链接</el-button></template>
+  </el-dialog>
+</div>

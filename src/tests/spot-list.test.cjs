@@ -20,7 +20,7 @@ function fixture(options = {}) {
   Object.assign(message, { success: message, warning: message, error: message });
   const window = {
     Vue: { computed, ref: (value) => ({ value }), watch() {} },
-    LXM_APP_PARTS: [], LXM_AUTH: { hasSession: () => options.online !== false }, LXM_SPOT_ORDER: spotOrder,
+    LXM_APP_PARTS: [], LXM_AUTH: { hasSession: () => options.online !== false }, LXM_SPOT_ORDER: spotOrder, LXM_CONTENT_ORDER: require("../utils/content-order.js"),
     LXM_PAGES: { register(page) { window.page = page; } }
   };
   const ctx = {

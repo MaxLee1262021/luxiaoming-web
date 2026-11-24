@@ -1,10 +1,10 @@
 /* Customer-service desk: all decisions, amounts and countdown values come from the protected API. */
 (function () {
-  const statusNames = { new: '待认领', reserved: '复购预占', claimed: '待确认', confirmed: '已确认待拍', shooting: '拍摄中', final_pending: '待付尾款', done: '已完成', refunded: '已退款', canceled: '已取消' };
+  const statusNames = { new: '待认领', reserved: '复购预占', claimed: '待确认', confirmed: '待派单 / 已定档', shooting: '拍摄中', final_pending: '拍摄中（待付尾款）', done: '已完成', refunded: '已退款', canceled: '已取消' };
   const categories = { photo: '照片', video: '视频', combo: '套餐', peripheral: '周边' };
   const timelineNames = {
     claim: '认领订单', reserve_take: '接受预占订单', reserve_timeout: '预占超时回流', reserve_giveup: '放弃预占',
-    slot_confirm: '确认拍摄时间', shoot_start: '开始拍摄', shoot_finish: '完成拍摄', link_generate: '生成服务链接', refund: '订单退款',
+    slot_confirm: '确认拍摄时间', customer_arrival: '游客确认到达', shoot_start: '开始拍摄', shoot_finish: '完成拍摄', link_generate: '生成服务链接', refund: '订单退款',
     receipt_confirmed: '客户收货完成', reschedule: '改期', assign: '登记派单', transfer: '转派', bind: '建立绑定', renew: '绑定续期',
     release: '解除绑定', makeup: '补发', cancel_offset: '撤销冲抵', restore: '恢复提成', offset_plan: '冲抵计划', void: '置零'
   };
@@ -14,8 +14,15 @@
   const bindingNames = { active: '保护中', released: '已解除', expired: '已过期' };
   window.LXM_SVC_WORKBENCH_SETUP = function (ctx, mode) {
     const { reactive, computed, onMounted, onUnmounted } = Vue;
+    // Opt-in context for embedded instances. Legacy callers keep their original
+    // navigation globals and mounted requests; the general desk uses local state.
+    const navigation = ctx.kfIsolation || window;
+    const filtersKey = ctx.kfIsolation ? 'filters' : 'LXM_KF_Filters';
+    const aftersaleKey = ctx.kfIsolation ? 'aftersale' : 'LXM_KF_AFtersale';
     const s = reactive({ loading: false, busy: false, error: '', reserveError: '', rows: [], reserves: [], total: 0, summary: {}, tab: mode === 'intake' ? 'all' : 'active', query: { keyword: '', type: '', status: '', photo: '', page: 1, size: 20 }, drawer: false, detail: null, detailLoading: false, detailError: '', dialog: '', current: null, form: {}, photographers: [], staffMembers: [], bindings: [], bindingsTotal: 0, bindingPage: 1, config: {}, configVer: 0, configActive: {}, configHistory: [], linkInput: '', linkOrder: null, linkResult: null, linkError: '', linkLoading: false, fromOrder: '' });
     Object.assign(s, { detailTab: 'timeline', complaintOrders: [], complaintForm: { order_no: '', resp: 'service', reason: '' }, inlineError: '', linkMatchTimer: null, bindingError: '', reserveTotal:0 });
+    Object.assign(s, { rescheduleVisible: false, rescheduleLoading: false, rescheduleBusy: false, rescheduleError: '', rescheduleRows: [] });
+    let rescheduleId = 0;
     let alive = true, requestId = 0, detailId = 0, reserveId = 0, reserveInFlight = false, loadInFlight = false, reserveTimer, refreshTimer, countdownTimer, searchTimer;
     let loadController, reserveController, detailController;
     const controller = () => typeof AbortController === 'function' ? new AbortController() : null;
@@ -26,6 +33,7 @@
     const admin = computed(() => ['super', 'admin'].includes(ctx.state.role));
     const supervisor = computed(() => ['supervisor', 'service_supervisor'].includes(ctx.state.role));
     const operator = computed(() => ['super', 'admin', 'service', 'supervisor', 'service_supervisor'].includes(ctx.state.role));
+    const rescheduleReviewer = computed(() => ['super', 'service'].includes(ctx.state.role));
     const canComplaint = computed(() => ['super', 'admin', 'service', 'supervisor', 'service_supervisor', 'finance'].includes(ctx.state.role));
     const title = { workbench: '工作台', intake: '订单承接', followup: '跟进与完成', complaints: '客诉与退款' }[mode];
     const rowsOf = data => Array.isArray(data) ? data : data?.list || data?.rows || [];
@@ -33,6 +41,11 @@
     const orderStatus = row => row?.service_status || row?.order?.service_status || '';
     const money = value => value == null ? '—' : '¥' + (Number(value) / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const time = value => value ? String(value).replace('T', ' ').replace(/Z$/, '').slice(0, 19) : '—';
+    function rescheduleTime(value) {
+      const date = new Date(value);
+      return /(?:Z|[+-]\d\d:\d\d)$/.test(String(value || '')) && Number.isFinite(date.getTime())
+        ? date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : time(value);
+    }
     const shortOpenid = value => value ? (String(value).length > 12 ? String(value).slice(0, 5) + '…' + String(value).slice(-4) : String(value)) : '—';
     const countdown = row => row.status === 'holding' || row.reserve_defer ? '--:--' : String(Math.floor(Number(row.left_seconds || 0) / 60)).padStart(2, '0') + ':' + String(Number(row.left_seconds || 0) % 60).padStart(2, '0');
     const progress = row => row.status === 'holding' || row.reserve_defer ? 100 : Math.max(0, Math.min(100, Number(row.left_seconds || 0) / Math.max(1, Number(row.hold_minutes || 60) * 60) * 100));
@@ -40,6 +53,7 @@
     function canClaim(row) { return operator.value && row?.can_claim === true && orderStatus(row) === 'new'; }
     function canAct(row) { return operator.value && owns(row) && ['claimed', 'confirmed', 'shooting'].includes(orderStatus(row)); }
     function isPeripheral(row) { return (row?.category || row?.order?.category) === 'peripheral'; }
+    function canStart() { return false; }
     function canOpen(kind, row) {
       if (kind === 'claim') return canClaim(row);
       if (!['confirm', 'reschedule', 'assign', 'transfer'].includes(kind)) return true;
@@ -60,8 +74,73 @@
       return '未记录客服归属';
     }
     const createdTime = row => row?.created_at || row?.createdAt;
-    const statusLabel = row => orderStatus(row) === 'new' && row?.payment_status === 'unpaid' ? '待支付' : statusNames[orderStatus(row)] || '—';
+    const statusLabel = row => orderStatus(row) === 'new' && row?.payment_status === 'unpaid' ? '待支付'
+      : orderStatus(row) === 'confirmed' ? row?.photo_id ? '已定档' : '待派单'
+        : orderStatus(row) === 'final_pending' ? '拍摄中' : statusNames[orderStatus(row)] || '—';
     function canAftersale(row) { return canComplaint.value && !!row && (typeof row.can_complaint === 'boolean' ? row.can_complaint : owns(row) || ctx.state.role === 'finance' && !!(row.service_managed || row.svc_paid_processed)); }
+    function canReviewReschedule(row) {
+      if (!rescheduleReviewer.value || row?.rescheduleRequest?.status !== 'pending') return false;
+      if (typeof row.canReviewReschedule === 'boolean') return row.canReviewReschedule;
+      const assignee = row.assigneeId || row.assignee_id || row.serviceUserId;
+      return ctx.state.role === 'super' || !assignee || String(assignee) === String(ctx.state.currentStaffId || '');
+    }
+    function rescheduleCanApprove(row) {
+      return canReviewReschedule(row) && !row.deleted && !row.isDeleted && !row.shootingStartedAt && !row.shootingCompletedAt
+        && !['shooting', 'selection_pending', 'awaiting_delivery', 'awaiting_final_payment', 'final_pending', 'editing', 'retouching', 'paid', 'delivered', 'completed', 'done', 'cancelled', 'canceled', 'refunded', 'terminated', 'deleted', '拍摄中', '已拍摄', '已完成', '已交付', '已取消', '已退款', '已中止']
+          .some(status => [row.status, row.workflowStage, row.businessStatus, row.service_status].includes(status));
+    }
+    async function loadRescheduleRequests() {
+      if (!rescheduleReviewer.value || s.rescheduleBusy || s.rescheduleLoading) return;
+      const seq = ++rescheduleId;
+      s.rescheduleLoading = true; s.rescheduleError = '';
+      try {
+        if (!window.LXM_CLOUD?.getColl) throw new Error('改期申请暂不可用，请刷新后重试');
+        const response = await window.LXM_CLOUD.getColl('orders');
+        if (!alive || seq !== rescheduleId) return;
+        const rows = Array.isArray(response) ? response : rowsOf(response?.data || response);
+        s.rescheduleRows = rows.filter(row => row?.rescheduleRequest?.status === 'pending')
+          .sort((a, b) => String(a.rescheduleRequest.requestedAt || '').localeCompare(String(b.rescheduleRequest.requestedAt || '')));
+      } catch (e) { if (alive && seq === rescheduleId) s.rescheduleError = e.message; }
+      finally { if (alive && seq === rescheduleId) s.rescheduleLoading = false; }
+    }
+    async function openRescheduleRequests() {
+      if (!rescheduleReviewer.value) return;
+      s.rescheduleVisible = true;
+      await loadRescheduleRequests();
+    }
+    async function reviewReschedule(row, approved) {
+      if (s.rescheduleBusy || s.rescheduleLoading || !canReviewReschedule(row) || approved && !rescheduleCanApprove(row)) return;
+      const request = row.rescheduleRequest, id = row.id || row._id;
+      if (!id || !request.id) return;
+      s.rescheduleBusy = true; s.rescheduleError = '';
+      let reason = '同意客人改期申请', failure = '';
+      try {
+        if (approved) await ctx.ElMessageBox.confirm(`订单 ${row.orderNo || id} 将由 ${row.appointmentAt || '待确认'} ${row.timePeriod || ''} 改为 ${request.appointmentAt} ${request.timePeriod}。确认同意客人的改期申请？`, '审核改期申请', { confirmButtonText: '同意并改期', cancelButtonText: '返回', type: 'warning' });
+        else {
+          const result = await ctx.ElMessageBox.prompt('请填写驳回原因，客人可在订单中查看。', '驳回改期申请', { confirmButtonText: '确认驳回', cancelButtonText: '返回', inputType: 'textarea', inputValidator: value => String(value || '').trim().length >= 2 && String(value || '').trim().length <= 500 || '请填写 2 至 500 字的驳回原因' });
+          reason = String(result?.value || '').trim();
+          if (reason.length < 2 || reason.length > 500) { s.rescheduleBusy = false; return; }
+        }
+      } catch (_) { s.rescheduleBusy = false; return; }
+      if (!alive) return;
+      try {
+        const reviewBody = { requestId: request.id, approved: !!approved, reason };
+        if (typeof ctx.kfIsolation?.reviewReschedule === 'function') await ctx.kfIsolation.reviewReschedule(id, reviewBody);
+        else {
+          if (!window.LXM_CLOUD?.orderAction) throw new Error('改期审核暂不可用，请刷新后重试');
+          await window.LXM_CLOUD.orderAction(id, 'reviewreschedule', reviewBody);
+        }
+        if (!alive) return;
+        s.rescheduleRows = s.rescheduleRows.filter(item => (item.id || item._id) !== id);
+        ctx.ElMessage.success(approved ? '已同意改期，拍摄时间已更新' : '已驳回，原拍摄时间保持不变');
+        if (!ctx.kfIsolation?.suppressAutoLoad) await load(false);
+        if (typeof ctx.kfIsolation?.onAction === 'function') await ctx.kfIsolation.onAction();
+        if (s.drawer && s.detail) await openDetail(s.detail);
+      } catch (e) {
+        if (alive) { failure = e.message; s.rescheduleError = failure; ctx.ElMessage.error(failure); }
+      } finally { if (alive) s.rescheduleBusy = false; }
+      if (alive) { await loadRescheduleRequests(); if (failure) s.rescheduleError = failure; }
+    }
     async function api(path, method = 'GET', body, options = {}) {
       const response = await window.LXM_HTTP.request('/api/kf/' + path, { method, ...(options.signal ? { signal: options.signal } : {}), ...(body != null ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) });
       const payload = await response.json();
@@ -123,7 +202,8 @@
         const result = await api(path, 'POST', body || {});
         if (!alive) return result;
         ctx.ElMessage.success(typeof success === 'function' ? success(result) : success); s.dialog = '';
-        await load(false);
+        if (!ctx.kfIsolation?.suppressAutoLoad) await load(false);
+        if (typeof ctx.kfIsolation?.onAction === 'function') await ctx.kfIsolation.onAction();
         if (s.drawer && s.detail) await openDetail(s.detail);
         return result;
       } catch (e) {
@@ -137,14 +217,14 @@
               const existing = s.rows.find(row => String(row.id) === String(e.data?.complaint_id || e.data?.id) || orderNo(row) === no);
               if (existing) await openDetail(existing);
             } else {
-              window.LXM_KF_Filters = { page: 'svcComplaints', keyword: no };
+              navigation[filtersKey] = { page: 'svcComplaints', keyword: no };
               ctx.switchMenu('svcComplaints');
             }
           } else if ([4001, 4002, 4004, 4005].includes(Number(e.code))) await load();
         }
       } finally { if (alive) s.busy = false; }
     }
-    async function claim(row) { if (!canClaim(row)) return; if (supervisor.value) return open('claim',row); return action('orders/' + encodeURIComponent(orderNo(row)) + '/claim', { expected_status: 'new' }, '已认领，订单进入待确认'); }
+    async function claim(row) { if (!canClaim(row)) return; if (supervisor.value) return open('claim',row); return action('orders/' + encodeURIComponent(orderNo(row)) + '/claim', { expected_status: 'new' }, '已认领，请确认拍摄时间'); }
     async function reserve(row, kind) {
       if (!operator.value || !owns(row) || orderStatus(row) !== 'reserved') return;
       if (kind === 'giveup') { try { await ctx.ElMessageBox.confirm('放弃后该单立即回到公共池。若该客户已无其他预占单，保护绑定一并解除。', '放弃预占', { type: 'warning' }); } catch (_) { return; } }
@@ -183,17 +263,12 @@
       if (kind === 'confirm' && s.current?.requested_time && f.new_time !== s.current.requested_time && !f.reason.trim()) return ctx.ElMessage.warning('确认时间与用户提交值不同，请填写改期原因');
       if (['assign', 'transfer'].includes(kind) && !f.to_photo) return ctx.ElMessage.warning('请选择在职摄影师');
       const endpoint = { confirm: 'slot/confirm', reschedule: 'slot/reschedule', assign: 'assign', transfer: 'transfer' }[kind];
-      if (endpoint) return action('orders/' + encodeURIComponent(no) + '/' + endpoint, f, kind === 'reschedule' ? '已改期，订单状态保持不变' : kind === 'transfer' ? '已转派，原摄影师报酬按结算状态置零或冲抵；客服归属及提成保持不变' : kind === 'assign' ? '已登记派单，仍为已确认待拍；到场后请登记开始拍摄' : '已登记');
+      if (endpoint) return action('orders/' + encodeURIComponent(no) + '/' + endpoint, f, kind === 'reschedule' ? '已改期，订单状态保持不变' : kind === 'transfer' ? '已转派，原摄影师报酬按结算状态置零或冲抵；客服归属及提成保持不变' : kind === 'assign' ? '摄影师已安排，订单已定档；游客确认到达点位后自动进入拍摄中并可支付尾款' : '拍摄时间已确认，安排摄影师后订单进入已定档');
       if (kind === 'complaint') return action('complaints', f, '售后与判责已登记');
       if (kind === 'rejudge') return action('complaints/' + encodeURIComponent(no) + '/rejudge', { resp: f.resp, reason: f.reason }, '改判已记录，差额按结算状态调账');
     }
-    async function shoot(row, kind) {
-      if (isPeripheral(row) || !canAct(row) || !row.photo_id || (kind === 'start' ? orderStatus(row) !== 'confirmed' : kind !== 'finish' || orderStatus(row) !== 'shooting')) return;
-      try { await ctx.ElMessageBox.confirm(kind === 'finish' ? '确认现场拍摄已经结束？登记后等待游客支付尾款，到账后订单才完成；无需尾款时由游客确认完成。' : '确认开始拍摄？', kind === 'finish' ? '登记拍摄完成' : '开始拍摄'); }
-      catch (_) { return; }
-      return action('orders/' + encodeURIComponent(orderNo(row)) + '/shoot/' + kind, { expected_status: orderStatus(row) }, kind === 'finish' ? result => result.service_status === 'done'
-        ? '订单已完成，提成进入观察期' + (result.bound && result.bind_expire_at ? '；客户保护至 ' + time(result.bind_expire_at) : '')
-        : '拍摄完成已登记，等待游客支付尾款或确认完成' : '已置为拍摄中');
+    async function shoot() {
+      return ctx.ElMessage.warning('游客确认到达点位后自动进入拍摄中，尾款支付成功后自动完成，无需客服手动变更');
     }
     async function confirmReceipt(row) {
       if (!isPeripheral(row) || !canAct(row)) return;
@@ -201,7 +276,17 @@
       catch (_) { return; }
       return action('orders/' + encodeURIComponent(orderNo(row)) + '/receipt/confirm', { received: true, expected_status: orderStatus(row) }, '已登记收货完成，提成进入观察期');
     }
-    function aftersale(row) { if (!canAftersale(row)) return; s.fromOrder = orderNo(row); window.LXM_KF_AFtersale = { order_no: orderNo(row), expected_status: orderStatus(row) }; s.drawer = false; ctx.switchMenu('svcComplaints'); }
+    async function aftersale(row) {
+      if (!canAftersale(row) || s.busy) return;
+      if (operator.value) {
+        if (typeof ctx.openServiceAfterSale !== 'function') return ctx.ElMessage.error('售后服务暂不可用，请刷新后重试');
+        s.busy = true;
+        try { await ctx.openServiceAfterSale(orderNo(row)); }
+        finally { if (alive) s.busy = false; }
+        return;
+      }
+      s.fromOrder = orderNo(row); navigation[aftersaleKey] = { order_no: orderNo(row), expected_status: orderStatus(row) }; s.drawer = false; ctx.switchMenu('svcComplaints');
+    }
     async function resolveLink() {
       const no = s.linkInput.trim(); s.linkOrder = null; s.linkResult = null; s.linkError = '';
       if (!no) { s.linkError = '请输入真实订单号'; return; }
@@ -220,11 +305,11 @@
     async function loadBindings() { try { const data = await api('rebuy/bindings?' + new URLSearchParams({ page: s.bindingPage, size: 20 })); if (alive) { s.bindings = rowsOf(data); s.bindingsTotal = Number(data?.total ?? s.bindings.length); } } catch (e) { s.error = e.message; } }
     function search() { clearTimeout(searchTimer); searchTimer = setTimeout(() => load(true), 300); }
     function linkInputChange() { s.linkOrder = null; s.linkResult = null; clearTimeout(s.linkMatchTimer); if (s.linkInput.trim()) s.linkMatchTimer = setTimeout(resolveLink, 400); }
-    function goto(page, status) { window.LXM_KF_Filters = { page, status: status || '' }; ctx.switchMenu(page); }
+    function goto(page, status) { navigation[filtersKey] = { page, status: status || '' }; ctx.switchMenu(page); }
     function todoAction(row) {
       if (row.suggested_action === 'rejudge') {
         if (canRejudge(row)) return open('rejudge', row);
-        window.LXM_KF_Filters = { page: 'svcComplaints', keyword: orderNo(row) };
+        navigation[filtersKey] = { page: 'svcComplaints', keyword: orderNo(row) };
         return ctx.switchMenu('svcComplaints');
       }
       return openDetail(row);
@@ -270,16 +355,17 @@
       return `${s.reserveTotal} 单老客户复购` + (minutes.length===1 && s.reserves.every(row=>Number(row.hold_minutes)===minutes[0]) ? `，先给你 ${minutes[0]} 分钟` : '，剩余时间以每单倒计时为准');
     });
     onMounted(async () => {
-      if (window.LXM_KF_Filters && window.LXM_KF_Filters.page === ctx.state.active) { s.query.status = window.LXM_KF_Filters.status || ''; s.query.keyword = window.LXM_KF_Filters.keyword || ''; s.query.photo = window.LXM_KF_Filters.photo || ''; delete window.LXM_KF_Filters; }
+      if (ctx.kfIsolation?.suppressAutoLoad) return;
+      if (navigation[filtersKey] && navigation[filtersKey].page === ctx.state.active) { s.query.status = navigation[filtersKey].status || ''; s.query.keyword = navigation[filtersKey].keyword || ''; s.query.photo = navigation[filtersKey].photo || ''; delete navigation[filtersKey]; }
       await load();
       if (!alive) return;
       if (mode === 'intake') await loadBindings();
       if (mode === 'complaints') await prepareComplaintOrders();
       if (mode === 'workbench' || mode === 'intake') reserveTimer = setInterval(refreshReserves, 1000);
       if (mode === 'workbench' || mode === 'intake') refreshTimer = setInterval(() => load(false, true), 30000);
-      if (mode === 'complaints' && window.LXM_KF_AFtersale) { const source = window.LXM_KF_AFtersale; delete window.LXM_KF_AFtersale; s.fromOrder = source.order_no; s.complaintForm.order_no = source.order_no; }
+      if (mode === 'complaints' && navigation[aftersaleKey]) { const source = navigation[aftersaleKey]; delete navigation[aftersaleKey]; s.fromOrder = source.order_no; s.complaintForm.order_no = source.order_no; }
     });
-    onUnmounted(() => { alive = false; requestId++; detailId++; reserveId++; loadController?.abort(); reserveController?.abort(); detailController?.abort(); clearInterval(reserveTimer); clearInterval(refreshTimer); clearInterval(countdownTimer); clearTimeout(searchTimer); clearTimeout(s.linkMatchTimer); });
-    return { kfReserveSummary: reserveSummary, kfTodoAction: todoAction, kfSearch: search, kfSelectTab: selectTab, kfGoto: goto, kfLinkInput: linkInputChange, kfSaveComplaint: saveComplaint, kfDrawerTab: drawerTab, kfAdjustments: adjustments, kfStatusClass: statusClass, kfPriority: priority, kfStepIndex: stepIndex, kfShortTime: shortTime, kfBindDays: bindDays, kf: s, kfMode: mode, kfTitle: title, kfStatusNames: statusNames, kfCategories: categories, kfRespNames: responsibility, kfEffectNames: effectNames, kfBindingNames: bindingNames, kfMoney: money, kfTime: time, kfTimelineTitle: timelineTitle, kfPaymentLabel: paymentLabel, kfAssigneeLabel: assigneeLabel, kfCreatedTime: createdTime, kfStatusLabel: statusLabel, kfNo: orderNo, kfStatus: orderStatus, kfOpenid: shortOpenid, kfCountdown: countdown, kfProgress: progress, kfOwns: owns, kfCanClaim: canClaim, kfCanAct: canAct, kfCanAftersale: canAftersale, kfIsPeripheral: isPeripheral, kfCanGenerateLink: canGenerateLink, kfCanRejudge: canRejudge, kfCanOperate: operator, kfAdmin: admin, kfCanComplaint: canComplaint, kfLoad: load, kfTab: tabChange, kfRows: visibleRows, kfDetail: openDetail, kfOpen: open, kfSubmit: submit, kfClaim: claim, kfReserve: reserve, kfShoot: shoot, kfReceipt: confirmReceipt, kfAftersale: aftersale, kfResolveLink: resolveLink, kfGenerateLink: generateLink, kfLoadBindings: loadBindings, kfSaveConfig: saveConfig, kfCopy: copy };
+    onUnmounted(() => { alive = false; rescheduleId++; requestId++; detailId++; reserveId++; loadController?.abort(); reserveController?.abort(); detailController?.abort(); clearInterval(reserveTimer); clearInterval(refreshTimer); clearInterval(countdownTimer); clearTimeout(searchTimer); clearTimeout(s.linkMatchTimer); });
+    return { kfRescheduleTime: rescheduleTime, kfRescheduleReviewer: rescheduleReviewer, kfRescheduleCanReview: canReviewReschedule, kfRescheduleCanApprove: rescheduleCanApprove, kfOpenReschedules: openRescheduleRequests, kfLoadReschedules: loadRescheduleRequests, kfReviewReschedule: reviewReschedule, kfReserveSummary: reserveSummary, kfTodoAction: todoAction, kfSearch: search, kfSelectTab: selectTab, kfGoto: goto, kfLinkInput: linkInputChange, kfSaveComplaint: saveComplaint, kfDrawerTab: drawerTab, kfAdjustments: adjustments, kfStatusClass: statusClass, kfPriority: priority, kfStepIndex: stepIndex, kfShortTime: shortTime, kfBindDays: bindDays, kf: s, kfMode: mode, kfTitle: title, kfStatusNames: statusNames, kfCategories: categories, kfRespNames: responsibility, kfEffectNames: effectNames, kfBindingNames: bindingNames, kfMoney: money, kfTime: time, kfTimelineTitle: timelineTitle, kfPaymentLabel: paymentLabel, kfAssigneeLabel: assigneeLabel, kfCreatedTime: createdTime, kfStatusLabel: statusLabel, kfNo: orderNo, kfStatus: orderStatus, kfOpenid: shortOpenid, kfCountdown: countdown, kfProgress: progress, kfOwns: owns, kfCanClaim: canClaim, kfCanAct: canAct, kfCanStart: canStart, kfCanAftersale: canAftersale, kfIsPeripheral: isPeripheral, kfCanGenerateLink: canGenerateLink, kfCanRejudge: canRejudge, kfCanOperate: operator, kfAdmin: admin, kfCanComplaint: canComplaint, kfLoad: load, kfTab: tabChange, kfRows: visibleRows, kfDetail: openDetail, kfOpen: open, kfSubmit: submit, kfClaim: claim, kfReserve: reserve, kfShoot: shoot, kfReceipt: confirmReceipt, kfAftersale: aftersale, kfResolveLink: resolveLink, kfGenerateLink: generateLink, kfLoadBindings: loadBindings, kfSaveConfig: saveConfig, kfCopy: copy };
   };
 })();

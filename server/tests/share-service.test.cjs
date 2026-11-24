@@ -13,7 +13,7 @@ test("merchant projection uses session ownership and never exposes customer evid
     listDetails: async filter => { selected.push(filter); return { list: [raw], total: 1, sum: { netAmount: "5.00" } }; },
     getMerchantStats: async () => ({ boundUsers: 4, accT1Amount: "5.00", monthOrders: 1, userIds: ["PRIVATE_UID"] }),
   };
-  const service = createShareService({}, { store, clock: () => new Date("2026-11-06T00:00:00Z") });
+  const service = createShareService({ list: async () => [] }, { store, clock: () => new Date("2026-11-06T00:00:00Z") });
   const result = await service.mine({ merchantId: "another-store" }, { kind: "admin", role: "merchant", shopId: "owned-store" });
   assert.equal(selected[0].merchantId, "owned-store"); assert.equal(result.merchant.merchantId, "owned-store");
   assert.equal(result.list[0].orderNo, "****5678");

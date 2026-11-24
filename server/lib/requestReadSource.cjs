@@ -5,6 +5,29 @@
 module.exports = function requestReadSource(source) {
   const lists = new Map();
   const documents = new Map();
+  const documentBatches = new Map();
+
+  // Merge independent lookups made in the same turn without retaining any
+  // business data across requests. getMany is position-aligned with its IDs,
+  // including nulls and database ID aliases; do not remap by the returned id.
+  function fetchDocument(key, id) {
+    if (typeof source.getMany !== "function" || typeof id !== "string") return source.get(key, id);
+    let batch = documentBatches.get(key);
+    if (!batch) {
+      batch = [];
+      documentBatches.set(key, batch);
+      queueMicrotask(() => {
+        documentBatches.delete(key);
+        Promise.resolve().then(() => source.getMany(key, batch.map(item => item.id))).then(values => {
+          if (!Array.isArray(values) || values.length !== batch.length || !batch.every((_, index) => Object.hasOwn(values, index))) {
+            throw Object.assign(new Error("批量读取文档结果不完整"), { code: "DATA_SOURCE_INVALID" });
+          }
+          batch.forEach((item, index) => item.resolve(values[index]));
+        }).catch(error => batch.forEach(item => item.reject(error)));
+      });
+    }
+    return new Promise((resolve, reject) => batch.push({ id, resolve, reject }));
+  }
   function read(cache, key, fetch) {
     if (!cache.has(key)) {
       const pending = Promise.resolve().then(fetch).catch((error) => {
@@ -39,7 +62,7 @@ module.exports = function requestReadSource(source) {
             const exact=Array.isArray(rows) ? rows.find(row=>String(row.id || row._id || "")===String(id)) : null;
             if (exact) return exact;
           }
-          return source.get(key, id);
+          return fetchDocument(key, id);
         });
       };
       const value = Reflect.get(target, property, target);

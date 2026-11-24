@@ -1,18 +1,30 @@
 <div class="merchant-share">
-  <header class="share-heading"><div><p class="share-eyebrow">商家分成管理 · 商家端</p><h2>我的分成</h2><p>{{ shareState.mine.merchant.name || '本商家' }}的分成信息，仅显示本店脱敏流水。</p></div><el-button :loading="shareState.loading.mine" @click="loadShareMine()">刷新</el-button></header>
+  <header class="share-heading"><div><p class="share-eyebrow">商家分成管理 · 商家端</p><h2>我的分成</h2><p>{{ shareState.mine.merchant.name || '本商家' }}的关联订单与分成信息。</p></div><el-button :loading="shareState.loading.mine" @click="loadShareMine()">刷新</el-button></header>
   <div v-if="state.role === 'super'" class="share-preview"><strong>商家视角预览</strong><el-select v-model="shareState.mineQuery.merchantId" clearable filterable placeholder="选择要查看的商家" aria-label="选择预览商家" @change="loadShareMine(true)"><el-option v-for="merchant in shareState.merchants" :key="shareId(merchant)" :value="shareId(merchant)" :label="merchant.merchantName || merchant.name" /></el-select><span>与商家本人页面使用相同的脱敏字段</span></div>
   <div v-if="shareState.errors.mine" class="share-error" role="alert">{{ shareState.errors.mine }} <el-button link @click="loadShareMine()">重新加载</el-button></div>
   <el-empty v-if="state.role === 'super' && !shareState.mineQuery.merchantId" description="请选择商家，预览该店的我的分成页面" />
   <template v-if="shareIsMerchant || (state.role === 'super' && shareState.mineQuery.merchantId)">
   <el-alert v-if="!shareState.loading.mine && !shareState.errors.mine && !shareMineConfigured" title="尚未配置分成规则，当前默认不分成；请联系平台运营完成配置。" type="warning" :closable="false" show-icon />
+  <el-alert v-for="notice in shareState.mine.notices" :key="notice" :title="notice" type="info" :closable="false" show-icon />
+  <div class="share-filters"><h3>统计月份</h3><el-date-picker v-model="shareState.mineQuery.period" type="month" value-format="YYYY-MM" format="YYYY年MM月" :clearable="false" aria-label="分成统计月份" @change="loadShareMine(true)" /></div>
   <div class="share-metrics">
-    <div><span>本月分成净额</span><strong>{{ shareMoney(shareValue(shareState.mine.stats, 'monthAmount', 'monthNetAmount', 'monthlyAmount')) }}</strong><small>已扣除退款冲抵</small></div>
-    <div><span>有效历史绑定人数</span><strong>{{ shareCount(shareValue(shareState.mine.stats, 'boundUsers', 'bindingCount', 'boundUserCount')) }}</strong></div>
-    <div><span>本月订单</span><strong>{{ shareCount(shareValue(shareState.mine.stats, 'monthOrders', 'monthlyOrders', 'orderCount')) }}</strong></div>
+    <div><span>所选月分成净额</span><strong>{{ shareMoney(shareValue(shareState.mine.stats, 'monthAmount', 'monthNetAmount', 'monthlyAmount')) }}</strong><small>已扣除退款冲抵</small></div>
+    <div><span>当前归属人数</span><strong>{{ shareCount(shareValue(shareState.mine.stats, 'boundUsers', 'bindingCount', 'boundUserCount')) }}</strong></div>
+    <div><span>所选月已入账订单</span><strong>{{ shareCount(shareValue(shareState.mine.stats, 'monthOrders', 'monthlyOrders', 'orderCount')) }}</strong></div>
     <div><span>分成累计</span><strong>{{ shareMoney(shareAccumulatedTotal(shareState.mine.stats)) }}</strong><small>已生成分成净额</small></div>
   </div>
   <section class="share-panel">
-    <div class="share-filters"><h3>分成流水</h3><el-date-picker v-model="shareState.mineQuery.period" type="month" value-format="YYYY-MM" format="YYYY年MM月" placeholder="全部月份" aria-label="分成统计月份" @change="loadShareMine(true)" /><span class="share-filter-note">订单号仅显示后四位</span></div>
+    <div class="share-filters"><h3>关联订单</h3><span class="share-filter-note">按下单月份显示 · 共 {{ shareState.mine.orderTotal }} 单 · 订单号仅显示后四位</span></div>
+    <el-table v-loading="shareState.loading.mine" :data="shareState.mine.orders" stripe empty-text="所选月份暂无关联订单">
+      <el-table-column label="下单日期" min-width="160"><template #default="{row}">{{ shareTime(row.createdAt) }}</template></el-table-column>
+      <el-table-column label="订单号" min-width="130"><template #default="{row}"><span class="share-mono">{{ shareOrderTail(row) }}</span></template></el-table-column>
+      <el-table-column label="整单实收" min-width="140" align="right"><template #default="{row}">{{ shareMoney(row.paidAmount) }}</template></el-table-column>
+      <el-table-column label="分成进度" min-width="180"><template #default="{row}"><el-tag :type="row.status === 'posted' ? 'success' : row.status === 'review' ? 'warning' : 'info'">{{ row.statusText }}</el-tag></template></el-table-column>
+    </el-table>
+    <div class="share-pager"><el-pagination background layout="total, sizes, prev, pager, next" :total="shareState.mine.orderTotal" v-model:current-page="shareState.mineQuery.orderPage" v-model:page-size="shareState.mineQuery.orderSize" :page-sizes="[20, 50, 100]" @current-change="loadShareMine()" @size-change="loadShareMine(true)" /></div>
+  </section>
+  <section class="share-panel">
+    <div class="share-filters"><h3>分成流水</h3><span class="share-filter-note">按入账月份显示 · 订单号仅显示后四位</span></div>
     <div class="share-inline-summary"><span>正向 {{ shareMoney(shareState.mine.sum.positiveAmount) }}</span><span>冲抵 {{ shareMoney(shareState.mine.sum.reverseAmount) }}</span><strong>净额 {{ shareMoney(shareState.mine.sum.netAmount) }}</strong></div>
     <el-table v-loading="shareState.loading.mine" :data="shareState.mine.list" stripe empty-text="当前月份暂无分成流水" :row-class-name="({row}) => shareReverse(row) ? 'share-reverse-row' : ''">
       <el-table-column label="日期" min-width="160"><template #default="{row}">{{ shareTime(row.createdAt || row.payTime || row.date) }}</template></el-table-column>
@@ -24,6 +36,6 @@
     </el-table>
     <div class="share-pager"><el-pagination background layout="total, sizes, prev, pager, next" :total="shareState.mine.total" v-model:current-page="shareState.mineQuery.page" v-model:page-size="shareState.mineQuery.size" :page-sizes="[20, 50, 100]" @current-change="loadShareMine()" @size-change="loadShareMine(true)" /></div>
   </section>
-  <div class="share-notes"><h3>分成说明</h3><p>自主订单按有效长期绑定归属，不受客服时效限制；客服推荐订单按规则窗口判定。尾款到账并经过退款观察期后生成分成，退款另增负向冲抵。</p><p>本页不提供顾客姓名、手机号、用户标识、商品及收货信息，也不提供其他商家的数据。如对分成有疑问，请向平台提供脱敏订单尾号和日期。</p></div>
+  <div class="share-notes"><h3>分成说明</h3><p>平台所有订单均归最近扫码商家，退出后归属持续有效，直到扫下一个商家码。自主与客服推荐订单分别按对应比例计算；旅拍尾款、实物全款到账并经过退款观察期后生成分成，退款另增负向冲抵。关联订单的待入账进度不计入已入账金额。</p><p>本页不提供顾客姓名、手机号、用户标识、商品及收货信息，也不提供其他商家的数据。如对分成有疑问，请向平台提供脱敏订单尾号和日期。</p></div>
   </template>
 </div>

@@ -59,9 +59,9 @@ const WORKFLOW_STAGES = Object.freeze({
 });
 
 const serviceFlowSteps = [
-  { key: "reserved", label: "待确认", note: "定金已支付，等待客服安排摄影师；安排前可申请退定金" },
-  { key: "dispatch", label: "待拍摄", note: "人工确认时间、地点后填写派单记录" },
-  { key: "shoot", label: "拍摄中", note: "客服在确认摄影师到场后登记开始拍摄" },
+  { key: "reserved", label: "已预约", note: "定金已支付，等待客服安排摄影师；安排前可申请退定金" },
+  { key: "dispatch", label: "已定档", note: "已安排摄影师及拍摄时间、地点，等待游客到达点位" },
+  { key: "shoot", label: "拍摄中", note: "游客确认到达点位后自动进入此阶段，并可支付尾款" },
   { key: "completed", label: "已完成", note: "尾款支付回调后自动完成，可继续补充交付记录" },
 ];
 
@@ -99,9 +99,6 @@ function serviceFlowIndex(order) {
 
 function serviceFlowCurrent(order) {
   const step = serviceFlowSteps[serviceFlowIndex(order)] || { key: "", label: "-", note: "" };
-  if (step.key === "shoot") return { ...step, note: isShootingCompleted(order)
-    ? "拍摄已完成，等待游客支付尾款，到账后自动完成订单"
-    : "客服登记开始拍摄；拍摄结束后登记完成，游客才可支付尾款" };
   return step;
 }
 
@@ -149,8 +146,8 @@ function canRescheduleOrder(order = state.currentOrder) {
 }
 function defaultCustomerStatusForOrderStatus(status) {
   const map = {
-    reserved: "待确认", deposit_paid: "待确认", assigned: "待拍摄",
-    awaiting_shoot: "待拍摄", shooting: "拍摄中", retouching: "拍摄中", editing: "拍摄中",
+    reserved: "已预约", deposit_paid: "已预约", assigned: "已定档",
+    awaiting_shoot: "已定档", shooting: "拍摄中", retouching: "拍摄中", editing: "拍摄中",
     delivered: "拍摄中", final_pending: "拍摄中", paid: "已完成",
     completed: "已完成", cancelled: "已取消", canceled: "已取消",
   };
@@ -281,15 +278,11 @@ async function setServiceFlowStep(step) {
   const order = state.currentOrder;
   if (!canSetServiceFlowStep(step, order)) return ElMessage.info(serviceFlowDisabledReason(step, order));
   if (step.key === "dispatch") return openDispatchDialog(order);
-  if (step.key === "shoot") return startShooting(order);
 }
 function canSetServiceFlowStep(step, order = state.currentOrder) {
   if (!step || !order || !canEditCurrentOrder() || state.orderReadonly || isOrderAfterSaleLocked(order)) return false;
-  const current = serviceFlowIndex(order);
-  const target = serviceFlowSteps.findIndex((item) => item.key === step.key);
   const stage = workflowStageOf(order);
   if (step.key === "dispatch") return stage === WORKFLOW_STAGES.AWAITING_DISPATCH && canDispatchOrder(order);
-  if (step.key === "shoot") return stage === WORKFLOW_STAGES.AWAITING_SHOOT && canStartTask(order);
   return false;
 }
 function serviceFlowDisabledReason(step, order = state.currentOrder) {
@@ -298,13 +291,9 @@ function serviceFlowDisabledReason(step, order = state.currentOrder) {
   if (state.orderReadonly) return "当前为只读查看模";
   if (isOrderAfterSaleLocked(order)) return "售后处理中，订单状态已锁定";
   if (isOrderCompletedStatus(order)) return "订单已完成，不能重复推进";
-  const current = serviceFlowIndex(order);
-  const target = serviceFlowSteps.findIndex((item) => item.key === step.key);
-  if (step.key === "complete" && target === current && canCompleteWorkflow(order)) return "";
-  const stage = workflowStageOf(order);
   if (step.key === "reserved") return "定金已支付，等待客服安排摄影师";
   if (step.key === "dispatch") return "等待客服确认拍摄安排";
-  if (step.key === "shoot" && stage !== WORKFLOW_STAGES.AWAITING_SHOOT) return "请先完成派单后再开始拍摄";
+  if (step.key === "shoot") return "游客确认到达点位后自动进入拍摄中，并可支付尾款";
   if (step.key === "completed") return "尾款支付回调后自动完成";
   return "";
 }
@@ -334,7 +323,7 @@ function depositPaymentActionDisabledReason() { return "定金由游客支付，
 function canRegisterFinalPayment(order = state.currentOrder) {
   return false;
 }
-function finalPaymentDisabledReason() { return "客服登记拍摄完成后，游客可支付尾款，到账后订单自动完成"; }
+function finalPaymentDisabledReason() { return "游客确认到达点位后可支付尾款，到账后订单自动完成"; }
 function hasDeliveryRecord(order = state.currentOrder) {
   return !!order && (!!order.deliveryRecord || !!order.deliveredAt || !!order.deliveryRecords?.length);
 }
@@ -508,7 +497,7 @@ async function confirmDispatchPhotographer() {
     });
     log("安排摄影", order.orderNo, `${previous} -> ${next}；时间：${form.appointmentAt}；地点：${form.appointmentLocation}；人数：${form.peopleCount}${note ? `；备注：${note}` : ""}`);
     state.dispatchDialog = false;
-    ElMessage.success("摄影师已安排，操作已保存");
+    ElMessage.success("摄影师已安排，订单已定档");
   } catch (_) {}
 }
 function openTransferDialog(order = state.currentOrder) {
@@ -609,32 +598,13 @@ function confirmServiceConfirmation() { return openServiceConfirmationDialog(); 
 function acceptOrder() { return openServiceConfirmationDialog(); }
 
 async function startShooting(order = state.currentOrder) {
-  if (!canStartTask(order)) return ElMessage.warning("当前订单未完成派单或已开始拍摄");
-  try {
-    await persistOrderAction(order, "start", { reason: "客服确认摄影师已到场，开始拍摄" });
-    log("开始拍摄", order.orderNo, "客服确认摄影师到场并开始拍摄");
-    ElMessage.success("已记录开始拍摄");
-  } catch (_) {}
+  return ElMessage.info("游客确认到达点位后自动进入拍摄中，无需客服手动变更");
 }
 
 async function completeShooting(order = state.currentOrder) {
-  if (!canCompleteShooting(order)) return ElMessage.warning("当前订单不能登记拍摄完成，请先开始拍摄或核实处理状态");
-  try {
-    await window.LXMActionConfirm.confirm(ElMessageBox, "确认现场拍摄已经结束？登记后游客可支付尾款，到账后订单自动完成。", "登记拍摄完成", {
-      confirmButtonClass: "lxm-action-confirm--primary",
-      cancelButtonClass: "lxm-action-cancel",
-      type: "warning", confirmButtonText: "确认拍摄完成", cancelButtonText: "暂不登记",
-    });
-    await persistOrderAction(order, "shootcomplete", { reason: "客服确认现场拍摄完成，开放游客支付尾款" });
-    log("拍摄完成", order.orderNo, "现场拍摄完成，等待游客支付尾款");
-    ElMessage.success("拍摄完成已登记，等待游客支付尾款");
-  } catch (_) {}
+  return ElMessage.info("游客确认到达点位后可支付尾款，尾款支付成功后自动完成订单");
 }
-function canCompleteShooting(order = state.currentOrder) {
-  return !!order && ["service", "super"].includes(state.role) && canManageOrderRecords(order)
-    && !state.orderReadonly && !isOrderAfterSaleLocked(order) && !isShootingCompleted(order)
-    && workflowStageOf(order) === WORKFLOW_STAGES.SHOOTING;
-}
+function canCompleteShooting() { return false; }
 function isShootingCompleted(order = {}) {
   return !!order.shootingCompletedAt || ["final_pending", "editing", "retouching"].includes(String(order.status || "").toLowerCase());
 }
@@ -643,7 +613,7 @@ function canConfirmOfflineSelection(order = state.currentOrder) {
   return false;
 }
 
-function confirmOfflineSelection() { return ElMessage.info("本版无需选片确认，客服登记拍摄完成后开放尾款"); }
+function confirmOfflineSelection() { return ElMessage.info("游客确认到达点位后可支付尾款，无需客服确认选片"); }
 function canDeliverOrder(order = state.currentOrder) {
   return canManageOrderRecords(order) && !state.orderReadonly
     && [WORKFLOW_STAGES.SHOOTING, WORKFLOW_STAGES.COMPLETED].includes(workflowStageOf(order));
@@ -651,7 +621,7 @@ function canDeliverOrder(order = state.currentOrder) {
 
 function deliverOrder() { return ElMessage.info("请使用独立交付记录表单登记交付"); }
 async function updateTaskStatus(order, status) {
-  return ElMessage.warning("摄影师任务台仅供查看，拍摄状态由客服在客服工作台中登记");
+  return ElMessage.warning("摄影师任务台仅供查看，游客确认到达点位和尾款支付成功后自动更新订单状态");
 }
 function taskStatusOf(order = {}) {
   return String(order && order.taskStatus || "pending_acceptance").trim().toLowerCase() || "pending_acceptance";
@@ -674,10 +644,7 @@ async function acceptTask(order) {
     ElMessage.success("已接受拍摄任务");
   } catch (_) {}
 }
-function canStartTask(order) {
-  return !!order && canManageOrderRecords(order) && !state.orderReadonly
-    && !isOrderAfterSaleLocked(order) && workflowStageOf(order) === WORKFLOW_STAGES.AWAITING_SHOOT;
-}
+function canStartTask() { return false; }
 function canCompleteTask(order) {
   return false;
 }

@@ -294,7 +294,7 @@ function reconciliationPersonalWorkbookSheets() {
   ];
 }
 function exportRowsForOption(key) {
-  if (key === "shopRank") return { headers: ["商家ID", "商家", "当前有效码扫码（门店累计）", "有效绑定人数（门店累计）", "归属订单", "已入账分成净额"], rows: shopRank.value.map((row) => ({ "商家ID": row.id, "商家": row.name, "当前有效码扫码（门店累计）": row.scanCount, "有效绑定人数（门店累计）": row.boundUsers, "归属订单": row.orderCount, "已入账分成净额": row.totalAmount })) };
+  if (key === "shopRank") return { headers: ["商家ID", "商家", "当前有效码扫码（门店累计）", "当前归属人数（门店）", "归属订单", "已入账分成净额"], rows: shopRank.value.map((row) => ({ "商家ID": row.id, "商家": row.name, "当前有效码扫码（门店累计）": row.scanCount, "当前归属人数（门店）": row.boundUsers, "归属订单": row.orderCount, "已入账分成净额": row.totalAmount })) };
   if (key === "reconciliation" || key === "reconciliationPlatform") return { headers: ["报表模块", "主体类型", "主体名称", "金额", "数量", "分成比例", "结算周期", "结算范围", "结算状态", "说明"], rows: reconciliationCompositeExportRows(key === "reconciliationPlatform"), sheets: reconciliationWorkbookSheets(key === "reconciliationPlatform") };
   if (key === "reconciliationPersonal") {
     const rows = selectedReconciliationExportRows();

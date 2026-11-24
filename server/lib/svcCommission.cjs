@@ -305,6 +305,8 @@ function csvFor(rows) {
 function createSvcCommission(options = {}) {
   const { store } = options; if (!store?.transaction || !store?.read) throw new Error("客服分成需事务持久化存储");
   const clock = () => options.clock ? options.clock() : new Date();
+  const contacts = options.wecomContacts || require("./wecomContacts.cjs").createWecomContacts();
+  const wecomSync = require("./svcWecomSync.cjs").createSvcWecomSync({ store, contacts, clock });
   async function execute(method, path, input = {}, session = {}) {
     method = method.toUpperCase(); path = path.replace(/^\/api\/svc/, "").replace(/\/$/, "") || "/";
     if (method === "GET") return store.read(async raw => {
@@ -368,7 +370,9 @@ function createSvcCommission(options = {}) {
       throw failure(4040, "接口不存在", 404);
     }, { path: "/api/svc" + path, input, session });
     if (method !== "POST") throw failure(4040, "接口不存在", 404);
-    return store.transaction(async (raw, conn) => {
+    const syncMatch = path.match(/^\/staff\/([^/]+)\/wecom-sync$/);
+    if (syncMatch) { mustSuper(session); return wecomSync.run(syncMatch[1]); }
+    const result = await store.transaction(async (raw, conn) => {
       const state = arrays(raw), at = clock(), operator = actor(session);
       if (path === "/rule/preview") {
         mustSuper(session); const proposed = ratesOf(input.rates || input), period = requirePeriod(input.period || periodAt(at));
@@ -409,7 +413,7 @@ function createSvcCommission(options = {}) {
         if (!rates) { const global = state.rules.filter(row => row.party_id == null && row.beneficiary_type === "service" && timestamp(row.eff_at) <= timestamp(at)).sort((a, b) => Number(b.ver) - Number(a.ver))[0]; if (!global) throw failure(5011, "请先初始化统一比例"); rates = Object.fromEntries(B.CATEGORIES.map(key => ["rate_" + key + "_bp", global["rate_" + key + "_bp"]])); }
         const metadata = profileMetadata(input);
         const row = { id: crypto.randomBytes(12).toString("hex"), name, phone, joined_at: str(input.joined_at), base_salary: salary, rate_mode: mode, supervisor_id: str(input.supervisor_id) || null,settlement_cycle:cycle,...timing,...metadata,
-          staff_status: "active", account_id: str(input.account_id) || null, created_at: localTime(at), updated_at: localTime(at) };
+          staff_status: "active", account_id: str(input.account_id) || null, wecom_sync_status: "pending", wecom_sync_message: "等待同步企业微信", created_at: localTime(at), updated_at: localTime(at) };
         if (createAccount) Object.assign(row, await require("./svcAccounts.cjs").provisionSvcAccount(conn, row, input));
         state.staff.push(row);
         state.staffLogs.push({ id: idOf(state, "staffLogs"), staff_id: row.id, action: "create", from_tags: [], to_tags: [...row.assessment_tags], from_review_date: null, to_review_date: row.rate_review_date, reason, operator, created_at: localTime(at) });
@@ -526,6 +530,15 @@ function createSvcCommission(options = {}) {
       }
       throw failure(4040, "接口不存在", 404);
     });
+    if (path === "/staff") {
+      try { return await wecomSync.run(result.id); }
+      catch (_) {
+        // Local creation already committed. A later storage outage must not
+        // tell the operator to create the same account/profile again.
+        return { ...result, wecom_sync_status: "pending", wecom_sync_message: "客服已保存，企微同步结果暂不可用，请刷新列表后重试同步" };
+      }
+    }
+    return result;
   }
   async function runTasks(at = clock()) {
     const result = await store.transaction(async raw => {

@@ -133,12 +133,12 @@ window.LXM_VIEWS = {
       </el-dialog>
     </div>
 
-    <el-drawer v-model="state.orderDrawer" :title="state.orderReadonly ? '订单详情' : state.orderWorkMode==='afterSale' ? '订单详情与售后处理' : state.orderWorkMode==='finance' ? '订单详情与财务审核' : '订单编辑'" :size="state.orderReadonly ? 'min(860px, 100vw)' : 'min(1280px, 100vw)'" class="order-drawer">
+    <el-drawer v-model="state.orderDrawer" :title="generalDisplay(state.orderReadonly ? '订单详情' : state.orderWorkMode==='afterSale' ? '订单详情与售后处理' : state.orderWorkMode==='finance' ? '订单详情与财务审核' : '订单编辑')" :size="state.orderReadonly ? 'min(860px, 100vw)' : 'min(1280px, 100vw)'" class="order-drawer">
       <nav v-if="state.currentOrder && state.orderWorkMode==='service'" class="order-workbench-nav" :aria-label="state.orderReadonly ? '订单详情导航' : '订单编辑操作'">
         <el-button :class="{active:state.orderSection==='info'}" :aria-pressed="state.orderSection==='info'" @click="focusOrderSection('info')">订单信息</el-button>
         <el-button :class="{active:state.orderSection==='followup'}" :aria-pressed="state.orderSection==='followup'" @click="focusOrderSection('followup')">跟进记录</el-button>
         <template v-if="!state.orderReadonly">
-          <el-button :class="{active:state.orderSection==='status'}" :aria-pressed="state.orderSection==='status'" @click="focusOrderSection('status')">状态更改</el-button>
+          <el-button :class="{active:state.orderSection==='status'}" :aria-pressed="state.orderSection==='status'" @click="focusOrderSection('status')">订单进度</el-button>
           <el-button :class="{active:state.orderSection==='photography'}" :aria-pressed="state.orderSection==='photography'" @click="focusOrderSection('photography')">摄影安排</el-button>
           <el-button :disabled="!canManageOrderRecords(state.currentOrder) || isOrderAfterSaleLocked(state.currentOrder)" @click="openAfterSaleSubmit()">售后提交</el-button>
           <el-button :disabled="!canTransferOrder(state.currentOrder)" @click="openTransferDialog(state.currentOrder)">转让订单</el-button>
@@ -148,36 +148,49 @@ window.LXM_VIEWS = {
         <section class="order-left">
           <div class="order-head-card" data-order-section="info" tabindex="-1">
             <div>
-              <div class="order-no">{{ state.currentOrder.orderNo }}</div>
-              <h2>{{ state.currentOrder.customer }}</h2>
-              <p>{{ orderWorkflowStatusLabel(state.currentOrder) }} · {{ state.currentOrder.appointmentAt }} · {{ state.currentOrder.timePeriod }} · 当前操作者：{{ currentOperatorName() }}</p>
+              <div class="order-no">{{ generalDisplay(state.currentOrder.orderNo) }}</div>
+              <h2>{{ generalDisplay(state.currentOrder.customer) }}</h2>
+              <p>{{ generalDisplay(orderWorkflowStatusLabel(state.currentOrder)) }} · {{ generalDisplay(state.currentOrder.appointmentAt) }} · {{ generalDisplay(state.currentOrder.timePeriod) }} · 当前操作者：{{ generalDisplay(currentOperatorName()) }}</p>
             </div>
-            <div class="order-head-badges"><el-button size="small" plain @click="copyOrderWechatInfo(state.currentOrder)">复制订单信息</el-button><span class="order-status-pill" :style="{background: orderWorkflowStatusMeta(state.currentOrder).color}">{{ orderWorkflowStatusLabel(state.currentOrder) }}</span><span v-if="afterSaleBadge(state.currentOrder)" class="after-sale-badge strong">{{ afterSaleBadge(state.currentOrder) }}</span><span v-if="hasRiskBlock(state.currentOrder)" class="risk-mini-tag danger">风控冻结</span><span v-if="isFinanceLocked(state.currentOrder)" class="risk-mini-tag warning">财务锁定</span></div>
+            <div class="order-head-badges"><el-button size="small" plain @click="copyOrderWechatInfo(state.currentOrder)">复制订单信息</el-button><span class="order-status-pill" :style="{background: orderWorkflowStatusMeta(state.currentOrder).color}">{{ generalDisplay(orderWorkflowStatusLabel(state.currentOrder)) }}</span><span v-if="afterSaleBadge(state.currentOrder)" class="after-sale-badge strong">{{ generalDisplay(afterSaleBadge(state.currentOrder)) }}</span><span v-if="hasRiskBlock(state.currentOrder)" class="risk-mini-tag danger">风控冻结</span><span v-if="isFinanceLocked(state.currentOrder)" class="risk-mini-tag warning">财务锁定</span></div>
           </div>
           <div v-if="orderLockReasons(state.currentOrder).length" class="order-lock-banner">
             <strong>订单锁定提醒</strong>
-            <span v-for="reason in orderLockReasons(state.currentOrder)" :key="reason">{{ reason }}</span>
+            <span v-for="reason in orderLockReasons(state.currentOrder)" :key="reason">{{ generalDisplay(reason) }}</span>
+          </div>
+
+          <div v-if="state.currentOrder.rescheduleRequest" class="order-section">
+            <h3>客人改期申请 <el-tag size="small" :type="state.currentOrder.rescheduleRequest.status === 'pending' ? 'warning' : state.currentOrder.rescheduleRequest.status === 'approved' ? 'success' : 'info'">{{ generalDisplay(({pending:'待审核',approved:'已同意',rejected:'已驳回',cancelled:'已取消'})[state.currentOrder.rescheduleRequest.status] || '已结束') }}</el-tag></h3>
+            <div class="detail-grid">
+              <div class="detail-item"><span>申请拍摄时间</span><strong>{{ generalDisplay(state.currentOrder.rescheduleRequest.appointmentAt) }} {{ generalDisplay(state.currentOrder.rescheduleRequest.timePeriod) }}</strong></div>
+              <div class="detail-item"><span>提交时间</span><strong>{{ generalDisplay(state.currentOrder.rescheduleRequest.requestedAt || '—') }}</strong></div>
+              <div class="detail-item"><span>申请原因</span><strong>{{ generalDisplay(state.currentOrder.rescheduleRequest.reason) }}</strong></div>
+              <div v-if="state.currentOrder.rescheduleRequest.reviewReason" class="detail-item"><span>审核说明</span><strong>{{ generalDisplay(state.currentOrder.rescheduleRequest.reviewReason) }}</strong></div>
+            </div>
+            <p v-if="state.currentOrder.rescheduleRequest.status === 'pending'" class="muted">审核同意后才会更新拍摄时间，请前往客服工作台处理客人改期申请。</p>
           </div>
 
           <div class="order-section">
             <h3>客户与预约信息</h3>
             <div class="detail-grid">
-              <div class="detail-item"><span>客户姓名</span><strong>{{ state.currentOrder.customer }}</strong></div>
-              <div class="detail-item"><span>手机号</span><strong>{{ visiblePhone(state.currentOrder) }}</strong></div>
-              <div class="detail-item"><span>微信号</span><strong>{{ visibleWechat(state.currentOrder) }}</strong></div>
-              <div class="detail-item"><span>拍摄时间</span><strong>{{ state.currentOrder.appointmentAt }}</strong></div>
-              <div class="detail-item"><span>拍摄时段</span><strong>{{ state.currentOrder.timePeriod || '待客服确认' }}</strong></div>
-              <div class="detail-item"><span>客人可见状态</span><strong>{{ serviceCustomerStatusLabel(state.currentOrder) }}</strong></div>
+              <div class="detail-item"><span>客户姓名</span><strong>{{ generalDisplay(state.currentOrder.customer) }}</strong></div>
+              <div class="detail-item"><span>手机号</span><strong>{{ generalDisplay(visiblePhone(state.currentOrder)) }}</strong></div>
+              <div class="detail-item"><span>微信号</span><strong>{{ generalDisplay(visibleWechat(state.currentOrder)) }}</strong></div>
+              <div class="detail-item"><span>拍摄时间</span><strong>{{ generalDisplay(state.currentOrder.appointmentAt) }}</strong></div>
+              <div class="detail-item"><span>拍摄时段</span><strong>{{ generalDisplay(state.currentOrder.timePeriod || '待客服确认') }}</strong></div>
+              <div class="detail-item"><span>客人可见状态</span><strong>{{ generalDisplay(serviceCustomerStatusLabel(state.currentOrder)) }}</strong></div>
+              <div v-if="state.currentOrder.customerArrivedAt" class="detail-item"><span>游客确认到达</span><strong>{{ generalDisplay(state.currentOrder.customerArrivedAt) }}</strong></div>
+              <div v-if="state.currentOrder.shootingStartedAt" class="detail-item"><span>实际开拍登记</span><strong>{{ generalDisplay(state.currentOrder.shootingStartedAt) }}</strong></div>
             </div>
             <div class="finance-status-strip">
               <div v-for="item in orderFinanceReviews(state.currentOrder)" :key="item.id">
-                <span>{{ item.type }}</span>
-                <strong>{{ money(item.amount) }}</strong>
-                <em :class="{approved: ['confirmed','已审'].includes(item.status), rejected:item.status==='已驳', pending:item.status==='pending' || item.status==='待审'}">{{ ['confirmed','已审'].includes(item.status) ? '已到账' : item.status==='pending' ? '支付处理中' : item.status }}</em>
+                <span>{{ generalDisplay(item.type) }}</span>
+                <strong>{{ generalDisplay(money(item.amount)) }}</strong>
+                <em :class="{approved: ['confirmed','已审'].includes(item.status), rejected:item.status==='已驳', pending:item.status==='pending' || item.status==='待审'}">{{ generalDisplay(['confirmed','已审'].includes(item.status) ? '已到账' : item.status==='pending' ? '支付处理中' : item.status) }}</em>
               </div>
               <div v-if="!orderFinanceReviews(state.currentOrder).length"><span>付款记录</span><strong>暂无支付记录</strong><em>-</em></div>
             </div>
-            <div class="note-box"><b>客人预约备注</b><p>{{ state.currentOrder.customerRemark || '暂无客人备注' }}</p></div>
+            <div class="note-box"><b>客人预约备注</b><p>{{ generalDisplay(state.currentOrder.customerRemark || '暂无客人备注') }}</p></div>
           </div>
 
           <div class="order-section" data-order-section="followup" tabindex="-1">
@@ -185,9 +198,9 @@ window.LXM_VIEWS = {
             <div class="after-sale-status-panel">
               <template v-if="orderAfterSales(state.currentOrder).length">
                 <div v-for="item in orderAfterSales(state.currentOrder)" :key="item.id" class="after-sale-status-row">
-                  <div><strong>{{ item.type }}</strong><span>{{ item.reason }}</span><small>客人可见：{{ item.customerVisibleStatus || item.status }}</small></div>
-                  <el-tag :type="item.status==='已完成' ? 'success' : item.status==='待超管审核' ? 'warning' : 'danger'">{{ item.status }}</el-tag>
-                  <em v-if="item.refundAmount">退款 {{ money(item.refundAmount) }}</em>
+                  <div><strong>{{ generalDisplay(item.type) }}</strong><span>{{ generalDisplay(item.reason) }}</span><small>客人可见：{{ generalDisplay(item.customerVisibleStatus || item.status) }}</small></div>
+                  <el-tag :type="item.status==='已完成' ? 'success' : item.status==='待超管审核' ? 'warning' : 'danger'">{{ generalDisplay(item.status) }}</el-tag>
+                  <em v-if="item.refundAmount">退款 {{ generalDisplay(money(item.refundAmount)) }}</em>
                 </div>
               </template>
               <div v-else class="after-sale-status-empty">暂无售后服务问题</div>
@@ -203,25 +216,25 @@ window.LXM_VIEWS = {
             </div>
             <div v-if="orderFollowRecords(state.currentOrder).length" class="followup-record-list">
               <div v-for="item in orderFollowRecords(state.currentOrder).slice().reverse().slice(0,5)" :key="item.id || item.createTime" class="followup-record-row">
-                <div><strong>{{ item.content || item.reason }}</strong><small>{{ item.createTime || '-' }} · {{ item.operator || '客服' }}</small></div>
+                <div><strong>{{ generalDisplay(item.content || item.reason) }}</strong><small>{{ generalDisplay(item.createTime || '-') }} · {{ generalDisplay(item.operator || '客服') }}</small></div>
                 <el-button v-if="item.status !== 'completed' && canManageOrderRecords(state.currentOrder) && !state.orderReadonly" size="small" link type="success" @click="completeFollowup(item.id)">完成跟进</el-button>
-                <el-tag v-else size="small" :type="item.status === 'completed' ? 'success' : 'info'">{{ item.status === 'completed' ? '已完成' : '待跟进' }}</el-tag>
+                <el-tag v-else size="small" :type="item.status === 'completed' ? 'success' : 'info'">{{ generalDisplay(item.status === 'completed' ? '已完成' : '待跟进') }}</el-tag>
               </div>
             </div>
             <div class="follow-timeline">
               <div v-for="(logItem,index) in filteredOrderTimelineRows(state.currentOrder, 3)" :key="logItem.sort || index" class="timeline-row">
-                <span class="timeline-index">{{ index + 1 }}</span>
+                <span class="timeline-index">{{ generalDisplay(index + 1) }}</span>
                 <div class="timeline-card">
                   <div class="timeline-meta">
-                    <b>{{ logItem.time }}</b>
-                    <em>{{ logItem.operator }}</em>
+                    <b>{{ generalDisplay(logItem.time) }}</b>
+                    <em>{{ generalDisplay(logItem.operator) }}</em>
                   </div>
-                  <span class="timeline-category" :data-category="logItem.category">{{ logItem.category || '记录' }}</span>
-                  <strong>{{ logItem.action }}</strong>
+                  <span class="timeline-category" :data-category="logItem.category">{{ generalDisplay(logItem.category || '记录') }}</span>
+                  <strong>{{ generalDisplay(logItem.action) }}</strong>
                 </div>
               </div>
               <div v-if="orderTimelineRows(state.currentOrder).length > 3" class="timeline-collapse-row">
-                <span>已收拢 {{ orderTimelineRows(state.currentOrder).length - 3 }} 条更早记录</span>
+                <span>已收拢 {{ generalDisplay(orderTimelineRows(state.currentOrder).length - 3) }} 条更早记录</span>
                 <el-button size="small" plain @click="state.timelineDialog=true">弹窗预览全部</el-button>
               </div>
             </div>
@@ -231,16 +244,16 @@ window.LXM_VIEWS = {
             <div class="section-title-row"><h3>订单商品</h3><el-button v-if="canManageOrderAddons(state.currentOrder) && !state.orderReadonly" type="primary" plain @click="openAddonDialog">选择加购商品</el-button></div>
             <div class="product-lines">
               <div v-for="p in state.currentOrder.products" :key="p.type+p.id+p.key" @click="openProduct(p)">
-                <strong>{{ productName(p) }}</strong>
-                <span>{{ productTypeText(p.type || resolveProduct(p).type) }} · {{ spotName(p.spotId) }} / {{ seriesName(p.seriesId) }} / {{ albumName(p.albumId) }}</span>
-                <em>{{ money(p.price || productPrice(p)) }}</em>
+                <strong>{{ generalDisplay(productName(p)) }}</strong>
+                <span>{{ generalDisplay(productTypeText(p.type || resolveProduct(p).type)) }} · {{ generalDisplay(spotName(p.spotId)) }} / {{ generalDisplay(seriesName(p.seriesId)) }} / {{ generalDisplay(albumName(p.albumId)) }}</span>
+                <em>{{ generalDisplay(money(p.price || productPrice(p))) }}</em>
                 <el-button v-if="canManageOrderAddons(state.currentOrder) && !state.orderReadonly && p.key" class="line-remove" size="small" type="danger" @click.stop="removeAddon(p)" link>取消加购</el-button>
               </div>
             </div>
             <div class="snapshot-card">
               <b>下单商品快照</b>
-              <p>{{ state.currentOrder.packageSnapshot?.name || '订单创建时已记录商品价格快照' }}</p>
-              <span>原价 {{ money(state.currentOrder.packageSnapshot?.originalPrice || 0) }} · 成交价 {{ money(state.currentOrder.packageSnapshot?.price || state.currentOrder.totalAmount) }}</span>
+              <p>{{ generalDisplay(state.currentOrder.packageSnapshot?.name || '订单创建时已记录商品价格快照') }}</p>
+              <span>原价 {{ generalDisplay(money(state.currentOrder.packageSnapshot?.originalPrice || 0)) }} · 成交价 {{ generalDisplay(money(state.currentOrder.packageSnapshot?.price || state.currentOrder.totalAmount)) }}</span>
             </div>
           </div>
 
@@ -248,16 +261,16 @@ window.LXM_VIEWS = {
             <div class="section-title-row"><h3>成片与交付</h3><el-button v-if="canUploadDelivery(state.currentOrder)" :disabled="uploadBusy" @click="uploadDelivery(state.currentOrder)" type="primary" plain>上传成片草稿</el-button></div>
             <p class="muted">拍摄中及已完成订单均可补传；草稿仅后台可见，按交付记录的可见范围开放。图片最大 50 MiB，MP4 最大 500 MiB。</p>
             <div v-for="file in deliveryFiles(state.currentOrder)" :key="file.id" class="lxm-file-row">
-              <span>{{ file.name }}</span><el-tag size="small">草稿</el-tag><el-button link @click="openStoredFile(file)">预览</el-button>
+              <span>{{ generalDisplay(file.name) }}</span><el-tag size="small">草稿</el-tag><el-button link @click="openStoredFile(file)">预览</el-button>
               <el-button v-if="canUploadDelivery(state.currentOrder)" link type="danger" :disabled="uploadBusy" @click="removeDeliveryFile(state.currentOrder,file.id)">移除</el-button>
             </div>
-            <div v-for="file in deliveryFiles(state.currentOrder,false)" :key="file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-tag size="small" type="success">已发布</el-tag><el-button link @click="openStoredFile(file)" type="primary">查看</el-button><el-button link @click="openStoredFile(file,true)">下载</el-button></div>
+            <div v-for="file in deliveryFiles(state.currentOrder,false)" :key="file.id" class="lxm-file-row"><span>{{ generalDisplay(file.name) }}</span><el-tag size="small" type="success">已发布</el-tag><el-button link @click="openStoredFile(file)" type="primary">查看</el-button><el-button link @click="openStoredFile(file,true)">下载</el-button></div>
             <el-button v-if="canDeliverOrder(state.currentOrder) && !state.orderReadonly" :disabled="uploadBusy" @click="deliverOrder(state.currentOrder)" type="primary">新增照片交付记录</el-button>
             <div v-for="record in orderDeliveryRecords(state.currentOrder).slice().reverse()" :key="record.id || record.deliveredAt" class="delivery-record-row">
-              <strong>{{ record.method || record.deliveryMethod || '交付' }}</strong>
-              <span>{{ record.note || '-' }}</span>
-              <small>{{ record.deliveredAt || record.createdAt || '-' }} · {{ record.deliveredBy || record.operator || '客服' }}</small>
-              <el-tag size="small">{{ record.visibility==='internal' ? '仅后台可见' : record.visibility==='external' ? '线下交付' : '本单游客可见' }}</el-tag>
+              <strong>{{ generalDisplay(record.method || record.deliveryMethod || '交付') }}</strong>
+              <span>{{ generalDisplay(record.note || '-') }}</span>
+              <small>{{ generalDisplay(record.deliveredAt || record.createdAt || '-') }} · {{ generalDisplay(record.deliveredBy || record.operator || '客服') }}</small>
+              <el-tag size="small">{{ generalDisplay(record.visibility==='internal' ? '仅后台可见' : record.visibility==='external' ? '线下交付' : '本单游客可见') }}</el-tag>
               <el-button v-for="fileId in record.fileIds || []" :key="fileId" link @click="openStoredFile({id:fileId,name:'交付照片'})" type="primary">查看照片</el-button>
             </div>
           </div>
@@ -268,21 +281,21 @@ window.LXM_VIEWS = {
         <section v-if="!state.orderReadonly" class="order-right" :class="{locked:isOrderAfterSaleLocked(state.currentOrder)}">
           <div v-if="canOpenOrderForEdit(state.currentOrder) && state.orderWorkMode==='service'" class="service-workbench">
             <div class="service-workbench-header">
-              <div class="title-group"><h3>客服处理</h3><span class="badge-order">{{ state.currentOrder.orderNo }}</span></div>
+              <div class="title-group"><h3>客服处理</h3><span class="badge-order">{{ generalDisplay(state.currentOrder.orderNo) }}</span></div>
               <div class="header-actions">
                 <el-button v-if="canUseOrderExceptionTools(state.currentOrder)" size="small" plain @click="openOrderExceptionDialog(state.currentOrder)" type="danger">异常处理</el-button>
-                <span class="header-status">{{ serviceFlowCurrent(state.currentOrder).label }}</span>
+                <span class="header-status">{{ generalDisplay(serviceFlowCurrent(state.currentOrder).label) }}</span>
               </div>
             </div>
             <div class="service-workbench-body">
               <div class="service-card flow-card" data-order-section="status" tabindex="-1">
-                <div class="service-card-head"><strong>状态更改</strong><span>{{ serviceFlowCurrent(state.currentOrder).note }}</span></div>
+                <div class="service-card-head"><strong>订单进度</strong><span>{{ generalDisplay(serviceFlowCurrent(state.currentOrder).note) }}</span></div>
                 <div class="status-steps flow-steps">
                   <template v-for="(step,index) in serviceFlowSteps" :key="step.key">
-                    <el-tooltip :content="serviceFlowDisabledReason(step,state.currentOrder) || step.note" placement="top" :disabled="canSetServiceFlowStep(step,state.currentOrder)">
+                    <el-tooltip :content="generalDisplay(serviceFlowDisabledReason(step,state.currentOrder) || step.note)" placement="top" :disabled="canSetServiceFlowStep(step,state.currentOrder)">
                       <span class="disabled-tip-wrap"><button class="step-node" :class="serviceFlowClass(index,state.currentOrder)" :disabled="!canSetServiceFlowStep(step,state.currentOrder)" @click="setServiceFlowStep(step)">
-                        <span class="step-dot">{{ index + 1 }}</span>
-                        <span class="step-label">{{ step.label }}</span>
+                        <span class="step-dot">{{ generalDisplay(index + 1) }}</span>
+                        <span class="step-label">{{ generalDisplay(step.label) }}</span>
                       </button></span>
                     </el-tooltip>
                     <span v-if="index < serviceFlowSteps.length - 1" class="step-line" :class="{done:index < serviceFlowIndex(state.currentOrder)}"></span>
@@ -290,14 +303,12 @@ window.LXM_VIEWS = {
                 </div>
                 <div class="flow-action-row">
                   <el-button v-if="canDispatchOrder(state.currentOrder)" size="small" @click="openDispatchDialog(state.currentOrder)" type="primary">确认安排并派单</el-button>
-                  <el-button v-if="canStartTask(state.currentOrder)" size="small" type="primary" plain @click="startShooting(state.currentOrder)">开始拍摄</el-button>
-                  <el-button v-if="canCompleteShooting(state.currentOrder)" size="small" type="primary" plain @click="completeShooting(state.currentOrder)">登记拍摄完成</el-button>
                   <el-button v-if="canDeliverOrder(state.currentOrder)" size="small" @click="deliverOrder(state.currentOrder)" type="primary" plain>登记成片交付</el-button>
                 </div>
                 <div class="status-meta">
-                  <span><b>内部订单状态</b><em class="tag-internal">{{ serviceInternalStatusLabel(state.currentOrder) }}</em></span>
-                  <span><b>客人可见状态</b><em class="tag-customer">{{ serviceCustomerStatusLabel(state.currentOrder) }}</em></span>
-                  <span><b>当前提示</b><em>{{ serviceFlowCurrent(state.currentOrder).label }}</em></span>
+                  <span><b>内部订单状态</b><em class="tag-internal">{{ generalDisplay(serviceInternalStatusLabel(state.currentOrder)) }}</em></span>
+                  <span><b>客人可见状态</b><em class="tag-customer">{{ generalDisplay(serviceCustomerStatusLabel(state.currentOrder)) }}</em></span>
+                  <span><b>当前提示</b><em>{{ generalDisplay(serviceFlowCurrent(state.currentOrder).label) }}</em></span>
                 </div>
               </div>
 
@@ -305,10 +316,10 @@ window.LXM_VIEWS = {
               <div class="service-card" data-order-section="photography" tabindex="-1">
                 <div class="service-card-head"><strong>摄影安排</strong><span>确认摄影师、拍摄时间及地点</span></div>
                 <div class="service-info-grid">
-                  <label class="wide"><span>摄影师</span><div class="plain-action"><div><strong>{{ photographerDisplayName(state.currentOrder.photographerId) }}</strong><small>{{ canDispatchOrder(state.currentOrder) ? '定金已支付，可安排摄影师' : dispatchDisabledReason(state.currentOrder) }}</small></div><el-tooltip :content="dispatchDisabledReason(state.currentOrder)" placement="top" :disabled="canDispatchOrder(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!canDispatchOrder(state.currentOrder)" @click="openDispatchDialog(state.currentOrder)" type="primary">安排</el-button></span></el-tooltip></div></label>
-                  <label><span>确认拍摄地点</span><div class="plain-value"><strong>{{ state.currentOrder.appointmentLocation || state.currentOrder.shootLocation || state.currentOrder.location || '待确认' }}</strong><small>派单确认后同步给摄影师</small></div></label>
-                  <label><span>参与人数</span><div class="plain-value"><strong>{{ state.currentOrder.peopleCount || state.currentOrder.participantCount || '待确认' }}</strong><small>以派单确认信息为准</small></div></label>
-                  <label class="wide"><span>预约时间</span><div class="plain-action"><div><strong>{{ state.currentOrder.appointmentAt || '待确认' }}</strong><small>{{ state.currentOrder.timePeriod || '待客服确认' }}</small></div><el-tooltip :content="rescheduleDisabledReason(state.currentOrder)" placement="top" :disabled="canRescheduleOrder(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!canRescheduleOrder(state.currentOrder)" @click="openRescheduleDialog(state.currentOrder)" :type="state.currentOrder && workflowStageOf(state.currentOrder)!=='reserved' ? 'warning' : 'primary'">改期拍摄</el-button></span></el-tooltip></div></label>
+                  <label class="wide"><span>摄影师</span><div class="plain-action"><div><strong>{{ generalDisplay(photographerDisplayName(state.currentOrder.photographerId)) }}</strong><small>{{ generalDisplay(canDispatchOrder(state.currentOrder) ? '定金已支付，可安排摄影师' : dispatchDisabledReason(state.currentOrder)) }}</small></div><el-tooltip :content="generalDisplay(dispatchDisabledReason(state.currentOrder))" placement="top" :disabled="canDispatchOrder(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!canDispatchOrder(state.currentOrder)" @click="openDispatchDialog(state.currentOrder)" type="primary">安排</el-button></span></el-tooltip></div></label>
+                  <label><span>确认拍摄地点</span><div class="plain-value"><strong>{{ generalDisplay(state.currentOrder.appointmentLocation || state.currentOrder.shootLocation || state.currentOrder.location || '待确认') }}</strong><small>派单确认后同步给摄影师</small></div></label>
+                  <label><span>参与人数</span><div class="plain-value"><strong>{{ generalDisplay(state.currentOrder.peopleCount || state.currentOrder.participantCount || '待确认') }}</strong><small>以派单确认信息为准</small></div></label>
+                  <label class="wide"><span>预约时间</span><div class="plain-action"><div><strong>{{ generalDisplay(state.currentOrder.appointmentAt || '待确认') }}</strong><small>{{ generalDisplay(state.currentOrder.timePeriod || '待客服确认') }}</small></div><el-tooltip :content="generalDisplay(rescheduleDisabledReason(state.currentOrder))" placement="top" :disabled="canRescheduleOrder(state.currentOrder)"><span class="disabled-tip-wrap"><el-button size="small" plain :disabled="!canRescheduleOrder(state.currentOrder)" @click="openRescheduleDialog(state.currentOrder)" :type="state.currentOrder && workflowStageOf(state.currentOrder)!=='reserved' ? 'warning' : 'primary'">改期拍摄</el-button></span></el-tooltip></div></label>
                 </div>
               </div>
 
@@ -316,21 +327,21 @@ window.LXM_VIEWS = {
                 <div class="service-card-head"><strong>客户与履约信息</strong><span>来源与负责人只展示，变更走专用流程</span></div>
                 <div class="service-info-grid">
                   <label><span>客户姓名</span><el-input v-model="state.currentOrder.customer" :disabled="!canEditCurrentOrder()" placeholder="填写客户姓名" /></label>
-                  <label><span>手机号</span><div class="contact-list"><strong>{{ visiblePhone(state.currentOrder) }}</strong><small v-for="item in (state.currentOrder.extraPhones || [])" :key="item">{{ item }}</small><div class="contact-add"><el-input v-model="state.contactDraft.phone" size="small" placeholder="新增手机号" :disabled="!canEditCurrentOrder()" /><el-button size="small" :disabled="!canEditCurrentOrder() || !state.contactDraft.phone" @click="addOrderContact('phone')" type="primary" plain>新增</el-button></div></div></label>
-                  <label><span>微信号</span><div class="contact-list"><strong>{{ visibleWechat(state.currentOrder) }}</strong><small v-for="item in (state.currentOrder.extraWechats || [])" :key="item">{{ item }}</small><div class="contact-add"><el-input v-model="state.contactDraft.wechat" size="small" placeholder="新增微信号" :disabled="!canEditCurrentOrder()" /><el-button size="small" :disabled="!canEditCurrentOrder() || !state.contactDraft.wechat" @click="addOrderContact('wechat')" type="primary" plain>新增</el-button></div></div></label>
-                  <label><span>订单来源</span><div class="plain-value"><strong>{{ orderSourceTypeText(state.currentOrder) }}</strong><small>{{ orderSourceName(state.currentOrder) }}</small></div></label>
-                  <label><span>负责客服</span><div class="plain-value"><strong>{{ serviceOwnerName(state.currentOrder) }}</strong><small>跟当前客服账号绑定</small></div></label>
+                  <label><span>手机号</span><div class="contact-list"><strong>{{ generalDisplay(visiblePhone(state.currentOrder)) }}</strong><small v-for="item in (state.currentOrder.extraPhones || [])" :key="item">{{ generalDisplay(item) }}</small><div class="contact-add"><el-input v-model="state.contactDraft.phone" size="small" placeholder="新增手机号" :disabled="!canEditCurrentOrder()" /><el-button size="small" :disabled="!canEditCurrentOrder() || !state.contactDraft.phone" @click="addOrderContact('phone')" type="primary" plain>新增</el-button></div></div></label>
+                  <label><span>微信号</span><div class="contact-list"><strong>{{ generalDisplay(visibleWechat(state.currentOrder)) }}</strong><small v-for="item in (state.currentOrder.extraWechats || [])" :key="item">{{ generalDisplay(item) }}</small><div class="contact-add"><el-input v-model="state.contactDraft.wechat" size="small" placeholder="新增微信号" :disabled="!canEditCurrentOrder()" /><el-button size="small" :disabled="!canEditCurrentOrder() || !state.contactDraft.wechat" @click="addOrderContact('wechat')" type="primary" plain>新增</el-button></div></div></label>
+                  <label><span>订单来源</span><div class="plain-value"><strong>{{ generalDisplay(orderSourceTypeText(state.currentOrder)) }}</strong><small>{{ generalDisplay(orderSourceName(state.currentOrder)) }}</small></div></label>
+                  <label><span>负责客服</span><div class="plain-value"><strong>{{ generalDisplay(serviceOwnerName(state.currentOrder)) }}</strong><small>跟当前客服账号绑定</small></div></label>
                 </div>
               </div>
 
               <div class="service-card">
                 <div class="service-card-head"><strong>付款事实</strong><span>微信支付回调自动确认，后台不可修改收款状态</span></div>
                 <div class="amount-check-card compact">
-                  <div class="amount-row"><span class="amount-label">订单总价</span><span class="amount-value total">{{ money(state.currentOrder.totalAmount) }}</span></div>
-                  <div class="amount-row"><span class="amount-label">优惠减免</span><span class="amount-action-value"><span>{{ money(state.currentOrder.finalDiscountAmount) }}</span><el-button v-if="canManageOrderAddons(state.currentOrder)" size="small" type="primary" plain @click="enableMoneyEdit('couponAmount')">调整优惠</el-button></span></div>
+                  <div class="amount-row"><span class="amount-label">订单总价</span><span class="amount-value total">{{ generalDisplay(money(state.currentOrder.totalAmount)) }}</span></div>
+                  <div class="amount-row"><span class="amount-label">优惠减免</span><span class="amount-action-value"><span>{{ generalDisplay(money(state.currentOrder.finalDiscountAmount)) }}</span><el-button v-if="canManageOrderAddons(state.currentOrder)" size="small" type="primary" plain @click="enableMoneyEdit('couponAmount')">调整优惠</el-button></span></div>
                   <div v-if="canManageOrderAddons(state.currentOrder) && state.moneyEdit==='couponAmount'" class="coupon-editor amount-editor"><label>优惠金额</label><el-input-number v-model="state.moneyDraft" :min="0" :max="Math.max(Number(state.currentOrder.totalAmount || 0) - Number(state.currentOrder.depositPaid || 0), 0)" /><label>优惠原因</label><el-input v-model="state.currentOrder.priceAdjustReason" type="textarea" :rows="2" placeholder="填写优惠原因" /><div class="edit-actions"><el-button size="small" @click="cancelMoneyEdit">取消</el-button><el-button size="small" type="primary" @click="confirmMoneyEdit('couponAmount')">保存优惠</el-button></div></div>
-                  <div class="amount-row"><span class="amount-label">定金应收 / 已支付</span><span>{{ money(paymentDue(state.currentOrder,'deposit')) }} / {{ money(state.currentOrder.depositPaid) }}</span></div>
-                  <div class="amount-row"><span class="amount-label">尾款应收 / 已支付<small>客服登记拍摄完成后游客可支付，到账后订单自动完成</small></span><span>{{ money(paymentDue(state.currentOrder,'final')) }} / {{ money(state.currentOrder.finalPaid) }}</span></div>
+                  <div class="amount-row"><span class="amount-label">定金应收 / 已支付</span><span>{{ generalDisplay(money(paymentDue(state.currentOrder,'deposit'))) }} / {{ generalDisplay(money(state.currentOrder.depositPaid)) }}</span></div>
+                  <div class="amount-row"><span class="amount-label">尾款应收 / 已支付<small>游客确认到达点位后可支付，到账后订单自动完成</small></span><span>{{ generalDisplay(money(paymentDue(state.currentOrder,'final'))) }} / {{ generalDisplay(money(state.currentOrder.finalPaid)) }}</span></div>
                 </div>
                 <div class="amount-alert"><p>支付状态以服务端回调为准。订单完成后可继续登记交付与附加跟进。</p></div>
               </div>
@@ -343,17 +354,17 @@ window.LXM_VIEWS = {
               <div v-if="canUseOrderExceptionTools(state.currentOrder)" class="service-card exception-card">
                 <div class="service-card-head"><strong>超管异常兜底</strong><span>用于状态异常、来源归属错误、风控误锁等情况，提交后强制留痕。</span></div>
                 <div class="exception-summary">
-                  <span>当前状态：{{ orderWorkflowStatusLabel(state.currentOrder) }}</span>
-                  <span>来源：{{ orderSourceTypeText(state.currentOrder) }}</span>
-                  <span>商家：{{ shopName(state.currentOrder.shopId) }}</span>
-                  <span>分销员：{{ distributorName(state.currentOrder.distributorId) }}</span>
+                  <span>当前状态：{{ generalDisplay(orderWorkflowStatusLabel(state.currentOrder)) }}</span>
+                  <span>来源：{{ generalDisplay(orderSourceTypeText(state.currentOrder)) }}</span>
+                  <span>商家：{{ generalDisplay(shopName(state.currentOrder.shopId)) }}</span>
+                  <span>分销员：{{ generalDisplay(distributorName(state.currentOrder.distributorId)) }}</span>
                 </div>
                 <el-button plain @click="openOrderExceptionDialog(state.currentOrder)" type="danger">打开异常处理</el-button>
               </div>
 
               <div class="bottom-actions">
-                <el-button type="primary" :loading="state.saving" :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed'" @click="saveOrder">{{ state.currentOrder.status==='shooting' ? '保存履约备注' : '确认客户信息' }}</el-button>
-                <el-tooltip v-if="can('cancelOrder')" :content="cancelDisabledReason(state.currentOrder)" placement="top" :disabled="canEditCurrentOrder() && state.currentOrder.status!=='completed' && !isOrderAfterSaleLocked(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="danger" plain :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed' || isOrderAfterSaleLocked(state.currentOrder)" @click="cancelOrder(state.currentOrder)">取消订单</el-button></span></el-tooltip>
+                <el-button type="primary" :loading="state.saving" :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed'" @click="saveOrder">{{ generalDisplay(state.currentOrder.status==='shooting' ? '保存履约备注' : '确认客户信息') }}</el-button>
+                <el-tooltip v-if="can('cancelOrder')" :content="generalDisplay(cancelDisabledReason(state.currentOrder))" placement="top" :disabled="canEditCurrentOrder() && state.currentOrder.status!=='completed' && !isOrderAfterSaleLocked(state.currentOrder)"><span class="disabled-tip-wrap"><el-button type="danger" plain :disabled="!canEditCurrentOrder() || state.currentOrder.status==='completed' || isOrderAfterSaleLocked(state.currentOrder)" @click="cancelOrder(state.currentOrder)">取消订单</el-button></span></el-tooltip>
               </div>
             </div>
           </div>
@@ -361,48 +372,51 @@ window.LXM_VIEWS = {
             <div class="after-sale-workbench-head">
               <div class="after-sale-head-left">
                 <span class="after-sale-icon">售</span>
-                <div><h3>售后处理</h3><p>保存记录只留痕；处理完成后工单锁定，不能再修改说明或退款金额。</p></div>
+                <div><h3>售后处理</h3><p>先与客人联系并保存沟通记录，再提交退款；财务审核通过后自动原路退回。</p></div>
               </div>
               <div class="after-sale-head-status">
                 <span>处理状态</span>
-                <el-tag :type="normalizeAfterSaleStatus(state.currentAfterSale.status)==='待处理' ? 'warning' : normalizeAfterSaleStatus(state.currentAfterSale.status)==='已完成' ? 'success' : 'danger'">{{ normalizeAfterSaleStatus(state.currentAfterSale.status) }}</el-tag>
+                <el-tag :type="normalizeAfterSaleStatus(state.currentAfterSale.status)==='待处理' ? 'warning' : normalizeAfterSaleStatus(state.currentAfterSale.status)==='已完成' ? 'success' : 'danger'">{{ generalDisplay(normalizeAfterSaleStatus(state.currentAfterSale.status)) }}</el-tag>
               </div>
             </div>
             <div class="after-sale-summary-grid">
-              <div><span>售后类型</span><strong>{{ state.currentAfterSale.type }}</strong></div>
-              <div><span>负责客服</span><strong>{{ staffName(state.currentAfterSale.assigneeId) }}</strong></div>
-              <div><span>提交时间</span><strong>{{ state.currentAfterSale.createdAt }}</strong></div>
-              <div><span>客人可见</span><strong>{{ state.currentAfterSale.customerVisibleStatus || normalizeAfterSaleStatus(state.currentAfterSale.status) }}</strong></div>
-              <div class="full"><span>售后原因</span><p>{{ state.currentAfterSale.reason }}</p></div>
+              <div><span>售后类型</span><strong>{{ generalDisplay(state.currentAfterSale.type) }}</strong></div>
+              <div><span>负责客服</span><strong>{{ generalDisplay(staffName(state.currentAfterSale.assigneeId)) }}</strong></div>
+              <div><span>提交时间</span><strong>{{ generalDisplay(state.currentAfterSale.createdAt) }}</strong></div>
+              <div><span>客人可见</span><strong>{{ generalDisplay(state.currentAfterSale.customerVisibleStatus || normalizeAfterSaleStatus(state.currentAfterSale.status)) }}</strong></div>
+              <div class="full"><span>售后原因</span><p>{{ generalDisplay(state.currentAfterSale.reason) }}</p></div>
+              <div class="full" v-if="state.currentAfterSale.customerContactedAt"><span>已联系客人</span><p>{{ generalDisplay(state.currentAfterSale.customerContactedAt) }} · {{ generalDisplay(state.currentAfterSale.customerContactNote) }}</p></div>
             </div>
             <div class="after-sale-process-layout">
               <div class="after-sale-process-main">
                 <div class="textarea-wrap">
                   <div class="process-field-head"><label>跟进说明</label><span>必填</span></div>
                   <el-input v-model="state.afterSaleProcessForm.note" type="textarea" :rows="6" :disabled="isAfterSaleProcessReadonly(state.currentAfterSale)" placeholder="请输入本次处理记录，例如：已与客人协商一致，改期至7月5日下午。" />
+                  <el-checkbox v-model="state.afterSaleProcessForm.customerContacted" :disabled="state.afterSaleProcessSubmitting || !!state.currentAfterSale.customerContactedAt || isAfterSaleProcessReadonly(state.currentAfterSale)">已与客人取得联系</el-checkbox>
+                  <div class="form-tip" v-if="!state.currentAfterSale.customerContactedAt">联系客人后，填写沟通情况并保存记录，随后可提交退款审核。</div>
                 </div>
-<div v-if="state.currentAfterSale.attachments && state.currentAfterSale.attachments.length" class="lxm-attachment-box"><strong>客户提交的凭证</strong><div v-for="file in state.currentAfterSale.attachments" :key="file.fileId || file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-button link @click="openStoredFile(file)" type="primary">查看</el-button></div></div>
-<div class="lxm-attachment-box"><strong>内部处理凭证</strong><el-button :disabled="uploadBusy || isAfterSaleProcessReadonly(state.currentAfterSale)" @click="uploadAfterSaleAttachment(true)" type="primary" plain>上传凭证</el-button><small>凭证支持 JPG、PNG、WebP，最大 20 MiB</small><div v-for="file in attachmentFiles(state.afterSaleProcessForm)" :key="file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-button link @click="openStoredFile(file)" type="primary">查看</el-button><el-button link type="danger" :disabled="uploadBusy || file.saved || isAfterSaleProcessReadonly(state.currentAfterSale)" @click="removeAttachment(state.afterSaleProcessForm,file.id)">移除</el-button></div></div>
+<div v-if="state.currentAfterSale.attachments && state.currentAfterSale.attachments.length" class="lxm-attachment-box"><strong>客户提交的凭证</strong><div v-for="file in state.currentAfterSale.attachments" :key="file.fileId || file.id" class="lxm-file-row"><span>{{ generalDisplay(file.name) }}</span><el-button link @click="openStoredFile(file)" type="primary">查看</el-button></div></div>
+<div class="lxm-attachment-box"><strong>内部处理凭证</strong><el-button :disabled="uploadBusy || isAfterSaleProcessReadonly(state.currentAfterSale)" @click="uploadAfterSaleAttachment(true)" type="primary" plain>上传凭证</el-button><small>凭证支持 JPG、PNG、WebP，最大 20 MiB</small><div v-for="file in attachmentFiles(state.afterSaleProcessForm)" :key="file.id" class="lxm-file-row"><span>{{ generalDisplay(file.name) }}</span><el-button link @click="openStoredFile(file)" type="primary">查看</el-button><el-button link type="danger" :disabled="uploadBusy || file.saved || isAfterSaleProcessReadonly(state.currentAfterSale)" @click="removeAttachment(state.afterSaleProcessForm,file.id)">移除</el-button></div></div>
                 <div class="after-sale-process-footer">
                   <div class="refund-input-wrap">
                     <label>退款金额</label>
                     <div class="refund-confirm-row">
                       <el-input-number v-model="state.afterSaleProcessForm.refundAmount" :min="0" :controls="false" :disabled="isAfterSaleProcessReadonly(state.currentAfterSale) || state.afterSaleProcessForm.refundConfirmed" />
-                      <el-button size="small" plain :disabled="isAfterSaleProcessReadonly(state.currentAfterSale) || Number(state.afterSaleProcessForm.refundAmount || 0) <= 0 || state.afterSaleProcessForm.refundConfirmed" @click="confirmAfterSaleRefundAmount" type="warning">{{ state.afterSaleProcessForm.refundConfirmed ? '已确认' : '确认金额' }}</el-button>
+                      <el-button size="small" plain :disabled="isAfterSaleProcessReadonly(state.currentAfterSale) || Number(state.afterSaleProcessForm.refundAmount || 0) <= 0 || state.afterSaleProcessForm.refundConfirmed" @click="confirmAfterSaleRefundAmount" type="warning">{{ generalDisplay(state.afterSaleProcessForm.refundConfirmed ? '已确认' : '确认金额') }}</el-button>
                     </div>
-                    <span class="form-tip">无退款可不填；有退款时请先确认金额，处理完成后进入财务审核。</span>
+                    <span class="form-tip">无退款可不填；有退款时须先保存联系记录、确认金额，再提交财务审核。</span>
                   </div>
                   <div class="action-buttons">
-                    <el-button :disabled="isAfterSaleProcessReadonly(state.currentAfterSale)" @click="saveAfterSaleProcess(false)" type="primary" plain>保存记录</el-button>
-                    <el-button type="success" :disabled="isAfterSaleProcessReadonly(state.currentAfterSale) || (Number(state.afterSaleProcessForm.refundAmount || 0) > 0 && !state.afterSaleProcessForm.refundConfirmed)" @click="saveAfterSaleProcess(true)">处理完成</el-button>
+                    <el-button :loading="state.afterSaleProcessSubmitting" :disabled="state.afterSaleProcessSubmitting || isAfterSaleProcessReadonly(state.currentAfterSale)" @click="saveAfterSaleProcess(false)" type="primary" plain>保存记录</el-button>
+                    <el-button type="success" :loading="state.afterSaleProcessSubmitting" :disabled="state.afterSaleProcessSubmitting || isAfterSaleProcessReadonly(state.currentAfterSale) || (Number(state.afterSaleProcessForm.refundAmount || 0) > 0 && (!state.currentAfterSale.customerContactedAt || !state.afterSaleProcessForm.refundConfirmed))" @click="saveAfterSaleProcess(true)">{{ generalDisplay(Number(state.afterSaleProcessForm.refundAmount || 0) > 0 ? '提交退款审核' : '处理完成') }}</el-button>
                   </div>
                 </div>
               </div>
               <aside class="after-sale-process-side">
-                <div class="after-sale-rule"><b>售后处理规则</b><p>保存记录只记录本次进度，不结束售后；退款金额必须先确认再处理完成。处理完成后工单锁定，无退款直接结案，有退款进入财务审核。</p></div>
+                <div class="after-sale-rule"><b>售后退款流程</b><p>客服提交售后问题 → 售后联系客人并保存记录 → 提交订单退款 → 财务审核通过 → 退款原路返回。无退款可直接结案；退款到账以微信退款结果为准。</p></div>
                 <div v-if="state.currentAfterSale.logs && state.currentAfterSale.logs.length" class="after-sale-mini-logs">
                   <strong>最近处理记录</strong>
-                  <span v-for="log in state.currentAfterSale.logs.slice(0,3)" :key="log">{{ log }}</span>
+                  <span v-for="log in state.currentAfterSale.logs.slice(0,3)" :key="log">{{ generalDisplay(log) }}</span>
                 </div>
                 <div v-else class="after-sale-mini-logs empty">
                   <strong>最近处理记录</strong>
@@ -413,45 +427,45 @@ window.LXM_VIEWS = {
             <div class="after-sale-status-strip">
               <div>
                 <span>退款去向</span>
-                <strong>{{ Number(state.afterSaleProcessForm.refundAmount || 0) > 0 ? '提交财务审核' : '无需财务审核' }}</strong>
+                <strong>{{ generalDisplay(Number(state.afterSaleProcessForm.refundAmount || 0) > 0 ? '提交财务审核' : '无需财务审核') }}</strong>
               </div>
               <div>
                 <span>结案影响</span>
-                <strong>{{ Number(state.afterSaleProcessForm.refundAmount || 0) > 0 ? '财务审核后解锁订单' : '立即进入售后记录' }}</strong>
+                <strong>{{ generalDisplay(Number(state.afterSaleProcessForm.refundAmount || 0) > 0 ? '原路退款成功后结案' : '立即进入售后记录') }}</strong>
               </div>
             </div>
           </div>
           <div v-if="state.orderWorkMode==='finance' && state.currentFinanceReview" class="order-section sticky-service after-sale-workbench">
             <div class="finance-audit-card">
               <div class="finance-audit-head">
-                <div><h3>财务审核</h3><span>订单 {{ state.currentOrder.orderNo }}</span></div>
-                <b>{{ money(state.currentOrder.totalAmount) }}</b>
+                <div><h3>财务审核</h3><span>订单 {{ generalDisplay(state.currentOrder.orderNo) }}</span></div>
+                <b>{{ generalDisplay(money(state.currentOrder.totalAmount)) }}</b>
               </div>
               <div class="finance-audit-list">
                 <div v-for="(item,index) in state.currentFinanceReview.items" :key="item.id" class="finance-audit-item">
                   <div class="audit-title-row">
-                    <span class="audit-num">{{ index + 1 }}</span>
-                    <div><strong>{{ item.type }}</strong><em>{{ item.note || '等待财务核对微信线下收款记录' }}</em></div>
+                    <span class="audit-num">{{ generalDisplay(index + 1) }}</span>
+                    <div><strong>{{ generalDisplay(item.type) }}</strong><em>{{ generalDisplay(item.note || '等待财务核对微信线下收款记录') }}</em></div>
                   </div>
                   <div class="audit-row" :class="{pending:item.status==='待审', done:item.status==='已审', rejected:item.status==='已驳'}">
-                    <strong>{{ money(item.amount) }}</strong>
-                    <span :class="{pending:item.status==='待审', done:item.status==='已审', rejected:item.status==='已驳'}">{{ item.status }}</span>
+                    <strong>{{ generalDisplay(money(item.amount)) }}</strong>
+                    <span :class="{pending:item.status==='待审', done:item.status==='已审', rejected:item.status==='已驳'}">{{ generalDisplay(item.status) }}</span>
                   </div>
                   <div class="audit-meta-row">
-                    <span>提交时间：{{ item.createdAt || '-' }}</span>
-                    <span v-if="item.reviewedBy">审核人：{{ item.reviewedBy }}</span>
-                    <span v-if="item.reviewedAt">审核时间：{{ item.reviewedAt }}</span>
+                    <span>提交时间：{{ generalDisplay(item.createdAt || '-') }}</span>
+                    <span v-if="item.reviewedBy">审核人：{{ generalDisplay(item.reviewedBy) }}</span>
+                    <span v-if="item.reviewedAt">审核时间：{{ generalDisplay(item.reviewedAt) }}</span>
                   </div>
                   <div class="audit-actions">
-                    <el-button size="small" :disabled="item.status==='已审' || !can('financeReview')" @click="reviewFinanceItem(item,true)" type="success">审核通过</el-button>
-                    <el-button size="small" type="danger" plain :disabled="item.status==='已驳' || !can('financeReview')" @click="reviewFinanceItem(item,false)">驳回</el-button>
+                    <el-button size="small" :disabled="(item.status!=='待审' && !canQueryRefund(item)) || !can('financeReview')" @click="reviewFinanceItem(item,true)" type="success">{{ generalDisplay(canQueryRefund(item) ? '查询退款结果' : '审核通过') }}</el-button>
+                    <el-button size="small" type="danger" plain :disabled="item.status!=='待审' || !can('financeReview')" @click="reviewFinanceItem(item,false)">驳回</el-button>
                   </div>
                 </div>
               </div>
               <div class="finance-audit-summary">
-                <div><span>本单提交审核</span><strong>{{ money(state.currentFinanceReview.items.reduce((s,item)=>s+Number(item.amount||0),0)) }}</strong></div>
-                <div><span>已审核入账</span><strong class="done">{{ money(state.currentFinanceReview.items.filter(item=>item.status==='已审').reduce((s,item)=>s+Number(item.amount||0),0)) }}</strong></div>
-                <div><span>待审核金额</span><strong class="pending">{{ money(state.currentFinanceReview.items.filter(item=>item.status==='待审').reduce((s,item)=>s+Number(item.amount||0),0)) }}</strong></div>
+                <div><span>本单提交审核</span><strong>{{ generalDisplay(money(state.currentFinanceReview.items.reduce((s,item)=>s+Number(item.amount||0),0))) }}</strong></div>
+                <div><span>已审核入账</span><strong class="done">{{ generalDisplay(money(state.currentFinanceReview.items.filter(item=>item.status==='已审').reduce((s,item)=>s+Number(item.amount||0),0))) }}</strong></div>
+                <div><span>待审核金额</span><strong class="pending">{{ generalDisplay(money(state.currentFinanceReview.items.filter(item=>item.status==='待审').reduce((s,item)=>s+Number(item.amount||0),0))) }}</strong></div>
               </div>
               <div class="note-box warning"><b>金额口径说明</b><p>财务只核对到账与金额是否正确；未审核通过的金额不会进入月度对账和分成。已通过不可再驳回，已驳回不可再通过。</p></div>
             </div>
@@ -464,10 +478,10 @@ window.LXM_VIEWS = {
       <div class="form-grid single">
         <el-form-item label="售后类型"><el-select v-model="state.afterSaleForm.type"><el-option label="退款申请" value="退款申请" /><el-option label="协商退款" value="协商退款" /><el-option label="改期" value="改期" /><el-option label="投诉反馈" value="投诉反馈" /><el-option label="补发成片" value="补发成片" /><el-option label="补拍" value="补拍" /><el-option label="其他问题" value="其他问题" /></el-select></el-form-item>
         <el-form-item v-if="state.afterSaleForm.type.includes('退款')" label="申请退款金额"><el-input-number v-model="state.afterSaleForm.refundAmount" :min="0" /></el-form-item>
-        <el-form-item label="售后凭证"><div class="lxm-attachment-box"><el-button :disabled="uploadBusy || false" @click="uploadAfterSaleAttachment(false)" type="primary" plain>上传凭证</el-button><small>凭证支持 JPG、PNG、WebP，最大 20 MiB</small><div v-for="file in attachmentFiles(state.afterSaleForm)" :key="file.id" class="lxm-file-row"><span>{{ file.name }}</span><el-button link @click="openStoredFile(file)" type="primary">查看</el-button><el-button link type="danger" :disabled="uploadBusy || false" @click="removeAttachment(state.afterSaleForm,file.id)">移除</el-button></div></div></el-form-item>
+        <el-form-item label="售后凭证"><div class="lxm-attachment-box"><el-button :disabled="uploadBusy || false" @click="uploadAfterSaleAttachment(false)" type="primary" plain>上传凭证</el-button><small>凭证支持 JPG、PNG、WebP，最大 20 MiB</small><div v-for="file in attachmentFiles(state.afterSaleForm)" :key="file.id" class="lxm-file-row"><span>{{ generalDisplay(file.name) }}</span><el-button link @click="openStoredFile(file)" type="primary">查看</el-button><el-button link type="danger" :disabled="uploadBusy || false" @click="removeAttachment(state.afterSaleForm,file.id)">移除</el-button></div></div></el-form-item>
         <el-form-item label="售后原因"><el-input v-model="state.afterSaleForm.reason" type="textarea" :rows="4" placeholder="填写客人诉求、沟通情况、是否涉及退款或改期。" /></el-form-item>
       </div>
-      <div class="note-box"><b>处理规则</b><p>客服或客人在前端提交后，订单都会进入后台售后服务；无退款可不填金额，有退款金额的售后完成后进入财务审核，并同步影响经营看板、各角色数据与月度对账。</p></div>
+      <div class="note-box"><b>处理规则</b><p>客服提交问题后，由售后联系客人、保存沟通记录并提交退款，再由财务审核，审核通过后原路退款。客人在已预约订单中申请的自助退款由系统自动处理。</p></div>
       <template #footer><el-button @click="state.afterSaleSubmitDialog=false">取消</el-button><el-button type="primary" @click="submitAfterSale">确定提交</el-button></template>
     </el-dialog>
 
@@ -528,7 +542,7 @@ window.LXM_VIEWS = {
 
         <label><span>商家</span><el-select v-model="state.metricFilters.shopId" clearable filterable no-data-text="暂无商家数据" placeholder="全部商家"><el-option v-for="s in scopedShops" :key="s.id" :label="s.name" :value="s.id" /></el-select></label>
         <label><span>二维码位置</span><el-select v-model="state.metricFilters.scene" clearable no-data-text="暂无位置数据" placeholder="全部位置"><el-option v-for="scene in metricScenes" :key="scene" :label="scene" :value="scene" /></el-select></label>
-        <label><span>状态</span><el-select v-model="state.metricFilters.status" clearable no-data-text="暂无状态数据" placeholder="全部状态"><el-option v-if="state.dashboardDrill==='scan'" label="已转化" value="已转化" /><el-option v-if="state.dashboardDrill==='scan'" label="浏览未下单" value="浏览未下单" /><el-option v-if="state.dashboardDrill!=='scan'" label="待确认" value="待确认" /><el-option v-if="state.dashboardDrill!=='scan'" label="待拍摄" value="待拍摄" /><el-option v-if="state.dashboardDrill!=='scan'" label="拍摄中" value="拍摄中" /><el-option v-if="state.dashboardDrill!=='scan'" label="已完成" value="已完成" /></el-select></label>
+        <label><span>状态</span><el-select v-model="state.metricFilters.status" clearable no-data-text="暂无状态数据" placeholder="全部状态"><el-option v-if="state.dashboardDrill==='scan'" label="已转化" value="已转化" /><el-option v-if="state.dashboardDrill==='scan'" label="浏览未下单" value="浏览未下单" /><el-option v-if="state.dashboardDrill!=='scan'" label="已预约" value="已预约" /><el-option v-if="state.dashboardDrill!=='scan'" label="已定档" value="已定档" /><el-option v-if="state.dashboardDrill!=='scan'" label="拍摄中" value="拍摄中" /><el-option v-if="state.dashboardDrill!=='scan'" label="已完成" value="已完成" /></el-select></label>
         <label><span>关键词</span><el-input v-model="state.metricFilters.keyword" clearable placeholder="客户/订单/商家/openid" /></label>
         <el-button class="metric-filter-reset" plain @click="resetMetricFilters">重置</el-button>
       </div>
@@ -728,17 +742,17 @@ window.LXM_VIEWS = {
       <div v-if="state.currentOrder" class="timeline-dialog-list">
         <div class="timeline-filter-tabs">
           <button :class="{active:!state.timelineCategoryFilter}" @click="state.timelineCategoryFilter=''">全部</button>
-          <button v-for="cat in orderTimelineCategoryOptions(state.currentOrder)" :key="cat" :class="{active:state.timelineCategoryFilter===cat}" @click="state.timelineCategoryFilter=cat">{{ cat }}</button>
+          <button v-for="cat in orderTimelineCategoryOptions(state.currentOrder)" :key="cat" :class="{active:state.timelineCategoryFilter===cat}" @click="state.timelineCategoryFilter=cat">{{ generalDisplay(cat) }}</button>
         </div>
         <div v-for="(logItem,index) in filteredOrderTimelineRows(state.currentOrder)" :key="logItem.sort || index" class="timeline-row">
-          <span class="timeline-index">{{ index + 1 }}</span>
+          <span class="timeline-index">{{ generalDisplay(index + 1) }}</span>
           <div class="timeline-card">
             <div class="timeline-meta">
-              <b>{{ logItem.time }}</b>
-              <em>{{ logItem.operator }}</em>
+              <b>{{ generalDisplay(logItem.time) }}</b>
+              <em>{{ generalDisplay(logItem.operator) }}</em>
             </div>
-            <span class="timeline-category" :data-category="logItem.category">{{ logItem.category || '记录' }}</span>
-            <strong>{{ logItem.action }}</strong>
+            <span class="timeline-category" :data-category="logItem.category">{{ generalDisplay(logItem.category || '记录') }}</span>
+            <strong>{{ generalDisplay(logItem.action) }}</strong>
           </div>
         </div>
       </div>
@@ -879,7 +893,9 @@ window.LXM_VIEWS = {
     <el-dialog :close-on-click-modal="false" v-model="state.videoSingleDialog" title="视频摄像编辑" width="860px" class="content-edit-dialog">
       <div v-if="state.videoSingleForm" class="content-edit-form"><div class="form-grid">
         <label><span>名称</span><el-input v-model="state.videoSingleForm.title" /></label>
-        <label><span>风格标签</span><el-select v-model="state.videoSingleForm.tags" multiple filterable allow-create default-first-option><el-option v-for="t in tagOptions()" :key="t.id" :label="t.name" :value="t.name" /></el-select></label>
+        <label><span>推荐摄影师</span><el-select v-model="state.videoSingleForm.recommendedPhotographerId" clearable filterable aria-label="推荐摄影师" placeholder="请选择推荐摄影师（可选）" :loading="contentPhotographersLoading" :disabled="!can('contentEdit') || uploadBusy"><el-option v-for="photographer in contentPhotographerOptions" :key="photographer.id" :label="photographer.name" :value="photographer.id" /></el-select></label>
+        <p v-if="contentPhotographersError" class="full-width upload-tip" role="alert">{{ contentPhotographersError }} <el-button link type="primary" :disabled="!can('contentEdit') || uploadBusy" @click="loadContentPhotographers()">重试</el-button></p>
+        <label><span>标签 <em class="field-required">*</em></span><el-select aria-required="true" v-model="state.videoSingleForm.tags" multiple filterable allow-create default-first-option><el-option v-for="t in tagOptions()" :key="t.id" :label="t.name" :value="t.name" /></el-select></label>
         <label><span>单价（元）</span><el-input-number v-model="state.videoSingleForm.price" :min="0" :precision="2" /></label>
         <label><span>成片时长（秒）</span><el-input-number v-model="state.videoSingleForm.videoDuration" :min="0" /></label>
         <label><span>成片数量</span><el-input-number v-model="state.videoSingleForm.finishedVideoCount" :min="1" :precision="0" /></label>
@@ -904,8 +920,10 @@ window.LXM_VIEWS = {
             <div class="content-form-section-head"><strong>1 · 名称与风格</strong><span>风格系列与风格标签分别配置；新标签保存后可再次选用。</span></div>
             <div class="form-grid">
               <label><span>照片留影名称</span><el-input v-model="state.editContent.name" placeholder="如 春日花园照片单品" /></label>
+              <label><span>推荐摄影师</span><el-select v-model="state.editContent.recommendedPhotographerId" clearable filterable aria-label="推荐摄影师" placeholder="请选择推荐摄影师（可选）" :loading="contentPhotographersLoading" :disabled="!can('contentEdit') || uploadBusy"><el-option v-for="photographer in contentPhotographerOptions" :key="photographer.id" :label="photographer.name" :value="photographer.id" /></el-select></label>
+              <p v-if="contentPhotographersError" class="full-width upload-tip" role="alert">{{ contentPhotographersError }} <el-button link type="primary" :disabled="!can('contentEdit') || uploadBusy" @click="loadContentPhotographers()">重试</el-button></p>
               <label><span>风格系列</span><el-select v-model="state.editContent.seriesId" clearable filterable placeholder="选择风格系列"><el-option v-for="s in data.series.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select></label>
-              <label class="full-width"><span>风格标签</span><el-select v-model="state.editContent.tags" multiple filterable allow-create default-first-option placeholder="复用已有标签，或输入新标签后按回车"><el-option v-for="t in tagOptions('风格')" :key="t.id" :label="t.name" :value="t.name" /></el-select></label>
+              <label class="full-width"><span>商品标签 <em class="field-required">*</em></span><el-select aria-required="true" v-model="state.editContent.tags" multiple filterable allow-create default-first-option placeholder="复用已有标签，或输入新标签后按回车"><el-option v-for="t in tagOptions('风格')" :key="t.id" :label="t.name" :value="t.name" /></el-select></label>
             </div>
           </div>
           <div class="content-form-section">
@@ -925,13 +943,12 @@ window.LXM_VIEWS = {
             <el-input v-model="state.editContent.shootingNotes" type="textarea" :rows="4" placeholder="可使用默认模板，也可自定义输入" />
           </div>
           <div class="content-form-section">
-            <div class="content-form-section-head"><strong>4 · 价格与服务</strong><span>照片张数是商品包含的数量，预览图片可单独增减。</span></div>
+            <div class="content-form-section-head"><strong>4 · 价格与服务</strong><span>照片张数、修图和妆造可自由填写。</span></div>
             <div class="form-grid">
               <label><span>价格（元）</span><el-input-number v-model="state.editContent.price" :min="0" :precision="2" /></label>
-              <label><span>照片张数</span><el-input-number v-model="state.editContent.photoCount" :min="1" :precision="0" /></label>
-              <label><span>修图</span><el-select v-model="state.editContent.retouchMode"><el-option label="按张数" value="count" /><el-option label="包含" value="included" /><el-option label="不包含" value="excluded" /></el-select></label>
-              <label v-if="state.editContent.retouchMode==='count'"><span>修图张数</span><el-input-number v-model="state.editContent.retouchCount" :min="1" :precision="0" /></label>
-              <label class="switch-line"><span>是否含妆造</span><el-switch v-model="state.editContent.makeupIncluded" active-text="含妆造" inactive-text="不含妆造" /></label>
+              <label><span>照片张数</span><el-input v-model="state.editContent.photoCountText" maxlength="160" placeholder="例如：底片全送、交付9张" /></label>
+              <label><span>修图</span><el-input v-model="state.editContent.retouchText" maxlength="160" placeholder="例如：像素蛋糕、AI精修9张、PS精修9张、修9张" /></label>
+              <label><span>妆造</span><el-input v-model="state.editContent.makeupText" maxlength="160" placeholder="例如：包含妆造、含简妆、自备妆造" /></label>
             </div>
           </div>
           <div class="content-form-section">
@@ -946,10 +963,13 @@ window.LXM_VIEWS = {
         <div v-if="state.editContent.__key!=='albums'" class="content-form-section">
           <div class="content-form-section-head"><strong>基础必填</strong><span>名称、状态和标签用于列表展示、搜索和前端露出判断。</span></div>
           <div class="form-grid">
-            <label><span>{{ state.editContent.__key==='guides' ? '旅拍灵感标题' : '名称' }}</span><el-input v-model="state.editContent[state.editContent.__key==='guides' ? 'title' : 'name']" :placeholder="state.editContent.__key==='guides' ? '旅拍灵感标题（小程序展示标题）' : '名称'" /></label>
+            <label><span>{{ state.editContent.__key==='guides' ? '旅拍灵感标题' : '名称' }}</span><el-input v-model="state.editContent[state.editContent.__key==='guides' ? 'title' : 'name']" :maxlength="state.editContent.__key==='packages' && isPackageTitleLimited(state.editContent) ? packageTitleLimit : undefined" :show-word-limit="state.editContent.__key==='packages' && isPackageTitleLimited(state.editContent)" :placeholder="state.editContent.__key==='guides' ? '旅拍灵感标题（小程序展示标题）' : '名称'" /><small v-if="state.editContent.__key==='packages' && isPackageTitleLimited(state.editContent)" class="catalog-hint">套餐名称最多 {{ packageTitleLimit }} 个字符，首页预留三行标题；字母、数字、标点也计入。</small></label>
             <label v-if="!['cities','spots'].includes(state.editContent.__key)"><span>状态</span><el-select v-model="state.editContent.status" clearable placeholder="状态"><el-option label="启用" value="启用" /><el-option label="上架" value="上架" /><el-option label="草稿" value="草稿" /><el-option label="下架" value="下架" /><el-option label="停用" value="停用" /></el-select></label>
             <label v-if="state.editContent.__key!=='cities'"><span>运营标签</span><el-select v-model="state.editContent.tag" clearable filterable allow-create placeholder="从统一标签库选择标签"><el-option v-for="t in tagOptions()" :key="t.id" :label="t.name + ' · ' + t.category" :value="t.name" /></el-select></label>
+            <label v-if="state.editContent.__key==='packages'"><span>商品标签 <em class="field-required">*</em></span><el-select v-model="state.editContent.tags" multiple filterable allow-create default-first-option aria-required="true" placeholder="至少添加一个标签"><el-option v-for="t in tagOptions()" :key="t.id" :label="t.name" :value="t.name" /></el-select></label>
             <label v-if="state.editContent.__key==='packages'"><span>商品类型</span><el-select v-model="state.editContent.type" clearable placeholder="商品类型"><el-option label="拍照" value="photo" /><el-option label="短视频" value="video" /></el-select></label>
+            <label v-if="state.editContent.__key==='packages'"><span>推荐摄影师</span><el-select v-model="state.editContent.recommendedPhotographerId" clearable filterable aria-label="推荐摄影师" placeholder="请选择推荐摄影师（可选）" :loading="contentPhotographersLoading" :disabled="!can('contentEdit') || uploadBusy"><el-option v-for="photographer in contentPhotographerOptions" :key="photographer.id" :label="photographer.name" :value="photographer.id" /></el-select></label>
+            <p v-if="state.editContent.__key==='packages' && contentPhotographersError" class="full-width upload-tip" role="alert">{{ contentPhotographersError }} <el-button link type="primary" :disabled="!can('contentEdit') || uploadBusy" @click="loadContentPhotographers()">重试</el-button></p>
             <label v-if="state.editContent.__key==='packages'" class="switch-line"><span>首页推荐</span><el-switch v-model="state.editContent.isMainPush" active-text="全局主推套餐" /></label>
             <label v-if="state.editContent.__key==='packages'" class="switch-line"><span>热推置顶</span><el-switch v-model="state.editContent.isHot" active-text="首页热推商品" /></label>
             <label v-if="state.editContent.__key==='packages'"><span>热度分</span><el-input-number v-model="state.editContent.hotScore" :min="0" :max="100" /></label>

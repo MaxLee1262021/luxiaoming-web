@@ -9,7 +9,7 @@ const createSource = require("./fixtures/jsonSource.cjs");
 const rpc = require("../lib/rpc.cjs");
 const schema = require("../lib/mysqlSchema.cjs");
 const { createWechatPay } = require("../lib/wechatPay.cjs");
-const { createTestWechatPay } = require("./helpers/wechatPay.cjs");
+const { createTestWechatPay, createTestRefundGateway } = require("./helpers/wechatPay.cjs");
 const input = { name: "客户", phone: "13800000000", expectedDate: "2026-12-20", expectedTimePeriod: "上午", agreement: { version: "v1.0", current: true }, items: [{ packageId: "package" }], idempotencyKey: "booking-checkout-0001" };
 const identity = { identity: { kind: "public", openid: "owner" } };
 const otherIdentity = { identity: { kind: "public", openid: "other" } };
@@ -89,7 +89,7 @@ test("verified deposit callbacks create one paid order across retries, concurren
   const status = await rpc(source, "getPaymentStatus", { data: { bookingId: booking.bookingId, phase: "deposit" } }, identity);
   assert.equal(status.data.bookingStatus, "confirmed");
   assert.equal(status.data.orderId, order.id);
-  assert.equal(status.data.order.statusText, "待确认");
+  assert.equal(status.data.order.statusText, "已预约");
   const repeated = await rpc(source, "createBooking", { data: input }, identity);
   assert.equal(repeated.orderId, order.id);
   assert.equal(repeated.bookingStatus, "confirmed");
@@ -120,15 +120,18 @@ test("a four-fen deposit survives checkout, verified payment, storage restart an
 
   const detail = await rpc(source, "getOrderDetail", { data: { orderId: order.id } }, identity);
   assert.equal(detail.success, true, JSON.stringify(detail));
-  assert.equal(detail.data.statusText, "待确认");
+  assert.equal(detail.data.statusText, "已预约");
   assert.equal(detail.data.depositPaid, 0.04);
   assert.equal(detail.data.paidAmount, 0.04);
   assert.equal(detail.data.refundableDepositAmount, 0.04);
-  const refund = await rpc(source, "submitAfterSale", { data: { orderId: order.id, type: "定金退款", reason: "未安排摄影师申请退款" } }, identity);
+  const refund = await rpc(source, "requestOrderRefund", { data: { orderId: order.id, idempotencyKey: "four-fen-refund-0001", reason: "未安排摄影师申请退款" } }, { ...identity, wechatPay: createTestRefundGateway(source) });
   assert.equal(refund.success, true, JSON.stringify(refund));
-  const ticket = await source.get("afterSales", refund.data.ticketId);
+  const ticket = await source.get("afterSales", refund.data.refundTicketId);
   assert.equal(ticket.refundAmount, 0.04);
-  assert.equal(ticket.financeStatus, "待审");
+  assert.equal(ticket.reviewLane, "customer_self_cancel");
+  assert.equal(ticket.automaticApproval, true);
+  assert.equal(ticket.refundStatus, "refunded");
+  assert.equal((await source.get("orders", order.id)).status, "cancelled");
 });
 
 test("terminal unpaid transactions never create an order; paid drafts recover an interrupted promotion", async (t) => {

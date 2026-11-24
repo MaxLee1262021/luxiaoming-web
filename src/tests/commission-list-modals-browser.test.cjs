@@ -17,7 +17,7 @@ test("commission lists create through dialogs and refresh their lists with direc
     executablePath: process.env.COMMISSION_BROWSER_EXECUTABLE || "C:/Program Files/Google/Chrome/Application/chrome.exe" });
   const page = await browser.newPage({ viewport: { width: 1512, height: 1100 }, timezoneId: "Asia/Shanghai" });
   page.setDefaultTimeout(12000);
-  const output = path.resolve(__dirname, "../../../outputs/commission-list-modals-20261113");
+  const output = path.resolve(__dirname, "../../../outputs/commission-list-modals-20261116");
   fs.mkdirSync(output, { recursive: true });
   const report = { testOnly: true, realDatabaseAccess: false, status: "running", checks: [], requests: [], pageErrors: [] };
   page.on("pageerror", error => report.pageErrors.push(error.message));
@@ -26,7 +26,7 @@ test("commission lists create through dialogs and refresh their lists with direc
     try { await browser.close(); } finally { await fixture.close(); }
   });
   const serviceStaff = [], photographers = [];
-  let rejectService = true, rejectPhoto = true;
+  let rejectService = true, rejectPhoto = true, rejectPhotoLink = true;
   const rates = { rate_photo_bp: 2000, rate_video_bp: 2000, rate_combo_bp: 2200, rate_peripheral_bp: 800 };
   await page.route(/\/api\/(?:svc|photo)\//, async route => {
     const request = route.request(), url = new URL(request.url()), method = request.method();
@@ -44,9 +44,18 @@ test("commission lists create through dialogs and refresh their lists with direc
     else if (url.pathname === "/api/photo/rule") data = { current: { ver: 1, ...rates }, versions: [], overrides: [] };
     else if (url.pathname === "/api/photo/party" && method === "GET") data = { rows: photographers, total: photographers.length };
     else if (url.pathname === "/api/photo/party" && method === "POST") {
-      const body = request.postDataJSON(); assert.equal(body.account, "qa-photo-modal"); assert.equal(body.password, "QaPhoto2026!");
-      if (rejectPhoto) { code = 4315; msg = "测试摄影账号已存在"; data = { field: "account" }; rejectPhoto = false; }
-      else { const row = { ...body, id: "PH20269999", agree_no: "QA-PH-XY", status: "active", rates, pending_count: 0, month_fen: 0, total_fen: 0 }; delete row.password; photographers.push(row); data = { ...row, account_created: true }; }
+      const body = request.postDataJSON();
+      if (body.create_account === false) {
+        assert.equal(body.account, "qa-existing-photo");
+        assert.equal(Object.hasOwn(body, "password"), false, "link requests must omit any stale password");
+        assert.equal(Object.hasOwn(body, "account_id"), false);
+        if (rejectPhotoLink) { code = 4315; msg = "测试已有账号尚未启用"; data = { field: "account" }; rejectPhotoLink = false; }
+        else { const row = { ...body, id: "PH20269998", agree_no: "QA-PH-XY-LINK", status: "active", rates, pending_count: 0, month_fen: 0, total_fen: 0 }; photographers.push(row); data = { ...row, account: "QA-EXISTING-PHOTO", account_id: "qa-existing", account_created: false, account_linked: true }; }
+      } else {
+        assert.equal(body.create_account, true); assert.equal(body.account, "qa-photo-modal"); assert.equal(body.password, "QaPhoto2026!");
+        if (rejectPhoto) { code = 4315; msg = "测试摄影账号已存在"; data = { field: "account" }; rejectPhoto = false; }
+        else { const row = { ...body, id: "PH20269999", agree_no: "QA-PH-XY", status: "active", rates, pending_count: 0, month_fen: 0, total_fen: 0 }; delete row.password; photographers.push(row); data = { ...row, account_created: true }; }
+      }
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code, msg, data }) });
   });
@@ -119,6 +128,8 @@ test("commission lists create through dialogs and refresh their lists with direc
     await page.getByRole("button", { name: "新增摄影师", exact: true }).click();
     const photoDialog = page.getByRole("dialog", { name: "新增摄影师", exact: true });
     await photoDialog.waitFor();
+    assert.equal(await photoDialog.getByRole("radio", { name: "新建登录账号", exact: true }).isChecked(), true);
+    assert.equal(await formInput(photoDialog, /^登录密码$/).isVisible(), true);
     await photoDialog.getByPlaceholder("摄影师姓名").fill("QA新增摄影师");
     await photoDialog.getByPlaceholder("全平台唯一", { exact: true }).fill("13800000012");
     await formInput(photoDialog, /^登录账号$/).fill("qa-photo-modal");
@@ -142,6 +153,42 @@ test("commission lists create through dialogs and refresh their lists with direc
     await page.screenshot({ path: path.join(output, "photo-list-created.png"), fullPage: true, animations: "disabled" });
     await page.getByRole("button", { name: "新增摄影师", exact: true }).click();
     await photoDialog.waitFor(); assert.equal(await formInput(photoDialog, /^登录密码$/).inputValue(), "");
+    await formInput(photoDialog, /^登录密码$/).fill("StalePhoto2026!");
+    await photoDialog.locator(".el-radio").filter({ hasText: "关联已有账号" }).click();
+    assert.equal(await formInput(photoDialog, /^登录密码$/).count(), 0);
+    await photoDialog.locator(".el-radio").filter({ hasText: "新建登录账号" }).click();
+    assert.equal(await formInput(photoDialog, /^登录密码$/).inputValue(), "", "switching to link mode clears the previous password");
+    await photoDialog.locator(".el-radio").filter({ hasText: "关联已有账号" }).click();
+    await photoDialog.getByPlaceholder("摄影师姓名").fill("QA关联摄影师");
+    await photoDialog.getByPlaceholder("全平台唯一", { exact: true }).fill("13800000013");
+    await formInput(photoDialog, /^登录账号$/).fill("  qa-existing-photo  ");
+    await photoDialog.locator("textarea").fill("关联已开通摄影师账号的浏览器验证");
+    await checkDialogGeometry(photoDialog, ".photo-create-dialog", "保存摄影师档案", "photo-link");
+    await photoDialog.locator(".photo-account-section").scrollIntoViewIfNeeded();
+    await photoDialog.screenshot({ path: path.join(output, "photo-link-dialog-desktop.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await checkDialogGeometry(photoDialog, ".photo-create-dialog", "保存摄影师档案", "photo-link");
+    await photoDialog.locator(".photo-account-section").scrollIntoViewIfNeeded();
+    await photoDialog.screenshot({ path: path.join(output, "photo-link-dialog-mobile.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 1512, height: 1100 });
+    const linkBefore = listGets("/api/photo/party");
+    await photoDialog.getByRole("button", { name: "保存摄影师档案", exact: true }).click();
+    await photoDialog.locator(".photo-error").getByText("测试已有账号尚未启用", { exact: true }).waitFor();
+    assert.equal(await photoDialog.getByRole("radio", { name: "关联已有账号", exact: true }).isChecked(), true);
+    assert.equal(await photoDialog.getByPlaceholder("摄影师姓名").inputValue(), "QA关联摄影师");
+    assert.equal(await formInput(photoDialog, /^登录账号$/).inputValue(), "  qa-existing-photo  ");
+    assert.equal(await formInput(photoDialog, /^登录密码$/).count(), 0);
+    assert.equal(listGets("/api/photo/party"), linkBefore, "rejected links do not refresh or close the form");
+    await photoDialog.getByRole("button", { name: "保存摄影师档案", exact: true }).click();
+    await photoDialog.waitFor({ state: "hidden" });
+    await page.locator('[data-page-key="photoParty"] .el-table').getByText("QA关联摄影师", { exact: true }).waitFor();
+    assert.ok(listGets("/api/photo/party") > linkBefore);
+    report.checks.push("existing photographer accounts link without a password; switching modes clears secrets, rejected links retain the draft, and a successful retry closes the dialog and refreshes the list");
+    await page.getByRole("button", { name: "新增摄影师", exact: true }).click();
+    await photoDialog.waitFor();
+    assert.equal(await photoDialog.getByRole("radio", { name: "新建登录账号", exact: true }).isChecked(), true);
+    assert.equal(await formInput(photoDialog, /^登录账号$/).inputValue(), "");
+    assert.equal(await formInput(photoDialog, /^登录密码$/).inputValue(), "");
     await photoDialog.getByRole("button", { name: "取消", exact: true }).click();
     await photoDialog.waitFor({ state: "hidden" });
     report.checks.push("photographer modal preserves rejected form data, closes on success, GET refreshes the list, and clears secrets on reopen/cancel");

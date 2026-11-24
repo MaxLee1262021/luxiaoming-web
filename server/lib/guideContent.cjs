@@ -1,5 +1,6 @@
 "use strict";
 
+const contentOrder = require("../../src/utils/content-order.js");
 const { effectivePackageSpotIds, createContentContext } = require("./contentPolicy.cjs");
 const { ATTACHMENT_TYPES, MAX_ATTACHMENT_SIZE, isGuideAttachment } = require("./guideAttachments.cjs");
 
@@ -125,13 +126,17 @@ function guideText(html) {
   return decodeEntities(String(html || "").replace(/<(?:br|hr)\b[^>]*>|<\/(?:p|div|h[1-6]|li|blockquote|pre)>/gi, "\n").replace(/<[^>]*>/g, "")).replace(/\u200b/g, "").trim();
 }
 
-function sortGuides(a, b) {
-  const time = (value) => {
-    const number = typeof value === "number" || /^\d+(?:\.\d+)?$/.test(String(value || "")) ? Number(value) : Date.parse(value || "");
-    return Number.isFinite(number) ? number : 0;
-  };
-  return Number(!!b.isTop) - Number(!!a.isTop)
-    || time(b.updatedAt || b.updateTime || b.createTime || b.createdAt) - time(a.updatedAt || a.updateTime || a.createTime || a.createdAt);
+function sortGuides(a, b, sortBy = "default") {
+  if (["readCount", "score"].includes(sortBy)) {
+    const metric = (row) => {
+      const raw = sortBy === "readCount" ? row.readCount ?? row.views : row.score;
+      const value = typeof raw === "number" || typeof raw === "string" ? Number(raw) : 0;
+      return Number.isFinite(value) && value >= 0 ? value : 0;
+    };
+    const difference = metric(b) - metric(a);
+    if (difference) return difference;
+  }
+  return contentOrder.compare("guides", a, b);
 }
 
 function guideMedia(guide = {}) {
@@ -182,6 +187,27 @@ function matchesTargetType(product, type) {
 
 async function prepareGuideForSave(source, patch, current = {}) {
   const guide = { ...current, ...patch };
+  // These existing numeric columns also hold the editor's initial metrics.
+  // Validate before the metadata-only early return so every write path agrees.
+  for (const field of ["readCount", "score"]) {
+    if (!has(patch, field)) {
+      if (!idOf(current) && guide[field] == null) guide[field] = 0;
+      continue;
+    }
+    const raw = patch[field];
+    const numeric = typeof raw === "number" || (typeof raw === "string" && raw.trim() !== "");
+    const value = numeric ? Number(raw) : NaN;
+    if (field === "readCount" && (!Number.isInteger(value) || value < 0 || value > 2147483647)) return { error: "初始浏览人数须为 0 到 2147483647 的整数" };
+    if (field === "score" && (!Number.isFinite(value) || value < 0 || value > 5 || !Number.isInteger(value * 10))) return { error: "初始评分须为 0 到 5 分，最多 1 位小数" };
+    guide[field] = value;
+  }
+  // Classifications are optional metadata; editing one must also work for
+  // older articles whose body predates the current publication requirements.
+  if (has(patch, "category")) {
+    if (patch.category != null && typeof patch.category !== "string") return { error: "文章分类必须为文本" };
+    guide.category = (patch.category || "").trim();
+    if (guide.category.length > 40) return { error: "分类不能超过 40 个字" };
+  } else if (!idOf(current)) guide.category = "";
   // isShow is the current editor's visibility setting. Keep historical aliases
   // in sync so a stale visible/enabled=false cannot defeat a later show action.
   const visibilityField = ["isShow", "visible", "enabled"].find((key) => has(patch, key));

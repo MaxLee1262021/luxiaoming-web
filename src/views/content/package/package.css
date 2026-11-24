@@ -170,6 +170,7 @@
 .package-cell-product strong { display: block; color: #4a5268; font-weight: 500; overflow-wrap: anywhere; }
 .package-cell-product small { display: block; margin-top: 5px; color: #9ba2b3; font-size: 11px; overflow-wrap: anywhere; }
 .package-cell-product small.is-peripheral { color: #49a285; }
+.package-cell-product small.package-item-error { color: #d44b45; }
 .package-cell-quantity .el-input-number { max-width: 95px; }
 .package-cell-quantity .el-input__inner { font-size: 12px; }
 .package-cell-remove { text-align: right; }

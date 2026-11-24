@@ -289,10 +289,11 @@ test("customer cancellation uses one guarded contract for both public RPC names"
 
   source.collections.orders.afterSale = { id: "afterSale", orderNo: "AFTER-SALE", openid: "owner", status: "new", totalAmount: 100, depositDue: 30, finalDue: 70, afterSaleStatus: "pending", paymentRecords: [] };
   source.collections.afterSales.ticket = { id: "ticket", orderId: "afterSale", status: "pending" };
-  const frozen = await rpc(source, "cancelOrder", {
+  const beforeScheduleWithSupport = await rpc(source, "cancelOrder", {
     data: { orderId: "afterSale", reason: "support open", idempotencyKey: "cancel-after-sale-0001" },
   }, publicIdentity("owner"));
-  assert.equal(frozen.success, false);
+  assert.equal(beforeScheduleWithSupport.success, true, "an open support request does not prevent cancellation before scheduling");
+  assert.equal(source.collections.orders.afterSale.status, "cancelled");
 });
 
 test("runtime payment flags cannot enable simulated confirmations or fake WeChat gateways", { concurrency: false }, async () => {
@@ -443,6 +444,12 @@ test("dispatch conflicts, publication gates, and online refunds enforce server-s
   assert.equal(published.status, 200, JSON.stringify(published.body));
   assert.equal(workflow.canonicalStage(await source.get("orders", "selection")), workflow.WORKFLOW_STAGES.COMPLETED);
 
+  for (const ticketId of ["refund-ticket", "refund-duplicate-ticket"]) {
+    const contact = await post("super-token", `/api/after-sales/${ticketId}/action`, {
+      action: "follow", customerContacted: true, reason: "contacted customer and agreed refund proposal",
+    });
+    assert.equal(contact.status, 200, JSON.stringify(contact.body));
+  }
   const overConfirmedFunds = await post("super-token", "/api/after-sales/refund-ticket/action", {
     action: "complete", reason: "request too much", refundAmount: 31, refundConfirmed: true,
   });

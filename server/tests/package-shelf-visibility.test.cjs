@@ -79,8 +79,9 @@ test("explicit product shelf changes synchronize existing terminal aliases witho
   const { source } = fixture();
   const emptyContext = { spots: [], series: [], albums: [], packages: [], peripherals: [], guides: [] };
   for (const key of ["albums", "packages", "peripherals"]) {
+    const sales = key === "peripherals" ? { unit: "件", price: 1, stock: 0, shippingFee: 0 } : {};
     for (const field of ["auditStatus", "reviewStatus"]) {
-      const current = { id: "product", type: "video", productKind: "video_single", isShow: false, status: "下架", [field]: "已下" };
+      const current = { ...sales, id: "product", type: "video", productKind: "video_single", isShow: false, status: "下架", [field]: "已下" };
       const shown = await prepareContentPatch(source, key, { isShow: true, status: "上架" }, current, emptyContext);
       assert.equal(shown[field], "已上", `${key} ${field}`);
       const hidden = await prepareContentPatch(source, key, { isShow: false }, { ...current, ...shown }, emptyContext);
@@ -91,7 +92,7 @@ test("explicit product shelf changes synchronize existing terminal aliases witho
       assert.equal(Object.hasOwn(priceOnly, field), false, "a price edit does not reopen a hidden product");
     }
     for (const auditStatus of [undefined, ""]) {
-      const patch = await prepareContentPatch(source, key, { isShow: true, status: "上架" }, { id: "product", auditStatus }, emptyContext);
+      const patch = await prepareContentPatch(source, key, { isShow: true, status: "上架" }, { ...sales, id: "product", auditStatus }, emptyContext);
       assert.equal(Object.hasOwn(patch, "auditStatus"), false, `${key} retains an absent or empty audit`);
     }
   }

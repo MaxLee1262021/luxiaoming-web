@@ -6,8 +6,8 @@ const { TABLES, createSvcStore } = require("../../lib/svcStore.cjs");
 const { createSvcCommission } = require("../../lib/svcCommission.cjs");
 const { createSvcWorkbench } = require("../../lib/svcWorkbench.cjs");
 
-function svcAccountsSqlFixture() {
-  const names = [...Object.values(TABLES).map(([name]) => name), "svc_runtime_lock", "svc_staff_tag", "lxm_orders", "lxm_order_products", "photo_profile", "lxm_staff", "lxm_auth_users", "lxm_auth_roles", "lxm_auth_menus", "lxm_auth_role_menus"];
+function svcAccountsSqlFixture(options = {}) {
+  const names = [...Object.values(TABLES).map(([name]) => name), "svc_runtime_lock", "svc_staff_tag", "lxm_orders", "lxm_order_products", "photo_profile", "lxm_staff", "lxm_auth_users", "lxm_auth_roles", "lxm_auth_menus", "lxm_auth_role_menus", "lxm_share_staff_map"];
   let tables = Object.fromEntries(names.map(name => [name, []])), failAt, tail = Promise.resolve();
   const statements = [];
   tables.svc_runtime_lock.push({ id: 1 });
@@ -28,6 +28,7 @@ function svcAccountsSqlFixture() {
       }
       if (table === "lxm_auth_users" && /WHERE account\s*=\s*\?/i.test(sql)) rows = rows.filter(row => String(row.account).toLowerCase() === String(params[0]).toLowerCase() || /OR/i.test(sql) && row.subject_type === "staff" && row.subject_id === params.at(-1));
       else if (table === "lxm_auth_users" && /WHERE id IN \(/i.test(sql)) rows = rows.filter(row => params.includes(row.id));
+      if (table === "lxm_share_staff_map" && /WHERE wecom_userid=\? OR staff_id=\?/i.test(sql)) rows = rows.filter(row => row.wecom_userid === params[0] || row.staff_id === params[1]);
       const projection = sql.match(/^SELECT (.*?) FROM /i)[1];
       if (!projection.includes("*")) {
         const fields = projection.split(",").map(field => field.trim().replace(/`/g, ""));
@@ -44,6 +45,7 @@ function svcAccountsSqlFixture() {
       const existing = tables[table].find(old => table === "lxm_auth_users" ? String(old.account).toLowerCase() === String(row.account).toLowerCase() || old.id === row.id
         : table === "lxm_auth_role_menus" ? old.role_id === row.role_id && old.menu_key === row.menu_key
         : table === "lxm_auth_roles" ? old.id === row.id || old.role_key === row.role_key
+        : table === "lxm_share_staff_map" ? old.wecom_userid === row.wecom_userid
         : table === "lxm_auth_menus" ? old.id === row.id || old.menu_key === row.menu_key : row.id !== undefined && String(old.id) === String(row.id));
       if (existing) {
         if (/INSERT IGNORE/i.test(sql)) return [{ affectedRows: 0 }];
@@ -53,6 +55,11 @@ function svcAccountsSqlFixture() {
     }
     if (/^DELETE FROM svc_staff_tag/i.test(sql)) { tables.svc_staff_tag = tables.svc_staff_tag.filter(row => row.staff_id !== params[0]); return [{ affectedRows: 1 }]; }
     if (/^UPDATE/i.test(sql)) {
+      if (table === "lxm_share_staff_map" && /SET status='ACTIVE' WHERE wecom_userid=\? AND staff_id=\?/i.test(sql)) {
+        const row = tables[table].find(old => old.wecom_userid === params[0] && old.staff_id === params[1]);
+        if (row) row.status = "ACTIVE";
+        return [{ affectedRows: row ? 1 : 0 }];
+      }
       const fields = sql.match(/SET (.*?) WHERE/i)[1].split(",").map(field => field.match(/`(\w+)`=/)[1]);
       const pk = sql.match(/WHERE `(\w+)`=/)[1], row = tables[table].find(old => String(old[pk]) === String(params.at(-1)));
       assert.ok(row); fields.forEach((field, index) => { row[field] = params[index]; }); return [{ affectedRows: 1 }];
@@ -65,7 +72,7 @@ function svcAccountsSqlFixture() {
     try { return await work(conn); } catch (error) { tables = before; throw error; } finally { release(); }
   } };
   const store = createSvcStore(source), clock = () => "2026-11-13 12:00:00";
-  return { source, store, commission: createSvcCommission({ store, clock }), workbench: createSvcWorkbench({ store, clock }), tables: () => tables, fail: value => { failAt = value; }, statements };
+  return { source, store, commission: createSvcCommission({ store, clock, wecomContacts: { enabled: false }, ...options }), workbench: createSvcWorkbench({ store, clock }), tables: () => tables, fail: value => { failAt = value; }, statements };
 }
 
 module.exports = { svcAccountsSqlFixture };

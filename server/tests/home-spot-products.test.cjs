@@ -160,7 +160,7 @@ test("overlapping point-only flags cannot skip public product dependency visibil
 test("home can omit point catalogues without reading legacy point previews outside the search window", async () => {
   const { source, rows, reads } = fixture();
   rows.albums = [
-    ...Array.from({ length: 20 }, (_, index) => ({ id: `search-photo-${index}`, spotId: "b", sampleUrls: [], photoCount: 6 })),
+    ...Array.from({ length: 20 }, (_, index) => ({ id: `search-photo-${index}`, sort: index + 1, spotId: "b", sampleUrls: [], photoCount: 6 })),
     { id: "legacy-point-photo", spotId: "a", photoCount: 9 }
   ];
   rows.samples = [{ id: "legacy-preview", albumId: "legacy-point-photo", spotId: "a", url: "https://images.test/legacy-point.jpg" }];
@@ -193,4 +193,53 @@ test("explicit point-only calls keep working when the embedded point catalogue i
   assert.equal(only.data.spotProducts.spotId, "b");
   assert.deepEqual(ids(only.data.spotProducts.albums), ["photo-b"]);
   assert.deepEqual(ids(only.data.spotProducts.peripherals), ["gift-b"]);
+});
+
+test("public video catalogues preserve configured tags independently of empty or stale service tags", async () => {
+  const cases = [
+    { id: "new-tags", tags: ["测试爆款", "电影感"], serviceTags: [], expectedTags: ["测试爆款", "电影感"], expectedServiceTags: [] },
+    { id: "stale-services", tags: ["测试爆款"], serviceTags: ["旧服务标签"], expectedTags: ["测试爆款"], expectedServiceTags: ["旧服务标签"] },
+    { id: "cleared-tags", tags: [], serviceTags: ["旧服务标签"], expectedTags: [], expectedServiceTags: ["旧服务标签"] },
+    { id: "legacy-tags-only", tags: ["测试爆款"], expectedTags: ["测试爆款"], expectedServiceTags: ["测试爆款"] },
+    { id: "legacy-services", serviceTags: ["旧记录标签"], expectedTags: ["旧记录标签"], expectedServiceTags: ["旧记录标签"] },
+    { id: "string-tags", tags: " 测试爆款，电影感|测试爆款 ", serviceTags: " 独立服务，独立服务 ", expectedTags: ["测试爆款", "电影感"], expectedServiceTags: ["独立服务"] }
+  ];
+  const { source } = fixture({ packages: cases.map(({ expectedTags, expectedServiceTags, ...row }) => ({
+    ...row, name: row.id, spotId: "b", type: "video", productKind: "video_single",
+    videoUrl: `https://images.test/${row.id}.mp4`, isMainPush: true
+  })) });
+  const [home, point, videos, booking] = await Promise.all([
+    rpc(source, "getHomeData", { cityId: "cs", spotId: "b" }),
+    rpc(source, "getHomeData", { cityId: "cs", spotId: "b", spotProductsOnly: true }),
+    rpc(source, "getVideoSingles", { spotId: "b" }),
+    rpc(source, "getBookingData", {})
+  ]);
+  for (const result of [home, point, videos, booking]) assert.equal(result.success, true, JSON.stringify(result));
+  const catalogues = [home.data.videoSingles, home.data.spotProducts.videoSingles,
+    point.data.spotProducts.videoSingles, videos.data, booking.data.allPackages];
+  for (const catalogue of catalogues) {
+    for (const expected of cases) {
+      const product = catalogue.find(row => row.id === expected.id);
+      assert.ok(product, expected.id);
+      assert.deepEqual(product.tags, expected.expectedTags, `${expected.id}: configured tags must not be replaced by serviceTags`);
+      assert.deepEqual(product.serviceTags, expected.expectedServiceTags, `${expected.id}: service tags retain their own content`);
+    }
+  }
+});
+
+test("separating configured tags preserves photo package service descriptions and derived quantities", async () => {
+  const { source } = fixture({ packages: [{ id: "photo-package", name: "胶片套餐", spotId: "b", seriesId: "style-b",
+    type: "photo", productKind: "package", tags: ["胶片"], serviceTags: ["拍摄60分钟", "精修12张"] }] });
+  const [home, booking, detail] = await Promise.all([
+    rpc(source, "getHomeData", { cityId: "cs", spotId: "b" }),
+    rpc(source, "getBookingData", {}),
+    rpc(source, "getSeriesDetail", { packageId: "photo-package", seriesId: "style-b", spotId: "b" })
+  ]);
+  for (const result of [home, booking, detail]) assert.equal(result.success, true, JSON.stringify(result));
+  for (const product of [home.data.packages[0], home.data.spotProducts.packages[0], booking.data.allPackages[0], detail.data.currentPackage]) {
+    assert.deepEqual(product.tags, ["胶片"]);
+    assert.deepEqual(product.serviceTags, ["拍摄60分钟", "精修12张"]);
+    assert.equal(product.duration, 60);
+    assert.equal(product.retouchCount, 12);
+  }
 });

@@ -61,6 +61,23 @@ function prepareSiteConfigPatch(body, previous = {}) {
     if (changesNotice) body.bookingNotice = notice.split("\n");
     body.bookingNoticeVersion = version.trim();
   }
+  if (own(body, "bookingSuccessTips")) {
+    if (typeof body.bookingSuccessTips !== "string") return "预约成功温馨提示格式无效";
+    const tips = body.bookingSuccessTips.replace(/\r\n?/g, "\n").trim();
+    if (tips.length > 20000) return "预约成功温馨提示不能超过 20000 个字符";
+    body.bookingSuccessTips = tips;
+  }
+  if (own(body, "privacyPolicy")) {
+    const policy = body.privacyPolicy;
+    if (!policy || typeof policy !== "object" || Array.isArray(policy)) return "隐私配置格式无效";
+    if (typeof policy.title !== "string" || !policy.title.trim() || policy.title.trim().length > 128) return "请填写隐私政策标题（不超过 128 个字符）";
+    if (typeof policy.content !== "string" || !policy.content.trim() || policy.content.trim().length > 20000) return "请填写隐私政策正文（不超过 20000 个字符）";
+    const content = policy.content.replace(/\r\n?/g, "\n").trim();
+    // A text edit replaces the previous structured policy. Clearing sections
+    // prevents an older client from continuing to show stale paragraph blocks.
+    body.privacyPolicy = { title: policy.title.trim(), content, updateTime: new Date().toISOString(), sections: [] };
+    body.privacyText = content;
+  }
   return "";
 }
 

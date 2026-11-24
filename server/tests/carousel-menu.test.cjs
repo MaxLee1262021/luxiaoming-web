@@ -40,7 +40,7 @@ test("stored global-settings menus stay retired in sessions and permission manag
   };
   const session = await request("/api/auth/me");
   assert.equal(session.status, 200);
-  assert.deepEqual(session.body.menuDefinitions.filter(menu => !/^(?:svc|photo)/.test(menu.key)).map((menu) => menu.key), ["miniDecor", "permissions", "bookingConfig", "shareRules", "shareDetails", "shareMine"]);
+  assert.deepEqual(session.body.menuDefinitions.filter(menu => !/^(?:svc|photo)/.test(menu.key)).map((menu) => menu.key), ["miniDecor", "permissions", "bookingConfig", "productLinks", "shareRules", "shareDetails", "shareMine"]);
   assert.equal(session.body.menuDefinitions.find(menu => menu.key === "bookingConfig").label, "预约配置");
   assert.equal(session.body.menuDefinitions[0].label, "小程序轮播配置");
   const permissions = await request("/api/permissions/menus");

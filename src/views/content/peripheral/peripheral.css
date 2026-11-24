@@ -1,5 +1,7 @@
 @import url('../album/catalog.css');
 
+.peripheral-products .field-required{color:#e45454;font-style:normal;font-weight:500;margin-left:3px}
+
 .peripheral-products .peripheral-code{font-size:11px;line-height:1.6;color:#9297ad;overflow-wrap:anywhere}
 .peripheral-products .peripheral-inventory{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .peripheral-products .peripheral-stock{display:inline-flex;align-items:center;white-space:nowrap;padding:3px 8px;border-radius:5px;font-size:11px;line-height:1.4;font-weight:500;background:#f2f3f8;color:#8990a5}

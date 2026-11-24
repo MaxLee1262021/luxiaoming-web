@@ -34,6 +34,75 @@
     switchMenu
   } = ctx;
 
+// Home package cards reserve three title lines: 260rpx / 28rpx = 9 characters per line.
+const PACKAGE_TITLE_LIMIT = 27;
+function normalizePackageTitle(value) { return String(value ?? "").replace(/\s+/g, " ").trim(); }
+function packageTitleLength(value) { return normalizePackageTitle(value).length; }
+function isPackageTitleLimited(row = {}) {
+  if (row.__key && row.__key !== "packages") return false;
+  if (row.isVideoSingle === true || row.productKind === "video_single") return false;
+  if (row.isVideoSingle === false || ["package", "bundle"].includes(row.productKind)
+    || [row.includedItems, row.items].some((items) => Array.isArray(items) && items.length)) return true;
+  return ![row.type, row.serviceType, row.productType].some((value) => /video|视频/.test(String(value || "")));
+}
+function packageTitleError(row, previous = null) {
+  if (!isPackageTitleLimited(row)) return "";
+  const visible = (value) => typeof ctx.contentManualVisible === "function" ? ctx.contentManualVisible(value)
+    : value && value.isShow !== false && !["草稿", "下架", "停用", "隐藏", "已隐藏", "已下架"].includes(value.status);
+  const changed = !previous || normalizePackageTitle(row.name) !== normalizePackageTitle(previous.name);
+  const publishing = previous && !visible(previous) && visible(row);
+  return (changed || publishing) && packageTitleLength(row.name) > PACKAGE_TITLE_LIMIT
+    ? `套餐名称最多 ${PACKAGE_TITLE_LIMIT} 个字符，请缩短至首页三行以内` : "";
+}
+
+// 商品编辑仅使用摄影师姓名投影，不依赖派单或分成管理权限。
+state.contentPhotographers = { rows: [], loading: false, error: "" };
+const contentPhotographerOptions = computed(() => state.contentPhotographers.rows);
+const contentPhotographersLoading = computed(() => state.contentPhotographers.loading);
+const contentPhotographersError = computed(() => state.contentPhotographers.error);
+let contentPhotographersRequest = null;
+let contentPhotographersEpoch = 0;
+function clearContentPhotographers() {
+  contentPhotographersEpoch += 1;
+  contentPhotographersRequest = null;
+  state.contentPhotographers = { rows: [], loading: false, error: "" };
+}
+function contentPhotographerName(row = {}) {
+  const id = String(row.recommendedPhotographerId || "");
+  if (!id) return "未设置";
+  return contentPhotographerOptions.value.find((item) => item.id === id)?.name
+    || row.recommendedPhotographerName || "摄影师档案不可用";
+}
+function loadContentPhotographers() {
+  if (!window.LXM_AUTH?.hasSession?.()) return Promise.resolve(false);
+  if (contentPhotographersRequest) return contentPhotographersRequest;
+  const epoch = contentPhotographersEpoch;
+  state.contentPhotographers.loading = true;
+  state.contentPhotographers.error = "";
+  const base = String(window.LXM_API_CONFIG?.base || "/api").replace(/\/$/, "");
+  contentPhotographersRequest = Promise.resolve().then(async () => {
+    try {
+      const response = await window.LXM_HTTP.request(`${base}/content/photographers`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.error || body?.msg || "摄影师名单加载失败");
+      if (!Array.isArray(body?.rows)) throw new Error("摄影师名单返回格式无效");
+      if (epoch !== contentPhotographersEpoch) return false;
+      state.contentPhotographers.rows = body.rows.filter((item) => item && item.id && item.name)
+        .map((item) => ({ id: String(item.id), name: String(item.name) }));
+      return true;
+    } catch (error) {
+      if (epoch === contentPhotographersEpoch) state.contentPhotographers.error = error.message || "摄影师名单加载失败";
+      return false;
+    } finally {
+      if (epoch === contentPhotographersEpoch) {
+        state.contentPhotographers.loading = false;
+        contentPhotographersRequest = null;
+      }
+    }
+  });
+  return contentPhotographersRequest;
+}
+
 function contentCover(title, subtitle) {
   return "/images/placeholder.png";
 }
@@ -339,6 +408,7 @@ async function addTrash(key, source, previous, row) {
 
 function isVideoSingleProduct(row) {
   if (!row || row.deleted === true || row.isDeleted === true) return false;
+  if (window.LXM_CONTENT_ORDER) return window.LXM_CONTENT_ORDER.isVideoSingle(row);
   const video = [row.serviceType, row.type, row.productType, row.productKind, row.category]
     .some((value) => value !== undefined && value !== null && /video|短视频|视频/.test(String(value).trim().toLowerCase()));
   return video && (row.isVideoSingle === true || row.productKind === "video_single");
@@ -356,7 +426,7 @@ function filterVideoSingleRows(rows) {
     const kw = (f.keyword || "").toLowerCase();
     list = list.filter((r) => (r.title || r.name || "").toLowerCase().includes(kw) || (r.tags || []).join(",").toLowerCase().includes(kw));
   }
-  return list;
+  return ctx.sortedContentRows ? ctx.sortedContentRows("packages", list) : list;
 }
 const videoSingleRows = computed(() => filterVideoSingleRows(data.packages));
 function videoSingleWriteAllowed() {
@@ -385,6 +455,8 @@ function openVideoSingle(row = null) {
   state.videoSingleForm = row
     ? { ...row, __key: "packages", title: row.title || row.name, name: row.name || row.title, tags: Array.isArray(row.tags) ? [...row.tags] : [] }
     : { __key: "packages", id: `pkg_vs_${Date.now()}`, title: "", name: "", seriesId: "", spotId: "", videoUrl: "", previewVideoUrl: "", type: "video", productKind: "video_single", isVideoSingle: true, durationText: "", videoDuration: 0, finishedVideoCount: 1, hasAerial: false, fullEdit: true, makeupIncluded: false, deliveryCycle: "1–3 个工作日", shootingNotes: "", price: 0, status: "上架", isShow: true, isMainPush: false, tags: [], intro: "" };
+  state.videoSingleForm.recommendedPhotographerId = String(row?.recommendedPhotographerId || "");
+  loadContentPhotographers();
   state.videoSingleDialog = true;
   hydrateProductSpot(state.videoSingleForm);
 }
@@ -406,7 +478,7 @@ async function saveVideoSingle() {
   form.shootingNotes = String(form.shootingNotes || form.intro || "").trim();
   normalizeSingleProduct(form, "packages");
   const source = data.packages.find((item) => (item.id || item._id) === (form.id || form._id));
-  const validation = validateContentPublishing("packages", form, source);
+  const validation = validateContentPublishing("packages", form, source, { forceTags: true });
   if (validation) { ElMessage.warning(validation); return false; }
   if (!(await ensureContentTags(form, "packages"))) return false;
   const previous = source ? { ...source } : null;
@@ -704,7 +776,17 @@ function replaceAlbumPhoto(row, url) {
 }
 function applyAlbumShootingTemplate(row) {
   if (!row || !ctx.can("contentEdit")) return;
-  row.shootingNotes = "请提前与客服确认拍摄时间、地点及风格。具体拍摄安排及成片交付方式以预约确认为准。";
+  row.shootingNotes = `本次拍摄的取景、风格以本商品样片展示为参考标准，成片氛围与取景思路对标样片效果。
+📷拍摄内容：按照套餐约定时长、底片数量，在对应景点内拍摄，包含摄影师引导摆拍与自然抓拍。
+⏰拍摄时长：以套餐标注时长为准。
+👔穿搭建议：可参考商品样片风格搭配服装，配色简洁会更加上镜。
+💡温馨提示
+1. 下单后请联系鹿小鸣客服沟通拍摄细节，确认具体档期，客服将为您提供全程服务；
+2. 拍摄效果参考样片风格，受当日光线、人流、个人气质等因素影响，成片无法和样片完全一致；
+3. 拍摄点位如需门票、场地费，由客人自行承担；
+4. 拍摄时请遵守景区、街区管理规定，文明拍摄；
+5. 拍摄前可以把喜欢的画面、想法提前和摄影师、客服沟通；
+6. 建议穿着舒适方便行走的鞋子，做好防晒、防蚊等准备。`;
   row.intro = row.shootingNotes;
 }
 function openContent(row = null, requestedKey = "") {
@@ -723,7 +805,7 @@ function openContent(row = null, requestedKey = "") {
   const defaults = {
     spots: { name: "", cityId: "", cover: "", tag: "推荐", tags: [], styles: [], address: "", district: "", latitude: null, longitude: null, coordType: "gcj02", hotScore: 8.5, sort: 0, status: "启用", isShow: true },
     series: { name: "", spotId: defaultSpotId, spotIds: defaultSpotId ? [defaultSpotId] : [], style: "清新", styles: ["清新"], tags: [], intro: "", productType: "photo", soldCount: 0, minPrice: 0, maxPrice: 0, packageIds: [], status: "启用", cover: contentCover("新系", "拍摄风格封面") },
-    albums: { name: "", spotId: "", spotIds: [], spotBindingExplicit: true, seriesId: defaultSeriesId, price: 0, intro: "", photoCount: 0, shootingNotes: "", retouchMode: "excluded", retouchCount: 0, makeupIncluded: false, isShow: false, isSellable: true, allowMaterialUse: true, status: "下架", cover: "", sampleUrls: [] },
+    albums: { name: "", spotId: "", spotIds: [], spotBindingExplicit: true, seriesId: defaultSeriesId, price: 0, intro: "", photoCount: 0, photoCountText: "", retouchText: "", makeupText: "", shootingNotes: "", retouchMode: "excluded", retouchCount: 0, makeupIncluded: false, isShow: false, isSellable: true, allowMaterialUse: true, status: "下架", cover: "", sampleUrls: [] },
     samples: { name: "", type: "photo", spotId: defaultSpotId, seriesId: defaultSeriesId, albumId: defaultAlbumId, status: "启用", url: contentCover("新样", "上传预览") },
     packages: { name: "", type: "photo", spotId: defaultSpotId, seriesId: defaultSeriesId, albumId: defaultAlbumId, originalPrice: 999, price: 699, specialPrice: 699, isMainPush: false, isShow: true, status: "上架", intro: "", description: "", serviceTags: ["精修9"], cover: contentCover("新套", "套餐封面") },
     addonServices: { name: "", category: "修图", price: 199, enabled: true, intro: "增值服务，仅客服处理订单时添加" },
@@ -734,6 +816,10 @@ function openContent(row = null, requestedKey = "") {
   };
   const sourceRow = row?.__source || row;
   state.editContent = sourceRow ? { ...sourceRow, __key: key } : { ...(defaults[key] || {}), id: "", __key: key };
+  if (["albums", "packages"].includes(key)) {
+    state.editContent.recommendedPhotographerId = String(state.editContent.recommendedPhotographerId || "");
+    loadContentPhotographers();
+  }
   if (key === "spots") spotDraftSort.set(state.editContent, state.editContent.sort);
   if (key === "cities") {
     const status = String(state.editContent.status || "").trim().toLowerCase();
@@ -827,6 +913,9 @@ function openContent(row = null, requestedKey = "") {
       retouchCount: state.editContent.retouchCount ?? 0,
       makeupIncluded: state.editContent.makeupIncluded ?? false,
       photoCount: state.editContent.photoCount ?? 0,
+      photoCountText: state.editContent.photoCountText ?? `${Number(state.editContent.photoCount) || 0} 张照片`,
+      retouchText: state.editContent.retouchText ?? (albumRetouchMode(state.editContent) === "count" ? `${Number(state.editContent.retouchCount)} 张` : albumRetouchMode(state.editContent) === "included" ? "包含" : "不包含"),
+      makeupText: state.editContent.makeupText ?? (state.editContent.makeupIncluded === true ? "包含" : "不包含"),
       shootingNotes: state.editContent.shootingNotes ?? state.editContent.intro ?? "",
       retouchMode: albumRetouchMode(state.editContent),
     });
@@ -905,6 +994,12 @@ async function saveContent() {
   const target = contentList(key);
   const payload = { ...row };
   delete payload.__key;
+  if (key === "packages" && isPackageTitleLimited(payload)) {
+    const previous = target.find((item) => String(item.id || item._id) === String(payload.id || payload._id));
+    const titleError = packageTitleError(payload, previous);
+    if (titleError) return ElMessage.warning(titleError);
+    payload.name = normalizePackageTitle(payload.name);
+  }
   if (key === "series") normalizeSeriesSpotRelations(payload);
   if (key === "spots") {
     const city = cityById(payload.cityId || payload.city);
@@ -1061,7 +1156,7 @@ async function saveContent() {
   }
   let persisted = payload;
   normalizeSingleProduct(payload, key);
-  const validation = validateContentPublishing(key, payload, target.find((item) => String(item.id || item._id) === String(payload.id || payload._id)));
+  const validation = validateContentPublishing(key, payload, target.find((item) => String(item.id || item._id) === String(payload.id || payload._id)), { forceTags: true });
   if (validation) return ElMessage.warning(validation);
   if (!(await ensureContentTags(payload, key))) return;
   if (key === "spots") {
@@ -1127,9 +1222,17 @@ async function persistSpotSort(spot, requested) {
 // 将内容保存到真实数据库，采用服务端确认的数据更新界面。
 // 新增项在 saveContent 里已预置 payload.id，服务端可能还没有该 id，先 update 失败则回退 create。
 async function pushContentToCloud(key, payload, options = {}) {
+  if (!["albums", "packages", "guides"].includes(key)) return pushContentToCloudUnlocked(key, payload, options);
+  if (state.contentSortSaving) { ElMessage.warning("内容或排序正在保存，请稍后再试"); return null; }
+  state.contentSortSaving = true;
+  try { return await pushContentToCloudUnlocked(key, payload, options); }
+  finally { state.contentSortSaving = false; }
+}
+async function pushContentToCloudUnlocked(key, payload, options = {}) {
   if (!isServerConnected()) { ElMessage.error("真实后端连接不可用，内容未保存"); return null; }
   try {
     const doc = { ...payload, isDeleted: false };
+    if (["albums", "packages", "guides"].includes(key)) delete doc.sort;
     if (key === "spots" && options.preserveSpotSort) delete doc.sort;
     let res;
     if (payload.id) {
@@ -1144,7 +1247,8 @@ async function pushContentToCloud(key, payload, options = {}) {
     }
     if (!confirmedContentSave(res)) throw new Error(res && res.error || "服务端未确认内容保存");
     const id = String((res && (res.id || res._id)) || payload.id || "");
-    const saved = key === "spots" ? applySpotOrderResponse(res) : res.id || res._id ? res : {};
+    const saved = key === "spots" ? applySpotOrderResponse(res)
+      : ["albums", "packages", "guides"].includes(key) && ctx.applyContentOrderResponse ? ctx.applyContentOrderResponse(key, res) : res.id || res._id ? res : {};
     return { ...payload, ...(saved && typeof saved === "object" ? saved : {}), id, _id: id };
   } catch (e) {
     ElMessage.error("服务端保存失败，未修改本地内容：" + (e && e.message ? e.message : e));
@@ -1160,18 +1264,47 @@ function confirmedContentSave(result) {
   return !!(result && typeof result === "object" && !Array.isArray(result) && !result.error && result.ok !== false
     && (result.ok === true || result.id || result._id));
 }
-function validateContentPublishing(key, row, previous = null) {
+function configuredProductTags(value) {
+  const tags = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[，,、|\r\n]/) : [];
+  return [...new Set(tags.filter((tag) => typeof tag === "string").map((tag) => tag.trim()).filter(Boolean))];
+}
+function taglessHideOnly(row, previous, raw = row) {
+  if (!previous || (typeof ctx.contentManualVisible === "function" ? ctx.contentManualVisible(row) : row.isShow !== false && !["草稿", "下架", "停用"].includes(row.status))) return false;
+  const statusFields = new Set(["isShow", "visible", "enabled", "isSellable", "status", "saleStatus", "shelfStatus", "auditStatus", "reviewStatus", "deleted", "isDeleted"]);
+  const projectedFields = new Set(["id", "_id", "__key", "__source", "effectiveVisible", "visibilityReasons"]);
+  return Object.keys(raw).every((field) => projectedFields.has(field) || statusFields.has(field) || JSON.stringify(raw[field]) === JSON.stringify(previous[field]));
+}
+function peripheralWithdrawalPatch(raw, previous) {
+  if (!previous || !(previous.id || previous._id)) return null;
+  const row = { ...previous, ...raw };
+  const visible = typeof ctx.contentManualVisible === "function" ? ctx.contentManualVisible(row) : row.isShow !== false && !["草稿", "下架", "停用"].includes(row.status);
+  if (visible && row.internalOnly !== true) return null;
+  const fields = new Set(["isShow", "visible", "enabled", "isSellable", "status", "saleStatus", "shelfStatus", "auditStatus", "reviewStatus", "internalOnly", "auditType", "auditSubmitAt", "auditSubmitter", "auditReason"]);
+  const projected = new Set(["id", "_id", "__key", "__source", "effectiveVisible", "visibilityReasons", "effectiveSpotIds", "deletedSpotIds"]);
+  if (!Object.keys(raw).some((field) => fields.has(field))
+    || !Object.keys(raw).every((field) => projected.has(field) || fields.has(field) || JSON.stringify(raw[field]) === JSON.stringify(previous[field]))) return null;
+  return Object.fromEntries(Object.entries(raw).filter(([field]) => fields.has(field)));
+}
+function validateContentPublishing(key, row, previous = null, options = {}) {
   // Guide publication is validated by the dedicated editor and server. List
   // visibility/pinning must also work for text-only, media-only and legacy notes.
   if (key === "guides") return "";
+  if (key === "packages") {
+    const titleError = packageTitleError(row, previous);
+    if (titleError) return titleError;
+  }
   const visible = (value) => typeof ctx.contentManualVisible === "function" ? ctx.contentManualVisible(value) : value && value.isShow !== false && !["草稿", "下架", "停用"].includes(value.status);
+  if (["albums", "packages"].includes(key) && !configuredProductTags(row.tags).length
+    && (options.forceTags || !taglessHideOnly(row, previous, options.raw || row))) return "请至少添加一个标签";
   if (key === "albums") {
+    for (const [field, label] of [["photoCountText", "照片张数"], ["retouchText", "修图"], ["makeupText", "妆造"]]) {
+      if (row[field] != null && (typeof row[field] !== "string" || row[field].trim().length > 160)) return `${label}应为不超过160个字符的文字`;
+    }
     if (row.photoCount !== undefined && (row.photoCount === null || row.photoCount === "" || !Number.isSafeInteger(Number(row.photoCount)) || Number(row.photoCount) < (visible(row) ? 1 : 0))) return "请填写有效的整数照片张数";
-    if (albumRetouchMode(row) === "count" && (row.retouchCount === undefined || !Number.isSafeInteger(Number(row.retouchCount)) || Number(row.retouchCount) < 1)) return "请填写正整数的修图张数";
+    if (!String(row.retouchText || "").trim() && albumRetouchMode(row) === "count" && (row.retouchCount === undefined || !Number.isSafeInteger(Number(row.retouchCount)) || Number(row.retouchCount) < 1)) return "请填写正整数的修图张数";
   }
   if (!visible(row) || (previous && visible(previous))) return "";
   const text = (value) => String(value ?? "").trim();
-  const tags = [...(row.tags || []), ...(row.styles || []), ...(row.styleTags || []), ...(row.serviceTags || []), row.style].filter((value) => text(value));
   const label = { spots: "打卡点", albums: "照片留影", packages: row.type === "video" ? "视频摄像" : "套餐", peripherals: "影像周边", guides: "旅拍灵感" }[key];
   if (!label) return "";
   if (!text(row.name || row.title)) return `请填写${label}名称`;
@@ -1187,11 +1320,6 @@ function validateContentPublishing(key, row, previous = null) {
     if (row.price === "" || row.price === undefined || !Number.isFinite(Number(row.price)) || Number(row.price) < 0) return "请填写有效单价";
     if (!text(row.shootingNotes || row.intro || row.description)) return `请填写${key === "peripherals" ? "产品" : "拍摄"}说明`;
   }
-  if (key === "albums" || key === "packages" && row.type === "video") {
-    const seriesId = text(row.seriesId);
-    const linkedStyle = seriesId && (data.series || []).some((item) => item && !item.deleted && !item.isDeleted && String(item.id || item._id || "") === seriesId);
-    if (!tags.length && !linkedStyle && !(key === "albums" && text(row.seriesName))) return "请选择关联拍摄风格或输入风格标签";
-  }
   if (key === "albums" && (!Number.isSafeInteger(Number(row.photoCount)) || Number(row.photoCount) < 1)) return "请填写正整数的照片张数";
   if (key === "packages" && row.type === "video") {
     if (!(Number(row.videoDuration) > 0) && !text(row.durationText)) return "请填写成片时长";
@@ -1200,7 +1328,7 @@ function validateContentPublishing(key, row, previous = null) {
     if (!contentVideoUrl(row)) return "请上传商品视频";
   }
   if (key === "peripherals") {
-    if (!(row.images || row.mediaUrls || []).length && !text(row.cover || row.image)) return "请上传影像周边素材";
+    if (!(row.images || row.mediaUrls || []).length && !(row.videos || []).length && !text(row.cover || row.image)) return "请上传影像周边素材";
   }
   if (["spots", "albums"].includes(key) && !text(row.cover || row.image || row.coverUrl)) return "请上传首图或封面";
   return "";
@@ -1237,6 +1365,9 @@ function hydrateProductSpot(row) {
 }
 function markContentSpotChange(row) { if (row && (!row.__key || ["albums", "packages", "peripherals"].includes(row.__key))) row.__spotSelectionChanged = true; }
 function normalizeSingleProduct(row, key) {
+  if (["albums", "packages"].includes(key) && Object.prototype.hasOwnProperty.call(row, "recommendedPhotographerId")) {
+    row.recommendedPhotographerId = String(row.recommendedPhotographerId || "");
+  }
   if (!["albums", "peripherals"].includes(key) && !(key === "packages" && row.type === "video")) return;
   hydrateProductSpot(row);
   row.spotId = String(row.spotId || "");
@@ -1256,6 +1387,9 @@ function normalizeSingleProduct(row, key) {
   }
   if (key === "albums") {
     row.makeupIncluded = row.makeupIncluded === true;
+    for (const field of ["photoCountText", "retouchText", "makeupText"]) {
+      if (row[field] !== undefined) row[field] = String(row[field] ?? "").trim();
+    }
     row.retouchMode = albumRetouchMode(row);
     row.retouchCount = row.retouchMode === "count" ? Number(row.retouchCount ?? 0) : 0;
     row.shootingNotes = String(row.shootingNotes ?? row.intro ?? "").trim();
@@ -1278,6 +1412,16 @@ function normalizeSingleProduct(row, key) {
 }
 async function persistContentMutation(key, source, previous = null) {
   if (!source || !(source.id || source._id)) return false;
+  if (["albums", "packages", "guides"].includes(key)) {
+    if (state.contentSortSaving) {
+      if (previous) Object.assign(source, previous);
+      ElMessage.warning("内容或排序正在保存，请稍后再试");
+      return false;
+    }
+    state.contentSortSaving = true;
+    try { return await persistContentMutationUnlocked(key, source, previous); }
+    finally { state.contentSortSaving = false; }
+  }
   if (key !== "spots") return persistContentMutationUnlocked(key, source, previous);
   if (isSpotOrderSaving()) {
     if (previous) Object.assign(source, previous);
@@ -1295,20 +1439,26 @@ async function persistContentMutationUnlocked(key, source, previous = null) {
     ElMessage.error("真实后端连接不可用，修改未保存");
     return false;
   }
-  normalizeSingleProduct(source, key);
-  const validation = validateContentPublishing(key, source, previous);
+  const raw = { ...source };
+  if (key === "packages" && isPackageTitleLimited(source)) source.name = normalizePackageTitle(source.name);
+  // A withdrawal must stay a partial visibility update. Product normalization
+  // would otherwise add empty material and default flags to legacy products.
+  const withdrawal = key === "peripherals" && peripheralWithdrawalPatch(raw, previous);
+  if (!withdrawal) normalizeSingleProduct(source, key);
+  const validation = withdrawal ? "" : validateContentPublishing(key, source, previous, { raw });
   if (validation) {
     if (previous) Object.assign(source, previous);
     ElMessage.warning(validation);
     return false;
   }
-  if (!(await ensureContentTags(source, key))) return false;
+  if (!withdrawal && !(await ensureContentTags(source, key))) return false;
   const id = source.id || source._id;
-  const payload = { ...source, id, _id: id };
+  const payload = { ...(withdrawal || source), id, _id: id };
   delete payload.__key;
   delete payload.__source;
   delete payload.id;
   delete payload._id;
+  if (["albums", "packages", "guides"].includes(key)) delete payload.sort;
   if (key === "spots" && previous && window.LXM_SPOT_ORDER.rank(source.sort) === window.LXM_SPOT_ORDER.rank(previous.sort)) delete payload.sort;
   try {
     let saved;
@@ -1319,6 +1469,7 @@ async function persistContentMutationUnlocked(key, source, previous = null) {
       saved = await window.LXM_CLOUD.create(key, { ...payload, id });
     }
     if (!confirmedContentSave(saved)) throw new Error((saved && saved.error) || "内容保存失败");
+    if (["albums", "packages", "guides"].includes(key) && ctx.applyContentOrderResponse) saved = ctx.applyContentOrderResponse(key, saved);
     if (saved.id || saved._id) Object.assign(source, key === "spots" ? applySpotOrderResponse(saved) : saved);
     return true;
   } catch (error) {
@@ -1631,6 +1782,17 @@ async function saveSiteConfig() {
 }
 
   return {
+    contentPhotographerOptions,
+    contentPhotographersLoading,
+    contentPhotographersError,
+    contentPhotographerName,
+    loadContentPhotographers,
+    clearContentPhotographers,
+    packageTitleLimit: PACKAGE_TITLE_LIMIT,
+    normalizePackageTitle,
+    packageTitleLength,
+    isPackageTitleLimited,
+    packageTitleError,
     albumRetouchMode,
     albumPhotoUrls,
     setAlbumCover,

@@ -1,0 +1,77 @@
+"use strict";
+const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path");
+const { startBrowserFixture } = require("./fixtures/merchant-share-browser.cjs");
+
+test("product links menu, filters, generation, copy and responsive layout", { skip: process.env.RUN_PRODUCT_LINKS_BROWSER !== "1", timeout: 90000 }, async t => {
+  const { chromium } = require(process.env.PRODUCT_LINKS_PLAYWRIGHT_MODULE || "playwright");
+  const fixture = await startBrowserFixture();
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.PRODUCT_LINKS_BROWSER_EXECUTABLE || "C:/Program Files/Google/Chrome/Application/chrome.exe" });
+  t.after(async () => { await browser.close(); await fixture.close(); });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, timezoneId: "Asia/Shanghai" });
+  const errors = [], generated = [];
+  page.on("pageerror", error => errors.push(error.message)); page.setDefaultTimeout(12000);
+  const types = ["album", "video", "package", "peripheral"];
+  const labels = ["照片留影", "视频摄像", "旅拍套餐", "周边商品"];
+  const items = types.map((type, index) => ({ id: `qa-${type}`, type, typeLabel: labels[index], name: ["江边留影", "旅途短片", "城市漫游套餐", "旅行纪念相框"][index], cover: "", price: [99, 199, 399, 29][index], summary: "测试商品介绍，仅用于隔离验收", status: "available", statusLabel: "可生成", canGenerate: true, disabledReason: "" }));
+  items.push({ ...items[0], id: "qa-offline", name: "暂停销售的服务", status: "unavailable", statusLabel: "不可生成", canGenerate: false, disabledReason: "商品已下架" });
+  let configured = true, rejectGeneration = false, rejectCatalog = false;
+  await page.route("**/api/health", async route => { const response = await route.fetch(); await route.fulfill({ response, json: { ...await response.json(), mode: "mysql" } }); });
+  // Only the new endpoints use deterministic test responses. Auth, navigation,
+  // lazy page loading and all UI code are the actual application.
+  await page.route("**/api/product-links/catalog", route => route.fulfill({ status: rejectCatalog ? 503 : 200, json: rejectCatalog ? { error: "测试目录暂不可用" } : { items, configured, environment: "release" } }));
+  await page.route("**/api/product-links/generate", async route => {
+    const body = route.request().postDataJSON(); generated.push(body);
+    await route.fulfill({ status: rejectGeneration ? 503 : 200, json: rejectGeneration ? { error: "微信配额暂不可用" } : { url: "https://wxaurl.cn/TEST_ONLY_" + body.id, expiresAt: new Date(Date.UTC(2026, 10, 19, 4) + body.expireDays * 86400000).toISOString(), environment: "release", path: "pages/photoCollection/photoCollection", query: "albumId=" + body.id } });
+  });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { async writeText(value) { window.qaClipboard = value; } } });
+  });
+  await page.goto(fixture.url);
+  await page.getByPlaceholder("账号", { exact: true }).fill(fixture.accounts.admin.account);
+  await page.getByPlaceholder("密码", { exact: true }).fill(fixture.accounts.admin.password);
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.locator('[data-menu-key="productLinks"]').click();
+  const section = page.locator('[data-page-key="productLinks"]');
+  await section.getByRole("button", { name: "刷新列表", exact: true }).waitFor();
+  await page.waitForFunction(() => !document.querySelector(".el-loading-mask"));
+  assert.equal(await section.locator(".el-table__body-wrapper tbody tr").count(), 5);
+  assert.equal(await section.locator(".el-table__body-wrapper tbody tr").filter({ hasText: "暂停销售的服务" }).getByRole("button", { name: "生成外链", exact: true }).isDisabled(), true);
+  const out = path.resolve(__dirname, "../../../outputs/product-links-20261119"); fs.mkdirSync(out, { recursive: true });
+  await page.screenshot({ path: path.join(out, "desktop.png"), fullPage: true });
+  await section.getByRole("textbox", { name: "搜索名称或商品编号", exact: true }).fill("qa-peripheral");
+  assert.equal(await section.locator(".el-table__body-wrapper tbody tr").count(), 1);
+  await section.getByRole("button", { name: "重置", exact: true }).click();
+  await section.locator(".product-links-counts button").filter({ hasText: "视频摄像" }).click();
+  assert.equal(await section.locator(".el-table__body-wrapper tbody tr").count(), 1);
+  await section.getByRole("button", { name: "重置", exact: true }).click();
+  await section.locator(".product-links-expiry .el-select").click();
+  await page.getByRole("option", { name: "7 天", exact: true }).click();
+  await section.locator(".el-table__body-wrapper tbody tr").filter({ hasText: "江边留影" }).getByRole("button", { name: "生成外链", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "小程序外链已生成", exact: true });
+  await dialog.waitFor(); assert.deepEqual(generated[0], { type: "album", id: "qa-album", expireDays: 7 });
+  assert.equal(await dialog.getByRole("textbox", { name: "已生成的小程序外链", exact: true }).inputValue(), "https://wxaurl.cn/TEST_ONLY_qa-album");
+  await dialog.getByRole("button", { name: "复制链接", exact: true }).click();
+  assert.equal(await page.evaluate(() => window.qaClipboard), "https://wxaurl.cn/TEST_ONLY_qa-album");
+  await page.screenshot({ path: path.join(out, "generated-dialog.png"), fullPage: true });
+  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+  rejectGeneration = true;
+  await section.locator(".el-table__body-wrapper tbody tr").filter({ hasText: "旅途短片" }).getByRole("button", { name: "生成外链", exact: true }).click();
+  await page.getByText("生成失败：微信配额暂不可用", { exact: true }).waitFor();
+  assert.equal(await dialog.isVisible(), false);
+  configured = false; await section.getByRole("button", { name: "刷新列表", exact: true }).click();
+  await section.getByText("暂未配置微信小程序凭据，请联系管理员配置后生成外链。", { exact: true }).waitFor();
+  assert.equal(await section.getByRole("button", { name: "生成外链", exact: true }).first().isDisabled(), true);
+  configured = true; rejectCatalog = true; await section.getByRole("button", { name: "刷新列表", exact: true }).click();
+  await section.getByText("测试目录暂不可用", { exact: true }).waitFor();
+  rejectCatalog = false; await section.getByRole("button", { name: "重新加载", exact: true }).click();
+  await section.locator(".product-links-settings").waitFor();
+  const collapse = page.getByRole("button", { name: "收起菜单", exact: true });
+  if (await collapse.isVisible()) await collapse.click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const backdrop = page.getByRole("button", { name: "关闭导航", exact: true });
+  if (await backdrop.isVisible()) await backdrop.click();
+  await page.locator(".el-message").first().waitFor({ state: "hidden" });
+  await page.screenshot({ path: path.join(out, "mobile.png"), fullPage: true });
+  assert.equal(await section.evaluate(element => element.scrollWidth > element.clientWidth + 1), false);
+  assert.deepEqual(errors, []);
+});

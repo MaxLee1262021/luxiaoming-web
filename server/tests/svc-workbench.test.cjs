@@ -67,13 +67,13 @@ test("photographer transfer cannot change service owner or commission", async ()
 });
 test("finishing an already fully paid shoot activates ledger and binds customer, absent photographer rolls back", async () => {
   const state = initial(); Object.assign(state.orders[0], { service_status: "shooting", assignee_id: "st1", photo_id: "p1" }); const f = fixture(state);
-  const result = await f.call("shoot/finish", { expected_status: "shooting" });
+  const result = await f.call("shoot/finish", { expected_status: "shooting" }, admin);
   assert.equal(result.commission_fen, 2796); assert.equal(result.bind_expire_at, "2026-11-15 21:00:00"); assert.equal(f.store.snapshot().ledger[0].status, "obs");
-  const g = fixture({ orders: [{ ...state.orders[0], photo_id: null }] }); await assert.rejects(g.call("shoot/finish", { expected_status: "shooting" }), e => e.code === 4003); assert.equal(g.store.snapshot().orders[0].service_status, "shooting"); assert.equal(g.store.snapshot().bindings.length, 0);
+  const g = fixture({ orders: [{ ...state.orders[0], photo_id: null }] }); await assert.rejects(g.call("shoot/finish", { expected_status: "shooting" }, admin), e => e.code === 4003); assert.equal(g.store.snapshot().orders[0].service_status, "shooting"); assert.equal(g.store.snapshot().bindings.length, 0);
 });
 test("missing openid never blocks completion or commission", async () => {
   const state = initial(); Object.assign(state.orders[0], { service_status: "shooting", assignee_id: "st1", photo_id: "p1", customer_openid: null }); const f = fixture(state);
-  const result = await f.call("shoot/finish", { expected_status: "shooting" }); assert.equal(result.bound, false); assert.equal(result.commission_fen, 2796); assert.equal(f.store.snapshot().bindings.length, 0);
+  const result = await f.call("shoot/finish", { expected_status: "shooting" }, admin); assert.equal(result.bound, false); assert.equal(result.commission_fen, 2796); assert.equal(f.store.snapshot().bindings.length, 0);
 });
 function boundState(paid = "2026-11-10 22:12:00") { const state = initial(); state.orders[0].paid_at = paid; state.bindings = [{ id: "1", openid: "same-customer", staff_id: "st1", source_order_no: "old", bound_at: "2026-11-09 15:00:00", expire_at: "2026-11-14 15:00:00", status: "active" }]; return state; }
 test("payment callback is idempotent under 20 repeats and quiet countdown frozen", async () => {
@@ -109,7 +109,7 @@ test("refund cancels reserved order without reflow or binding release; terminal 
   await assert.rejects(f.call("claim", { expected_status: "refunded" }), e => e.code === 4003);
 });
 test("observation boundary uses exact timestamps and unknown complaints stay on hold", async () => {
-  const state = initial(); Object.assign(state.orders[0], { service_status: "shooting", assignee_id: "st1", photo_id: "p1" }); const f = fixture(state); f.at("2026-11-10 23:50:00"); await f.call("shoot/finish", { expected_status: "shooting" });
+  const state = initial(); Object.assign(state.orders[0], { service_status: "shooting", assignee_id: "st1", photo_id: "p1" }); const f = fixture(state); f.at("2026-11-10 23:50:00"); await f.call("shoot/finish", { expected_status: "shooting" }, admin);
   f.at("2026-11-17 23:49:59"); await f.app.runTasks(); assert.equal(f.store.snapshot().ledger[0].status, "obs");
   f.at("2026-11-17 23:50:00"); await f.app.runTasks(); assert.equal(f.store.snapshot().ledger[0].status, "settleable");
   await f.app.execute("POST", "/api/kf/complaints", { order_no: "LM1", resp: "unknown", reason: "待调查" }, service); await f.app.runTasks(); assert.equal(f.store.snapshot().ledger[0].status, "obs");
@@ -118,7 +118,7 @@ test("service responsibility allows finish but blocks/revokes binding; duplicate
   const state = initial(); Object.assign(state.orders[0], { service_status: "shooting", assignee_id: "st1", photo_id: "p1" }); const f = fixture(state);
   const complaint = await f.app.execute("POST", "/api/kf/complaints", { order_no: "LM1", resp: "service", reason: "服务问题" }, service);
   await assert.rejects(f.app.execute("POST", "/api/kf/complaints", { order_no: "LM1", resp: "service", reason: "重复" }, service), e => e.code === 4010 && e.data.id === complaint.id);
-  const done = await f.call("shoot/finish", { expected_status: "shooting" }); assert.equal(done.bound, false); assert.equal(f.store.snapshot().ledger[0].status, "void");
+  const done = await f.call("shoot/finish", { expected_status: "shooting" }, admin); assert.equal(done.bound, false); assert.equal(f.store.snapshot().ledger[0].status, "void");
   await assert.rejects(f.app.execute("POST", `/api/kf/complaints/${complaint.id}/rejudge`, { resp: "user", reason: "复核" }, service), e => e.code === 403);
   await f.app.execute("POST", `/api/kf/complaints/${complaint.id}/rejudge`, { resp: "user", reason: "复核" }, admin); assert.equal(f.store.snapshot().complaints[0].resp, "service"); assert.equal(f.store.snapshot().complaints[0].rejudge_log[0].to, "user");
 });
@@ -192,7 +192,7 @@ test("supervisor generated links retain subordinate source and reject indirect o
 test("supervisor final responsibility rejudgment restores direct report commission without finance approval", async () => {
   const state = managedGroupState(); Object.assign(state.orders[0], { service_status: "shooting", assignee_id: "st1", photo_id: "p1" }); const f = fixture(state);
   await f.app.execute("POST", "/api/kf/complaints", { order_no: "LM1", resp: "service", reason: "初次判责" }, service);
-  await f.call("shoot/finish", { expected_status: "shooting" }); assert.equal(f.store.snapshot().ledger[0].status, "void");
+  await f.call("shoot/finish", { expected_status: "shooting" }, admin); assert.equal(f.store.snapshot().ledger[0].status, "void");
   await f.app.execute("POST", "/api/kf/complaints/1/rejudge", { resp: "user", reason: "复核客服无责" }, supervisor);
   assert.equal(f.store.snapshot().ledger[0].status, "obs"); assert.equal(f.store.snapshot().ledger[0].party_id, "st1");
   assert.equal(f.store.snapshot().complaints[0].rejudge_log[0].by, "manager-account"); assert.equal(f.store.snapshot().adjustments.filter(row => row.action === "restore").length, 0);
@@ -217,7 +217,7 @@ test("photography orders cannot skip shooting through receipt endpoint; peripher
   state.orders[0].category = "peripheral"; const peripheral = fixture(state);
   await assert.rejects(peripheral.call("assign", { expected_status: "claimed", to_photo: "p1", reason: "不应派单", channel: "phone" }), error => error.code === 4003);
   await peripheral.store.transaction(s => { s.orders[0].service_status = "confirmed"; s.orders[0].photo_id = "p1"; s.orders[0].schedule_time = "2026-11-12 15:00:00"; });
-  await assert.rejects(peripheral.call("shoot/start", { expected_status: "confirmed" }), error => error.code === 4003);
+  await assert.rejects(peripheral.call("shoot/start", { expected_status: "confirmed" }, admin), error => error.code === 4003);
 });
 test("calendar rejects impossible dates and overlaps while preserving shared config", () => {
   assert.throws(() => core.validateConfig({ holiday_dates: ["2026-02-30"] }), error => error.code === 4014);
@@ -231,9 +231,9 @@ test("first assignment waits for confirmed time and photography completion canno
   assert.equal(f.store.snapshot().assignLogs.length, 0);
   await f.call("slot/confirm", { expected_status: "claimed", new_time: "2026-11-12 15:00:00", channel: "phone" });
   await f.call("assign", { expected_status: "confirmed", to_photo: "p1", reason: "线下确认", channel: "phone" });
-  await assert.rejects(f.call("shoot/finish", { expected_status: "confirmed" }), { code: 4003 });
-  await f.call("shoot/start", { expected_status: "confirmed" });
-  await f.call("shoot/finish", { expected_status: "shooting" });
+  await assert.rejects(f.call("shoot/finish", { expected_status: "confirmed" }, admin), { code: 4003 });
+  await f.call("shoot/start", { expected_status: "confirmed" }, admin);
+  await f.call("shoot/finish", { expected_status: "shooting" }, admin);
   assert.equal(f.store.snapshot().orders[0].service_status, "done");
 });
 
@@ -249,7 +249,7 @@ test("state residence follows durable transition logs and rescheduling never res
   assert.equal(row.stay_minutes, 15); assert.equal(row.requested_time, "2026-11-12 15:00:00");
   assert.ok(row.timeline.some(log => log.action === "slot_confirm" && log.reason.includes("phone")));
   await f.call("assign", { expected_status: "confirmed", to_photo: "p1", reason: "线下确认", channel: "phone" });
-  await f.call("shoot/start", { expected_status: "confirmed" });
+  await f.call("shoot/start", { expected_status: "confirmed" }, admin);
   f.at("2026-11-10 22:00:00");
   const restarted = createSvcWorkbench({ store: f.store, clock: () => "2026-11-10 22:00:00" });
   row = await restarted.execute("GET", "/api/kf/orders/LM1", {}, service);

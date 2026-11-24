@@ -1,11 +1,13 @@
 // 商家分成专属状态。页面只展示服务端账本，不在浏览器重算分成金额。
 (window.LXM_APP_PARTS = window.LXM_APP_PARTS || []).push(function (ctx) {
   const monthNow = () => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`; };
-  const freshForm = () => ({ name: "", contact: "", phone: "", address: "", account: "", password: "", ratioT1: undefined, ratioT2: undefined, ttlHours: 720, refundWindowDays: 3, reason: "", cooperationConfirmed: false, businessLicenseNo: "", invoiceTitle: "", taxNo: "", bankName: "", bankAccount: "", accountHolder: "" });
+  const freshMine = () => ({ merchant: {}, rule: {}, stats: {}, list: [], total: 0, sum: {}, orders: [], orderTotal: 0, orderStats: {}, notices: [] });
+  const freshMineQuery = () => ({ merchantId: "", period: monthNow(), page: 1, size: 20, orderPage: 1, orderSize: 20 });
+  const freshForm = () => ({ name: "", contact: "", phone: "", address: "", account: "", password: "", ratioT1: undefined, ratioT2: undefined, refundWindowDays: 3, reason: "", cooperationConfirmed: false, businessLicenseNo: "", invoiceTitle: "", taxNo: "", bankName: "", bankAccount: "", accountHolder: "" });
   const shareState = ctx.reactive({
     rules: [], ruleTotal: 0, summary: {}, ruleQuery: { keyword: "", status: "", page: 1, size: 20 },
     details: [], detailTotal: 0, detailSum: {}, detailQuery: { merchantId: "", period: monthNow(), splitType: "", page: 1, size: 20 },
-    mine: { merchant: {}, rule: {}, stats: {}, list: [], total: 0, sum: {} }, mineQuery: { merchantId: "", period: monthNow(), page: 1, size: 20 },
+    mine: freshMine(), mineQuery: freshMineQuery(),
     merchants: [], loading: { rules: false, details: false, mine: false, merchant: false, qr: false },
     errors: { rules: "", details: "", mine: "", merchant: "", qr: "" },
     busy: false, exporting: false, helpOpen: false, settings: null, settingsLoading: false, settingsError: "", grantsOpen: false, grantRoles: [], grantRoleId: "", grantPermissions: [], grantLoading: false, grantSaving: false, grantError: "", editorOpen: false, editorMode: "new", form: freshForm(), formError: "", formFieldErrors: {},
@@ -40,8 +42,7 @@
   const shareSelectedMerchant = ctx.computed(() => shareState.merchant?.merchant || {});
   const settingLabels = [
     ["enabled", "启用日配置状态", "configured"], ["enableAt", "正式启用时间（北京时间）", "time"],
-    ["defaultTtlHours", "默认客服订单分成时效", "小时"], ["defaultRefundWindowDays", "默认平台退款窗口期", "天"],
-    ["csAttrDays", "客服点击归因窗口", "sessionDays"], ["maxCandidateMerchants", "客服候选商家上限", "家"],
+    ["defaultRefundWindowDays", "默认平台退款窗口期", "天"], ["csAttrDays", "客服点击归因窗口", "sessionDays"],
     ["scanDedupSeconds", "重复扫码去重窗口", "秒"], ["judgeRetryMax", "判定失败最大重试次数", "次"],
     ["engineVersion", "判定规则版本", ""], ["phoneAlertConfigured", "电话告警配置", "configured"], ["operationalAlertConfigured", "运营提醒配置", "configured"]
   ];
@@ -138,17 +139,18 @@
     });
   }
   async function loadShareMine(reset = false) {
-    if (reset) shareState.mineQuery.page = 1;
+    if (reset) { shareState.mineQuery.page = 1; shareState.mineQuery.orderPage = 1; }
     const isSuper = ctx.state.role === "super";
     if (!isSuper && !shareIsMerchant.value) { shareState.errors.mine = "仅商家本人及超级管理员可查看商家端"; return; }
     if (isSuper && !shareState.mineQuery.merchantId) {
       sequence.mine = (sequence.mine || 0) + 1; shareState.loading.mine = false; shareState.errors.mine = "";
-      shareState.mine = { merchant: {}, rule: {}, stats: {}, list: [], total: 0, sum: {} }; return;
+      shareState.mine = freshMine(); return;
     }
     const query = { ...shareState.mineQuery };
     if (!isSuper) delete query.merchantId;
     await load("mine", `/mine?${queryString(query)}`, (result) => {
-      shareState.mine = { ...result, merchant: result.merchant || {}, rule: result.rule || {}, stats: result.stats || {}, list: result.list || [], total: Number(result.total || 0), sum: result.sum || {} };
+      shareState.mine = { ...freshMine(), ...result, merchant: result.merchant || {}, rule: result.rule || {}, stats: result.stats || {}, list: result.list || [], total: Number(result.total || 0), sum: result.sum || {},
+        orders: result.orders || [], orderTotal: Number(result.orderTotal || 0), orderStats: result.orderStats || {}, notices: result.notices || [] };
     });
   }
   async function loadMerchantOptions() {
@@ -241,7 +243,7 @@
     delete requestIds.onboard;
   }
   function configForm(rule = {}) {
-    return { ratioT1: rule.ratioT1 === undefined ? undefined : Number(rule.ratioT1) * 100, ratioT2: rule.ratioT2 === undefined ? undefined : Number(rule.ratioT2) * 100, ttlHours: rule.ttlHours ?? 720, refundWindowDays: rule.refundWindowDays ?? 3, reason: "", versionNo: rule.versionNo ?? rule.version ?? 0 };
+    return { ratioT1: rule.ratioT1 === undefined ? undefined : Number(rule.ratioT1) * 100, ratioT2: rule.ratioT2 === undefined ? undefined : Number(rule.ratioT2) * 100, refundWindowDays: rule.refundWindowDays ?? 3, reason: "", versionNo: rule.versionNo ?? rule.version ?? 0 };
   }
   function revokeQr() { if (shareState.qrImage) URL.revokeObjectURL(shareState.qrImage); shareState.qrImage = ""; }
   async function openShareMerchant(row, tab = "info") {
@@ -287,7 +289,6 @@
       else if (!Number.isFinite(Number(form[key])) || Number(form[key]) < 0 || Number(form[key]) > 50) errors[key] = `${label}须在0–50%之间`;
       else if (Math.abs(Number(form[key]) * 100 - Math.round(Number(form[key]) * 100)) > 0.000001) errors[key] = `${label}最多保留两位小数`;
     }
-    if (!Number.isInteger(Number(form.ttlHours)) || Number(form.ttlHours) < 1 || Number(form.ttlHours) > 87600) errors.ttlHours = "客服订单分成时效须为1–87600的整数小时";
     if (form.refundWindowDays === "" || form.refundWindowDays === null || !Number.isInteger(Number(form.refundWindowDays)) || Number(form.refundWindowDays) < 0 || Number(form.refundWindowDays) > 365) errors.refundWindowDays = "平台退款窗口期须为0–365的整数天数";
     if (!String(form.reason || "").trim()) errors.reason = "请填写原因，保存后将记录到历史版本";
     else if (String(form.reason).trim().length > 255) errors.reason = "原因最多填写255字";
@@ -305,7 +306,7 @@
     return false;
   }
   function configPayload(form) {
-    return { ratioT1: Number((Number(form.ratioT1) / 100).toFixed(4)), ratioT2: Number((Number(form.ratioT2) / 100).toFixed(4)), ttlHours: Number(form.ttlHours), refundWindowDays: Number(form.refundWindowDays), reason: String(form.reason).trim() };
+    return { ratioT1: Number((Number(form.ratioT1) / 100).toFixed(4)), ratioT2: Number((Number(form.ratioT2) / 100).toFixed(4)), refundWindowDays: Number(form.refundWindowDays), reason: String(form.reason).trim() };
   }
   async function saveShareNewMerchant() {
     if (!shareCanConfig.value || shareState.busy) return;
@@ -415,7 +416,7 @@
     epoch += 1; revokeQr();
     shareState.rules = []; shareState.ruleTotal = 0; shareState.summary = {}; shareState.merchants = [];
     shareState.details = []; shareState.detailTotal = 0; shareState.detailSum = {};
-    shareState.mine = { merchant: {}, rule: {}, stats: {}, list: [], total: 0, sum: {} };
+    shareState.mine = freshMine();
     shareState.merchant = null; shareState.merchantOpen = false; shareState.editorOpen = false; shareState.rotateOpen = false; shareState.statusOpen = false; shareState.helpOpen = false;
     shareState.settings = null; shareState.settingsLoading = false; shareState.settingsError = "";
     shareState.grantsOpen = false; shareState.grantRoles = []; shareState.grantRoleId = ""; shareState.grantPermissions = []; shareState.grantLoading = false; shareState.grantSaving = false; shareState.grantError = "";
@@ -423,7 +424,7 @@
     shareState.formFieldErrors = {}; shareState.configFieldErrors = {};
     shareState.ruleQuery = { keyword: "", status: "", page: 1, size: 20 };
     shareState.detailQuery = { merchantId: "", period: monthNow(), splitType: "", page: 1, size: 20 };
-    shareState.mineQuery = { merchantId: "", period: monthNow(), page: 1, size: 20 };
+    shareState.mineQuery = freshMineQuery();
     Object.keys(shareState.loading).forEach((key) => { shareState.loading[key] = false; shareState.errors[key] = ""; });
     Object.keys(requestIds).forEach((key) => delete requestIds[key]);
   }

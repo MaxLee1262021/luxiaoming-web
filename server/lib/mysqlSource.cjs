@@ -18,6 +18,7 @@ const schema = require("./mysqlSchema.cjs");
 const mysqlDescriptions = require("./mysqlDescriptions.cjs");
 const { SQL_TIME_ZONE, normalizeDateTime } = require("./mysqlDateTime.cjs");
 const { planSpotMutation } = require("./spotOrder.cjs");
+const { KEYS: CONTENT_ORDER_KEYS, planContentMutation } = require("./contentOrder.cjs");
 const { createLogger, errorCode, recordDatabaseOperation } = require("./observability.cjs");
 
 const {
@@ -116,6 +117,22 @@ function chunks(values, size) {
   const output = [];
   for (let index = 0; index < values.length; index += size) output.push(values.slice(index, index + size));
   return output;
+}
+
+// Consume lazily: a pool's connection limit does not bound the number of
+// queued promises or the result arrays retained by their closures.
+async function forEachBounded(values, concurrency, work) {
+  const iterator = values[Symbol.iterator]();
+  let failed = false, failure;
+  await Promise.all(Array.from({ length: concurrency }, async () => {
+    while (!failed) {
+      const next = iterator.next();
+      if (next.done) return;
+      try { await work(next.value); }
+      catch (error) { if (!failed) { failed = true; failure = error; } }
+    }
+  }));
+  if (failed) throw failure;
 }
 
 function emptyRelations() {
@@ -290,6 +307,7 @@ module.exports = function createMysqlSource(cfg = {}) {
   const slowQueryMs = Math.min(Math.max(Number(cfg.slowQueryMs ?? process.env.DB_SLOW_QUERY_MS ?? 500), 1), 120000);
   const slowTransactionMs = Math.min(Math.max(Number(cfg.slowTransactionMs ?? process.env.DB_SLOW_TRANSACTION_MS ?? 1000), 1), 120000);
   const relationBatchSize = Math.min(Math.max(Number(cfg.relationBatchSize ?? process.env.DB_RELATION_BATCH_SIZE ?? 500), 1), 1000);
+  const readConcurrency = Math.min(Math.max(Math.trunc(Number(cfg.connectionLimit) || 10), 1), 100);
 
   async function query(conn, sql, params = []) {
     const startedAt = process.hrtime.bigint();
@@ -733,17 +751,17 @@ module.exports = function createMysqlSource(cfg = {}) {
   // proportional to relationship types rather than the number of records.
   async function relationRowsMany(key, ids, conn = pool, knownAttributes) {
     const uniqueIds = [...new Set((ids || []).map((id) => String(id || "")).filter(Boolean))];
-    const output = new Map(uniqueIds.map((id) => [id, emptyRelations()]));
+    const output = groupRelationRows(uniqueIds, knownAttributes, {});
     if (!uniqueIds.length) return output;
     const relationPayload = {};
     for (const relationName of RELATION_BY_KEY[key] || []) {
       if (relationName === "account_permissions") continue;
       const relation = RELATIONS[relationName];
       const parent = relationParent(relationName);
-      if (relation && parent && parent.columns[0]) relationPayload[relationName] = { parentColumn: parent.columns[0], rows: [] };
+      if (relation && parent && parent.columns[0]) relationPayload[relationName] = { parentColumn: parent.columns[0] };
     }
-    const attributes = knownAttributes === undefined ? [] : knownAttributes;
-    for (const batch of chunks(uniqueIds, relationBatchSize)) {
+    for (let offset = 0; offset < uniqueIds.length; offset += relationBatchSize) {
+      const batch = uniqueIds.slice(offset, offset + relationBatchSize);
       const placeholders = batch.map(() => "?").join(",");
       const entries = Object.entries(relationPayload);
       const reads = knownAttributes === undefined ? [() => query(conn, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id IN (${placeholders}) ORDER BY record_id,path,ordinal`, [key, ...batch])] : [];
@@ -753,10 +771,36 @@ module.exports = function createMysqlSource(cfg = {}) {
         reads.push(() => query(conn, `SELECT * FROM \`${relation.table}\` WHERE \`${payload.parentColumn}\` IN (${placeholders}) ORDER BY \`${payload.parentColumn}\`,${orderBy}`, batch));
       }
       const rows = await readIndependentRelations(conn, reads);
-      if (knownAttributes === undefined) attributes.push(...rows[0]);
-      entries.forEach(([, payload], index) => payload.rows.push(...rows[index + (knownAttributes === undefined ? 1 : 0)]));
+      if (knownAttributes === undefined) {
+        for (const row of rows[0]) {
+          const target = output.get(String(row && row.record_id || ""));
+          if (target) target[COLLECTION_VALUES_TABLE].push(row);
+        }
+      }
+      entries.forEach(([name, payload], index) => {
+        for (const row of rows[index + (knownAttributes === undefined ? 1 : 0)]) {
+          const target = output.get(String(row && row[payload.parentColumn] || ""));
+          if (!target) continue;
+          (target[name] ||= []).push(row);
+        }
+      });
     }
-    return groupRelationRows(uniqueIds, attributes, relationPayload);
+    return output;
+  }
+
+  async function hydrateReadRows(key, rows) {
+    // Keep the full public list and its SQL order, but release each batch's
+    // relation/EAV structures before hydrating the next one. Replace internal
+    // raw rows in place rather than retaining a second full-length array.
+    for (let offset = 0; offset < rows.length; offset += relationBatchSize) {
+      const batch = rows.slice(offset, offset + relationBatchSize);
+      const related = await relationRowsMany(key, batch.map(row => String(row.id)));
+      for (let index = 0; index < batch.length; index++) {
+        const row = batch[index];
+        rows[offset + index] = hydrateDocument(key, row, related.get(String(row.id)) || emptyRelations());
+      }
+    }
+    return rows;
   }
 
   async function readOne(key, id) {
@@ -783,14 +827,87 @@ module.exports = function createMysqlSource(cfg = {}) {
     }
     if (item && item.legacy) return (await readLegacy(key)).map((row) => ({ ...sanitizeLegacyDocument(row.doc), id: row.id, _id: row.id }));
     const rows = await query(pool, `SELECT * FROM \`${tableFor(key)}\` ORDER BY id`);
-    const related = await relationRowsMany(key, rows.map((row) => String(row.id)));
-    return rows.map((row) => hydrateDocument(key, row, related.get(String(row.id)) || emptyRelations()));
+    return hydrateReadRows(key, rows);
+  }
+
+  async function getMany(key, ids) {
+    assertKey(key);
+    if (!Array.isArray(ids)) throw Object.assign(new Error("记录标识列表格式无效"), { code: "DATA_SOURCE_INVALID" });
+    if (!ids.length) return [];
+    const requested = ids.map(id => String(id));
+    const uniqueIds = [...new Set(requested)];
+    await ensure();
+    const item = state.get(key);
+    if (item && item.missing) throw Object.assign(new Error("规范化数据表不存在"), { code: "SCHEMA_MISSING" });
+    const found = new Map();
+    const batchSize = Math.min(relationBatchSize, 100);
+    for (let offset = 0; offset < uniqueIds.length; offset += batchSize) {
+      const batch = uniqueIds.slice(offset, offset + batchSize);
+      // Each indexed predicate is exactly the predicate used by get(). UNION
+      // ALL preserves the database's collation and parameter semantics while
+      // the ordinal maps aliases/missing IDs without lowercasing or an N+1
+      // fallback. A derived-table JOIN could change collation coercibility.
+      const projection = item && item.legacy ? "record.id, record.`doc`" : "record.*";
+      const sql = batch.map((_, index) => `SELECT ${index} AS __read_index, ${projection} FROM \`${tableFor(key)}\` record WHERE id=?`).join(" UNION ALL ");
+      const matches = (await query(pool, sql, batch)).map(({ __read_index, ...row }) => ({ index: Number(__read_index), row }));
+      if (item && item.legacy) {
+        for (const { index, row } of matches) {
+          const doc = parseLegacy(row.doc);
+          if (!doc) throw Object.assign(new Error("旧版数据记录格式无效"), { code: "DATA_SOURCE_INVALID" });
+          if (!found.has(batch[index])) found.set(batch[index], { ...sanitizeLegacyDocument(doc), id: String(row.id), _id: String(row.id) });
+        }
+      } else {
+        const related = await relationRowsForGets(key, matches.map(({ index }) => ({ index, id: batch[index] })));
+        for (const { index, row } of matches) {
+          const id = batch[index];
+          if (!found.has(id)) found.set(id, hydrateDocument(key, row, related.get(index) || emptyRelations()));
+        }
+      }
+    }
+    // Duplicate IDs and database-equivalent aliases must not share mutable
+    // documents: separate get() calls have separate nested results, too.
+    const returned = new Set();
+    return requested.map(id => {
+      const doc = found.get(id);
+      if (!doc) return null;
+      if (returned.has(doc)) return structuredClone(doc);
+      returned.add(doc);
+      return doc;
+    });
+  }
+
+  async function relationRowsForGets(key, owners) {
+    const output = new Map(owners.map(({ index }) => [index, emptyRelations()]));
+    if (!owners.length) return output;
+    const names = [COLLECTION_VALUES_TABLE];
+    const attributes = owners.map(({ index }) => `SELECT ${index} AS __read_owner, collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE collection_name=? AND record_id=?`).join(" UNION ALL ");
+    const reads = [() => query(pool, `${attributes} ORDER BY __read_owner,path,ordinal`, owners.flatMap(({ id }) => [key, id]))];
+    for (const name of RELATION_BY_KEY[key] || []) {
+      if (name === "account_permissions") continue;
+      const definition = RELATIONS[name], parent = relationParent(name);
+      if (!definition || !parent) continue;
+      const sql = owners.map(({ index }) => `SELECT ${index} AS __read_owner, related.* FROM \`${definition.table}\` related WHERE \`${parent.columns[0]}\`=?`).join(" UNION ALL ");
+      const orderBy = relationOrderColumns(definition).map(column => `\`${column}\``).join(",");
+      names.push(name);
+      reads.push(() => query(pool, `${sql} ORDER BY __read_owner,${orderBy}`, owners.map(({ id }) => id)));
+    }
+    // Read owner ordinals from SQL rather than comparing returned owner keys
+    // in JS. get() accepts the database's key equivalence independently in
+    // each relation table, including historical case variants and empty IDs.
+    const rows = await readIndependentRelations(pool, reads);
+    rows.forEach((result, index) => {
+      for (const { __read_owner, ...row } of result) {
+        const target = output.get(Number(__read_owner));
+        if (target) (target[names[index]] ||= []).push(row);
+      }
+    });
+    return output;
   }
 
   async function listMany(keys) {
     // Module endpoints have already authorized their keys; the source still
     // validates every identifier before issuing any SQL. Results are fresh and
-    // never shared across requests. The pool bounds independent read concurrency.
+    // never shared across requests. Bound queued work as well as connections.
     if (!Array.isArray(keys)) throw Object.assign(new Error("集合列表格式无效"), { code: "DATA_SOURCE_INVALID" });
     const requested = [...new Set(keys.map(assertKey))];
     if (!requested.length) return {};
@@ -798,35 +915,47 @@ module.exports = function createMysqlSource(cfg = {}) {
     for (const key of requested) if (state.get(key)?.missing) throw Object.assign(new Error("规范化数据表不存在"), { code: "SCHEMA_MISSING" });
     const rawByKey = new Map();
     const legacyByKey = new Map();
-    await Promise.all(requested.map(async key => {
+    await forEachBounded(requested, readConcurrency, async key => {
       if (state.get(key)?.legacy) legacyByKey.set(key, (await readLegacy(key)).map(row => ({ ...sanitizeLegacyDocument(row.doc), id: row.id, _id: row.id })));
       else rawByKey.set(key, await query(pool, `SELECT * FROM \`${tableFor(key)}\` ORDER BY id`));
-    }));
-    const owners = [...rawByKey].flatMap(([key, rows]) => rows.map(row => ({ key, id: String(row.id) })));
-    const attributesByKey = new Map(requested.map(key => [key, []]));
+    });
+    function* ownerBatches() {
+      let batch = [];
+      for (const [key, rows] of rawByKey) {
+        for (let index = 0; index < rows.length; index++) {
+          batch.push({ key, index, id: String(rows[index].id) });
+          if (batch.length >= relationBatchSize) { yield batch; batch = []; }
+        }
+      }
+      if (batch.length) yield batch;
+    }
     const canonicalKeys = new Map(requested.map(key => [key.toLowerCase(),key]));
-    await Promise.all(chunks(owners, relationBatchSize).map(async batch => {
+    // A rich order batch already fans out over eleven relation tables. Keep
+    // only a small number of those batches resident while retaining enough
+    // overlap to feed the pool; scalar-only collections can use every slot.
+    const widestRelations = Math.max(0, ...requested.map(key => (RELATION_BY_KEY[key] || []).filter(name => name !== "account_permissions").length));
+    const hydrationConcurrency = Math.min(readConcurrency, Math.max(2, Math.ceil(readConcurrency / (widestRelations + 1))));
+    await forEachBounded(ownerBatches(), hydrationConcurrency, async batch => {
       const groups = new Map();
-      for (const {key,id} of batch) { if (!groups.has(key)) groups.set(key, []); groups.get(key).push(id); }
+      for (const owner of batch) { if (!groups.has(owner.key)) groups.set(owner.key, []); groups.get(owner.key).push(owner); }
       const params = [], predicates = [];
-      for (const [key, ids] of groups) {
-        predicates.push(`(collection_name=? AND record_id IN (${ids.map(() => "?").join(",")}))`);
-        params.push(key, ...ids);
+      for (const [key, owners] of groups) {
+        predicates.push(`(collection_name=? AND record_id IN (${owners.map(() => "?").join(",")}))`);
+        params.push(key, ...owners.map(owner => owner.id));
       }
       const rows = await query(pool, `SELECT collection_name,record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM \`${RELATIONS.collection_values.table}\` WHERE ${predicates.join(" OR ")} ORDER BY collection_name,record_id,path,ordinal`, params);
+      const attributesByKey = new Map([...groups.keys()].map(key => [key, []]));
       for (const row of rows) {
         const key = canonicalKeys.get(String(row.collection_name).toLowerCase());
-        if (key) attributesByKey.get(key).push(row);
+        if (attributesByKey.has(key)) attributesByKey.get(key).push(row);
       }
-    }));
-    const output = {};
-    await Promise.all(requested.map(async key => {
-      if (legacyByKey.has(key)) { output[key] = legacyByKey.get(key); return; }
-      const rows = rawByKey.get(key);
-      const related = await relationRowsMany(key, rows.map(row => String(row.id)), pool, attributesByKey.get(key));
-      output[key] = rows.map(row => hydrateDocument(key, row, related.get(String(row.id)) || emptyRelations()));
-    }));
-    return Object.fromEntries(requested.map(key => [key, output[key]]));
+      await Promise.all([...groups].map(async ([key, owners]) => {
+        const related = await relationRowsMany(key, owners.map(owner => owner.id), pool, attributesByKey.get(key));
+        const records = rawByKey.get(key);
+        for (const owner of owners) records[owner.index] = hydrateDocument(key, records[owner.index], related.get(owner.id) || emptyRelations());
+      }));
+    });
+    return Object.fromEntries(requested.map(key => [key, legacyByKey.has(key) ? legacyByKey.get(key) : rawByKey.get(key)]));
   }
 
   async function findOrderByPaymentOutTradeNo(outTradeNo) {
@@ -944,6 +1073,24 @@ module.exports = function createMysqlSource(cfg = {}) {
     });
   }
 
+  async function applyContentMutation(key, id, patch = {}, options = {}) {
+    if (!CONTENT_ORDER_KEYS.has(key)) throw new Error("不支持的内容排序类型");
+    await ensure();
+    const stateItem = state.get(key);
+    if (stateItem && (stateItem.legacy || stateItem.missing)) throw Object.assign(new Error("商品数据结构尚未就绪"), { code: stateItem.legacy ? "SCHEMA_LEGACY" : "SCHEMA_MISSING" });
+    return withTransaction(async conn => {
+      // Serialize both pools in the packages table so conversion of a video
+      // into a bundle cannot race either pool's insertion order.
+      const rows = await query(conn, `SELECT * FROM \`${tableFor(key)}\` ORDER BY id FOR UPDATE`);
+      const relations = await relationRowsMany(key, rows.map(row => String(row.id)), conn);
+      const documents = rows.map(row => hydrateDocument(key, row, relations.get(String(row.id))));
+      const plan = planContentMutation(key, documents, id, schema.normalizeDocumentAliases(key, patch), options);
+      if (!plan) return null;
+      for (const change of plan.changes) await writeRecord(conn, key, change.id, change.after, tableFor(key), !!change.before);
+      return plan;
+    });
+  }
+
   async function upsert(key, id, patch = {}) {
     assertKey(key); await ensure();
     const current = await readOne(key, id);
@@ -972,6 +1119,13 @@ module.exports = function createMysqlSource(cfg = {}) {
     const stateItem = state.get(key);
     if (stateItem && (stateItem.legacy || stateItem.missing)) throw Object.assign(new Error("数据结构尚未就绪"), { code: "SCHEMA_MISSING" });
     const changed = await withTransaction(async conn => {
+      if (key === "orders" && ["rescheduleRequest", "cancellationSource", "customerCancelIdempotencyKey"].some(field => Object.hasOwn(patch || {}, field))) {
+        // The workbench reads before flushing its changed columns. Share its
+        // lock before reading this row, so a stale assignment/start cannot be
+        // flushed after customer cancellation or reschedule approval commits.
+        try { await query(conn, "SELECT id FROM svc_runtime_lock WHERE id=1 FOR UPDATE"); }
+        catch (error) { if (error.code !== "ER_NO_SUCH_TABLE") throw error; }
+      }
       const rows = await query(conn, `SELECT * FROM \`${tableFor(key)}\` WHERE id=? FOR UPDATE`, [String(id)]);
       if (!rows.length) return false;
       const current = hydrateDocument(key, rows[0], await relationRows(key, String(id), conn));
@@ -1063,11 +1217,13 @@ module.exports = function createMysqlSource(cfg = {}) {
     list: readMany,
     listMany,
     get: readOne,
+    getMany,
     findOrderByPaymentOutTradeNo,
     findBookingByPaymentOutTradeNo,
     create,
     update,
     applySpotMutation,
+    applyContentMutation,
     compareAndUpdate,
     replace,
     upsert,

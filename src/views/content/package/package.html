@@ -2,7 +2,7 @@
   <header class="package-head">
     <div>
       <h2>旅拍套餐管理</h2>
-      <p>按城市与打卡点批量添加照片、视频，跨地点组合套餐，独立多选影像周边。</p>
+      <p>按城市与打卡点组合套餐。升序向前插一位，降序向后插一位，其余套餐依次调整。</p>
     </div>
     <div class="package-head-actions">
       <div class="package-stats" aria-label="套餐数量统计">
@@ -45,6 +45,7 @@
         </div>
         <span class="package-status" :class="{'is-off':statusText(row)==='已下架'}">{{ statusText(row)==='已上架' ? '显示中' : '已隐藏' }}</span>
       </div>
+      <div class="catalog-meta-row"><span>推荐摄影师</span><strong>{{ contentPhotographerName(row) }}</strong></div>
       <p class="package-description">{{ row.description || '暂无套餐说明' }}</p>
       <div class="package-item-groups">
         <section v-for="group in groupItems(row)" :key="group.key" class="package-item-group" :class="{'is-peripheral':group.peripheral}">
@@ -52,7 +53,7 @@
           <div class="package-item-chips">
             <span v-for="(item,index) in group.items" :key="item.type+':'+item.productId+':'+index" class="package-item-chip">
               <span class="package-type" :class="'type-'+item.type">{{ item.typeLabel }}</span>
-              <span>{{ item.name || '未选择商品' }}<small v-if="item.quantity>1"> ×{{ item.quantity }}</small></span>
+              <span>{{ itemDisplayName(item) }}<small v-if="item.quantity>1"> ×{{ item.quantity }}</small></span>
             </span>
           </div>
         </section>
@@ -62,7 +63,7 @@
       <p v-if="visibilityHint(row)" class="package-visibility-hint">{{ visibilityHint(row) }}</p>
       <footer class="package-card-footer">
         <span class="package-muted">{{ (row.includedItems || []).length }} 种商品</span>
-        <div class="package-card-actions">
+        <div class="package-card-actions"><div class="content-order-controls" v-if="can('contentEdit')" role="group" aria-label="展示排序"><span class="content-order-position">第 {{ contentSortPosition('packages', row) }} 位</span><el-button plain :disabled="contentSortDisabled('packages', row, -1)" @click="changeContentSort('packages', row, -1)">升序</el-button><el-button plain :disabled="contentSortDisabled('packages', row, 1)" @click="changeContentSort('packages', row, 1)">降序</el-button></div>
           <el-button plain size="small" :disabled="pendingIds.includes(row.id)" @click="openEdit(row)">{{ canEdit() ? '编辑' : '查看' }}</el-button>
           <el-tooltip v-if="canEdit()" :content="manualVisible(row) ? '点击隐藏套餐' : '点击显示套餐'" placement="top">
             <el-switch :model-value="manualVisible(row)" :loading="pendingIds.includes(row.id)" :disabled="pendingIds.includes(row.id)" :aria-label="'在小程序显示套餐：'+row.name" @change="toggleVisible(row)" />
@@ -90,11 +91,13 @@
       <section class="package-form-section">
         <div class="package-section-head"><h3>基本信息</h3><span>套餐名称、标签与说明</span></div>
         <div class="package-basic-grid">
-          <label class="package-field"><span>套餐名称 <em>*</em></span><el-input v-model="form.name" maxlength="50" show-word-limit aria-label="套餐名称" placeholder="例如：西湖晨光 · 留影 + 航拍套餐" /></label>
+          <label class="package-field"><span>套餐名称 <em>*</em></span><el-input v-model="form.name" :maxlength="packageTitleLimit" show-word-limit aria-label="套餐名称" placeholder="例如：西湖晨光 · 留影 + 航拍套餐" /><small>最多 {{ packageTitleLimit }} 个字符，中文、字母、数字和标点均计入；首页标题预留三行。</small><small v-if="packageTitleLength(form.name)>packageTitleLimit" role="alert">现有标题超过限制；改名或重新显示前请缩短，原名称不会自动截断。</small></label>
           <div class="package-display-card"><span>小程序端展示</span><div><el-switch v-model="form.isShow" aria-label="在小程序显示此套餐" /><span>{{ !form.isShow ? '隐藏（小程序不可见）' : (previewVisible(form) ? '显示（小程序可见）' : '已开启，关联内容隐藏时暂不展示') }}</span></div></div>
         </div>
+        <label class="package-field"><span>推荐摄影师</span><el-select v-model="form.recommendedPhotographerId" clearable filterable aria-label="推荐摄影师" placeholder="请选择推荐摄影师（可选）" :loading="contentPhotographersLoading" :disabled="!canEdit() || saving"><el-option v-for="photographer in contentPhotographerOptions" :key="photographer.id" :label="photographer.name" :value="photographer.id" /></el-select></label>
+        <p v-if="contentPhotographersError" class="catalog-hint" role="alert">{{ contentPhotographersError }} <el-button link type="primary" :disabled="!canEdit() || saving" @click="loadContentPhotographers()">重试</el-button></p>
         <div class="package-field">
-          <span>套餐标签 <small>最多 6 个，可自定义</small></span>
+          <span>套餐标签 <em>*</em> <small>至少 1 个，最多 6 个，可自定义</small></span>
           <div class="package-tags package-edit-tags">
             <span v-for="(tag,index) in formTags" :key="tag" class="package-tag" :class="'tone-'+(index % 6)">{{ tag }}<button type="button" :disabled="!canEdit() || saving" :aria-label="'移除标签：'+tag" @click="removeTag(index)">×</button></span>
             <span v-if="!formTags.length" class="package-muted">暂未添加标签</span>
@@ -118,14 +121,14 @@
             </div>
           </div>
           <div class="package-add-line is-peripheral">
-            <div class="package-add-line-head"><span class="package-line-label">通用影像周边</span><span>独立多选，不受城市与打卡点限制</span></div>
+            <div class="package-add-line-head"><span class="package-line-label">通用影像周边</span><span>按规格独立多选，不受城市与打卡点限制</span></div>
             <div class="package-peripheral-fields">
-              <el-select v-model="picker.peripheralIds" multiple clearable filterable collapse-tags collapse-tags-tooltip :max-collapse-tags="2" popper-class="package-product-popper" aria-label="多选通用影像周边，可跨城市搭配" :placeholder="peripheralOptions.length ? '选择一个或多个影像周边' : '暂无可选影像周边'" :disabled="!peripheralOptions.length"><el-option v-for="product in peripheralOptions" :key="product.id" :label="product.name+'（'+money(product.price)+'）'" :value="product.id"><div class="package-product-option"><span class="package-option-name">{{ product.name }}</span><span class="package-option-price">{{ money(product.price) }}</span><span v-if="isProductIncluded('peripheral',product.id)" class="package-option-included">已添加</span></div></el-option></el-select>
+              <el-select v-model="picker.peripheralIds" multiple clearable filterable collapse-tags collapse-tags-tooltip :max-collapse-tags="2" popper-class="package-product-popper" aria-label="多选通用影像周边及具体规格，可跨城市搭配" :placeholder="peripheralOptions.length ? '选择影像周边及具体规格（可多选）' : '暂无可选影像周边'" :disabled="!peripheralOptions.length"><el-option v-for="product in peripheralOptions" :key="product.key" :label="product.label+'（'+money(product.price)+'）'" :value="product.key"><div class="package-product-option"><span class="package-option-name">{{ product.label }}</span><span class="package-option-price">{{ money(product.price) }}</span><span v-if="isProductIncluded('peripheral',product.id,product.key)" class="package-option-included">已添加</span></div></el-option></el-select>
               <el-button plain type="primary" :disabled="!picker.peripheralIds.length" @click="addPeripheralProducts">添加所选（{{ picker.peripheralIds.length }}）</el-button>
             </div>
           </div>
         </div>
-        <p class="package-help">添加后可切换城市 / 打卡点继续添加，已选商品会保留。重复添加同一商品将累计数量。</p>
+        <p class="package-help">添加后可切换城市 / 打卡点继续添加，已选商品会保留。周边不同规格分别添加，重复添加同一商品的同一规格将累计数量。</p>
         <div class="package-selection-head"><strong>已选商品</strong><span>共 <b>{{ selectedQuantity }}</b> 件 · 合计 <b>{{ money(form.originalPrice || 0) }}</b></span></div>
         <div v-if="form.includedItems.length" class="package-table-wrap">
           <table class="package-selected-table">
@@ -133,11 +136,11 @@
             <tbody>
               <tr v-for="(item,index) in form.includedItems" :key="item.type+':'+item.productId+':'+index">
                 <td class="package-cell-type"><span class="package-type" :class="'type-'+item.type">{{ itemTypeLabel(item.type) }}</span></td>
-                <td class="package-cell-product"><strong>{{ item.name || '未选择商品' }}</strong><small :class="{'is-peripheral':item.type==='peripheral'}">{{ itemLocation(item) }}</small></td>
+                <td class="package-cell-product"><strong>{{ itemDisplayName(item) }}</strong><small v-if="itemSelectionError(item)" class="package-item-error" role="alert">{{ itemSelectionError(item) }}</small><small :class="{'is-peripheral':item.type==='peripheral'}">{{ itemLocation(item) }}</small></td>
                 <td class="is-number package-cell-price" data-label="单价">{{ money(item.price || 0) }}</td>
-                <td class="package-cell-quantity"><el-input-number v-model="item.quantity" :min="1" :precision="0" controls-position="right" :aria-label="item.name+'的数量'" @change="setItemQuantity(item)" /></td>
+                <td class="package-cell-quantity"><el-input-number v-model="item.quantity" :min="1" :precision="0" controls-position="right" :aria-label="itemDisplayName(item)+'的数量'" @change="setItemQuantity(item)" /></td>
                 <td class="is-number package-cell-subtotal" data-label="小计">{{ money((item.price || 0)*(item.quantity || 0)) }}</td>
-                <td class="package-cell-remove"><el-button v-if="canEdit()" link type="danger" :aria-label="'移除商品：'+item.name" @click="removeIncludedItem(index)">移除</el-button></td>
+                <td class="package-cell-remove"><el-button v-if="canEdit()" link type="danger" :aria-label="'移除商品：'+itemDisplayName(item)" @click="removeIncludedItem(index)">移除</el-button></td>
               </tr>
             </tbody>
           </table>

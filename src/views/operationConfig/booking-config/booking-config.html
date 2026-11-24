@@ -1,10 +1,11 @@
 <div class="booking-config-page">
   <div class="booking-config-heading">
-    <div><h2>预约配置</h2><p>设置定金收取规则及用户提交预约前需同意的须知。</p></div>
-    <el-button :loading="loading" :disabled="saving" @click="loadConfig">重新加载</el-button>
+    <div><h2>预约配置</h2><p>设置定金收取规则、预约须知、成功页温馨提示和小程序隐私政策。</p></div>
+    <el-button :loading="loading" :disabled="busy" @click="loadConfig">重新加载</el-button>
   </div>
   <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon />
-  <el-form v-else-if="!loading" v-loading="saving" label-position="top" :disabled="!editable || saving" @submit.prevent="saveConfig">
+  <template v-else-if="!loading">
+  <el-form v-loading="saving" label-position="top" :disabled="!editable || busy" @submit.prevent="saveConfig">
     <section class="booking-config-card">
       <h3>默认定金比例</h3>
       <p>照片留影、视频摄像和旅拍套餐优先使用商品单独设置的定金比例；商品留空时使用这里的默认比例。约拍定制也使用此比例。</p>
@@ -29,15 +30,50 @@
       <h3>约拍定制定价 <span class="booking-config-optional">选填</span></h3>
       <p>仅用于约拍定制，照片留影、视频摄像和旅拍套餐使用各自商品售价。</p>
       <div class="booking-config-prices">
-        <el-form-item label="单人 1 小时价格（元）"><el-input-number v-model="form.single" :min="0.01" :precision="2" controls-position="right" placeholder="暂未配置" aria-label="约拍定制单人价格" /></el-form-item>
-        <el-form-item label="每增加一人每小时加价（元）"><el-input-number v-model="form.extraPerPerson" :min="0" :precision="2" controls-position="right" placeholder="暂未配置" aria-label="约拍定制每增加一人价格" /></el-form-item>
+        <el-form-item label="单人 1 小时价格（元）"><el-input-number v-model="form.single" :min="0.01" :step="0.01" :precision="2" controls-position="right" placeholder="暂未配置" aria-label="约拍定制单人价格" /></el-form-item>
+        <el-form-item label="每增加一人每小时加价（元）"><el-input-number v-model="form.extraPerPerson" :min="0" :step="0.01" :precision="2" controls-position="right" placeholder="暂未配置" aria-label="约拍定制每增加一人价格" /></el-form-item>
       </div>
     </section>
     <div class="booking-config-actions">
       <span>{{ ready ? '默认定金比例和预约须知已填写' : '请填写默认定金比例、预约须知正文及版本' }}</span>
-      <el-button v-if="editable" type="primary" native-type="submit" :loading="saving" :disabled="loading">保存预约配置</el-button>
+      <el-button v-if="editable" type="primary" native-type="submit" :loading="saving" :disabled="loading || privacySaving || tipsSaving">保存预约配置</el-button>
       <span v-else>当前账号仅可查看</span>
     </div>
   </el-form>
+  <el-form v-loading="tipsSaving" label-position="top" :disabled="!editable || busy" @submit.prevent="saveSuccessTips">
+    <section class="booking-config-card" aria-labelledby="success-tips-config-title">
+      <h3 id="success-tips-config-title">预约成功页温馨提示 <span class="booking-config-optional">选填</span></h3>
+      <p>设置小程序「预约申请已提交」页面底部「温馨提示」的正文。</p>
+      <el-form-item label="温馨提示正文">
+        <el-input v-model="tipsForm.content" type="textarea" :rows="6" :maxlength="20000" show-word-limit placeholder="请输入预约成功后的提示内容，留空使用默认提示" aria-label="预约成功页温馨提示正文" />
+      </el-form-item>
+      <p class="booking-config-hint">支持多行文字，最多 20000 个字符。未设置或清空后使用小程序默认提示。</p>
+      <div class="booking-config-actions booking-config-privacy-actions">
+        <span>{{ tipsForm.content.trim() ? '将展示自定义温馨提示' : '当前使用小程序默认提示' }}</span>
+        <el-button v-if="editable" type="primary" native-type="submit" :loading="tipsSaving" :disabled="saving || privacySaving">保存温馨提示</el-button>
+        <span v-else>当前账号仅可查看</span>
+      </div>
+    </section>
+  </el-form>
+  <el-form v-loading="privacySaving" label-position="top" :disabled="!editable || busy" @submit.prevent="savePrivacyConfig">
+    <section class="booking-config-card" aria-labelledby="privacy-config-title">
+      <h3 id="privacy-config-title">隐私配置</h3>
+      <p>配置小程序「我的 → 隐私政策」页面展示的标题和正文，单独保存后生效。</p>
+      <el-form-item label="隐私政策标题" required>
+        <el-input v-model="privacyForm.title" :maxlength="128" show-word-limit placeholder="请输入隐私政策标题" aria-label="隐私政策标题" />
+      </el-form-item>
+      <el-form-item label="隐私政策正文" required>
+        <el-input v-model="privacyForm.content" type="textarea" :rows="12" :maxlength="20000" show-word-limit placeholder="请输入完整的隐私政策，换行将按段落展示" aria-label="隐私政策正文" />
+      </el-form-item>
+      <p class="booking-config-hint">请填写实际生效的隐私政策，正文按换行分段展示。</p>
+      <p v-if="privacyUpdatedAt" class="booking-config-hint">最近保存：{{ privacyUpdatedAt }}</p>
+      <div class="booking-config-actions booking-config-privacy-actions">
+        <span>{{ privacyReady ? '隐私政策标题和正文已填写' : '请填写隐私政策标题和正文' }}</span>
+        <el-button v-if="editable" type="primary" native-type="submit" :loading="privacySaving" :disabled="saving || tipsSaving">保存隐私配置</el-button>
+        <span v-else>当前账号仅可查看</span>
+      </div>
+    </section>
+  </el-form>
+  </template>
   <div v-else class="booking-config-card" role="status">正在加载预约配置…</div>
 </div>

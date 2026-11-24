@@ -8,7 +8,8 @@ const {createLogger,errorCode} = require('./observability.cjs');
 const defaultLogger = createLogger({service:'customer-service'});
 const RETRY_SECONDS = [5,25,125];
 const menus = [
-  ['svcWorkbench','工作台','客服工作台'],['svcIntake','订单承接','客服工作台'],['svcFollowup','跟进与完成','客服工作台'],['svcComplaints','客诉与退款','客服工作台'],
+  ['svcGeneralWorkbench','总工作台','客服工作台'],
+  ['svcWorkbench','工作台','客服工作台'],['productLinks','商品小程序外链','客服工作台'],['svcIntake','订单承接','客服工作台'],['svcFollowup','跟进与完成','客服工作台'],['svcComplaints','客诉与退款','客服工作台'],
   ['svcRules','分成配置','客服分成管理'],['svcLedger','分成明细','客服分成管理'],['svcStaff','客服列表','客服分成管理'],['svcSettlements','结算管理','客服分成管理'],['svcMine','客服端','客服分成管理']
 ];
 function enabled() { return !!process.env.SVC_ENABLE_AT && Number.isFinite(Date.parse(process.env.SVC_ENABLE_AT)); }
@@ -87,6 +88,7 @@ async function attemptPaid(source,order,options={}) {
   jobs.set(id,run);return run;
 }
 async function queuePaid(source, order, options={}) {
+  if (order && !source.bookingRequestSource) await require('./packageFulfillment.cjs').sync(source, order);
   if (!enabled() || source.bookingRequestSource || !order) return {skipped:true};
   const at = order.depositPaidAt || order.paid_at || order.paidAt;
   if (!at || require('./svcCore.cjs').millis(at) < Date.parse(process.env.SVC_ENABLE_AT)) return {skipped:true};
@@ -100,12 +102,21 @@ async function queuePaid(source, order, options={}) {
 }
 async function onRefund(source, order) {
   if (!order) return {skipped:true};
+  await require('./packageFulfillment.cjs').sync(source, order);
   const no = order.orderNo || order.order_no;
   if (!enabled() && (!no || !await hasManualClaims(source, no))) return {skipped:true};
-  return serviceFor(source).workbench.onRefund(no);
+  return serviceFor(source).workbench.onRefund({ order_no: no, customerCancelled: order.cancellationSource === "customer_self_cancel" });
+}
+async function onCancelled(source, order, options = {}) {
+  if (!order || source.bookingRequestSource) return {skipped:true};
+  await require('./packageFulfillment.cjs').sync(source, order);
+  const no = order.orderNo || order.order_no;
+  if (Number(order.svc_paid_processed) !== 1 && (!no || !await hasManualClaims(source,no,options))) return {skipped:true};
+  return serviceFor(source,options).workbench.onCancelled(no);
 }
 async function onCompleted(source, order, options = {}) {
   if (!order || source.bookingRequestSource) return {skipped:true};
+  await require('./packageFulfillment.cjs').sync(source, order);
   // A late duplicate receipt must not re-open a refunded/cancelled order or
   // turn a review hold into service completion.
   if (order.paymentReviewRequired === true || require('./orderWorkflow.cjs').canonicalStage(order) === 'cancelled') return {skipped:true};
@@ -149,4 +160,4 @@ function createWorker(source, options = {}) {
   return { tick, start() { if (timer) return; stopped=false; timer=setInterval(tick,60000);timer.unref?.();tick(); }, async stop() { stopped=true;clearInterval(timer);timer=null;for(const scheduled of retryTimers.get(source)||[])clearTimeout(scheduled);retryTimers.get(source)?.clear();await current; } };
 }
 function stampDay(value){return require('./svcCore.cjs').stamp(value).slice(0,10);}
-module.exports={menus,enabled,hasManualClaims,serviceFor,onPaid,queuePaid,onRefund,onCompleted,createWorker,attemptPaid};
+module.exports={menus,enabled,hasManualClaims,serviceFor,onPaid,queuePaid,onRefund,onCancelled,onCompleted,createWorker,attemptPaid};

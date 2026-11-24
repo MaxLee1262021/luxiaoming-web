@@ -108,13 +108,13 @@ test("real browser shows global share settings read-only for super and hides the
     const dialog = page.getByRole("dialog", { name: "商家分成规则" });
     const settings = dialog.locator('section[aria-label="全局分成参数只读区域"]');
     await settings.locator("dl dt").first().waitFor({ state: "visible" });
-    assert.equal(await settings.locator("dl dt").count(), 11);
+    assert.equal(await settings.locator("dl dt").count(), 9);
     result.displayedParameters = await settings.locator("dl").evaluate(node => Object.fromEntries(Array.from(node.querySelectorAll("dt")).map(label => [label.textContent.trim(), label.nextElementSibling.textContent.trim()])));
     const displayed = result.displayedParameters;
     assert.equal(displayed["启用日配置状态"], actual.enabled ? "已配置" : "未配置");
-    assert.equal(displayed["默认客服订单分成时效"], `${actual.defaultTtlHours} 小时`);
+    assert.equal(displayed["默认客服订单分成时效"], undefined);
     assert.equal(displayed["默认平台退款窗口期"], `${actual.defaultRefundWindowDays} 天`);
-    assert.equal(displayed["客服候选商家上限"], `${actual.maxCandidateMerchants} 家`);
+    assert.equal(displayed["客服候选商家上限"], undefined);
     assert.equal(displayed["重复扫码去重窗口"], `${actual.scanDedupSeconds} 秒`);
     assert.equal(displayed["判定失败最大重试次数"], `${actual.judgeRetryMax} 次`);
     assert.equal(displayed["客服点击归因窗口"], Number(actual.csAttrDays) === 0 ? "仅本次会话" : `${actual.csAttrDays} 天`);
@@ -123,7 +123,7 @@ test("real browser shows global share settings read-only for super and hides the
     assert.equal(displayed["运营提醒配置"], actual.operationalAlertConfigured ? "已配置" : "未配置");
     assert.equal(displayed["正式启用时间（北京时间）"], "2026-01-01 08:00:00");
     assert.doesNotMatch(await settings.innerText(), /当前已启用|发送成功|https?:\/\//);
-    result.checks.push({ name: "super opens rule help and all 11 live HTTP parameters match their business display", passed: true });
+    result.checks.push({ name: "super opens rule help and all 9 current HTTP parameters match their business display", passed: true });
     result.checks.push({ name: "enabled and alert flags describe configuration, not launch activation or notification delivery", passed: true });
     assert.equal(await settings.locator("input,select,textarea,[contenteditable=true]").count(), 0);
     assert.deepEqual(await settings.getByRole("button").allTextContents(), ["刷新参数"]);

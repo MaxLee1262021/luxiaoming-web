@@ -13,6 +13,8 @@
     inDateRange,
     inRoleScope,
     isCreatedBooking,
+    isAutomaticCustomerRefund,
+    normalizeAfterSaleStatus,
     orderAfterSales,
     orderBusinessStatus,
     orderDistributorIds,
@@ -85,7 +87,9 @@ const scopedOrders = computed(() => {
   }
   if (state.filters.refundStatus) list = list.filter((o) => orderRefundStatus(o) === state.filters.refundStatus);
   if (state.filters.transferStatus) list = list.filter((o) => state.filters.transferStatus === "has" ? hasTransferRecord(o) : !hasTransferRecord(o));
-  if (state.filters.rescheduleStatus) list = list.filter((o) => state.filters.rescheduleStatus === "has" ? hasRescheduleRecord(o) : !hasRescheduleRecord(o));
+  if (state.filters.rescheduleStatus) list = list.filter((o) => state.filters.rescheduleStatus === "pending"
+    ? o.rescheduleRequest?.status === "pending"
+    : state.filters.rescheduleStatus === "has" ? hasRescheduleRecord(o) : !hasRescheduleRecord(o));
   if (state.filters.assigneeId) list = list.filter((o) => o.assigneeId === state.filters.assigneeId);
   if (state.filters.photographerId) list = list.filter((o) => o.photographerId === state.filters.photographerId);
   if (state.filters.productType) list = list.filter((o) => orderProducts(o).some((p) => p && (p.type === state.filters.productType || p.productType === state.filters.productType || resolveProduct(p).type === state.filters.productType)));
@@ -120,16 +124,18 @@ function afterSaleOrder(row) {
 const afterSaleRows = computed(() => {
   let list = data.afterSales.filter((row) => {
     const order = afterSaleOrder(row);
-    return order.id && inRoleScope(order);
+    return !isAutomaticCustomerRefund(row) && order.id && !row.deleted && !row.isDeleted && inRoleScope(order);
   });
-  if (state.filters.status) list = list.filter((row) => row.status === state.filters.status);
-  if (state.filters.productType) list = list.filter((row) => row.type === state.filters.productType);
+  const afterSaleView = state.active === "afterSales";
+  if (afterSaleView && state.filters.status) list = list.filter((row) => normalizeAfterSaleStatus(row.status) === normalizeAfterSaleStatus(state.filters.status));
+  if (afterSaleView && state.filters.productType) list = list.filter((row) => row.type === state.filters.productType);
   if (state.filters.assigneeId) list = list.filter((row) => row.assigneeId === state.filters.assigneeId);
   if (state.filters.keyword) list = list.filter((row) => JSON.stringify({ ...row, order: afterSaleOrder(row), shop: shopName(afterSaleOrder(row).shopId) }).includes(state.filters.keyword));
   return list.map((row) => {
     const order = afterSaleOrder(row);
     return {
       ...row,
+      status: normalizeAfterSaleStatus(row.status),
       orderNo: order.orderNo,
       shopId: order.shopId,
       amount: Number(row.refundAmount || row.amount || 0),
@@ -139,12 +145,12 @@ const afterSaleRows = computed(() => {
     };
   });
 });
-const activeAfterSaleRows = computed(() => afterSaleRows.value.filter((row) => row.status !== "已完"));
-const afterSaleRecordRows = computed(() => afterSaleRows.value.filter((row) => row.status === "已完"));
+const activeAfterSaleRows = computed(() => afterSaleRows.value.filter((row) => row.status !== "已完成"));
+const afterSaleRecordRows = computed(() => afterSaleRows.value.filter((row) => row.status === "已完成"));
 const afterSaleSummary = computed(() => ({
   total: activeAfterSaleRows.value.length,
-  pending: activeAfterSaleRows.value.filter((row) => ["待处", "待超管审", "待财务审"].includes(row.status)).length,
-  processing: activeAfterSaleRows.value.filter((row) => row.status === "处理").length,
+  pending: activeAfterSaleRows.value.filter((row) => ["待处理", "待超管审核", "待财务审核"].includes(row.status)).length,
+  processing: activeAfterSaleRows.value.filter((row) => row.status === "处理中").length,
   done: afterSaleRecordRows.value.length,
 }));
 const scopedScans = computed(() => {

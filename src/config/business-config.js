@@ -102,10 +102,10 @@ window.LXM_CONFIG = {
     }
   },
   orderStatuses: [
-    { value: "reserved", label: "待确认", color: "#10B981", customer: "待确认" },
-    { value: "awaiting_shoot", label: "待拍摄", color: "#3B82F6", customer: "待拍摄" },
-    { value: "deposit_paid", label: "待确认", color: "#10B981", customer: "待确认" },
-    { value: "assigned", label: "待拍摄", color: "#3B82F6", customer: "待拍摄" },
+    { value: "reserved", label: "已预约", color: "#10B981", customer: "已预约" },
+    { value: "awaiting_shoot", label: "已定档", color: "#3B82F6", customer: "已定档" },
+    { value: "deposit_paid", label: "已预约", color: "#10B981", customer: "已预约" },
+    { value: "assigned", label: "已定档", color: "#3B82F6", customer: "已定档" },
     { value: "shooting", label: "拍摄中", color: "#3B82F6", customer: "拍摄中" },
     { value: "retouching", label: "拍摄中", color: "#F97316", customer: "拍摄中" },
     { value: "editing", label: "拍摄中", color: "#F97316", customer: "拍摄中" },
@@ -117,14 +117,14 @@ window.LXM_CONFIG = {
     { value: "canceled", label: "已取消", color: "#6B7280", customer: "已取消" }
   ],
   visibleStatus: [
-    { value: "reserved", label: "待确认" },
-    { value: "awaiting_shoot", label: "待拍摄" },
+    { value: "reserved", label: "已预约" },
+    { value: "awaiting_shoot", label: "已定档" },
     { value: "shooting", label: "拍摄中" },
     { value: "completed", label: "已完成" },
     { value: "cancelled", label: "已取消" },
     // Legacy customerStatus values remain accepted on imported orders; the
     // display label uses the current business-state vocabulary.
-    { value: "scheduled", label: "待拍摄" },
+    { value: "scheduled", label: "已定档" },
     { value: "retouching", label: "拍摄中" },
     { value: "editing", label: "拍摄中" },
     { value: "delivered", label: "拍摄中" },

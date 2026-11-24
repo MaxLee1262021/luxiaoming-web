@@ -31,10 +31,10 @@
   <div class="table-title">
     <div>
       <strong>售后服务</strong>
-      <p>售后处理中会锁定订单完结、取消、转派和金额修改；有退款时需先确认金额，再进入财务审核。</p>
+      <p>客服提交问题 → 售后联系客人 → 提交退款 → 财务审核 → 原路退款。已预约订单的用户自助退款由系统自动处理。</p>
     </div>
   </div>
-  <el-table :data="pagedList('afterSaleActive', activeAfterSaleRows)" stripe border empty-text="暂无处理中的售后，客人发起的退款/改期会出现在这里">
+  <el-table :data="pagedList('afterSaleActive', activeAfterSaleRows)" stripe border empty-text="暂无待处理的售后问题">
     <el-table-column prop="createdAt" label="提交时间" width="150" />
     <el-table-column prop="type" label="类型" width="100" />
     <el-table-column label="订单/客户" min-width="180">
@@ -70,7 +70,7 @@
         <el-button link type="primary" @click="openAfterSaleProcess(row)">售后处理</el-button>
         <el-tooltip :content="isAfterSaleProcessReadonly(row) ? '该售后已完成或待财务审核，不能重复处理' : '确认售后处理完成'" placement="top" :disabled="!isAfterSaleProcessReadonly(row)">
           <span class="disabled-tip-wrap">
-            <el-button link type="success" :disabled="isAfterSaleProcessReadonly(row)" @click="completeAfterSale(row)">处理完成</el-button>
+            <el-button link type="success" :disabled="isAfterSaleProcessReadonly(row)" @click="completeAfterSale(row)">{{ row.amount > 0 ? '提交退款' : '处理完成' }}</el-button>
           </span>
         </el-tooltip>
       </template>

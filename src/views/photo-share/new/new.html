@@ -1,5 +1,5 @@
 <div class="photo-share">
-  <header class="photo-heading"><div><p class="photo-eyebrow">摄影师分成 · PH-05</p><h2>新增摄影师</h2><p>填写摄影师资料和登录信息，保存后开通账号并绑定本人分成。摄影师无需接单或二次审核。</p></div><el-button :disabled="photoState.busy" @click="cancelPhotoCreate">返回列表</el-button></header>
+  <header class="photo-heading"><div><p class="photo-eyebrow">摄影师分成 · PH-05</p><h2>新增摄影师</h2><p>填写摄影师资料，选择新建登录账号或关联已有账号，保存后绑定本人分成。摄影师无需接单或二次审核。</p></div><el-button :disabled="photoState.busy" @click="cancelPhotoCreate">返回列表</el-button></header>
   <el-alert v-if="!photoCanCreate" title="当前账号没有摄影师建档权限" type="warning" :closable="false" />
   <section v-else class="photo-panel photo-new-form" v-loading="photoState.loading.rule">
     <el-form :key="'photo-new-' + photoState.busy" label-position="top" :model="photoState.form" :disabled="photoState.busy">
@@ -14,10 +14,11 @@
       </div>
       <p class="photo-form-note">摄影师无观察期，按完成月份归集；等待天数用于列表展示。</p>
       <div class="photo-account-section"><h3 class="photo-section-title">摄影师账号</h3>
-      <p class="photo-muted">一个账号对应一位摄影师，保存后立即开户。请通过既有安全渠道交付登录信息。</p>
+      <p class="photo-muted">一个账号对应一位摄影师。关联已有账号后继续使用原密码登录。</p>
+      <el-form-item label="登录账号设置"><el-radio-group v-model="photoState.form.create_account" @change="photoAccountModeChanged"><el-radio :value="true">新建登录账号</el-radio><el-radio :value="false">关联已有账号</el-radio></el-radio-group></el-form-item>
       <div class="photo-form-grid photo-account-grid">
-        <el-form-item label="登录账号" required prop="account" :error="photoState.formErrors.account"><el-input v-model="photoState.form.account" @input="clearPhotoFormError('account')" :validate-event="false" maxlength="128" autocomplete="off" /></el-form-item>
-        <el-form-item label="登录密码" required prop="password" :error="photoState.formErrors.password"><el-input v-model="photoState.form.password" @input="clearPhotoFormError('password')" :validate-event="false" type="password" show-password maxlength="128" autocomplete="new-password" /><small class="photo-input-help">8–128位，须同时包含字母和数字。</small></el-form-item>
+        <el-form-item label="登录账号" required prop="account" :error="photoState.formErrors.account"><el-input v-model="photoState.form.account" @input="clearPhotoFormError('account')" :validate-event="false" maxlength="128" autocomplete="off" :placeholder="photoState.form.create_account ? '填写新建摄影师登录账号' : '填写已新增的摄影师登录账号'" /><small class="photo-input-help">{{ photoState.form.create_account ? '保存时同时创建登录账号，并自动关联本摄影师。' : '填写权限管理中已启用、尚未关联摄影师档案的摄影师账号。' }}</small></el-form-item>
+        <el-form-item v-if="photoState.form.create_account" label="登录密码" required prop="password" :error="photoState.formErrors.password"><el-input v-model="photoState.form.password" @input="clearPhotoFormError('password')" :validate-event="false" type="password" show-password maxlength="128" autocomplete="new-password" /><small class="photo-input-help">8–128位，须同时包含字母和数字。</small></el-form-item>
       </div></div>
       <h3 class="photo-section-title">初始分成比例</h3><p class="photo-muted">默认填入当前统一比例。四类各自独立，单人比例须四类一次给全。</p>
       <div class="photo-rate-grid"><el-form-item v-for="category in photoCategories" :key="category.key" :label="category.label + '比例（%）'" required><el-input-number v-model="photoState.form[category.key]" :min="0" :max="100" :step="0.1" :precision="1" controls-position="right" /></el-form-item></div>

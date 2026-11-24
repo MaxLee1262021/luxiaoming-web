@@ -139,8 +139,16 @@ function confirmedRefund(order) {
   };
   // A multi-payment refund may have successful funds before the ticket reaches
   // its terminal state. An in-flight attempt is never confirmed money.
-  if (tickets.length) return tickets.reduce((sum, item) => sum + successfulAmount(item), 0);
-  return successfulAmount(order || {});
+  const online = Math.max(0, Number(order?.onlineRefundedAmount || 0));
+  if (tickets.length) {
+    const onlineTickets = tickets.filter(item => Array.isArray(item.refundAttempts));
+    const onlineVisible = onlineTickets.reduce((sum, item) => sum + successfulAmount(item), 0);
+    const manual = tickets.filter(item => !Array.isArray(item.refundAttempts)).reduce((sum, item) => sum + successfulAmount(item), 0);
+    // Automatic refunds are hidden from after-sale worklists. Their verified
+    // total stays on the order; overlap with visible online tickets counts once.
+    return Math.max(online, onlineVisible) + manual;
+  }
+  return Math.max(online, successfulAmount(order || {}));
 }
 function retainedCancelledAmount(order) {
   if (!isOrderCancelledStatus(order)) return 0;
@@ -276,8 +284,8 @@ function statusMeta(value) {
   // delivery facts remain visible in the order drawer, while the main list
   // follows the business statuses for paid reservations.
   const labels = {
-    reserved: "待确认", awaiting_shoot: "待拍摄",
-    deposit_paid: "待确认", assigned: "待拍摄", shooting: "拍摄中",
+    reserved: "已预约", awaiting_shoot: "已定档",
+    deposit_paid: "已预约", assigned: "已定档", shooting: "拍摄中",
     retouching: "拍摄中", editing: "拍摄中", final_pending: "拍摄中",
     delivered: "拍摄中", paid: "已完成", completed: "已完成",
     done: "已完成", cancelled: "已取消", canceled: "已取消"
@@ -365,8 +373,9 @@ function orderSourceName(order) {
   if (orderSourceType(order) === "natural") return order.sourceName || "小程序自然来";
   const distIds = orderDistributorIds(order);
   const shopId = order.shopId || order.source?.shopId;
-  if (distIds.length) return `${distIds.map(distributorName).join("、")} / ${shopName(shopId)}`;
-  return shopName(shopId);
+  const merchantName = shopById(shopId).name || order.sourceName || order.source?.shopName || shopId;
+  if (distIds.length) return `${distIds.map(distributorName).join("、")} / ${merchantName}`;
+  return merchantName;
 }
 function staffName(id) {
   return (ctx.photoState?.options?.find((row) => row.id === id) || data.staff.find((s) => s.id === id) || {}).name || "总部摄影";
@@ -623,8 +632,21 @@ function productStatus(row) {
   if (["启用", "发布"].includes(row.status)) return "上架";
   return "上架";
 }
+function isGeneralWorkbenchDisplay() {
+  const route = typeof ctx.menuRouteKey === "function" ? ctx.menuRouteKey(state.active) : state.active;
+  return route === "svcGeneralWorkbench";
+}
+// New-desk display only: never mask the business models or legacy defaults.
+function generalDisplay(value) {
+  if (!isGeneralWorkbenchDisplay() || typeof value !== "string" || !value) return value;
+  return value.replace(/(^|[^\d])(1\d{2})\d{4}(\d{4})(?!\d)/g, "$1$2****$3");
+}
 function visiblePhone(order) {
   if (!order?.phone) return "-";
+  if (isGeneralWorkbenchDisplay()) {
+    const value = String(order.phone);
+    return /^1\d{10}$/.test(value) ? generalDisplay(value) : value.includes("****") ? value : "联系方式已隐藏";
+  }
   if (state.role === "merchant") return order.phone.replace(/(\d{3})\d{4}(\d{4})/, "$1****$2");
   if (state.role === "photo") return "仅客服可";
   return order.phone;
@@ -827,8 +849,11 @@ function syncShopDistributorRates() {
     }
   });
 }
+function isAutomaticCustomerRefund(row = {}) {
+  return row.reviewLane === "customer_self_cancel" || row.submitSource === "customer_self_cancel";
+}
 function orderAfterSales(order) {
-  return data.afterSales.filter((item) => item.orderId === order.id);
+  return data.afterSales.filter((item) => item.orderId === order.id && !isAutomaticCustomerRefund(item));
 }
 function activeAfterSales(order) {
   return orderAfterSales(order).filter((item) => normalizeAfterSaleStatus(item.status) !== "已完成");
@@ -890,9 +915,10 @@ function orderTimelineRows(order) {
 function normalizeAfterSaleStatus(status) {
   const value = String(status || "").trim();
   if (!value) return "待处理";
-  if (["待处理", "待客服处理", "待跟进", "待响应"].includes(value)) return "待处理";
-  if (["处理中", "跟进中", "处理进行中"].includes(value)) return "处理中";
-  if (["已完成", "已结案", "已完结", "完成"].includes(value)) return "已完成";
+  if (["pending", "pending_review", "new", "待处", "待处理", "待客服处理", "待跟进", "待响应"].includes(value)) return "待处理";
+  if (["processing", "处理", "处理中", "跟进中", "处理进行中"].includes(value)) return "处理中";
+  if (["completed", "closed", "done", "已完", "已完成", "已结案", "已完结", "完成"].includes(value)) return "已完成";
+  if (["pending_finance", "待财务审", "待财务审核"].includes(value)) return "待财务审核";
   if (value.includes("超管")) return "待超管审核";
   return value;
 }
@@ -943,7 +969,7 @@ function copyOrderWechatInfo(order) {
   const lines = [
     `订单号：${order.orderNo || "-"}`,
     `客户：${order.customer || "-"}`,
-    `手机号：${order.phone || visiblePhone(order)}`,
+    `手机号：${isGeneralWorkbenchDisplay() ? visiblePhone(order) : order.phone || visiblePhone(order)}`,
     `微信号：${order.wechat || visibleWechat(order)}`,
     `拍摄时间：${order.appointmentAt || "待确认"}${order.timePeriod ? `（${order.timePeriod}）` : ""}`,
     `客人可见状态：${(statusMeta(order.status) || {}).customer || "-"}`,
@@ -951,7 +977,7 @@ function copyOrderWechatInfo(order) {
     `已收定金：${money(order.depositPaid)}`,
     `已收尾款：${money(order.finalPaid)}`,
   ];
-  const text = lines.join("\n");
+  const text = generalDisplay(lines.join("\n"));
   const done = () => ElMessage.success("订单信息已复制，可粘贴到企业微信或内部记录");
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
@@ -1257,6 +1283,8 @@ function canCompleteOrderPayment(order) {
     productName,
     productPrice,
     productStatus,
+    isGeneralWorkbenchDisplay,
+    generalDisplay,
     visiblePhone,
     visibleWechat,
     serviceOwnerName,
@@ -1282,6 +1310,7 @@ function canCompleteOrderPayment(order) {
     orderDistributorSplits,
     distributorRateForShop,
     syncShopDistributorRates,
+    isAutomaticCustomerRefund,
     orderAfterSales,
     activeAfterSales,
     isOrderAfterSaleLocked,

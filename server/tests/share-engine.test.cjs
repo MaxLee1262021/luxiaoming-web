@@ -18,27 +18,16 @@ function scenario(windowBits = [1, 1, 1], selfBits = [0, 0, 0]) {
   };
 }
 
-// Expectations transcribed from DEV-SHR-001 section 11.1, not computed using
-// the implementation's candidate-selection algorithm.
-const MATRIX = [
-  { window: [1, 1, 1], expected: ["C", "C", "B", "C", "A", "C", "B", "C"] },
-  { window: [1, 1, 0], expected: ["B", "B", "B", "B", "A", "A", "B", "B"] },
-  { window: [1, 0, 1], expected: ["C", "C", "C", "C", "A", "C", "A", "C"] },
-  { window: [1, 0, 0], expected: ["A", "A", "A", "A", "A", "A", "A", "A"] },
-  { window: [0, 1, 1], expected: ["C", "C", "B", "C", "C", "C", "B", "C"] },
-  { window: [0, 1, 0], expected: ["B", "B", "B", "B", "B", "B", "B", "B"] },
-  { window: [0, 0, 1], expected: ["C", "C", "C", "C", "C", "C", "C", "C"] },
-  { window: [0, 0, 0], expected: ["0", "0", "0", "0", "0", "0", "0", "0"] },
-];
-for (const [group, row] of MATRIX.entries()) for (let mask = 0; mask < 8; mask++) {
-  const bits = [(mask >> 2) & 1, (mask >> 1) & 1, mask & 1];
-  const caseNo = group * 8 + mask + 1;
-  test(`TC-T2-${String(caseNo).padStart(2, "0")}: window ${row.window.join("")} self ${bits.join("")}`, () => {
-    const result = judgeShare(scenario(row.window, bits));
-    assert.equal(result.hitMerchantId, row.expected[mask]);
+// Legacy TTL and previous orders no longer change ownership.
+for (let window = 0; window < 8; window++) for (let self = 0; self < 8; self++) {
+  const bits = n => [(n >> 2) & 1, (n >> 1) & 1, n & 1];
+  test('latest scan wins with legacy window ' + window + ' and self history ' + self, () => {
+    const result = judgeShare(scenario(bits(window), bits(self)));
+    assert.equal(result.hitMerchantId, "C");
     assert.equal(result.splitType, "T2");
-    assert.equal(result.splitAmount, row.expected[mask] === "0" ? "0.00" : "15.00");
-    assert.equal(result.candidateJson.candidates.length, 3);
+    assert.equal(result.splitAmount, "15.00");
+    assert.equal(result.candidateJson.candidates.length, 1);
+    assert.equal(result.candidateJson.attributionRule, "LATEST_SCAN_UNTIL_NEXT");
   });
 }
 
@@ -53,6 +42,56 @@ test("T1 persists across old scans, but a closed latest binding never revives an
   assert.equal(judgeShare(input).hitMerchantId, "0");
 });
 
+test("verified checkout supplies missing scan evidence, but latest server scan controls ownership", () => {
+  const input = scenario(); input.clicks = []; input.bindings = [];
+  input.event.orderSource = { merchantId: "A", qrId: "qr-A", scene: "SVERIFIEDA", at: "2026-11-06T12:00:00+08:00" };
+  let result = judgeShare(input);
+  assert.equal(result.hitMerchantId, "A"); assert.equal(result.hitReason, "ORDER_SOURCE");
+  assert.equal(result.splitAmount, "25.00"); assert.equal(result.ruleVersion, 1);
+  assert.deepEqual(result.orderSource, { merchantId: "A", qrId: "qr-A", scene: "SVERIFIEDA", at: "2026-11-06T04:00:00.000Z" });
+  assert.deepEqual(result.candidateJson.orderSource, result.orderSource);
+  input.bindings = scenario().bindings;
+  result = judgeShare(input);
+  assert.equal(result.hitMerchantId, "C", "the latest actual scan replaces an older checkout source");
+  assert.equal(result.candidateJson.candidates.length, 1);
+  assert.equal(result.candidateJson.candidates[0].source, "BINDING");
+});
+
+test("an inactive or missing checkout merchant cannot fall back to a different active binding", () => {
+  const input = scenario(); input.clicks = []; input.bindings = [];
+  input.event.orderSource = { merchantId: "A", qrId: "qr-A", scene: "SVERIFIEDA", at: "2026-11-06T04:00:00Z" };
+  for (const status of ["CLOSED", "DISABLED", "TERMINATED", "CANCELLED"]) {
+    input.merchants[0].status = status;
+    const result = judgeShare(input);
+    assert.equal(result.hitMerchantId, "0"); assert.equal(result.hitReason, "ORDER_SOURCE_MERCHANT_INACTIVE");
+    assert.equal(result.splitAmount, "0.00"); assert.equal(result.candidateJson.candidates[0].active, false);
+    assert.equal(result.candidateJson.orderSource.merchantId, "A");
+  }
+  input.merchants = input.merchants.slice(1);
+  assert.equal(judgeShare(input).hitMerchantId, "0");
+});
+
+test("restored checkout cannot manufacture a scan or revive an inactive latest binding", () => {
+  for (const clicks of [[], scenario().clicks]) {
+    const input = scenario(); input.clicks = clicks;
+    input.event.orderSource = { merchantId: "A", qrId: "qr-A", scene: "SVERIFIEDA", at: PAY };
+    assert.equal(judgeShare(input).hitMerchantId, "C");
+    input.bindings[2].status = "INACTIVE";
+    assert.equal(judgeShare(input).hitMerchantId, "0");
+  }
+});
+
+test("checkout evidence is bounded, normalized and cannot occur after payment", () => {
+  const input = scenario(); input.clicks = []; input.bindings = [];
+  const valid = { merchantId: "A", qrId: "qr-A", scene: "SVERIFIEDA", at: PAY };
+  input.event.orderSource = valid;
+  assert.equal(judgeShare(input).hitMerchantId, "A", "an inclusive checkout/payment timestamp is valid");
+  for (const value of [[], "A", {}, { ...valid, merchantId: "" }, { ...valid, qrId: "" }, { ...valid, scene: "X".repeat(33) }, { ...valid, at: "2026-11-10T12:00:01+08:00" }]) {
+    input.event.orderSource = value;
+    assert.throws(() => judgeShare(input), { code: "SHARE_4001" });
+  }
+});
+
 test("same timestamp uses numeric scan ID; future scans and future clicks are excluded", () => {
   const input = scenario(); input.clicks = [];
   input.bindings.forEach(row => row.lastScanAt = "2026-11-09T12:00:00+08:00");
@@ -62,26 +101,26 @@ test("same timestamp uses numeric scan ID; future scans and future clicks are ex
   assert.equal(result.hitMerchantId, "A"); assert.equal(result.splitType, "T1");
 });
 
-test("TTL uses historical superseded scan-time rule while ratio and refund window use payment-time rule", () => {
+test("legacy TTL never expires ownership; ratio and refund window use payment-time rule", () => {
   const input = scenario([1, 0, 0]);
   input.bindings = input.bindings.slice(0, 1); input.rules = input.rules.slice(0, 1);
   input.rules[0].status = "SUPERSEDED";
   input.rules.push({ ...input.rules[0], versionNo: 2, effectiveFrom: "2026-11-07T00:00:00+08:00", ratioT2: "0.0800", ttlHours: 1, status: "ACTIVE", refundWindowDays: 9 });
   const result = judgeShare(input);
   assert.equal(result.hitMerchantId, "A"); assert.equal(result.splitAmount, "40.00"); assert.equal(result.refundWindowDays, 9);
-  assert.equal(result.candidateJson.candidates[0].ttlHours, 720);
+  assert.equal(result.candidateJson.candidates[0].inWindow, true);
   assert.equal(resolveRatioAt(input.rules, "A", PAY).versionNo, 2);
   assert.equal(resolveTtlAt(input.rules, "A", input.bindings[0].lastScanAt).ruleVersion, 1);
 });
 
-test("T2 includes the inclusive window endpoint and excludes fully refunded or future self orders", () => {
+test("T2 ignores old windows and previous refunded or future self orders", () => {
   const input = scenario([1, 1, 1], [1, 1, 0]);
   input.rules.forEach(rule => rule.ttlHours = 96);
   input.selfOrders[0].fullyRefunded = true;
   input.selfOrders[1].payTime = "2026-11-11T12:00:00+08:00";
   const result = judgeShare(input);
   assert.equal(result.hitMerchantId, "C");
-  assert.equal(result.candidateJson.candidates.find(row => row.merchantId === "A").inWindow, true);
+  assert.equal(result.candidateJson.candidates[0].merchantId, "C");
 });
 
 test("unmapped latest staff click means T1/missing; clicks never create a binding", () => {
@@ -105,7 +144,7 @@ test("seven-day click window and zero-day explicit session window are respected"
   assert.equal(resolveSource({ event, clicks: [click], options: { csAttrDays: 0 } }).splitType, "T1");
 });
 
-test("candidate limit records truncation and considers the latest twenty only", () => {
+test("legacy candidate limit cannot exclude latest scan", () => {
   const input = scenario(); input.bindings = [];
   for (let i = 0; i < 21; i++) {
     const merchantId = "m" + i; input.merchants.push({ id: merchantId, status: "OPEN" });
@@ -114,7 +153,7 @@ test("candidate limit records truncation and considers the latest twenty only", 
   }
   input.selfOrders = [{ userId: "user-1", hitMerchantId: "m0", orderId: "old", splitType: "T1", payTime: "2026-11-09T00:00:00+08:00" }];
   const result = judgeShare(input);
-  assert.equal(result.hitMerchantId, "m20"); assert.equal(result.candidateJson.candidates.length, 20); assert.equal(result.candidateJson.truncated, true);
+  assert.equal(result.hitMerchantId, "m20"); assert.equal(result.candidateJson.candidates.length, 1); assert.equal(result.candidateJson.truncated, false);
 });
 
 test("money is HALF_UP at cents and pending attribution is frozen until net-base accounting", () => {

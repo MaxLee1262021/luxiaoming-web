@@ -7,12 +7,14 @@ const { apiModule, createLogger, currentRequestContext, errorCode, requestId } =
 const { keysForModule } = require("./apiModules.cjs");
 const { prepareGuideForSave } = require("./guideContent.cjs");
 const contentPolicy = require("./contentPolicy.cjs");
+const { listContentPhotographers } = require("./contentPhotographers.cjs");
 const requestReadSource = require("./requestReadSource.cjs");
 const { prepareDepositPatch, prepareSiteConfigPatch } = require("./bookingConfig.cjs");
 const merchantShare = require("./merchantShare.cjs");
 const { readScanRecords } = require("./scanRecords.cjs");
 const { MENUS: PHOTO_MENUS, createPhotoRoute } = require("./photoRoute.cjs");
 const { planMutation: planSpotMutation } = require("./spotOrder.cjs");
+const { KEYS: CONTENT_ORDER_KEYS, planContentMutation } = require("./contentOrder.cjs");
 const { isGuideAttachment } = require("./guideAttachments.cjs");
 const {
   WORKFLOW_STAGES,
@@ -31,6 +33,7 @@ const {
   businessStatusLabel,
   customerStatusForOrder,
   hasEffectiveDispatch,
+  isAutomaticOrderRefund,
   isDepositRefundable,
   refundableDepositAmount,
   normalizePaymentStatus,
@@ -137,16 +140,23 @@ const FINANCE_DOCUMENT_FIELDS = new Set(["settlementObservationDays", "largeSett
 const PUBLIC_RPC_NAMES = new Set([
   "login", "bindPhone", "getHomeData", "getSpots", "getBookingData", "getSeriesList",
   "getSeriesDetail", "getPhotoCollection", "getPeripherals", "getGuides", "listGuides", "getGuide", "getMyOrders",
-  "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "updateOrderStatus", "cancelOrder",
+  "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "updateOrderStatus", "cancelOrder", "confirmOrderArrival", "requestOrderReschedule",
   "createPayment", "createPaymentIntent", "getPaymentStatus", "cancelBooking",
   "submitAfterSale", "resolveMerchantCode", "reportShareScan", "reportShareClick", "getCities", "getPrivacyPolicy", "getSearchConfig",
   "getBookingConfig", "getFootprintConfig", "getCorpConfig", "getVideoSingles", "getMyProfile", "updateMyProfile", "getMyAfterSales",
   "getMyFavorites", "checkFavorite", "addFavorite", "removeFavorite", "toggleFavorite", "reportShareScan", "reportShareClick"
 ]);
 const PUBLIC_PRIVATE_RPC = new Set([
-  "bindPhone", "getMyProfile", "updateMyProfile", "getMyAfterSales", "getMyOrders", "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "createPayment", "createPaymentIntent", "getPaymentStatus", "cancelBooking", "updateOrderStatus", "cancelOrder", "submitAfterSale", "reportShareScan", "reportShareClick",
+  "confirmOrderArrival",
+  "bindPhone", "getMyProfile", "updateMyProfile", "getMyAfterSales", "getMyOrders", "getOrderDetail", "getOrderStatusCount", "createBooking", "createOrder", "createPayment", "createPaymentIntent", "getPaymentStatus", "cancelBooking", "updateOrderStatus", "cancelOrder", "requestOrderReschedule", "submitAfterSale", "reportShareScan", "reportShareClick",
   "getMyFavorites", "checkFavorite", "addFavorite", "removeFavorite", "toggleFavorite"
 ]);
+PUBLIC_RPC_NAMES.add("requestOrderRefund");
+PUBLIC_PRIVATE_RPC.add("requestOrderRefund");
+for (const action of require("./physicalCommerce.cjs").PUBLIC_ACTIONS) {
+  PUBLIC_RPC_NAMES.add(action);
+  if (action !== "getPhysicalCatalog") PUBLIC_PRIVATE_RPC.add(action);
+}
 const ADMIN_RPC_ACTIONS = { getDashboard: "dashboard", generateMerchantQR: "shopEdit" };
 
 const ROLE_ALIASES = { admin: "super", administrator: "super", photographer: "photo" };
@@ -167,7 +177,7 @@ const CONTENT_ROUTE_KEYS = new Set([
 ]);
 const DEFAULT_ROLE_MENU_KEYS = Object.freeze({
   super: ["dashboard", "orders", "afterSales", "tasks", "addonServices", "financeReview", "reconciliation", "staff", "distributors", "shops", "contentOverview", "spots", "cities", "series", "albums", "samples", "contentTags", "packages", "videoSingles", "shelfProducts", "productAudit", "peripherals", "miniDecor", "bookingConfig", "guides", "permissions", "logs", "trash"],
-  service: ["dashboard", "orders", "afterSales", "addonServices"],
+  service: ["dashboard", "orders", "afterSales", "addonServices", "productLinks"],
   finance: ["dashboard", "orders", "afterSales", "financeReview", "reconciliation"],
   photo: ["photoMine"],
   merchant: ["shareMine"],
@@ -231,8 +241,10 @@ const ORDER_FINANCE_FIELDS = new Set([
 const ORDER_PHOTO_FIELDS = new Set(["status", "customerStatus", "statusLogs", "followRecords", "completedAt"]);
 const ORDER_MERCHANT_FIELDS = new Set(["customerRemark"]);
 const IMMUTABLE_ORDER_FIELDS = new Set(["id", "_id", "orderNo", "openid", "_openid", "createTime", "bookingIdempotencyKey", "refundAttempts", "onlineRefundReservations", "refundedAmount", "onlineRefundedAmount", "shareEnqueuePending", "shareRefundPending", "refundStatus", "refundConfirmed", "finalPaymentSessionId", "finalPaymentSessionStartAt", "shareOrderSource", "shareServiceStaffId", "shareCsClickId", "shareSourceReason", "shareAttributionRevision"]);
+for (const field of ["customerArrivedAt", "customerArrivedBy"]) IMMUTABLE_ORDER_FIELDS.add(field);
+for (const field of ["rescheduleRequest", "rescheduleRequestHistory", "rescheduleRecords", "customerCancellationRefundStatus", "customerCancellationRefundAmount", "customerCancellationRefundBaselineOnlineAmount", "customerCancelRefundTicketId", "customerCancelRefundTicketIds", "customerCancellationServicePending", "customerCancelIdempotencyKey", "cancellationSource"]) IMMUTABLE_ORDER_FIELDS.add(field);
 for (const field of ['customer_openid','requested_time','schedule_time','service_status','assignee_id','photo_id','done_at','reserve_staff_id','is_rebuy','reflow_from','svc_paid_processed','svcPaymentPending']) IMMUTABLE_ORDER_FIELDS.add(field);
-for (const field of ['svcPaymentAttempts','svcPaymentRetryAt','svcPaymentDeadAt','svcPaymentFailureCode']) IMMUTABLE_ORDER_FIELDS.add(field);
+for (const field of ['svcPaymentAttempts','svcPaymentRetryAt','svcPaymentDeadAt','svcPaymentFailureCode','physicalFulfillmentSnapshot']) IMMUTABLE_ORDER_FIELDS.add(field);
 const ORDER_WORKFLOW_FIELDS = new Set([
   "status", "customerStatus", "workflowStage", "depositRatio", "depositDue", "finalDue", "depositPaid", "finalPaid", "depositFinanceStatus", "finalFinanceStatus",
   "depositPaidAt", "finalPaidAt", "paymentVerify", "financeStatus", "refundAmount", "refundConfirmed",
@@ -582,9 +594,27 @@ function containsConfigSensitive(value, seen = new WeakSet()) {
   });
 }
 
+function serviceOrderOwner(order = {}) {
+  return String(order.assignee_id || order.assigneeId || order.serviceUserId || "");
+}
+async function serviceOwnerIds(source, session, orders) {
+  const subject = String(session.subjectId || "");
+  const ids = new Set([subject]);
+  if (orders.some(order => serviceOrderOwner(order) && serviceOrderOwner(order) !== subject) && typeof source.transaction === "function") {
+    try {
+      const staffIds = await source.transaction(async conn => {
+        const [rows] = await conn.query("SELECT id FROM svc_staff WHERE account_id=? AND staff_status='active'", [subject]);
+        return rows.map(row => String(row.id));
+      });
+      staffIds.forEach(id => ids.add(id));
+    } catch (error) { if (error.code !== "ER_NO_SUCH_TABLE") throw error; }
+  }
+  return ids;
+}
 async function filterRows(source, session, key, value) {
   const candidates = Array.isArray(value) ? value : (value && typeof value === "object" ? Object.values(value) : []);
-  const rows = key === "orders" ? candidates.filter((row) => !isUnpaidBooking(row)) : candidates;
+  const rows = key === "orders" ? candidates.filter((row) => !isUnpaidBooking(row))
+    : key === "afterSales" ? candidates.filter(row => row && !isAutomaticOrderRefund(row)) : candidates;
   const role = normalizeRole(session.role);
   // Custom roles receive no implicit headquarters scope. Their authorized
   // menu module determines both the available capability and row set.
@@ -613,10 +643,12 @@ async function filterRows(source, session, key, value) {
     const subject = String(session.subjectId || "");
     if (key === "afterSales") {
       const currentOrders = await source.list("orders");
-      const ownedIds = new Set(currentOrders.filter((order) => order && String(order.assigneeId || "") === subject).map(getRowId));
+      const ownerIds = await serviceOwnerIds(source, session, currentOrders);
+      const ownedIds = new Set(currentOrders.filter(order => order && ownerIds.has(serviceOrderOwner(order))).map(getRowId));
       return rows.filter((row) => row && ownedIds.has(String(row.orderId || "")));
     }
-    return rows.filter((row) => row && (!String(row.assigneeId || "") || String(row.assigneeId || "") === subject));
+    const ownerIds = key === "orders" ? await serviceOwnerIds(source, session, rows) : new Set([subject]);
+    return rows.filter(row => row && (!serviceOrderOwner(row) || ownerIds.has(serviceOrderOwner(row))));
   }
   if (role === "photo") return key === "orders" ? rows.filter((row) => row && String(row.photographerId || "") === String(session.subjectId || "")) : rows;
   if (role === "merchant") {
@@ -755,7 +787,8 @@ function readBody(req, maxBytes = 1024 * 1024) {
       if (settled) return;
       try {
         const raw = Buffer.concat(chunks).toString("utf8");
-        settled = true; resolve(raw ? JSON.parse(raw) : {});
+        const value = raw ? JSON.parse(raw) : {};
+        settled = true; resolve(value);
       } catch (_) { const error = new Error("请求 JSON 无效"); error.code = "INVALID_JSON"; fail(error); }
     });
   });
@@ -783,11 +816,13 @@ function decodePart(value) {
 }
 
 module.exports = function createApi(source, mode, options = {}) {
+  let generalContactService = options.svcGeneralContact || null;
   const auth = options.auth || createAuthStore();
   const logger = options.logger || createLogger({ service: "luxiaoming-admin" });
   const wechatPay = options.wechatPay || require("./wechatPay.cjs").createWechatPay();
   const files = options.fileService || require("./fileService.cjs").createFileService({ source, authorize: authorizeFile, adapter: options.fileAdapter });
   const permissionStore = options.permissionStore || null;
+  let productLinksService;
   let photoService;
   const photo = options.photoService || Object.fromEntries(["getRules","previewRule","saveRule","listLedger","exportCsv","batchSettle","listParties","createParty","savePartyRate","setPartyStatus","listSettlements","settlementAction","mine","validateAssignment"].map(name => [name,(...args) => {
     photoService ||= require("./photoShare.cjs").createPhotoShareService({source,...options.photoOptions});
@@ -869,6 +904,20 @@ module.exports = function createApi(source, mode, options = {}) {
       return true;
     }
     if (!["order-delivery", "after-sale"].includes(purpose) || !asset.orderId) return false;
+    if (purpose === "after-sale" && String(asset.orderId).startsWith("physical_")) {
+      const service = require("./physicalCommerce.cjs").serviceFor(source, { wechatPay, ...options.physicalOptions });
+      try {
+        if (session.kind === "public") {
+          await service.executePublic("getPhysicalOrder", { orderId: asset.orderId }, { openid: session.openid });
+          return sameFileOwner(session, asset);
+        }
+        const canReadPhysical = role === "super" || ["service", "supervisor", "service_supervisor", "finance"].includes(role)
+          && ["svcWorkbench", "svcIntake", "svcFollowup", "svcComplaints", "financeReview"].some(key => sessionHasMenu(session, key));
+        if (!read || !canReadPhysical) return false;
+        const order = await service.executeAdmin("detail", { orderId: asset.orderId }, session);
+        return (order.afterSales || []).some(ticket => (ticket.attachmentFileIds || []).includes(String(asset.id || asset.fileId)));
+      } catch (_) { return false; }
+    }
     const order = await source.get("orders", String(asset.orderId));
     if (!order || order.isDeleted || order.deleted || isOrderCancelledStatus(order.status)) return false;
     if (session.kind === "public") {
@@ -971,14 +1020,30 @@ module.exports = function createApi(source, mode, options = {}) {
     }
     return ids;
   }
-  async function describeFiles(ids) {
-    return Promise.all(fileIds(ids).map((id) => files.describe(id)));
+  function createReadProjection(readSource) {
+    const descriptors = new Map();
+    return {
+      source: readSource,
+      describe(id) {
+        if (!descriptors.has(id)) descriptors.set(id, Promise.resolve().then(() => files.describe(id, readSource)));
+        // A response may enrich the same file for several records. Keep each
+        // output independent while sharing only this read's pending metadata.
+        return descriptors.get(id).then((value) => ({ ...value }));
+      },
+    };
   }
-  async function projectAdminRow(key, row, session, contentContext) {
+  async function describeFiles(ids, projection) {
+    return Promise.all(fileIds(ids).map((id) => projection ? projection.describe(id) : files.describe(id)));
+  }
+  async function projectAdminRow(key, row, session, contentContext, projection) {
     let out = redactRow(key, row, session);
     if (!out || typeof out !== "object") return out;
+    if (key === "orders" && row.rescheduleRequest?.status === "pending") {
+      out.canReviewReschedule = ["super", "service"].includes(normalizeRole(session.role)) && hasAction(session, "orderEdit")
+        && await require("./customerReschedule.cjs").reviewerAllowed(projection?.source || source, row, session);
+    }
     if (contentPolicy.CONTENT_POLICY_KEYS.has(key)) {
-      const context = contentContext || await contentPolicy.createVisibilityContext(source, [key]);
+      const context = contentContext || await contentPolicy.createVisibilityContext(projection?.source || source, [key]);
       Object.assign(out, contentPolicy.effectiveContentVisibility(key, row, context));
       if (key === "packages" && !contentPolicy.isVideoSingle(row)) out.effectiveSpotIds = contentPolicy.effectivePackageSpotIds(row, context);
       if (key === "peripherals") ["sales", "salesCount", "soldCount", "soldAmount"].forEach((field) => { delete out[field]; });
@@ -990,9 +1055,9 @@ module.exports = function createApi(source, mode, options = {}) {
       out.businessStatusText = businessStatusLabel(businessStatus);
       out.orderStatus = businessStatusLabel(businessStatus);
       out.depositRefundable = isDepositRefundable(row);
-      if (Array.isArray(out.deliveryDraftFileIds)) out.deliveryDraftFiles = await describeFiles(out.deliveryDraftFileIds);
+      if (Array.isArray(out.deliveryDraftFileIds)) out.deliveryDraftFiles = await describeFiles(out.deliveryDraftFileIds, projection);
       if (out.deliverFiles || out.photos) {
-        out.deliverFiles = await enrichFileDescriptors(publicDeliveryFiles(out.deliverFiles || out.photos));
+        out.deliverFiles = await enrichFileDescriptors(publicDeliveryFiles(out.deliverFiles || out.photos), projection);
         if (out.photos) out.photos = out.deliverFiles;
       }
     }
@@ -1002,19 +1067,19 @@ module.exports = function createApi(source, mode, options = {}) {
       out.attachmentFileIds = [...new Set([...(out.attachmentFileIds || []), ...(customerEvidence ? legacyIds : [])])];
       out.internalAttachmentFileIds = [...new Set([...(out.internalAttachmentFileIds || []), ...(!customerEvidence ? legacyIds : [])])];
       out = removePrivateMarkers(out);
-      out.attachments = await describeFiles(out.attachmentFileIds);
-      out.internalAttachments = await describeFiles(out.internalAttachmentFileIds);
+      out.attachments = await describeFiles(out.attachmentFileIds, projection);
+      out.internalAttachments = await describeFiles(out.internalAttachmentFileIds, projection);
     } else if (FINANCE_KEYS.has(key)) {
       out.attachmentFileIds = [...new Set([...(out.attachmentFileIds || []), ...legacyEvidenceIds(out)])];
       out = removePrivateMarkers(out);
-      out.attachments = await describeFiles(out.attachmentFileIds);
+      out.attachments = await describeFiles(out.attachmentFileIds, projection);
     }
     return out;
   }
-  async function enrichFileDescriptors(descriptors) {
+  async function enrichFileDescriptors(descriptors, projection) {
     return Promise.all(descriptors.map(async (entry) => {
       if (!entry || typeof entry !== "object" || !entry.fileId) return entry;
-      return { ...await files.describe(entry.fileId), ...entry };
+      return { ...await (projection ? projection.describe(entry.fileId) : files.describe(entry.fileId)), ...entry };
     }));
   }
   function initAuth() {
@@ -1573,7 +1638,7 @@ module.exports = function createApi(source, mode, options = {}) {
       safeBody.openid = session.openid; safeBody.data.openid = session.openid;
     }
     const result = await rpc(source, name, safeBody, { req, res, identity: session ? { kind: "public", openid: session.openid,
-      sessionId:crypto.createHash('sha256').update(parseBearer(req)).digest('hex'),sessionStartedAt:session.createdAt ? new Date(session.createdAt).toISOString() : undefined } : null, allowDevOpenid, files, wechatPay });
+      sessionId:crypto.createHash('sha256').update(parseBearer(req)).digest('hex'),sessionStartedAt:session.createdAt ? new Date(session.createdAt).toISOString() : undefined } : null, allowDevOpenid, files, wechatPay, physicalOptions: options.physicalOptions });
     if (result && result.success === false) {
       let unavailable = !!(sourceStatus && sourceStatus.ready === false);
       if (!unavailable && source && typeof source.health === "function") {
@@ -2345,6 +2410,11 @@ module.exports = function createApi(source, mode, options = {}) {
     const raw = method === "DELETE" ? {} : await readBody(req);
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "请求体无效" });
     delete raw.__spotOrder;
+    delete raw.__contentOrder;
+    const sortOnly = Object.prototype.hasOwnProperty.call(raw, "sortDirection");
+    if (sortOnly && (!CONTENT_ORDER_KEYS.has(key) || method !== "PUT" || ![-1, 1].includes(raw.sortDirection) || Object.keys(raw).length !== 1)) {
+      return json(res, 400, { error: "排序操作须单独提交升序或降序" });
+    }
     if (["deleted", "isDeleted"].some((field) => Object.prototype.hasOwnProperty.call(raw, field) && typeof raw[field] !== "boolean")) return json(res, 400, { error: "删除状态必须为布尔值" });
     if ("deleted" in raw && "isDeleted" in raw && raw.deleted !== raw.isDeleted) return json(res, 400, { error: "删除状态不一致" });
     if (method === "POST" && key !== "tagLibrary" && !["isShow", "status", "enabled", "visible"].some((field) => Object.prototype.hasOwnProperty.call(raw, field))) {
@@ -2354,6 +2424,7 @@ module.exports = function createApi(source, mode, options = {}) {
       const current = id ? await source.get(key, id) : null;
       if (["PUT", "DELETE"].includes(method) && (!id || !current)) return json(res, id ? 404 : 400, { error: id ? "未找到记录" : "缺少记录 id" });
       if (current && !(await filterRows(source, session, key, [current])).length) return json(res, 404, { error: "未找到记录" });
+      if (sortOnly && contentPolicy.deleted(current)) return json(res, 409, { error: "已删除内容不能排序" });
       const context = await contentPolicy.createContentContext(source);
       const deleting = method === "DELETE" || (raw.deleted === true || raw.isDeleted === true) && !contentPolicy.deleted(current);
       const restoring = current && contentPolicy.deleted(current) && (raw.deleted === false || raw.isDeleted === false);
@@ -2362,15 +2433,23 @@ module.exports = function createApi(source, mode, options = {}) {
       if (method === "POST" && (raw.deleted === true || raw.isDeleted === true)) return json(res, 400, { error: "创建记录时不能标记删除" });
       let patch;
       try {
-        patch = deleting ? { deleted: true, isDeleted: true } : restoring ? Object.fromEntries(["isShow", "status", "enabled", "visible"].filter((field) => field in raw).map((field) => [field, raw[field]]))
+        patch = sortOnly ? {} : deleting ? { deleted: true, isDeleted: true } : restoring ? Object.fromEntries(["isShow", "status", "enabled", "visible"].filter((field) => field in raw).map((field) => [field, raw[field]]))
           : await contentPolicy.prepareContentPatch(source, key, raw, current || {}, context);
-        if (restoring) { patch.deleted = false; patch.isDeleted = false; }
-        if (key === "guides" && !deleting) {
+        if (restoring) {
+          patch.deleted = false; patch.isDeleted = false;
+          const restored = { ...current, ...patch };
+          // Restoration retains stored content rather than accepting editor
+          // fields from an old recycle snapshot. Repair missing tags while hidden.
+          if (["albums", "packages"].includes(key) && contentPolicy.ownContentVisible(restored) && !contentPolicy.hasProductTags(restored)) {
+            return json(res, 400, { error: "请先恢复为隐藏状态，至少添加一个标签后再上架" });
+          }
+        }
+        if (key === "guides" && !deleting && !sortOnly) {
           const prepared = await prepareGuideForSave(source, patch, current || {});
           if (prepared.error) return json(res, 400, { error: prepared.error });
           patch = prepared.guide;
         }
-        if (["albums", "packages"].includes(key) && !deleting && !restoring) {
+        if (["albums", "packages"].includes(key) && !deleting && !restoring && !sortOnly) {
           const depositError = prepareDepositPatch(raw, patch);
           if (depositError) return json(res, 400, { error: depositError });
         }
@@ -2380,13 +2459,17 @@ module.exports = function createApi(source, mode, options = {}) {
           if (!patch.category && !current?.category) patch.category = "风格";
           patch.scope = "所有商品";
         }
-        if (!deleting && !restoring) {
+        if (!deleting && !restoring && !sortOnly) {
           const next = { ...current, ...patch };
           const booleanFields = key === "albums" ? ["makeupIncluded"] : key === "packages" && contentPolicy.isVideoSingle(next)
             ? ["makeupIncluded", "hasAerial", "fullEdit"] : key === "peripherals" ? ["retouchIncluded", "editingIncluded"] : [];
           for (const field of booleanFields) if (next[field] === undefined || next[field] === null) { patch[field] = false; next[field] = false; }
-          const publicationError = contentPolicy.validateContentPublication(key, next, current, context);
+          const publicationError = contentPolicy.validateContentPublication(key, next, current, context, raw);
           if (publicationError) return json(res, 400, { error: publicationError });
+        }
+        if (key === "peripherals" && current && (typeof source.transaction === "function" || options.physicalOptions?.store)) {
+          try { await require("./physicalCommerce.cjs").serviceFor(source, { wechatPay, ...options.physicalOptions }).guardCatalogMutation(current, patch); }
+          catch (error) { if (error.code !== "ER_NO_SUCH_TABLE") throw error; }
         }
       } catch (error) { return json(res, error.statusCode || 400, { error: error.message }); }
       const recordId = id || String(patch.id || patch._id || `${key}_${crypto.randomBytes(10).toString("hex")}`);
@@ -2409,6 +2492,7 @@ module.exports = function createApi(source, mode, options = {}) {
       };
       let saved;
       let spotOrderChanges = [];
+      let contentOrderChanges = [];
       try {
         // Capture relations before deleting/unlinking the point. In particular,
         // all packages spanning it keep a deletion blocker after the unlink.
@@ -2433,6 +2517,23 @@ module.exports = function createApi(source, mode, options = {}) {
             }
             if (!saved) throw new Error("点位记录保存失败");
           }
+        } else if (CONTENT_ORDER_KEYS.has(key)) {
+          const orderOptions = { create: !current, direction: sortOnly ? raw.sortDirection : 0 };
+          if (typeof source.applyContentMutation === "function") {
+            const result = await source.applyContentMutation(key, recordId, patch, orderOptions);
+            if (!result || !result.saved || !Array.isArray(result.changes)) throw new Error("商品排序保存失败");
+            saved = result.saved;
+            contentOrderChanges = result.changes;
+            for (const change of contentOrderChanges) completed.push({ key, id: change.id, before: change.before, patch: change.after });
+          } else {
+            const plan = planContentMutation(key, await source.list(key), recordId, patch, orderOptions);
+            if (!plan || !plan.saved) throw new Error("商品排序保存失败");
+            contentOrderChanges = plan.changes;
+            for (const change of contentOrderChanges) {
+              const result = await write(key, change.id, change.before, change.after);
+              if (String(change.id) === String(recordId)) saved = result;
+            }
+          }
         } else saved = await write(key, recordId, current, patch);
         if (deleting) {
           const allTrash = await source.list("trash");
@@ -2448,7 +2549,7 @@ module.exports = function createApi(source, mode, options = {}) {
             await write("trash", getRowId(trashRow), trashRow, {}, true);
           }
         }
-        if (!deleting && key !== "tagLibrary") {
+        if (!deleting && key !== "tagLibrary" && !sortOnly) {
           const tags = await source.list("tagLibrary");
           for (const { name, category } of contentPolicy.customTagEntries(key, saved)) {
             if (tags.some((tag) => !contentPolicy.deleted(tag) && String(tag.name || "").trim() === name && tag.category === category)) continue;
@@ -2457,7 +2558,7 @@ module.exports = function createApi(source, mode, options = {}) {
             tags.push(tag);
           }
         }
-        if (!(await auditMutation(session, deleting ? "删除内容进入回收站" : restoring ? "恢复内容" : method === "POST" ? "创建内容" : "更新内容", key, recordId, "内容关联及显示状态由服务端统一校验"))) throw new Error("内容审计保存失败");
+        if (!(await auditMutation(session, sortOnly ? "调整商品排序" : deleting ? "删除内容进入回收站" : restoring ? "恢复内容" : method === "POST" ? "创建内容" : "更新内容", key, recordId, sortOnly ? `插入第 ${saved.sort} 位，其他同类内容依次调整` : "内容关联及显示状态由服务端统一校验"))) throw new Error("内容审计保存失败");
       } catch (error) {
         let rolledBack = true;
         for (const entry of completed.reverse()) {
@@ -2473,6 +2574,10 @@ module.exports = function createApi(source, mode, options = {}) {
       if (boundFileIds.length) await files.markBound(boundFileIds);
       const response = await projectAdminRow(key, saved, session);
       if (key === "spots") response.__spotOrder = spotOrderChanges.map((change) => ({ id: change.id, sort: change.after.sort ?? 0 }));
+      // Return the complete committed order so a second operator's stale card
+      // list also reconciles siblings that did not move in this request.
+      if (CONTENT_ORDER_KEYS.has(key)) response.__contentOrder = (await source.list(key))
+        .filter((row) => !contentPolicy.deleted(row)).map((row) => ({ id: getRowId(row), sort: row.sort ?? 0 }));
       return json(res, method === "POST" ? 201 : 200, method === "DELETE" ? { ok: true, ...response } : response);
     });
   }
@@ -2501,6 +2606,11 @@ module.exports = function createApi(source, mode, options = {}) {
       return json(res, 200, { ok: true });
     });
   }
+  async function projectPhysicalInventory(rows) {
+    if (typeof source.transaction !== "function" && !options.physicalOptions?.store) return rows;
+    try { return await require("./physicalCommerce.cjs").serviceFor(source, { wechatPay, ...options.physicalOptions }).projectCatalogInventory(rows); }
+    catch (error) { if (error.code === "ER_NO_SUCH_TABLE") return rows; throw error; }
+  }
   async function collectionRoute(req, res, parts, session, pathname, suppliedBody) {
     const key = decodePart(parts[1]); const id = parts[2] ? decodePart(parts[2]) : "";
     if (!KEY_SET.has(key)) { const e = new Error("不支持的数据集合"); e.code = "DATA_KEY_INVALID"; throw e; }
@@ -2508,18 +2618,21 @@ module.exports = function createApi(source, mode, options = {}) {
     if (method === "GET") {
       if (!canReadKey(session, key)) return forbidden(res, session, pathname);
       const readSource = requestReadSource(source);
+      const projection = createReadProjection(readSource);
       if (id) {
-        let value = key === "scans" ? (await readAdminScans(readSource)).find(row => getRowId(row) === id) : await readConfigDocument(key, id);
+        let value = key === "scans" ? (await readAdminScans(readSource)).find(row => getRowId(row) === id) : await readConfigDocument(key, id, readSource);
         // Older JSON installs stored the singleton under homeStats. Keep read
         // compatibility while the next editor save writes siteConfig/global.
-        if (!value && key === "siteConfig" && id === "global") value = await source.get(key, "homeStats");
-        const rows = await filterRows(source, session, key, value ? [value] : []);
+        if (!value && key === "siteConfig" && id === "global") value = await readSource.get(key, "homeStats");
+        let rows = await filterRows(readSource, session, key, value ? [value] : []);
         if (!rows.length) return json(res, 404, { error: "未找到记录" });
-        return json(res, 200, await projectAdminRow(key, rows[0], session));
+        if (key === "peripherals") rows = await projectPhysicalInventory(rows);
+        return json(res, 200, await projectAdminRow(key, rows[0], session, null, projection));
       }
-      const value = key === "scans" ? await readAdminScans(readSource) : await readSource.list(key); const rows = await filterRows(readSource, session, key, value);
+      const value = key === "scans" ? await readAdminScans(readSource) : await readSource.list(key); let rows = await filterRows(readSource, session, key, value);
+      if (key === "peripherals") rows = await projectPhysicalInventory(rows);
       const contentContext = rows.length && contentPolicy.CONTENT_POLICY_KEYS.has(key) ? await contentPolicy.createVisibilityContext(readSource, [key]) : null;
-      return json(res, 200, await Promise.all(rows.map((row) => projectAdminRow(key, row, session, contentContext))));
+      return json(res, 200, await Promise.all(rows.map((row) => projectAdminRow(key, row, session, contentContext, projection))));
     }
     if (!["POST", "PUT", "DELETE"].includes(method)) return json(res, 405, { error: "方法不支持" });
     const contentTrashPost = key === "trash" && normalizeRole(session.role) === "content" && method === "POST";
@@ -2731,7 +2844,7 @@ module.exports = function createApi(source, mode, options = {}) {
       const order = orderId ? await source.get("orders", orderId) : null;
       if (!order || order.isDeleted || order.deleted) return json(res, 404, { error: "关联订单不存在" });
       if (!(await filterRows(source, session, "orders", [order])).length) return forbidden(res, session, pathname, "不能为未授权订单创建售后工单");
-      if (role === "service" && String(order.assigneeId || "") !== String(session.subjectId || "")) return forbidden(res, session, pathname, "请先领取订单后创建审核事项");
+      if (role === "service" && !(await serviceOwnerIds(source, session, [order])).has(serviceOrderOwner(order))) return forbidden(res, session, pathname, "请先领取订单后创建审核事项");
       let tickets;
       try { tickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用" }); }
       if ((Array.isArray(tickets) ? tickets : []).some((ticket) => ticket && String(ticket.orderId || "") === orderId && !isAfterSaleTerminalStatus(ticket.status))) {
@@ -2749,14 +2862,15 @@ module.exports = function createApi(source, mode, options = {}) {
       body.packageName = body.packageName || order.packageName || "";
       body.status = "待处";
       body.customerVisibleStatus = "已提";
-      body.financeStatus = refundAmount > 0 ? "待审" : "无需财务审核";
+      body.financeStatus = "未提交";
       body.refundAmount = refundAmount;
       body.refundPhase = refundPhase || "";
-      body.reviewLane = [WORKFLOW_STAGES.AWAITING_DEPOSIT, WORKFLOW_STAGES.AWAITING_DISPATCH].includes(canonicalStage(order)) ? "pre_dispatch" : "service_exception";
-      body.refundStatus = refundAmount > 0 ? "pending_review" : "not_requested";
+      body.reviewLane = "service_exception";
+      body.refundStatus = "not_requested";
       body.refundConfirmed = false;
       body.submitSource = "后台提交";
-      if (body.assigneeId) {
+      if (role === "service") body.assigneeId = session.subjectId;
+      else if (body.assigneeId) {
         const staffRows = await source.list("staff");
         const validAssignee = (Array.isArray(staffRows) ? staffRows : []).some((staff) => staff
           && String(staff.id || staff._id) === String(body.assigneeId)
@@ -2788,6 +2902,7 @@ module.exports = function createApi(source, mode, options = {}) {
       // append an audit timeline. Generic collection PUT is intentionally not
       // an alternate workflow command.
       if (key === "orders") return forbidden(res, session, pathname, "订单变更必须通过专用操作接口");
+      if (key === "afterSales") return forbidden(res, session, pathname, "售后变更必须通过专用处理及财务审核接口");
       if (!(await enforceOrderPatch(session, key, id, body))) return forbidden(res, session, pathname, "当前角色不能修改该记录或字段");
       const current = await source.get(key, id);
       if (!current || !(await filterRows(source, session, key, [current])).length) return json(res, 404, { error: "未找到记录" });
@@ -2872,22 +2987,22 @@ module.exports = function createApi(source, mode, options = {}) {
     if (key === "afterSales" && response && typeof response === "object") response.order = redactRow("orders", linkedOrder, session);
     return json(res, 201, response);
   }
-  async function moduleValueForKey(key, session, contentContext, readSource) {
+  async function moduleValueForKey(key, session, contentContext, readSource, projection) {
     if (key === "homeConfig") {
       const value = await readConfigDocument(key, "homeStats", readSource);
       const rows = await filterRows(readSource, session, key, value ? [value] : []);
-      return rows.length ? projectAdminRow(key, rows[0], session) : null;
+      return rows.length ? projectAdminRow(key, rows[0], session, null, projection) : null;
     }
     if (key === "siteConfig" || key === "financeSettings") {
       const value = await readConfigDocument(key, "global", readSource);
       if (key === "siteConfig" && !value) return {};
       const rows = await filterRows(readSource, session, key, value ? [value] : []);
-      return rows.length ? projectAdminRow(key, rows[0], session) : null;
+      return rows.length ? projectAdminRow(key, rows[0], session, null, projection) : null;
     }
     const value = key === "scans" ? await readAdminScans(readSource) : await readSource.list(key);
     const rows = await filterRows(readSource, session, key, value);
     const context = await contentContext;
-    return Promise.all(rows.map((row) => projectAdminRow(key, row, session, context)));
+    return Promise.all(rows.map((row) => projectAdminRow(key, row, session, context, projection)));
   }
   async function moduleRoute(req, res, parts, parsed, session, pathname) {
     if (req.method !== "GET") return json(res, 405, { error: "请使用 GET" });
@@ -2899,10 +3014,11 @@ module.exports = function createApi(source, mode, options = {}) {
     // Share in-flight reads only within this GET. Context dependencies and
     // response collections start together, and later requests read fresh data.
     const readSource = requestReadSource(source);
+    const projection = createReadProjection(readSource);
     await readSource.preload(allowedKeys);
     const contentContext = contentPolicy.createVisibilityContext(readSource, allowedKeys);
     const [entries] = await Promise.all([
-      Promise.all(allowedKeys.map(async (key) => [key, await moduleValueForKey(key, session, contentContext, readSource)])),
+      Promise.all(allowedKeys.map(async (key) => [key, await moduleValueForKey(key, session, contentContext, readSource, projection)])),
       contentContext,
     ]);
     const collections = Object.fromEntries(entries.filter(([, value]) => value !== null && value !== undefined));
@@ -2983,10 +3099,21 @@ module.exports = function createApi(source, mode, options = {}) {
     if (!orderId) return json(res, 400, { error: "缺少订单 id" });
     const current = await source.get("orders", orderId);
     if (!current) return json(res, 404, { error: "订单不存在" });
-    if (!(await filterRows(source, session, "orders", [current])).length) return forbidden(res, session, pathname, "当前角色不能操作该订单");
     const body = await readBody(req);
     if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "请求体无效" });
     const action = String(body.action || "").trim().toLowerCase();
+    if (["service", "supervisor", "service_supervisor"].includes(normalizeRole(session.role)) && ["start", "shootcomplete"].includes(action)) {
+      return forbidden(res, session, pathname, "拍摄状态由游客到达点位及尾款支付自动更新，无需客服手动变更");
+    }
+    if (action === "reviewreschedule") {
+      if (!["super", "service"].includes(normalizeRole(session.role)) || !hasAction(session, "orderEdit")) return forbidden(res, session, pathname, "当前账号无改期审核权限");
+      if (current.isDeleted || current.deleted) return json(res, 404, { error: "订单不存在" });
+      try {
+        const reviewed = await require("./customerReschedule.cjs").reviewCustomerReschedule(source, current, body, session);
+        return json(res, 200, { ok: true, auditRecorded: true, idempotent: reviewed.idempotent, data: await projectAdminRow("orders", reviewed.order, session) });
+      } catch (error) { return json(res, error.statusCode || 503, { error: error.statusCode ? error.message : "改期审核暂不可用，请稍后重试" }); }
+    }
+    if (!(await filterRows(source, session, "orders", [current])).length) return forbidden(res, session, pathname, "当前角色不能操作该订单");
     if (['claim','transfer','accept','assign','taskaccept','unable','unassign','reschedule','start','shootcomplete','complete','cancel','delete','restore','edit','price'].includes(action) && (current.svc_paid_processed || await require('./customerService.cjs').hasManualClaims(source, current.orderNo || current.order_no))) return json(res,409,{error:'该订单由客服工作台管理，请使用工作台的对应操作'});
     if(action==='payment') return json(res,409,{error:'收款由微信线上支付及验签回调确认，后台不再登记或人工确认到账'});
     if ((current.isDeleted || current.deleted) && action !== "restore") return json(res, 404, { error: "订单不存在" });
@@ -3278,7 +3405,9 @@ module.exports = function createApi(source, mode, options = {}) {
       label = "改期拍摄";
     } else if (action === "start") {
       if (depositDue(current) > 0 && !hasConfirmedPayment(current, "deposit")) return json(res, 409, { error: "订金到账确认后才能开始拍摄" });
-      if (![WORKFLOW_STAGES.AWAITING_SHOOT].includes(currentStage)) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
+      const arrivedAwaitingStart = currentStage === WORKFLOW_STAGES.SHOOTING && current.customerArrivedAt && !hasCompletedShooting(current);
+      if (currentStage !== WORKFLOW_STAGES.AWAITING_SHOOT && !arrivedAwaitingStart) return json(res, 409, { error: "订单当前状态不能开始拍摄" });
+      if (arrivedAwaitingStart && current.shootingStartedAt) return json(res, 200, { ok: true, idempotent: true, data: await projectAdminRow("orders", current, session) });
       // Task acceptance remains available for teams that use it, but it is
       // optional: once a photographer is assigned, they may start directly.
       if (String(current.taskStatus || "").toLowerCase() === "unable") return json(res, 409, { error: "任务已标记无法履约，请等待重新派单" });
@@ -3287,7 +3416,7 @@ module.exports = function createApi(source, mode, options = {}) {
       patch.customerStatus = customerStatusForStage(WORKFLOW_STAGES.SHOOTING);
       label = "开始拍摄";
     } else if (action === "shootcomplete") {
-      if (currentStage !== WORKFLOW_STAGES.SHOOTING || !current.shootingStartedAt) return json(res, 409, { error: "只有已开始拍摄的任务可以标记拍摄完成" });
+      if (currentStage !== WORKFLOW_STAGES.SHOOTING || !(current.shootingStartedAt || current.customerArrivedAt)) return json(res, 409, { error: "只有已开始拍摄或游客已到达的任务可以标记拍摄完成" });
       patch.status = "final_pending";
       patch.shootingCompletedAt = now;
       patch.shootingCompletedBy = session.account;
@@ -3642,6 +3771,7 @@ module.exports = function createApi(source, mode, options = {}) {
       }
     }
     if (boundFileIds.length) await files.markBound(boundFileIds);
+    await require('./packageFulfillment.cjs').sync(source, updated);
     return json(res, 200, { ok: true, auditRecorded: true, data: await projectAdminRow("orders", updated, session) });
   }
   async function afterSaleActionRoute(req, res, parts, session, pathname) {
@@ -3655,6 +3785,7 @@ module.exports = function createApi(source, mode, options = {}) {
     if (!ticketId) return json(res, 400, { error: "缺少售后工单 id" });
     const current = await source.get("afterSales", ticketId);
     if (!current) return json(res, 404, { error: "售后工单不存在" });
+    if (isAutomaticOrderRefund(current)) return json(res, 409, { error: "该记录为用户自动退款，请在订单中查看退款进度" });
     const orderId = String(current.orderId || "");
     const order = orderId ? await source.get("orders", orderId) : null;
     if (!order || order.isDeleted || order.deleted) return json(res, 404, { error: "关联订单不存在" });
@@ -3681,6 +3812,10 @@ module.exports = function createApi(source, mode, options = {}) {
     }
     let orderAfterSaleStatus = current.status || "处理";
     const preDispatchDepositRefund = isMiniPreDispatchDepositRefund(current);
+    const refundInProgress = Array.isArray(current.refundAttempts) && current.refundAttempts.length > 0;
+    if (action !== "review" && (refundInProgress || current.status === "待财务审")) {
+      return json(res, 409, { error: "退款已提交财务或正在退款，不能再修改售后处理" });
+    }
     let cancelAfterDepositRefund = false;
     if (action === "review") {
       const decisionStatus = normalizeFinanceStatus(body.status);
@@ -3689,6 +3824,9 @@ module.exports = function createApi(source, mode, options = {}) {
       const approved = body.approved === true || decisionStatus === "已审";
       const currentFinanceStatus = normalizeFinanceStatus(current.financeStatus || "待审");
       const onlineRetry = approved && currentFinanceStatus === "已审" && Array.isArray(current.refundAttempts) && current.refundAttempts.length && !current.refundConfirmed;
+      if (!preDispatchDepositRefund && !onlineRetry && (current.status !== "待财务审" || !current.customerContactedAt || currentFinanceStatus !== "待审")) {
+        return json(res, 409, { error: "售后须先联系客人并提交退款，才能进入财务审核" });
+      }
       if ((role === "finance" || preDispatchDepositRefund) && currentFinanceStatus !== "待审" && !onlineRetry) return json(res, 409, { error: "该售后已审核，不能重复处理" });
       if (!["待审", "已审", "已驳"].includes(currentFinanceStatus)) return json(res, 409, { error: "该售后当前不在财务审核队列" });
       const refundAmount = roundMoney(current.refundAmount);
@@ -3730,6 +3868,7 @@ module.exports = function createApi(source, mode, options = {}) {
       }
       if (refundAmount > 0) {
         if (action !== "complete") return json(res, 400, { error: "请在结案操作中提交退款审核申请" });
+        if (!preDispatchDepositRefund && !current.customerContactedAt) return json(res, 409, { error: "请先与客人取得联系并保存联系记录，再提交退款" });
         const refundPhase = String(current.refundPhase || "").trim().toLowerCase();
         let allTickets;
         try { allTickets = await source.list("afterSales"); } catch (_) { return json(res, 503, { error: "售后数据暂不可用，无法登记退款" }); }
@@ -3755,6 +3894,11 @@ module.exports = function createApi(source, mode, options = {}) {
         patch.status = "处理";
         patch.customerVisibleStatus = "处理";
         orderAfterSaleStatus = "处理";
+        if (action === "follow" && body.customerContacted === true) {
+          patch.customerContactedAt = current.customerContactedAt || now;
+          patch.customerContactedBy = current.customerContactedBy || session.subjectId;
+          patch.customerContactNote = reason;
+        }
       }
     }
     const logLine = `${session.account} ${action === "review" ? "财务审核" : action === "complete" ? "处理完成" : "跟进"}：${reason}`;
@@ -3910,10 +4054,75 @@ module.exports = function createApi(source, mode, options = {}) {
         if (origin && !allowedOrigins.includes(origin)) return json(res, 403, { error: "跨域来源不被允许" });
         res.statusCode = 204; return res.end();
       }
+      if (parts[0] === "product-links") {
+        const session = await requireSession(req, res, parsed.pathname, "admin");
+        if (!session) return;
+        if (normalizeRole(session.role) !== "super" && !sessionHasMenu(session, "productLinks") && !sessionHasMenu(session, "svcGeneralWorkbench")) {
+          return forbidden(res, session, parsed.pathname, "当前账号未获得商品小程序外链菜单权限");
+        }
+        res.setHeader("Cache-Control", "no-store");
+        if (parts.length !== 2 || !["catalog", "generate"].includes(parts[1])) return json(res, 404, { error: "商品外链接口不存在" });
+        if (req.method !== (parts[1] === "catalog" ? "GET" : "POST")) return json(res, 405, { error: parts[1] === "catalog" ? "请使用 GET" : "请使用 POST" });
+        const links = require("./productLinks.cjs");
+        try {
+          productLinksService ||= options.productLinksService || links.createProductLinksService(source, options.productLinksOptions);
+          const data = parts[1] === "catalog" ? await productLinksService.catalog() : await productLinksService.generate(await readBody(req));
+          return json(res, 200, data);
+        } catch (error) {
+          if (error.code === "INVALID_JSON") return json(res, 400, { code: "PRODUCT_LINK_INPUT_INVALID", error: links.ERROR_MESSAGES.PRODUCT_LINK_INPUT_INVALID });
+          const known = Object.hasOwn(links.ERROR_MESSAGES, error.code || "");
+          const status = known ? error.statusCode || 503 : 503;
+          logger.warn("product_links.request.failed", { requestId: rid, errorCode: known ? error.code : "PRODUCT_LINK_UNAVAILABLE" });
+          return json(res, status, { code: known ? error.code : "PRODUCT_LINK_UNAVAILABLE", error: known ? links.ERROR_MESSAGES[error.code] : "商品外链服务暂不可用，请稍后重试" });
+        }
+      }
+      if (parts[0] === "physical") {
+        const service = options.physicalService || require("./physicalCommerce.cjs").serviceFor(source, { wechatPay, ...options.physicalOptions });
+        if (parts[1] === "logistics" && parts[2] === "kuaidi100" && parts[3] === "notify") {
+          if (req.method !== "POST") return json(res, 405, { result: false, returnCode: "405", message: "method not allowed" });
+          try {
+            const raw = await readRawBody(req);
+            const body = Object.fromEntries(new URLSearchParams(Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw)));
+            await service.receiveLogisticsNotification(parsed.query.subscriptionId, body);
+            return json(res, 200, { result: true, returnCode: "200", message: "ok" });
+          } catch (error) {
+            logger.warn("physical.logistics.notification.failed", { errorCode: errorCode(error), requestId: rid });
+            return json(res, error.statusCode === 401 ? 401 : 500, { result: false, returnCode: "500", message: "notification rejected" });
+          }
+        }
+        const session = await requireSession(req, res, parsed.pathname, "admin");
+        if (!session) return;
+        if (parts[1] !== "admin" || !parts[2] || parts.length !== 3) return json(res, 404, { code: 404, msg: "实物接口不存在" });
+        const action = parts[2];
+        const role = normalizeRole(session.role);
+        const privileged = role === "super";
+        const deskMenu = ["svcGeneralWorkbench", "svcWorkbench", "svcIntake", "svcFollowup", "svcComplaints"].some(key => sessionHasMenu(session, key));
+        const financeMenu = ["financeReview", "afterSales", "svcComplaints"].some(key => sessionHasMenu(session, key));
+        const contentMenu = ["peripherals", "shelfProducts"].some(key => sessionHasMenu(session, key));
+        if (!privileged && !(deskMenu && ["service", "supervisor", "service_supervisor"].includes(role)) && !(financeMenu && role === "finance") && !(contentMenu && role === "content")) return json(res, 403, { code: 403, msg: "无实物订单操作权限" });
+        try {
+          const readActions = new Set(["list", "detail", "config", "catalog", "afterSales", "export"]);
+          if (readActions.has(action) ? req.method !== "GET" : req.method !== "POST") return json(res, 405, { code: 405, msg: "请求方法不允许" });
+          const body = req.method === "GET" ? parsed.query : await readBody(req);
+          if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { code: 400, msg: "请求参数须为对象" });
+          const data = await service.executeAdmin(action, body, session);
+          if (data && data.csv != null) {
+            res.statusCode = 200; res.setHeader("Content-Type", "text/csv; charset=utf-8");
+            res.setHeader("Content-Disposition", "attachment; filename=physical-orders.csv"); return res.end(data.csv);
+          }
+          return json(res, 200, { code: 0, msg: "ok", data });
+        } catch (error) {
+          const status = error.statusCode || 503;
+          if (status >= 500) logger.error("physical.admin.failed", { requestId: rid, errorCode: errorCode(error) });
+          return json(res, status, { code: error.code || "PHYSICAL_UNAVAILABLE", msg: status < 500 ? error.message : "实物订单服务暂不可用，请检查迁移与配置" });
+        }
+      }
       if (['kf','svc'].includes(parts[0])) {
         const session = await requireSession(req,res,parsed.pathname,'admin'); if (!session) return;
+        const generalOnly = parts[0] === 'kf' && (parsed.pathname.startsWith('/api/kf/workbench/general') || /^\/api\/kf\/photographers\/[^/]+\/occupancy$/.test(parsed.pathname) || /^\/api\/kf\/orders\/[^/]+\/contact$/.test(parsed.pathname));
+        if (generalOnly && normalizeRole(session.role) !== 'super' && !sessionHasMenu(session, 'svcGeneralWorkbench')) return json(res,403,{code:4030,msg:'当前账号未获得总工作台菜单权限'});
         if (normalizeRole(session.role) !== 'super') {
-          const allowed = parts[0] === 'kf' ? ['svcWorkbench','svcIntake','svcFollowup','svcComplaints']
+          const allowed = parts[0] === 'kf' ? ['svcGeneralWorkbench','svcWorkbench','svcIntake','svcFollowup','svcComplaints']
             : parts[1] === 'me' ? ['svcMine'] : parts[1] === 'rule' ? ['svcRules'] : parts[1] === 'staff' ? ['svcStaff']
             : parts[1] === 'appeal' ? ['svcMine','svcSettlements','svcLedger'] : parts[1] === 'settlement' ? ['svcSettlements','svcMine'] : ['svcLedger','svcMine'];
           if (!allowed.some(key=>sessionHasMenu(session,key))) return json(res,403,{code:4030,msg:'当前账号未获得此客服模块菜单权限'});
@@ -3923,16 +4132,60 @@ module.exports = function createApi(source, mode, options = {}) {
           if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res,200,{code:4014,msg:'请求参数须为对象'});
           const modules = options.customerService || require('./customerService.cjs').serviceFor(source);
           const service = parts[0] === 'kf' ? modules.workbench : modules.commission;
+          if (parsed.pathname === '/api/kf/workbench/general/reschedule-review') {
+            if (req.method !== 'POST') return json(res,405,{code:405,msg:'请使用POST审核改期'});
+            const role = normalizeRole(session.role);
+            if (!['super','service'].includes(role) || !(roleActions(session).has('*') || roleActions(session).has('orderEdit'))) return json(res,403,{code:403,msg:'当前账号无改期审核权限'});
+            const id = String(body.order_id || '').trim();
+            const current = id && await source.get('orders', id);
+            if (!current || current.deleted || current.isDeleted) return json(res,404,{code:404,msg:'订单不存在'});
+            const result = await require('./customerReschedule.cjs').reviewCustomerReschedule(source, current, body, session);
+            return json(res,200,{code:0,msg:'ok',data:{idempotent:result.idempotent,order:await projectAdminRow('orders',result.order,session)}});
+          }
+          const contact = parts[0] === 'kf' && parts.length === 4 && parts[1] === 'orders' && parts[3] === 'contact';
+          if (contact) {
+            if (req.method !== 'POST') return json(res,405,{code:405,msg:'请使用POST发起联系'});
+            if (!['super','service','supervisor','service_supervisor'].includes(normalizeRole(session.role))) return json(res,403,{code:403,msg:'当前角色无权联系服务订单客户'});
+            const order = await service.execute('GET', '/api/kf/orders/' + parts[2], {}, session);
+            if ((order?.order ? { ...order.order, ...order } : order)?.can_generate_link !== true) return json(res,403,{code:403,msg:'该订单不在当前客服可联系的跟进范围内'});
+            const caller = String(session.authzUserId || session.accountId || session.subjectId || session.id || '');
+            if (!caller || typeof source.transaction !== 'function') return json(res,409,{code:409,msg:'当前账号尚未配置企业微信客服映射'});
+            const [[mapping]] = await source.transaction(conn => conn.query("SELECT m.wecom_userid FROM lxm_share_staff_map m JOIN lxm_auth_users u ON u.id=m.staff_id WHERE m.staff_id=? AND m.status='ACTIVE' AND u.status='active' LIMIT 1", [caller]));
+            if (!mapping?.wecom_userid) return json(res,409,{code:409,msg:'当前登录客服尚未配置有效企业微信映射'});
+            generalContactService ||= require('./svcGeneralContact.cjs').createSvcGeneralContact();
+            let data;
+            try {
+              data = await generalContactService.prepare({ order: order?.order ? { ...order.order, ...order } : order, staff: { wecom_userid: mapping.wecom_userid }, pageUrl: body.pageUrl, userAgent: req.headers['user-agent'] || '' });
+            } catch (error) {
+              if (error instanceof require('./svcGeneralContact.cjs').SvcGeneralContactError) throw error;
+              throw Object.assign(new Error('企微联系准备暂不可用'), { code: 'SVC_GENERAL_CONTACT_FAILED', statusCode: 503 });
+            }
+            res.setHeader('Cache-Control', 'no-store');
+            return json(res,200,{code:0,msg:'ok',data});
+          }
           const data = await service.execute(req.method,parsed.pathname,body,session);
           if (data?.csv != null) {
             res.statusCode=200;res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(data.filename || '客服分成.csv')}`);return res.end(data.csv);
           }
           return json(res,200,{code:0,msg:'ok',data});
         } catch(error) {
+          if (error instanceof require('./svcGeneralContact.cjs').SvcGeneralContactError) return json(res,error.statusCode || 503,{code:error.code,msg:error.userMessage});
           const business = Number.isInteger(Number(error.code)) && Number(error.code) >= 4000;
           const status = error.statusCode || error.status || (business ? 200 : 503);
           if (!business) logger.error('svc.request.failed',{route:parsed.pathname,code:errorCode(error)});
           return json(res,status,{code:business ? Number(error.code) : status >= 400 && status < 500 ? Number(error.code) || status : 'SVC_UNAVAILABLE',msg:business || status >= 400 && status < 500 ? error.message : '客服服务暂不可用，请检查迁移与配置',...(error.data ? {data:error.data} : {})});
+        }
+      }
+      if (parts[0] === "content" && parts[1] === "photographers" && parts.length === 2) {
+        const session = await requireSession(req, res, parsed.pathname, "admin"); if (!session) return;
+        const role = normalizeRole(session.role);
+        if (role !== "super" && (["photo", "merchant", "distributor", "agent"].includes(role) || !hasAction(session, "view")
+          || !["albums", "videoSingles", "packages"].some((key) => sessionHasMenu(session, key)))) return forbidden(res, session, parsed.pathname);
+        if (req.method !== "GET") return json(res, 405, { error: "请使用 GET 查询摄影师" });
+        try { return json(res, 200, { rows: await listContentPhotographers(source) }); }
+        catch (error) {
+          logger.error("content.photographers.failed", { requestId: rid, errorCode: errorCode(error) });
+          return json(res, 503, { error: "摄影师列表暂不可用，请稍后重试" });
         }
       }
       if (parts[0] === "photo") {

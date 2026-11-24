@@ -124,21 +124,26 @@ test("online processing does not cancel or deduct funds; a signed query success 
   assert.equal(source.wechatPay.refundRequests.filter((request) => request.method === "POST").length, 1, "query retry keeps the original refund number");
 });
 
-test("mini-program request and finance review share the pre-dispatch refund contract", async (t) => {
+test("new mini-program refund requests execute automatically without finance while legacy reviews remain supported", async (t) => {
   const source = makeSource();
   delete source.collections.afterSales["deposit-refund"];
   Object.assign(source.collections.orders.booking, { afterSaleStatus: "", afterSaleId: "" });
+  const post = await startApi(t, source);
   const submitted = await rpc(source, "submitAfterSale", { data: {
     orderId: "booking", type: "定金退款", refundAmount: 999, reason: "行程变更申请退还定金",
-  } }, { identity: { kind: "public", openid: "owner" } });
+  } }, { identity: { kind: "public", openid: "owner" }, wechatPay: source.wechatPay });
   assert.equal(submitted.success, true, JSON.stringify(submitted));
-  const ticket = await source.get("afterSales", submitted.data.ticketId);
+  const ticket = await source.get("afterSales", submitted.data.refundTicketId);
   assert.equal(ticket.refundAmount, 30);
-  assert.equal(ticket.reviewLane, "pre_dispatch");
-  const post = await startApi(t, source);
+  assert.equal(ticket.reviewLane, "customer_self_cancel");
+  assert.equal(ticket.automaticApproval, true);
+  assert.equal(ticket.refundConfirmed, true);
+  assert.equal(submitted.data.refundStatus, "refunded");
   const reviewed = await post("finance", approve(), `/api/after-sales/${ticket.id}/action`);
-  assert.equal(reviewed.status, 200, JSON.stringify(reviewed.body));
+  assert.equal(reviewed.status, 409, JSON.stringify(reviewed.body));
+  assert.equal(source.wechatPay.refundRequests.filter((request) => request.method === "POST").length, 1);
   assert.equal((await source.get("orders", "booking")).status, "cancelled");
+  assert.equal((await source.get("orders", "booking")).afterSaleId, "");
 });
 
 test("review rechecks assignment and fulfillment changes after the request", async (t) => {
@@ -241,6 +246,8 @@ test("service-exception refund totals stay scoped to their own order", async (t)
   Object.assign(source.collections.afterSales["deposit-refund"], { type: "退款申请", reviewLane: "service_exception", refundAmount: 20 });
   source.collections.afterSales.other = confirmedRefund("unrelated-order", 999);
   const post = await startApi(t, source);
+  const contacted = await post("super", { action: "follow", customerContacted: true, reason: "电话联系客人确认服务例外退款" });
+  assert.equal(contacted.status, 200, JSON.stringify(contacted.body));
   const completed = await post("super", { action: "complete", refundAmount: 30, reason: "人工核实服务例外退款" });
   assert.equal(completed.status, 200, JSON.stringify(completed.body));
   const result = await post("finance", approve());

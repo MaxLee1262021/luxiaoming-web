@@ -86,6 +86,31 @@ test("legacy lifecycle, ownership and confirmed schedule survive their service p
   assert.equal(project({ svc_paid_processed: "1" }).service_managed, true);
 });
 
+test("customer intent supplies the requested time without confirming a shooting slot", () => {
+  for (const intentTimePeriod of ["15:30", "15:30:00"]) {
+    const row = project({ intentDate: "2026-12-20", intentTimePeriod });
+    assert.equal(row.requested_time, "2026-12-20 15:30:00");
+    assert.equal(row.schedule_time, null);
+    assert.equal(row.service_status, "new");
+  }
+  const confirmed = project({ intentDate: "2026-12-20", intentTimePeriod: "15:30", service_status: "confirmed",
+    appointmentAt: "2026-12-21 16:00:00", schedule_time: "2026-12-21 16:00:00" });
+  assert.equal(confirmed.requested_time, "2026-12-20 15:30:00");
+  assert.equal(confirmed.schedule_time, "2026-12-21 16:00:00");
+  assert.equal(project({ intentDate: "2026-12-20", intentTimePeriod: "15:30", requested_time: "2026-12-19 14:00:00" }).requested_time, "2026-12-19 14:00:00");
+});
+
+test("incomplete, textual and invalid customer intent cannot fabricate a requested datetime", () => {
+  for (const extra of [{ intentDate: "2026-12-20" }, { intentTimePeriod: "15:30" },
+    { intentDate: "2026-12-20", intentTimePeriod: "上午" }, { intentDate: "2026-12-20", intentTimePeriod: "15:00-16:00" },
+    { intentDate: "2026-02-30", intentTimePeriod: "15:30" }, { intentDate: "2026-12-20", intentTimePeriod: "24:00" },
+    { intentDate: "2026-12-20", intentTimePeriod: "15:60" }]) {
+    const row = project({ ...extra, service_status: "confirmed", appointmentAt: "2026-12-21 16:00:00" });
+    assert.equal(row.requested_time, null, JSON.stringify(extra));
+    assert.equal(row.schedule_time, "2026-12-21 16:00:00", "confirmed time must not replace incomplete original intent");
+  }
+});
+
 test("existing service ownership and reservation states are retained without changing input", () => {
   for (const status of ["reserved", "claimed", "confirmed", "shooting", "final_pending", "done", "refunded", "canceled"]) {
     const input = { orderNo: "ORDER-1", service_status: status, assignee_id: "s1", photo_id: "p1", depositPaidAt: PAID, svc_paid_processed: 1 };

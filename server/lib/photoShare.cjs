@@ -3,7 +3,7 @@
 const crypto = require("node:crypto");
 const b = require("./svcBenefit.cjs");
 const { createPhotoStore } = require("./photoStore.cjs");
-const { provisionPhotoAccount, requirePhotoAdministrator, validatePhotoCredentials } = require("./photoAccounts.cjs");
+const { provisionPhotoAccount, linkPhotoAccount, requirePhotoAdministrator, validatePhotoAccountInput } = require("./photoAccounts.cjs");
 const DEFAULT_RATES = Object.freeze({ rate_photo_bp: 2000, rate_video_bp: 2000, rate_combo_bp: 2000, rate_peripheral_bp: 800 });
 const SETTLEMENT_CYCLES = Object.freeze({ daily: "日结", weekly: "周结", monthly: "月结" });
 const ZERO_REASONS = Object.freeze({ refund: "整单退款", stop_shoot: "中途停拍", complaint_photo: "摄影师责任", transfer: "已被转派" });
@@ -323,24 +323,29 @@ function createPhotoShareService(options = {}) {
   }); return page(rows, query); }); }
   async function createParty(input, session) {
     requirePhotoAdministrator(session);
-    const login = validatePhotoCredentials(input);
+    const createAccount = input.create_account !== false, login = validatePhotoAccountInput(input);
     const cycle = input.cycle === undefined ? "monthly" : input.cycle;
     if (typeof cycle !== "string" || !Object.hasOwn(SETTLEMENT_CYCLES, cycle)) throw fail(4314, "结算方式请选择日结、周结或月结");
     return write(async (state, context = {}) => {
     const name = txt(input.name), phone = txt(input.phone), createdAt = b.localTime(at());
     if (!name || name.length > 32 || !/^1[3-9]\d{9}$/.test(phone)) throw fail(4314, "请填写姓名及有效手机号");
-    if (state.profiles.some(p => p.phone === phone) || (state.phones || []).includes(phone)) throw fail(4301, "手机号全平台唯一，已存在");
+    if (state.profiles.some(p => p.phone === phone) || createAccount && (state.phones || []).includes(phone)) throw fail(4301, "手机号全平台唯一，已存在");
     const { id, agree_no: agree } = allocateProfileNumbers(state.profiles, createdAt);
     const profile = { id, name, phone, agree_no: agree, rate_mode: input.rate_mode || "custom", status: "active", dispute_days: Number(input.dispute_days ?? 5), wait_days: Number(input.wait_days ?? 3), cycle, created_at: createdAt };
     if (!Number.isInteger(profile.dispute_days) || profile.dispute_days < 1 || profile.dispute_days > 30 || !Number.isInteger(profile.wait_days) || profile.wait_days < 0 || profile.wait_days > 30) throw fail(4314, "异议期须为1–30工作日，等待天数须为0–30整数");
+    const account = await (createAccount ? options.provisionAccount || provisionPhotoAccount : options.linkAccount || linkPhotoAccount)(context.conn, profile, login);
+    const matchingAccount = createAccount ? account?.account === login.account : txt(account?.account).toLowerCase() === login.account.toLowerCase();
+    if (!account || !matchingAccount || !account.account_id || account.account_created !== createAccount || !createAccount && account.account_linked !== true) throw b.failure(4399, "摄影师账号保存未完成，建档已回滚", 503);
+    if (!createAccount) {
+      const occupied = state.phoneOwners ? state.phoneOwners.some(owner => owner.phone === phone && !(owner.table === "lxm_auth_users" && owner.id === account.account_id) && !(owner.table === "lxm_staff" && owner.id === account.legacy_staff_id)) : (state.phones || []).includes(phone);
+      if (occupied) throw fail(4301, "手机号全平台唯一，已存在");
+    }
     const supplied = input.rates || input;
     const rates = b.CATEGORIES.some(key => supplied["rate_" + key + "_bp"] != null || supplied[key + "_bp"] != null) ? ratesOf(input) : Object.fromEntries(b.CATEGORIES.map(key => ["rate_" + key + "_bp", currentRule(state, null, at())["rate_" + key + "_bp"]]));
     const creationReason = txt(input.reason) || "建档；协议 " + agree;
     saveVersion(state, { ...rates, rate_mode: profile.rate_mode, reason: creationReason }, id, operator(session), createdAt, true);
     state.profiles.push(profile); profileLog(state, id, "create", `建档；协议 ${agree}；结算方式 ${SETTLEMENT_CYCLES[cycle]}；比例 ${JSON.stringify(rates)}；原因：${creationReason}`, operator(session), createdAt);
-    const account = await (options.provisionAccount || provisionPhotoAccount)(context.conn, profile, login);
-    if (!account || account.account !== login.account || !account.account_id || account.account_created !== true) throw b.failure(4399, "摄影师账号创建未完成，建档已回滚", 503);
-    return { ...profile, account: account.account, account_id: account.account_id, account_created: true };
+    return { ...profile, account: account.account, account_id: account.account_id, account_created: createAccount, ...(!createAccount ? { account_linked: true } : {}) };
   }); }
   async function savePartyRate(id, input, session) { return write(state => { const profile = findParty(state, id), old = currentRule(state, id, at()); const row = saveVersion(state, input, id, operator(session), at()); profile.rate_mode = row.rule_mode; profileLog(state, id, "rate", `${JSON.stringify(ratesDisplay(old))} → ${row.rule_mode === "global" ? "统一比例" : JSON.stringify(ratesDisplay(row))}；原因：${row.reason}；请同步合作协议`, operator(session), at()); return row; }); }
   async function setPartyStatus(id, input, session) { return write(state => { const profile = findParty(state, id); if (!["active", "paused", "ended"].includes(input.status)) throw fail(4314, "状态无效"); if (profile.status === "ended" && input.status !== "ended") throw fail(4310, "已终止档案不可恢复，请重新建档"); const reason = reasonOf(input); if (input.status === "ended" && Number(profile.pending_count) > 0) throw fail(4302, `无法终止：${profile.name} 还有 ${profile.pending_count} 笔在途订单，需逐单选择「改派 / 本人拍完 / 取消」，不允许一键放行`, { pending_count: Number(profile.pending_count), pending_orders: profile.pending_orders }); if (profile.status === input.status) return { photo_id: id, status: profile.status }; profile.status = input.status; profileLog(state, id, { active: "resume", paused: "pause", ended: "end" }[input.status], reason, operator(session), at()); return { photo_id: id, status: profile.status }; }); }

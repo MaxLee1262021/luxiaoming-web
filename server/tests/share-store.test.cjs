@@ -59,6 +59,40 @@ test("closure invalidation is replayable, reopening alone does not reactivate, a
   assert.equal((await store.getMerchantStats("m1")).boundUsers, 1);
 });
 
+test("current bound users move exclusively A to B to A, surviving restart without counting history", async () => {
+  const { f, store } = await ready();
+  await store.onboardMerchant(merchant("m1")); await store.onboardMerchant(merchant("m2"));
+  f.setTime("2026-11-01T01:00:00Z"); await store.reportScan({ userId: "u1", scene: "c=m1" });
+  await store.reportScan({ userId: "u2", scene: "c=m1" });
+  assert.equal((await store.getMerchantStats("m1")).boundUsers, 2);
+  // Same timestamp must still switch via the monotonic scan ID.
+  await store.reportScan({ userId: "u1", scene: "c=m2" });
+  assert.equal((await f.newStore().getMerchantStats("m1")).boundUsers, 1);
+  assert.equal((await store.getMerchantStats("m2")).boundUsers, 1);
+  let summaries = await store.listRuleSummaries({ all: true });
+  assert.equal(summaries.list.reduce((n, row) => n + row.boundUsers, 0), 2);
+  f.setTime("2026-11-01T02:00:00Z"); await store.upsertMerchant({ merchantId: "m2", status: "CLOSED" });
+  assert.equal((await store.getMerchantStats("m2")).boundUsers, 0);
+  assert.equal((await store.getMerchantStats("m1")).boundUsers, 1, "closed latest merchant never revives old ownership");
+  await store.reportScan({ userId: "u1", scene: "c=m1" });
+  summaries = await f.newStore().listRuleSummaries({ all: true });
+  assert.equal(summaries.list.find(row => row.merchantId === "m1").boundUsers, 2);
+  assert.equal((await store.getMerchantStats("m1")).scanCount, 3);
+});
+
+test("legacy dedup cannot swallow a genuine A to B to A switch within five seconds", async () => {
+  const { f, store } = await ready();
+  await store.onboardMerchant(merchant("m1")); await store.onboardMerchant(merchant("m2"));
+  f.setTime("2026-11-01T01:00:00Z"); await store.reportScan({ userId: "u", scene: "c=m1" });
+  f.setTime("2026-11-01T01:00:01Z"); await store.reportScan({ userId: "u", scene: "c=m2" });
+  f.setTime("2026-11-01T01:00:02Z");
+  assert.equal((await store.reportScan({ userId: "u", scene: "c=m1" })).deduplicated, false);
+  const result = await store.enqueuePayment({ orderId: "switch-back", userId: "u", payTime: "2026-11-01T01:00:02Z", paidTotal: "100.00" });
+  assert.equal(result.decision.hitMerchantId, "m1");
+  assert.equal((await store.getMerchantStats("m2")).boundUsers, 0);
+  assert.equal(f.tables().scan.length, 3);
+});
+
 test("paid decisions persist over restart and later scans/configuration; pre-maturity refunds reduce base", async () => {
   const { f, store } = await ready(); await store.onboardMerchant(merchant()); await store.onboardMerchant(merchant("m2"));
   f.setTime("2026-11-01T01:00:00Z"); await store.reportScan({ userId: "u1", scene: "c=m1" });
@@ -100,18 +134,18 @@ test("post-maturity refunds are independently idempotent, cumulative and booked 
   await assert.rejects(store.recordRefund({ orderId: "o1", refundNo: "excess", amount: "0.01" }), { code: "SHARE_4001" });
 });
 
-test("T2 uses earlier paid pending T1 jobs; later clicks and full-refunded prior jobs cannot influence historical attribution", async () => {
+test("T2 follows the latest scan regardless of prior pending T1 payments or refunds", async () => {
   const { f, store } = await ready(); await store.onboardMerchant(merchant()); await store.onboardMerchant(merchant("m2"));
   f.setTime("2026-11-01T01:00:00Z"); await store.reportScan({ userId: "u1", scene: "c=m1" });
   await store.enqueuePayment({ orderId: "t1", userId: "u1", paidTotal: "100.00", payTime: "2026-11-01T01:00:00Z" });
   f.setTime("2026-11-01T02:00:00Z"); await store.reportScan({ userId: "u1", scene: "c=m2" });
   await store.reportClick({ userId: "u1", staffId: "service", linkId: "link" });
   const result = await store.enqueuePayment({ orderId: "t2", userId: "u1", paidTotal: "100.00", payTime: "2026-11-01T02:00:00Z" });
-  assert.equal(result.decision.hitMerchantId, "m1"); assert.equal(result.decision.hitReason, "D_LATEST_SCAN");
+  assert.equal(result.decision.hitMerchantId, "m2"); assert.equal(result.decision.hitReason, "BINDING");
   assert.equal(await store.getSnapshot("t1"), null);
   f.setTime("2026-11-01T03:00:00Z"); await store.recordRefund({ orderId: "t1", refundNo: "full", amount: "100.00" });
   const next = await store.enqueuePayment({ orderId: "t3", userId: "u1", paidTotal: "100.00", payTime: "2026-11-01T03:00:00Z" });
-  assert.equal(next.decision.hitMerchantId, "m2"); assert.equal(next.decision.hitReason, "C_LATEST_SCAN");
+  assert.equal(next.decision.hitMerchantId, "m2"); assert.equal(next.decision.hitReason, "BINDING");
   assert.equal(f.tables().scan.length, 2, "click reports must not insert scans");
 });
 
@@ -196,7 +230,7 @@ test("registered customer-service links persist immutable staff identity and exp
   await assert.rejects(store.createCsLink({ ...request, linkId: "3".repeat(32), staffId: "other-service" }), { code: "SHARE_4090" });
 });
 
-async function missingEarlierSelfOrder() {
+async function missingEarlierScan() {
   const { f, store } = await ready();
   await store.onboardMerchant(merchant("m1", { refundWindowDays: 0, ratioT2: "0.0800" }));
   await store.onboardMerchant(merchant("m2", { refundWindowDays: 0 }));
@@ -207,16 +241,19 @@ async function missingEarlierSelfOrder() {
   await store.enqueuePayment({ orderId: "t2", userId: "u1", paidTotal: "100.00", payTime: "2026-11-01T02:10:00Z" });
   await store.processJob("t2");
   const original = await store.getSnapshot("t2"); assert.equal(original.hitMerchantId, "m2");
-  // A durable observer recovered this earlier online payment after T2 posted.
-  // Correction must replay its true pay time, not the current latest binding.
+  // A durable observer recovers missing pre-payment facts after T2 posted.
+  // Correction replays its true payment-time scan history.
   f.setTime("2026-11-02T00:00:00Z");
   const earlier = await store.enqueuePayment({ orderId: "t1", userId: "u1", paidTotal: "50.00", payTime: "2026-11-01T01:30:00Z" });
   assert.equal(earlier.decision.hitMerchantId, "m1"); assert.equal(earlier.decision.splitType, "T1");
+  f.setTime("2026-11-01T02:05:00Z");
+  await store.reportScan({ userId: "u1", scene: "c=m1" });
+  f.setTime("2026-11-02T00:00:00Z");
   return { f, store, original };
 }
 
 test("correction replays original payment facts, transfers remaining balance, and refunds only the effective revision", async () => {
-  const { f, store, original } = await missingEarlierSelfOrder();
+  const { f, store, original } = await missingEarlierScan();
   await store.recordRefund({ orderId: "t2", refundNo: "before-correction", amount: "20.00" });
   const input = { reason: "补偿恢复早期支付证据后核对归属", requestId: "correct-once", operatorId: "super" };
   const results = await Promise.all([store.correctSnapshot("t2", input), store.correctSnapshot("t2", input)]);
@@ -261,7 +298,7 @@ test("no-op corrections preserve money rows, rebase subsequent refund rounding, 
 });
 
 test("correction rollback preserves quota, ledger and immutable snapshot when any append fails", async () => {
-  const { f, store, original } = await missingEarlierSelfOrder();
+  const { f, store, original } = await missingEarlierScan();
   const before = await store.listDetails({ orderId: "t2", all: true });
   f.injectFailure("INSERT INTO `lxm_share_audit`");
   const input = { requestId: "will-retry", reason: "核对后更正", operatorId: "super" };
@@ -357,7 +394,7 @@ test("failed notifications stay queryable and audited manual retry resets only a
   assert.ok(f.tables().audit.some(row => row.action === "ALERT_RETRY"));
 });
 
-test("configured default TTL and scan dedup are applied with validated retry settings", async () => {
+test("legacy TTL does not expire ownership; scan dedup and retry settings remain validated", async () => {
   const f = fixture(); const store = f.newStore({ defaultTtlHours: 2, dedupSeconds: 10, judgeRetryMax: 3 }); await store.ensureSchema();
   await store.upsertMerchant({ merchantId: "m", name: "尚未配置门店" });
   await store.saveQr({ merchantId: "m", id: "qr", scene: "c=m", imageUrl: "https://example.test/qr.png", reason: "入驻", operatorId: "super" });
@@ -365,11 +402,11 @@ test("configured default TTL and scan dedup are applied with validated retry set
   f.setTime("2026-11-01T01:00:08Z"); assert.equal((await store.reportScan({ userId: "u", scene: "c=m" })).deduplicated, true);
   f.setTime("2026-11-01T04:00:00Z"); await store.reportClick({ userId: "u", staffId: "s" });
   const queued = await store.enqueuePayment({ orderId: "o", userId: "u", paidTotal: "10.00", payTime: "2026-11-01T04:00:00Z" });
-  assert.equal(queued.decision.hitMerchantId, "0"); assert.equal(queued.decision.candidateJson.candidates[0].ttlHours, 2);
+  assert.equal(queued.decision.hitMerchantId, "m"); assert.equal(queued.decision.ratio, "0.0000");
   for (const options of [{ defaultTtlHours: 0 }, { dedupSeconds: 0 }, { judgeRetryMax: 11 }]) assert.throws(() => f.newStore(options), { code: "SHARE_4001" });
 });
 
-test("scan metadata is archived while server time alone controls binding, dedup and the attribution window", async () => {
+test("scan metadata is archived while server time controls binding and dedup without expiring attribution", async () => {
   const { f, store } = await ready(); await store.onboardMerchant(merchant("m1", { ttlHours: 1, refundWindowDays: 0 }));
   f.setTime("2026-11-01T01:00:00Z");
   const future = "2030-12-01T10:11:12+08:00";
@@ -385,7 +422,7 @@ test("scan metadata is archived while server time alone controls binding, dedup 
   assert.equal((await store.getBindingsAsOf("u", "2026-11-01T01:00:05Z"))[0].lastScanAt, "2026-11-01T01:00:05.000Z");
   f.setTime("2026-11-01T03:00:06Z"); await store.reportClick({ userId: "u", staffId: "service" });
   const payment = await store.enqueuePayment({ orderId: "outside-window", userId: "u", paidTotal: "100.00", payTime: "2026-11-01T03:00:06Z" });
-  assert.equal(payment.decision.hitMerchantId, "0", "a future client timestamp cannot extend the server-time window");
+  assert.equal(payment.decision.hitMerchantId, "m1", "the latest scan remains eligible after the legacy window");
   for (const metadata of [{ launchType: 3 }, { deviceId: "d".repeat(129) }, { clientScanAt: "not-an-iso-date" }, { clientScanAt: "2026-01-01T00:00:00." + "1".repeat(50) + "Z" }])
     await assert.rejects(store.reportScan({ userId: "other", qrId: "qr-m1", ...metadata }), { code: "SHARE_4001" });
   assert.equal(f.tables().scan.length, 2);
@@ -424,33 +461,33 @@ async function pendingLateFacts(windowA = 3, windowB = 7, { enqueueT1 = true } =
   return { f, store, queued };
 }
 
-test("a late earlier T1 refreshes pending T2 from seven to three days without a premature formal snapshot", async () => {
+test("a late earlier T1 never changes the latest merchant or its seven-day refund window", async () => {
   const { f, store, queued } = await pendingLateFacts(3, 7);
   assert.equal(queued.job.availableAt, "2026-11-08T02:10:00.000Z");
   const originalRetryAt = (await store.getJob("t2")).nextAttemptAt;
   await store.refreshPendingBatch({ limit: 100 });
   const refreshed = await store.getJob("t2");
-  assert.equal(refreshed.decisionJson.hitMerchantId, "m1"); assert.equal(refreshed.availableAt, "2026-11-04T02:10:00.000Z");
+  assert.equal(refreshed.decisionJson.hitMerchantId, "m2"); assert.equal(refreshed.availableAt, "2026-11-08T02:10:00.000Z");
   assert.equal(refreshed.nextAttemptAt, originalRetryAt); assert.equal(await store.getSnapshot("t2"), null);
   f.setTime("2026-11-04T02:10:00Z");
-  assert.ok((await store.listDueJobs()).some(job => job.orderId === "t2"), "a stale initial seven-day nextAttemptAt cannot hide a never-retried mature job");
+  assert.equal((await store.listDueJobs()).some(job => job.orderId === "t2"), false);
+  assert.equal((await store.processJob("t2")).pending, true);
+  f.setTime("2026-11-08T02:10:00Z");
   const posted = await store.processJob("t2");
-  assert.equal(posted.snapshot.hitMerchantId, "m1"); assert.equal(posted.snapshot.splitAmount, "8.00");
+  assert.equal(posted.snapshot.hitMerchantId, "m2"); assert.equal(posted.snapshot.splitAmount, "3.00");
 });
 
-test("processJob replays original t0 and extends the window if late T1 changes three-day B to seven-day A", async () => {
+test("late earlier T1 never extends the latest merchant's three-day refund window", async () => {
   const { f, store } = await pendingLateFacts(7, 3);
   f.setTime("2026-11-04T02:10:00Z");
-  const attempt = await store.processJob("t2");
-  assert.equal(attempt.pending, true); assert.equal(await store.getSnapshot("t2"), null);
-  assert.equal(attempt.job.availableAt, "2026-11-08T02:10:00.000Z");
-  f.setTime("2026-11-08T02:10:00Z"); const posted = await store.processJob("t2");
-  assert.equal(posted.snapshot.hitMerchantId, "m1"); assert.equal(posted.snapshot.refundWindowDays, 7);
+  const posted = await store.processJob("t2");
+  assert.equal(posted.snapshot.hitMerchantId, "m2");
+  assert.equal(posted.snapshot.refundWindowDays, 3);
 });
 
-test("late pre-t0 full refund removes the provisional T1 preference before pending T2 posts", async () => {
+test("late pre-t0 refund of an earlier T1 never changes latest merchant ownership", async () => {
   const { f, store } = await pendingLateFacts(7, 3);
-  await store.refreshPendingJob("t2"); assert.equal((await store.getJob("t2")).decisionJson.hitMerchantId, "m1");
+  await store.refreshPendingJob("t2"); assert.equal((await store.getJob("t2")).decisionJson.hitMerchantId, "m2");
   await store.recordRefund({ orderId: "t1", refundNo: "late-full-refund", amount: "50.00", refundAt: "2026-11-01T01:50:00Z" });
   f.setTime("2026-11-04T02:10:00Z");
   const posted = await store.processJob("t2");
@@ -473,11 +510,11 @@ test("pending refresh preserves failed-attempt budgets and cannot advance a real
   const failed = await store.getJob("t2"); assert.equal(failed.attempts, 1);
   await store.enqueuePayment({ orderId: "t1", userId: "u", paidTotal: "50.00", payTime: "2026-11-01T01:30:00Z" });
   await store.refreshPendingBatch(); const refreshed = await store.getJob("t2");
-  assert.equal(refreshed.availableAt, "2026-11-04T02:10:00.000Z");
+  assert.equal(refreshed.availableAt, "2026-11-08T02:10:00.000Z");
   assert.equal(refreshed.attempts, 1); assert.equal(refreshed.nextAttemptAt, failed.nextAttemptAt);
   assert.equal((await store.processJob("t2")).deferred, true);
   assert.equal((await store.listDueJobs()).some(job => job.orderId === "t2"), false);
-  f.setTime("2026-11-08T02:10:01Z"); assert.equal((await store.processJob("t2")).snapshot.hitMerchantId, "m1");
+  f.setTime("2026-11-08T02:10:01Z"); assert.equal((await store.processJob("t2")).snapshot.hitMerchantId, "m2");
 });
 
 test("durable keyset pagination reaches beyond a hundred long-window jobs and resumes after restart", async () => {
@@ -499,7 +536,7 @@ test("durable keyset pagination reaches beyond a hundred long-window jobs and re
 });
 
 test("late facts affecting a posted snapshot only create review evidence until explicit correction", async () => {
-  const { f, store, original } = await missingEarlierSelfOrder();
+  const { f, store, original } = await missingEarlierScan();
   const before = await store.listDetails({ orderId: "t2", all: true });
   const reviewed = await store.reviewPostedFacts({ orderId: "t1" });
   assert.equal(reviewed.flagged, 1); assert.deepEqual(await store.getSnapshot("t2"), original);
@@ -510,19 +547,19 @@ test("late facts affecting a posted snapshot only create review evidence until e
   assert.equal(f.tables().risk.find(risk => risk.entity_id === "t2").status, "RESOLVED");
 });
 
-test("a late successful full refund may flag a dependent posted T2 but cannot silently move its money", async () => {
+test("a late full refund of an earlier order neither flags nor moves a later latest-scan T2", async () => {
   const { f, store } = await ready();
   await store.onboardMerchant(merchant("m1", { refundWindowDays: 0, ratioT2: "0.0800" })); await store.onboardMerchant(merchant("m2", { refundWindowDays: 0 }));
   f.setTime("2026-11-01T01:00:00Z"); await store.reportScan({ userId: "u", scene: "c=m1" });
   f.setTime("2026-11-01T01:30:00Z"); await store.enqueuePayment({ orderId: "t1", userId: "u", paidTotal: "50.00", payTime: "2026-11-01T01:30:00Z" }); await store.processJob("t1");
   f.setTime("2026-11-01T02:00:00Z"); await store.reportScan({ userId: "u", scene: "c=m2" }); await store.reportClick({ userId: "u", staffId: "service" });
   f.setTime("2026-11-01T02:10:00Z"); await store.enqueuePayment({ orderId: "t2", userId: "u", paidTotal: "100.00", payTime: "2026-11-01T02:10:00Z" }); await store.processJob("t2");
-  const original = await store.getSnapshot("t2"); assert.equal(original.hitMerchantId, "m1");
+  const original = await store.getSnapshot("t2"); assert.equal(original.hitMerchantId, "m2");
   f.setTime("2026-11-02T00:00:00Z"); await store.recordRefund({ orderId: "t1", refundNo: "late-confirmed-full", amount: "50.00", refundAt: "2026-11-01T01:50:00Z" });
-  assert.equal((await store.reviewPostedFacts({ orderId: "t1", refundNo: "late-confirmed-full" })).flagged, 1);
-  assert.deepEqual(await store.getSnapshot("t2"), original); assert.equal((await store.listDetails({ orderId: "t2" })).sum.netAmount, "8.00");
+  assert.equal((await store.reviewPostedFacts({ orderId: "t1", refundNo: "late-confirmed-full" })).flagged, 0);
+  assert.deepEqual(await store.getSnapshot("t2"), original); assert.equal((await store.listDetails({ orderId: "t2" })).sum.netAmount, "3.00");
   const review = f.tables().outbox.find(event => event.event_type === "SHARE_LATE_FACT_REVIEW");
-  assert.equal(JSON.parse(review.payload_json).expectedMerchantId, "m2");
+  assert.equal(review, undefined);
 });
 
 test("user invalidation preserves ledger history, invalidates every binding and permits a new real scan", async () => {

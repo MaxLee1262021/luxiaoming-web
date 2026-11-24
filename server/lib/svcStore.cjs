@@ -8,7 +8,7 @@ const schema = require("./mysqlSchema.cjs");
 // multi-process serialization; SQL rollback covers orders, accounting and logs.
 // The initial repository favors correctness. It never substitutes demo data.
 const TABLES = Object.freeze({
-  staff: ["svc_staff", "id", "id name phone joined_at base_salary rate_mode supervisor_id staff_status account_id rate_review_date settlement_cycle link_valid_days observe_days created_at updated_at"],
+  staff: ["svc_staff", "id", "id name phone joined_at base_salary rate_mode supervisor_id staff_status account_id rate_review_date settlement_cycle link_valid_days observe_days wecom_userid wecom_department_id wecom_sync_status wecom_sync_message wecom_sync_started_at wecom_synced_at created_at updated_at"],
   staffLogs: ["svc_staff_profile_log", "id", "id staff_id action from_tags to_tags from_review_date to_review_date reason operator created_at"],
   operationLogs: ["svc_operation_log", "id", "id order_no action staff_id operator reason created_at"],
   receiptLogs: ["svc_receipt_log", "id", "id order_no received_at operator created_at"],
@@ -32,10 +32,19 @@ const APPEND_ONLY = new Set(["configs", "bindingLogs", "slotLogs", "assignLogs",
 const JSON_FIELDS = new Set(["rejudge_log", "holiday_dates", "workday_dates", "from_tags", "to_tags"]);
 const SERVICE_FIELDS = "customer_openid requested_time schedule_time service_status assignee_id photo_id done_at reserve_staff_id is_rebuy reflow_from svc_paid_processed".split(" ");
 const ORDER_WORKFLOW_FIELDS = ["shootingStartedAt", "shootingCompletedAt", "status", "workflowStage", "completedAt"];
-const ORDER_FACT_PATHS = ["shootingStartedAt", "shootingCompletedAt", "shootingCompleted", "completionSource", "paymentReviewRequired", "selectionStatus", "selectionConfirmedAt", "selectionAcknowledgedAt"];
+const REQUESTED_TIME_FACT_PATHS = ["intentDate", "intentTimePeriod"];
+const ORDER_FACT_PATHS = [...REQUESTED_TIME_FACT_PATHS, "customerArrivedAt", "customerArrivedBy", "shootingStartedAt", "shootingCompletedAt", "shootingCompleted", "completionSource", "paymentReviewRequired", "selectionStatus", "selectionConfirmedAt", "selectionAcknowledgedAt"];
 function normal(row) { return Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value instanceof Date ? c.stamp(value) : JSON_FIELDS.has(key) && typeof value === "string" ? JSON.parse(value) : typeof value === "bigint" ? String(value) : value])); }
 function fen(value) { const s = String(value == null ? "0" : value); if (!/^-?\d+(?:\.\d{1,2})?$/.test(s)) return 0; const negative = s[0] === "-", [whole, frac = ""] = (negative ? s.slice(1) : s).split("."); const v = BigInt(whole) * 100n + BigInt(frac.padEnd(2, "0")); const result = Number(negative ? -v : v); if (!Number.isSafeInteger(result)) throw c.fail(4014, "订单金额超出安全范围"); return result; }
 function orderTime(...values) { const value = values.find(value => value != null && value !== "" && Number.isFinite(c.millis(value))); return value == null ? null : c.stamp(value); }
+function intentTime(order) {
+  const date = c.text(order.intentDate), time = c.text(order.intentTimePeriod);
+  // An intent such as "上午" has no exact clock time. Preserve its original
+  // text, but never invent a datetime or treat the intent as a confirmed slot.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(time)) return null;
+  const value = `${date} ${time.length === 5 ? time + ":00" : time}`;
+  return Number.isFinite(c.millis(value)) && c.stamp(value) === value ? value : null;
+}
 function explicitNumber(value) { return value != null && typeof value !== "boolean" && String(value).trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : null; }
 function depositWaived(order) {
   // Missing legacy payment metadata is unknown, rather than a zero deposit.
@@ -69,6 +78,8 @@ function orderRow(raw) {
   const hasPaid = !!paid || phasePaid("deposit") || phasePaid("final") || payments.length > 0;
   const waived = depositWaived(r), paymentStatus = hasPaid ? "paid" : waived ? "waived" : "unpaid";
   const request = r.appointmentAt || (r.bookingDate && /^\d{2}:\d{2}/.test(r.bookingTime || "") ? `${r.bookingDate} ${r.bookingTime.slice(0, 5)}:00` : null);
+  const hasIntent = !!(c.text(r.intentDate) || c.text(r.intentTimePeriod));
+  const requested = r.requested_time || intentTime(r) || (!hasIntent && request && Number.isFinite(c.millis(request)) ? c.stamp(request) : null);
   const assignee = r.assignee_id || r.assigneeId || r.serviceUserId || null, photo = r.photo_id || r.photographerId || null;
   const status = serviceStatus(r, assignee, photo);
   return { ...r, order_no: r.orderNo || r.order_no, customer_openid: r.customer_openid || r.openid || r._openid || null,
@@ -78,7 +89,7 @@ function orderRow(raw) {
     net_amount_fen: Math.max(0, fen(r.totalAmount ?? r.totalPrice ?? r.price) - fen(r.finalDiscountAmount) - fen(r.refundAmount)),
     service_net_amount_fen: Math.max(0, fen(r.depositPaid)), commission_basis: "paid_deposit",
     category: r.category || (r.packageId ? "combo" : "photo"), product_name: r.product_name || r.packageName || r.spotName || "旅拍订单",
-    merchant_name: r.merchant_name || r.shopId || "", requested_time: r.requested_time || (request && Number.isFinite(c.millis(request)) ? c.stamp(request) : null),
+    merchant_name: r.merchant_name || r.shopId || "", requested_time: requested,
     service_status: status, assignee_id: assignee,
     schedule_time: orderTime(r.schedule_time, ["confirmed", "shooting", "final_pending", "done"].includes(status) ? request : null),
     photo_id: photo, done_at: r.done_at || r.completedAt || null,
@@ -98,21 +109,21 @@ function projection(table, fields) {
   const aliases=fields.filter(key=>DATE_COLUMNS.has(key)||TIME_COLUMNS.has(key)).map(key=>`, DATE_FORMAT(\`${key}\`, '${DATE_COLUMNS.has(key)?'%Y-%m-%d':'%Y-%m-%d %H:%i:%s'}') AS \`${key}\``).join('');
   return `SELECT *${aliases} FROM \`${table}\``;
 }
-async function hydrateOrderRows(conn, rows) {
+async function hydrateOrderRows(conn, rows, { paths = ORDER_FACT_PATHS, includePayments = true } = {}) {
   const attributes = new Map(), payments = new Map();
   const ids = [...new Set(rows.map(row => String(row.id)))];
   for (let start = 0; start < ids.length; start += 200) {
     const batch = ids.slice(start, start + 200), placeholders = batch.map(() => "?").join(",");
-    const leaves = await sql(conn, `SELECT record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM lxm_collection_values WHERE collection_name=? AND record_id IN (${placeholders}) AND path IN (${ORDER_FACT_PATHS.map(() => "?").join(",")})`, ["orders", ...batch, ...ORDER_FACT_PATHS]);
+    const leaves = await sql(conn, `SELECT record_id,path,ordinal,value_type,value_text,value_number,value_bool,value_time FROM lxm_collection_values WHERE collection_name=? AND record_id IN (${placeholders}) AND path IN (${paths.map(() => "?").join(",")})`, ["orders", ...batch, ...paths]);
     for (const row of leaves) { const id = String(row.record_id); if (!attributes.has(id)) attributes.set(id, []); attributes.get(id).push(row); }
-    const records = await sql(conn, `SELECT * FROM lxm_order_payment_records WHERE order_id IN (${placeholders}) ORDER BY order_id,record_no`, batch);
+    const records = includePayments ? await sql(conn, `SELECT * FROM lxm_order_payment_records WHERE order_id IN (${placeholders}) ORDER BY order_id,record_no`, batch) : [];
     for (const row of records) { const id = String(row.order_id); if (!payments.has(id)) payments.set(id, []); payments.get(id).push(row); }
   }
   return rows.map(row => {
     const id = String(row.id), output = { ...row };
     // Only the transaction's workflow guards need these sparse facts. Keep
     // physical values and existing service response keys exactly as read.
-    schema.hydrateAttributeRows(output, (attributes.get(id) || []).filter(leaf => ORDER_FACT_PATHS.includes(leaf.path)));
+    schema.hydrateAttributeRows(output, (attributes.get(id) || []).filter(leaf => paths.includes(leaf.path)));
     const records = payments.get(id) || [];
     if (records.length) output.paymentRecords = schema.hydrateDocument("orders", { id }, { order_payment_records: records }).paymentRecords;
     return output;
@@ -126,7 +137,7 @@ async function load(conn, workflowFacts = true) {
   const tags = await sql(conn,'SELECT staff_id,tag FROM svc_staff_tag ORDER BY staff_id,tag_index');
   for (const staff of state.staff) staff.assessment_tags = tags.filter(row=>String(row.staff_id)===String(staff.id)).map(row=>row.tag);
   const orderRows = await sql(conn, projection('lxm_orders',SERVICE_FIELDS) + " WHERE COALESCE(deleted,0)=0 AND COALESCE(isDeleted,0)=0");
-  state.orders = (workflowFacts ? await hydrateOrderRows(conn, orderRows) : orderRows).map(orderRow);
+  state.orders = (await hydrateOrderRows(conn, orderRows, workflowFacts ? {} : { paths: REQUESTED_TIME_FACT_PATHS, includePayments: false })).map(orderRow);
   const products = await sql(conn, "SELECT order_id,product_type,name,product_id FROM lxm_order_products ORDER BY item_no");
   for (const order of state.orders) { const product = products.find(p => String(p.order_id) === String(order.id)); if (product) { const type = c.text(product.product_type).toLowerCase(); order.category = /peripheral|周边/.test(type) ? "peripheral" : /video|视频/.test(type) ? "video" : /package|combo|套餐/.test(type) || order.packageId ? "combo" : "photo"; order.product_name = product.name || order.product_name; order.product_id = product.product_id; } }
   state.photoNative = true;
@@ -225,7 +236,7 @@ function createSvcStore(source) {
     const rows = await sql(conn, "SELECT EXISTS(SELECT 1 FROM svc_operation_log WHERE action='claim'" + (specific ? " AND order_no=?" : "") + " LIMIT 1) AS has_manual_claims", specific ? [String(orderNo)] : []);
     return Number(rows[0]?.has_manual_claims) === 1;
   }), read: (work,context) => source.transaction(async conn => {
-    const helpers = {TABLES,SERVICE_FIELDS,normal,orderRow,projection,loadPhotographers};
+    const helpers = {TABLES,SERVICE_FIELDS,REQUESTED_TIME_FACT_PATHS,normal,orderRow,projection,loadPhotographers,hydrateOrderRows};
     const selected = context && (await require("./svcReadStore.cjs").loadWorkbench(conn,context,helpers) || await require("./svcCommissionReadStore.cjs").loadCommission(conn,context,helpers));
     return work(selected || await load(conn, false));
   }) };

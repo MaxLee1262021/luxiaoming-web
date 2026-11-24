@@ -50,6 +50,42 @@ test("super preview requires a selected merchant and merchant queries cannot cho
   const merchant = fixture("merchant"); merchant.ui.shareState.mineQuery.merchantId = "other-shop"; await merchant.ui.loadShareMine();
   assert.doesNotMatch(merchant.calls[0].url, /merchantId/);
 });
+
+test("merchant orders retain their own pagination and never inflate posted ledger totals", async () => {
+  const f = fixture("merchant");
+  f.ui.shareState.mineQuery.page = 3;
+  f.ui.shareState.mineQuery.orderPage = 2;
+  f.ui.shareState.mineQuery.orderSize = 50;
+  f.controls.handler = async () => ({ code: 0, data: {
+    merchant: { name: "本店" }, list: [{ orderNo: "****1111", amount: "10.00" }], total: 1,
+    sum: { netAmount: "10.00" }, stats: { monthAmount: "10.00", accT1Amount: "10.00", accT2Amount: "0.00" },
+    orders: [{ orderNo: "****2222", paidAmount: "100.00", status: "observing", statusText: "退款观察期" }],
+    orderTotal: 55, orderStats: { total: 55 }, notices: ["合成业务提示"],
+  } });
+  await f.ui.loadShareMine();
+  const query = new URL(f.calls[0].url, "https://synthetic.test").searchParams;
+  assert.equal(query.get("page"), "3"); assert.equal(query.get("orderPage"), "2"); assert.equal(query.get("orderSize"), "50");
+  assert.equal(f.ui.shareState.mine.orders[0].statusText, "退款观察期");
+  assert.equal(f.ui.shareState.mine.orderTotal, 55); assert.equal(f.ui.shareState.mine.list[0].orderNo, "****1111");
+  assert.equal(f.ui.shareState.mine.sum.netAmount, "10.00"); assert.equal(f.ui.shareAccumulatedTotal(f.ui.shareState.mine.stats), "10.00");
+  f.ui.shareState.mineQuery.period = "2026-10";
+  await f.ui.loadShareMine(true);
+  const reset = new URL(f.calls[1].url, "https://synthetic.test").searchParams;
+  assert.equal(reset.get("page"), "1"); assert.equal(reset.get("orderPage"), "1"); assert.equal(reset.get("period"), "2026-10");
+});
+
+test("account changes clear associated orders and prevent late progress results from restoring them", async () => {
+  const f = fixture("merchant"); let resolve;
+  f.ui.shareState.mine = { ...f.ui.shareState.mine, orders: [{ orderNo: "****1234" }], notices: ["old-account-notice"], orderTotal: 1 };
+  f.ui.shareState.mineQuery.orderPage = 3;
+  f.controls.handler = () => new Promise(done => { resolve = done; });
+  const pending = f.ui.loadShareMine();
+  f.listeners["lxm-auth-changed"]();
+  resolve({ code: 0, data: { orders: [{ orderNo: "****5678" }], orderTotal: 1, notices: ["late-account-notice"] } });
+  await pending;
+  assert.deepEqual(plain(f.ui.shareState.mine.orders), []); assert.deepEqual(plain(f.ui.shareState.mine.notices), []);
+  assert.equal(f.ui.shareState.mine.orderTotal, 0); assert.equal(f.ui.shareState.mineQuery.orderPage, 1);
+});
 test("a response from the previous account cannot repopulate cleared share data", async () => {
   const f = fixture(); let resolve;
   f.controls.handler = () => new Promise((done) => { resolve = done; });
@@ -74,7 +110,7 @@ test("onboarding requires cooperation and valid rules, sends decimal ratios and 
   f.controls.handler = async () => ({ status: 503, code: "RETRY", msg: "稍后重试" });
   await f.ui.saveShareNewMerchant(); await f.ui.saveShareNewMerchant();
   assert.equal(f.calls[0].body.ratioT1, 0.0525); assert.equal(f.calls[0].body.ratioT2, 0);
-  assert.equal(f.calls[0].body.ttlHours, 720); assert.equal(f.calls[0].body.refundWindowDays, 3);
+  assert.equal(f.calls[0].body.ttlHours, undefined); assert.equal(f.calls[0].body.refundWindowDays, 3);
   assert.equal(f.calls[0].init.headers["Idempotency-Key"], f.calls[1].init.headers["Idempotency-Key"]);
   assert.equal(f.ui.shareState.form.name, "门店"); assert.equal(f.ui.shareState.editorOpen, true);
   assert.match(f.ui.shareValidateConfig({ ratioT1: 50.01, ratioT2: 1, ttlHours: 720, refundWindowDays: 3, reason: "x" }), /0–50/);
@@ -84,7 +120,7 @@ test("config version conflicts retain edits and send the displayed version", asy
   const f = fixture(); f.ui.shareState.merchant = { merchant: { merchantId: "shop-a" } };
   f.ui.shareState.configForm = { ratioT1: 5, ratioT2: 8, ttlHours: 720, refundWindowDays: 3, reason: "活动", versionNo: 4 };
   f.controls.handler = async () => ({ status: 409, code: 4091, msg: "配置版本已变化" });
-  await f.ui.saveShareConfig(); assert.equal(f.calls[0].body.versionNo, 4); assert.equal(f.ui.shareState.configForm.ratioT2, 8); assert.match(f.ui.shareState.configError, /版本/);
+  await f.ui.saveShareConfig(); assert.equal(f.calls[0].body.versionNo, 4); assert.equal(f.calls[0].body.ttlHours, undefined); assert.equal(f.ui.shareState.configForm.ratioT2, 8); assert.match(f.ui.shareState.configError, /版本/);
 });
 test("missing backend fails visibly and does not fill mock figures", async () => {
   const f = fixture(); f.controls.handler = async () => { throw new Error("网络不可用"); };
@@ -157,7 +193,7 @@ test("timestamps with offsets display in Shanghai while business wall-clock valu
   assert.equal(f.ui.shareTime("2026-11-07"), "2026-11-07");
 });
 test("refund observation and reason validation match the service limits", () => {
-  const f = fixture(); const valid = { ratioT1: 5, ratioT2: 8, ttlHours: 720, refundWindowDays: 365, reason: "开通" };
+  const f = fixture(); const valid = { ratioT1: 5, ratioT2: 8, refundWindowDays: 365, reason: "开通" };
   assert.equal(f.ui.shareValidateConfig(valid), "");
   assert.match(f.ui.shareValidateConfig({ ...valid, refundWindowDays: 366 }), /365/);
   assert.match(f.ui.shareValidateConfig({ ...valid, reason: "字".repeat(256) }), /255/);
@@ -206,8 +242,8 @@ test("super rule help reads actual business settings without exposing endpoint U
   f.controls.handler = async () => ({ code: 0, data: { enabled: true, enableAt: "2027-01-01T00:00:00+08:00", defaultTtlHours: 960, defaultRefundWindowDays: 3, csAttrDays: 0, maxCandidateMerchants: 12, scanDedupSeconds: 8, judgeRetryMax: 3, engineVersion: "test-2.0", phoneAlertConfigured: true, operationalAlertConfigured: false, webhookUrl: "https://DO_NOT_SHOW.invalid/hook", secret: "DO_NOT_SHOW" } });
   f.ui.openShareHelp(); await new Promise(setImmediate);
   assert.equal(f.ui.shareState.helpOpen, true); assert.equal(f.calls[0].url, "/api/share/settings"); assert.equal(f.calls[0].init.method, "GET"); assert.equal(f.calls[0].body, undefined);
-  const rows = f.ui.shareSettingsRows.value; assert.equal(rows.length, 11);
-  assert.equal(rows.find((row) => row.key === "defaultTtlHours").value, "960 小时"); assert.equal(rows.find((row) => row.key === "csAttrDays").value, "仅本次会话");
+  const rows = f.ui.shareSettingsRows.value; assert.equal(rows.length, 9);
+  assert.equal(rows.some((row) => ["defaultTtlHours", "maxCandidateMerchants"].includes(row.key)), false); assert.equal(rows.find((row) => row.key === "csAttrDays").value, "仅本次会话");
   assert.equal(rows.find((row) => row.key === "enableAt").value, "2027-01-01 00:00:00");
   assert.equal(rows.find((row) => row.key === "enabled").label, "启用日配置状态"); assert.equal(rows.find((row) => row.key === "enabled").value, "已配置");
   assert.equal(rows.find((row) => row.key === "phoneAlertConfigured").value, "已配置"); assert.equal(rows.find((row) => row.key === "operationalAlertConfigured").value, "未配置");

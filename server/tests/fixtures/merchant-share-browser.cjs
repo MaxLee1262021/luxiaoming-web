@@ -55,7 +55,7 @@ async function startBrowserFixture(options = {}) {
       const selected = result.filter(row => (!filter.keyword || `${row.name} ${row.merchantId}`.includes(filter.keyword)) && (!filter.status || row.status === filter.status));
       return { total: selected.length, list: selected.slice((filter.page - 1) * filter.size, filter.page * filter.size) };
     },
-    async listDetails(filter) { const selected = details.filter(r => (!filter.merchantId || r.merchantId === filter.merchantId) && (!filter.period || r.period === filter.period) && (!filter.splitType || r.splitType === filter.splitType)); const page = filter.page || 1, size = filter.size || 20; return { total: selected.length, list: copy(selected.slice((page - 1) * size, page * size)), sum: sums(selected) }; },
+    async listDetails(filter) { const selected = details.filter(r => (!filter.merchantId || r.merchantId === filter.merchantId) && (!filter.period || r.period === filter.period) && (!filter.splitType || r.splitType === filter.splitType)); const page = filter.page || 1, size = filter.size || 20; return { total: selected.length, orderCount: new Set(selected.map(row => row.orderId)).size, list: copy(selected.slice((page - 1) * size, page * size)), sum: sums(selected) }; },
     async saveRule(input) {
       const previous = rules.get(input.merchantId) || [];
       if (Number(input.expectedVersion) !== Number(previous[0]?.versionNo || 0)) throw shareError("SHARE_4091", "配置已被他人修改，请刷新后重试", 409);

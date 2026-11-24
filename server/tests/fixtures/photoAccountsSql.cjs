@@ -20,7 +20,10 @@ function photoAccountsSqlFixture() {
       if (/role_key='photo'/.test(sql)) rows = rows.filter(row => row.role_key === "photo");
       if (/menu_key='photoMine'/.test(sql)) rows = rows.filter(row => row.menu_key === "photoMine");
       if (/WHERE account=\?/.test(sql)) rows = rows.filter(row => row.account.toLowerCase() === params[0].toLowerCase() || row.subject_type === "photo" && row.subject_id === params[1]);
-      if (/^SELECT phone/.test(sql)) rows = rows.filter(row => row.phone).map(row => ({ phone: row.phone }));
+      if (/WHERE id=\?/.test(sql)) rows = rows.filter(row => String(row.id) === String(params[0]));
+      if (/WHERE account_id=\?/.test(sql)) rows = rows.filter(row => String(row.account_id) === String(params[0]));
+      if (/WHERE subject_type='photo' AND subject_id=\?/.test(sql)) rows = rows.filter(row => row.subject_type === "photo" && row.subject_id === params[0]);
+      if (/WHERE phone IS NOT NULL/.test(sql)) rows = rows.filter(row => row.phone);
       if (/^SELECT COUNT\(\*\)/.test(sql)) return [[{ count: 0 }]];
       return [rows];
     }

@@ -4,7 +4,7 @@
     <div class="catalog-actions">
       <template v-if="!editorOpen">
         <span class="catalog-source">真实数据库</span>
-        <el-button v-if="remoteOn" plain :loading="remoteLoading" @click="refreshFromServer">刷新</el-button><el-button plain @click="openContentTrash">回收站</el-button><el-button type="primary" v-if="can('contentEdit')" @click="createPeripheral">＋ 新建商品</el-button>
+        <el-button v-if="remoteOn" plain :loading="remoteLoading" @click="refreshFromServer">刷新</el-button><el-button plain @click="openContentTrash">回收站</el-button><el-button v-if="physicalCanConfigureSales" plain :loading="physicalSales.loading" @click="physicalConfigure">销售配置</el-button><el-button type="primary" v-if="can('contentEdit')" @click="createPeripheral">＋ 新建商品</el-button>
       </template>
       <template v-else><el-button :disabled="saving" @click="closeEditor">返回列表</el-button><el-button type="primary" v-if="can('contentEdit')" :loading="saving" @click="saveSelectedPeripheral">保存商品</el-button></template>
     </div>
@@ -25,6 +25,7 @@
           <h3>{{ item.name || '未命名商品' }}</h3><div class="peripheral-code">商品编码：{{ item.productCode || '未填写' }}</div>
           <div class="catalog-chips"><span class="catalog-chip" v-for="tag in (Array.isArray(item.tags) ? item.tags : []).slice(0,4)" :key="tag">{{ tag }}</span><span v-if="!(item.tags || []).length" class="catalog-chip is-muted">未设置标签</span></div>
           <div class="catalog-meta">
+            <div class="catalog-meta-row"><span>样式</span><strong>{{ styleText(item) }}</strong></div>
             <div class="catalog-meta-row"><span>规格</span><strong>{{ specText(item) }}</strong></div>
             <div class="catalog-meta-row"><span>商品售价</span><strong class="catalog-price">{{ priceText(item) }}</strong></div>
             <div class="catalog-meta-row"><span>库存</span><strong class="peripheral-inventory"><span>{{ stockText(item) }}</span><span class="peripheral-stock" :class="'is-'+stockState(item).key">{{ stockState(item).text }}</span></strong></div>
@@ -38,46 +39,51 @@
   </template>
   <div class="catalog-editor" v-else-if="selectedPeripheral">
     <el-form class="catalog-form" :disabled="!can('contentEdit') || saving">
+      <el-alert class="catalog-alert" type="info" :closable="false" show-icon title="带 * 的信息为必填项" description="填写商品名称、销售单位、规格、售价、库存、运费、商品素材和商品说明。小程序下单还需在「内容管理 → 周边商品 → 销售配置」开启购买总开关并启用该商品；商品须上架且为现货，可用库存大于 0。照片定制商品请走客服咨询。" />
       <section class="catalog-panel">
         <div class="catalog-panel-head"><h3>基本信息</h3></div>
-        <label class="catalog-field"><span>商品名称</span><el-input v-model="selectedPeripheral.name" placeholder="例如：原木定制相框" maxlength="60" /></label>
-        <div class="catalog-row"><label class="catalog-field"><span>商品编码</span><el-input v-model="selectedPeripheral.productCode" maxlength="128" placeholder="选填，例如：FRAME-001" /></label><label class="catalog-field"><span>销售单位</span><el-input v-model="selectedPeripheral.unit" maxlength="20" placeholder="例如：件、本、套" /></label></div>
+        <label class="catalog-field"><span>商品名称 <em class="field-required">*</em></span><el-input aria-required="true" v-model="selectedPeripheral.name" placeholder="例如：原木定制相框" maxlength="60" /></label>
+        <div class="catalog-row"><label class="catalog-field"><span>商品编码（可选）</span><el-input v-model="selectedPeripheral.productCode" maxlength="128" placeholder="选填，例如：FRAME-001" /></label><label class="catalog-field"><span>销售单位 <em class="field-required">*</em></span><el-input aria-required="true" v-model="selectedPeripheral.unit" maxlength="20" placeholder="例如：件、本、套" /></label></div>
         <label class="catalog-field"><span>商品分类</span><el-select v-model="selectedPeripheral.category" filterable allow-create default-first-option placeholder="选择或输入分类"><el-option v-for="name in ['相框','相册','冰箱贴','明信片','钥匙扣','其他']" :key="name" :label="name" :value="name" /></el-select></label>
         <label class="catalog-field"><span>标签</span><el-select v-model="selectedPeripheral.tags" multiple filterable allow-create default-first-option placeholder="选择已有标签，或输入后回车"><el-option v-for="tag in peripheralTags" :key="tag" :label="tag" :value="tag" /></el-select></label>
       </section>
       <section class="catalog-panel peripheral-spec-panel">
-        <div class="catalog-panel-head"><h3>销售规格与库存</h3><span class="peripheral-stock" :class="'is-'+stockState(selectedPeripheral).key">{{ stockState(selectedPeripheral).text }}</span></div>
-        <label class="catalog-field"><span>规格模式</span><el-radio-group v-model="selectedPeripheral.specMode" @change="changeSpecMode"><el-radio-button value="single" label="single">单规格</el-radio-button><el-radio-button value="multiple" label="multiple">多规格</el-radio-button></el-radio-group></label>
+        <div class="catalog-panel-head"><h3>样式、规格与库存</h3><span class="peripheral-stock" :class="'is-'+stockState(selectedPeripheral).key">{{ stockState(selectedPeripheral).text }}</span></div>
+        <label class="catalog-field"><span>规格模式 <em class="field-required">*</em></span><el-radio-group aria-required="true" v-model="selectedPeripheral.specMode" @change="changeSpecMode"><el-radio-button value="single" label="single">单规格</el-radio-button><el-radio-button value="multiple" label="multiple">多规格</el-radio-button></el-radio-group></label>
         <template v-if="selectedPeripheral.specMode==='single'">
-          <label class="catalog-field"><span>规格说明</span><el-select v-model="selectedPeripheral.specs" multiple filterable allow-create default-first-option placeholder="例如：10寸、原木色，输入后回车"><el-option v-for="spec in selectedPeripheral.specs" :key="spec" :label="spec" :value="spec" /></el-select></label>
-          <div class="catalog-row"><label class="catalog-field"><span>商品售价（元）</span><el-input-number v-model="selectedPeripheral.price" :min="0" :precision="2" controls-position="right" /></label><label class="catalog-field"><span>库存（{{ selectedPeripheral.unit || '件' }}）</span><el-input-number v-model="selectedPeripheral.stock" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" placeholder="未设置，请填写" /></label></div>
+          <label class="catalog-field"><span>样式（可选）</span><el-input v-model="selectedPeripheral.skuStyle" maxlength="80" placeholder="例如：枫木白、米白色、两宫格" /><small class="catalog-hint">样式与规格分别填写，小程序先选样式，再选规格。</small></label>
+          <label class="catalog-field"><span>规格说明（可选）</span><el-select v-model="selectedPeripheral.specs" multiple filterable allow-create default-first-option placeholder="留空使用默认规格；例如：6寸含打印、8寸15×20cm"><el-option v-for="spec in selectedPeripheral.specs" :key="spec" :label="spec" :value="spec" /></el-select></label>
+          <div class="catalog-row"><label class="catalog-field"><span>商品售价（元）<em class="field-required">*</em></span><el-input-number aria-required="true" v-model="selectedPeripheral.price" :min="0.01" :max="10000000" :precision="2" controls-position="right" placeholder="请输入大于 0 的售价" /></label><label class="catalog-field"><span>库存（{{ selectedPeripheral.unit || '件' }}）<em class="field-required">*</em></span><el-input-number aria-required="true" v-model="selectedPeripheral.stock" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" placeholder="未设置，请填写" /></label></div>
         </template>
         <template v-else>
-          <p class="catalog-hint peripheral-spec-hint">每种规格分别设置售价和库存，例如「10寸 / 原木色」「12寸 / 胡桃色」。多规格商品暂支持展示与咨询，预约加购请联系客服。</p>
+          <p class="catalog-hint peripheral-spec-hint">每个销售组合按样式、规格、售价和库存依次填写，例如样式「枫木白」、规格「6寸含打印」。同一样式可添加不同规格，同一规格也可添加不同样式。</p>
           <div class="peripheral-sku-list">
             <article class="peripheral-sku" v-for="(sku,index) in selectedPeripheral.skus" :key="index">
               <div class="peripheral-sku-head"><strong>规格 {{ index + 1 }}</strong><el-button link type="danger" :disabled="selectedPeripheral.skus.length<=1" @click="removeSku(index)">删除规格</el-button></div>
-              <div class="catalog-row"><label class="catalog-field"><span>规格名称</span><el-input v-model="sku.spec" maxlength="160" placeholder="例如：10寸 / 原木色" /></label><label class="catalog-field"><span>规格编码</span><el-input v-model="sku.skuCode" maxlength="128" placeholder="选填，例如：FRAME-10-WOOD" /></label></div>
-              <div class="catalog-row"><label class="catalog-field"><span>售价（元）</span><el-input-number v-model="sku.price" :min="0" :precision="2" controls-position="right" /></label><label class="catalog-field"><span>库存（{{ selectedPeripheral.unit || '件' }}）</span><el-input-number v-model="sku.stock" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" placeholder="请填写库存" /></label></div>
+              <label class="catalog-field"><span>样式（可选）</span><el-input v-model="sku.style" maxlength="80" placeholder="例如：枫木白、米白色、两宫格" /></label>
+              <div class="catalog-row"><label class="catalog-field"><span>规格名称 <em class="field-required">*</em></span><el-input aria-required="true" v-model="sku.spec" maxlength="160" placeholder="例如：6寸含打印、8寸15×20cm" /><small class="catalog-hint">选项预览：{{ skuLabel(sku, '待填写规格') }}</small></label><label class="catalog-field"><span>规格编码（可选）</span><el-input v-model="sku.skuCode" maxlength="128" placeholder="选填，例如：FRAME-6-WOOD" /></label></div>
+              <div class="catalog-row"><label class="catalog-field"><span>售价（元）<em class="field-required">*</em></span><el-input-number aria-required="true" v-model="sku.price" :min="0.01" :max="10000000" :precision="2" controls-position="right" placeholder="请输入大于 0 的售价" /></label><label class="catalog-field"><span>库存（{{ selectedPeripheral.unit || '件' }}）<em class="field-required">*</em></span><el-input-number aria-required="true" v-model="sku.stock" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" placeholder="请填写库存" /></label></div>
             </article>
           </div>
           <div class="peripheral-sku-tools"><el-button plain type="primary" :disabled="selectedPeripheral.skus.length>=100" @click="addSku">＋ 添加规格</el-button><span>{{ selectedPeripheral.skus.length }} / 100 个规格</span></div>
           <div class="peripheral-sku-summary"><span>商品起售价 <strong>{{ priceText(selectedPeripheral) }}</strong></span><span>总库存 <strong>{{ stockText(selectedPeripheral) }}</strong></span></div>
         </template>
         <label class="catalog-field"><span>预警库存（{{ selectedPeripheral.unit || '件' }}）</span><el-input-number v-model="selectedPeripheral.stockWarning" :min="0" :max="2147483647" :precision="0" :step="1" step-strictly controls-position="right" /><small class="catalog-hint">总库存大于 0 且不高于此值时显示库存预警；库存为 0 时显示缺货。</small></label>
+        <p class="catalog-hint">库存填写 0 可保存为售罄；小程序下单需要至少一个规格的可用库存大于 0。已启用交易库存的商品，请在「周边商品 → 销售配置」调整库存。</p>
       </section>
       <section class="catalog-panel">
-        <div class="catalog-panel-head"><h3>商品照片与素材</h3><el-button plain type="primary" @click="contentFile(selectedPeripheral,'images','peripherals',false,true)">上传照片</el-button></div>
+        <div class="catalog-panel-head"><h3>商品照片与素材 <em class="field-required">*</em></h3><el-button plain type="primary" @click="contentFile(selectedPeripheral,'images','peripherals',false,true)">上传照片</el-button></div>
+        <p class="catalog-hint">首图、商品照片或视频至少上传一份。</p>
         <label class="catalog-field"><span>首图 <el-button link type="primary" @click="contentFile(selectedPeripheral,'cover','peripherals')">上传首图</el-button></span><el-input v-model="selectedPeripheral.cover" @change="validateMediaUrl(selectedPeripheral,'cover')" placeholder="上传或填写首图地址" /></label>
         <div class="catalog-gallery" v-if="selectedPeripheral.images.length"><article v-for="(url,index) in selectedPeripheral.images" :key="url" class="catalog-media"><el-image :src="url" fit="cover" :preview-src-list="selectedPeripheral.images" :initial-index="index" preview-teleported /><span class="catalog-badge" v-if="selectedPeripheral.cover===url">首图</span><div class="catalog-media-tools"><el-button link type="primary" :disabled="selectedPeripheral.cover===url" @click="selectedPeripheral.cover=url">设为首图</el-button><el-button link type="danger" @click="removeMedia('images',url)">删除</el-button></div></article></div><div class="catalog-upload-empty" v-else>上传商品照片后，可选择一张作为首图。</div>
         <div class="catalog-panel-head" style="margin-top:20px"><h3>视频素材（可选）</h3><el-button plain type="primary" @click="contentFile(selectedPeripheral,'videos','peripherals',true,true)">上传视频</el-button></div><div v-for="url in selectedPeripheral.videos" :key="url"><video :src="url" controls preload="metadata" class="catalog-video-player"></video><el-button link type="danger" @click="removeMedia('videos',url)">删除视频</el-button></div>
       </section>
       <section class="catalog-panel">
         <div class="catalog-panel-head"><h3>配送与服务内容</h3></div>
-        <div class="catalog-row"><label class="catalog-field"><span>运费（元）</span><el-input-number v-model="selectedPeripheral.shippingFee" :min="0" :precision="2" controls-position="right" /><small class="catalog-hint">填写 0 表示免运费。</small></label><label class="catalog-field"><span>交付周期</span><el-input v-model="selectedPeripheral.deliveryCycle" placeholder="例如：3–5个工作日" /></label></div>
+        <div class="catalog-row"><label class="catalog-field"><span>运费（元）<em class="field-required">*</em></span><el-input-number aria-required="true" v-model="selectedPeripheral.shippingFee" :min="0" :max="10000000" :precision="2" controls-position="right" placeholder="请填写运费，包邮填 0" /><small class="catalog-hint">填写 0 表示免运费，不能留空。</small></label><label class="catalog-field"><span>交付周期（可选）</span><el-input v-model="selectedPeripheral.deliveryCycle" placeholder="例如：3–5个工作日" /></label></div>
         <label class="catalog-switch"><span>照片精修</span><el-switch v-model="selectedPeripheral.retouchIncluded" active-text="包含" inactive-text="不包含" /></label><label class="catalog-switch"><span>视频精剪</span><el-switch v-model="selectedPeripheral.editingIncluded" active-text="包含" inactive-text="不包含" /></label>
       </section>
-      <section class="catalog-panel"><div class="catalog-panel-head"><h3>商品说明</h3></div><el-input type="textarea" :rows="5" v-model="selectedPeripheral.intro" placeholder="填写材质、制作工艺、定制方式及交付说明" /></section>
+      <section class="catalog-panel"><div class="catalog-panel-head"><h3>商品说明 <em class="field-required">*</em></h3></div><el-input aria-required="true" type="textarea" :rows="5" v-model="selectedPeripheral.intro" placeholder="填写材质、制作工艺、定制方式及交付说明" /></section>
       <section class="catalog-panel">
         <div class="catalog-panel-head"><h3>关联与显示</h3></div>
         <label class="catalog-field"><span>关联打卡点（可选）</span><el-select v-model="selectedPeripheral.spotId" clearable filterable placeholder="不关联打卡点" @change="changeSpot"><el-option v-for="s in data.spots.filter(i=>!i.deleted && !i.isDeleted)" :key="s.id || s._id" :label="s.name" :value="s.id || s._id" /></el-select></label>
@@ -93,15 +99,18 @@
         <div class="catalog-card-body">
           <h3>{{ selectedPeripheral.name || '商品名称' }}</h3><div class="peripheral-code">商品编码：{{ selectedPeripheral.productCode || '未填写' }}</div><div class="catalog-chips"><span class="catalog-chip" v-for="tag in selectedPeripheral.tags" :key="tag">{{ tag }}</span></div>
           <div class="catalog-meta">
-            <div class="catalog-meta-row"><span>商品规格</span><strong>{{ specText(selectedPeripheral) }}</strong></div><div class="catalog-meta-row"><span>商品售价</span><strong class="catalog-price">{{ priceText(selectedPeripheral) }}</strong></div>
+            <div class="catalog-meta-row"><span>样式</span><strong>{{ styleText(selectedPeripheral) }}</strong></div><div class="catalog-meta-row"><span>规格</span><strong>{{ specText(selectedPeripheral) }}</strong></div><div class="catalog-meta-row"><span>商品售价</span><strong class="catalog-price">{{ priceText(selectedPeripheral) }}</strong></div>
             <div class="catalog-meta-row"><span>总库存</span><strong class="peripheral-inventory"><span>{{ stockText(selectedPeripheral) }}</span><span class="peripheral-stock" :class="'is-'+stockState(selectedPeripheral).key">{{ stockState(selectedPeripheral).text }}</span></strong></div>
-            <div class="catalog-meta-row"><span>运费</span><strong>{{ selectedPeripheral.shippingFee===0 ? '免运费' : money(selectedPeripheral.shippingFee || 0) }}</strong></div><div class="catalog-meta-row"><span>交付周期</span><strong>{{ selectedPeripheral.deliveryCycle || '未填写' }}</strong></div><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ selectedPeripheral.spotId ? spotName(selectedPeripheral.spotId) : '不关联打卡点' }}</strong></div>
+            <div class="catalog-meta-row"><span>运费</span><strong>{{ shippingText(selectedPeripheral) }}</strong></div><div class="catalog-meta-row"><span>交付周期</span><strong>{{ selectedPeripheral.deliveryCycle || '未填写' }}</strong></div><div class="catalog-meta-row"><span>关联打卡点</span><strong>{{ selectedPeripheral.spotId ? spotName(selectedPeripheral.spotId) : '不关联打卡点' }}</strong></div>
           </div>
-          <ul class="catalog-preview-list" v-if="selectedPeripheral.specMode==='multiple'"><li v-for="(sku,index) in selectedPeripheral.skus" :key="index">{{ sku.spec || '待填写规格' }}<small>{{ priceText(sku) }} · 库存 {{ stockText({...sku, unit:selectedPeripheral.unit}) }}</small></li></ul>
+          <ul class="catalog-preview-list" v-if="selectedPeripheral.specMode==='multiple'"><li v-for="(sku,index) in selectedPeripheral.skus" :key="index">{{ skuLabel(sku, '待填写规格') }}<small>{{ priceText(sku) }} · 库存 {{ stockText({...sku, unit:selectedPeripheral.unit}) }}</small></li></ul>
           <p class="catalog-preview-desc">{{ selectedPeripheral.intro || '待填写商品说明' }}</p>
         </div>
       </article>
       <p class="catalog-preview-note">预览当前草稿 · 所有修改保存后生效</p>
     </aside>
   </div>
+  <el-dialog :model-value="physicalSales.dialog === 'config'" @close="physicalSales.dialog = ''" title="实物销售配置" width="min(640px, 94vw)" :close-on-click-modal="!physicalSales.busy" :close-on-press-escape="!physicalSales.busy" :show-close="!physicalSales.busy">
+    <el-alert v-if="physicalSales.error" :title="physicalSales.error" type="error" :closable="false" show-icon />
+    <el-form label-position="top" :disabled="physicalSales.busy"><el-form-item label="开放实物购买"><el-switch v-model="physicalSales.config.enabled" /></el-form-item><el-form-item label="允许购买的现货商品"><el-select v-model="physicalSales.config.enabledProductIds" multiple filterable style="width:100%"><el-option v-for="product in physicalSales.products" :key="product.id || product._id" :value="product.id || product._id" :label="product.name" /></el-select></el-form-item><el-form-item label="配送省份"><el-select v-model="physicalSales.config.allowedProvinces" multiple filterable allow-create default-first-option placeholder="留空支持大陆省份；可逐项填写如湖南省" style="width:100%" /></el-form-item><el-form-item label="待付款有效期（分钟）"><el-input-number v-model="physicalSales.config.paymentMinutes" :min="5" :max="120" /></el-form-item><el-form-item label="售后申请期（天）"><el-input-number v-model="physicalSales.config.afterSaleDays" :min="1" :max="90" /></el-form-item><el-form-item label="适用微信发货管理"><el-switch v-model="physicalSales.config.wechatReceiptRequired" /><small>适用账号开启后，确认收货通过微信官方入口并由服务端核实。须先完成微信发货配置与联调。</small></el-form-item><el-form-item label="同包运费">按商品适用最高运费收一次</el-form-item><p>需要客户照片的定制商品在制作资料流程就绪前继续咨询。历史商品不会自动开放购买。</p><el-collapse><el-collapse-item title="交易库存（已初始化后使用专用调整）"><div v-for="product in physicalSales.products" :key="product.id"><strong>{{ product.name }}</strong><el-select v-model="physicalSales.config.productPolicies[product.id].fulfillmentMode" style="width:160px;margin-left:12px"><el-option label="现货可售" value="stock" /><el-option label="照片定制，仅咨询" value="custom" /></el-select><p v-for="sku in product.skus || []" :key="sku.id">{{ skuLabel(sku) }} · 可售 {{ sku.available }} 件 <el-button link @click="physicalAdjustStock(sku)">调整库存</el-button></p></div></el-collapse-item></el-collapse></el-form><template #footer><el-button :disabled="physicalSales.busy" @click="physicalSales.dialog = ''">取消</el-button><el-button type="primary" :loading="physicalSales.busy" @click="physicalSaveConfig">保存</el-button></template></el-dialog>
 </div>

@@ -60,9 +60,9 @@ function createFileService({ source, authorize = async () => false, adapter = cr
     await previous.catch(() => {});
     try { return await task(); } finally { release(); if (locks.get(id) === tail) locks.delete(id); }
   }
-  async function get(id) {
+  async function get(id, readSource = source) {
     if (!/^file_[a-f0-9]{32,48}$/.test(String(id))) throw fileError("NOT_FOUND", "文件不存在", 404);
-    const asset = await source.get("mediaFiles", id);
+    const asset = await readSource.get("mediaFiles", id);
     if (!asset || asset.status === "deleted") throw fileError("NOT_FOUND", "文件不存在", 404);
     return asset;
   }
@@ -125,7 +125,9 @@ function createFileService({ source, authorize = async () => false, adapter = cr
       if (asset.visibility !== "public" || asset.purpose !== "content" || !READY.has(asset.status)) throw fileError("NOT_FOUND", "文件不存在", 404);
       return adapter.signRead(asset, { ...options, download: isGuideAttachment(asset) || !!options.download });
     },
-    async describe(id) { return descriptor(await get(id)); },
+    // Read projections may share metadata lookups inside one response. Access,
+    // binding and state transitions always retain the original live source.
+    async describe(id, readSource = source) { return descriptor(await get(id, readSource)); },
     async assertFiles(session, ids, scope = {}) {
       if (!Array.isArray(ids) || ids.length > 500 || new Set(ids).size !== ids.length) throw fileError("IDS", "文件列表无效或重复");
       const results = [];

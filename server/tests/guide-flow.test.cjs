@@ -117,6 +117,110 @@ test("admin publishes point-linked guides; mini-program opens each selected prod
   assert.equal(list.body.data.length, 0);
 });
 
+test("guide categories survive admin saves, SQL extension storage and public RPCs, including clearing and legacy metadata edits", async (t) => {
+  const f = await fixture(t);
+  const saved = await f.request("/api/collection/guides", guide({ category: " 市井日常 " }));
+  assert.equal(saved.status, 201, JSON.stringify(saved.body));
+  assert.equal(saved.body.category, "市井日常");
+  const stored = await f.source.get("guides", "guide");
+  const split = schema.splitDocument("guides", stored);
+  assert.ok(split.attributes.some((row) => row.path === "category" && row.value_text === "市井日常"), "category uses the existing extension store without new schema columns");
+  f.rows.guides[0] = schema.hydrateDocument("guides", { id: split.id, ...split.columns }, { ...split.relations, collection_values: split.attributes });
+  assert.equal(f.rows.guides[0].category, "市井日常");
+  for (const [rpc, params] of [["getGuide", { id: "guide" }], ["listGuides", {}], ["getHomeData", {}]]) {
+    const response = await f.request(`/api/rpc/${rpc}`, params, "POST", false);
+    const row = rpc === "getGuide" ? response.body.data : rpc === "listGuides" ? response.body.data[0] : response.body.data.guides[0];
+    assert.equal(row.category, "市井日常", rpc);
+  }
+  const changed = await f.request("/api/collection/guides/guide", { category: " 全部 " }, "PUT");
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.category, "全部", "classification names may match frontend filter labels");
+  const cleared = await f.request("/api/collection/guides/guide", { category: null }, "PUT");
+  assert.equal(cleared.body.category, "");
+  assert.equal((await f.request("/api/rpc/getGuide", { id: "guide" }, "POST", false)).body.data.category, "");
+  for (const category of ["字".repeat(41), ["机位"], { name: "机位" }, 12]) {
+    assert.equal((await f.request("/api/collection/guides/guide", { category }, "PUT")).status, 400);
+  }
+  f.rows.guides.push({ id: "legacy", title: "历史文章", status: "已发布", spotId: "spot" });
+  const legacy = await f.request("/api/collection/guides/legacy", { category: "拍摄技巧" }, "PUT");
+  assert.equal(legacy.status, 200, JSON.stringify(legacy.body));
+  assert.equal(legacy.body.category, "拍摄技巧");
+  assert.equal((await f.request("/api/collection/guides", { id: "draft", title: "未分类草稿" })).body.category, "");
+});
+
+test("initial guide metrics persist through SQL, edits and public list/detail/home responses", async (t) => {
+  const f = await fixture(t);
+  const saved = await f.request("/api/collection/guides", guide({ readCount: "1200", score: "4.9" }));
+  assert.equal(saved.status, 201, JSON.stringify(saved.body));
+  assert.equal(saved.body.readCount, 1200);
+  assert.equal(saved.body.score, 4.9);
+  const split = schema.splitDocument("guides", await f.source.get("guides", "guide"));
+  assert.equal(split.columns.readCount, 1200);
+  assert.equal(split.columns.score, 4.9);
+  f.rows.guides[0] = schema.hydrateDocument("guides", { id: split.id, ...split.columns }, { ...split.relations, collection_values: split.attributes });
+  for (const [rpc, params] of [["getGuide", { id: "guide" }], ["listGuides", {}], ["getHomeData", {}]]) {
+    const response = await f.request(`/api/rpc/${rpc}`, params, "POST", false);
+    const row = rpc === "getGuide" ? response.body.data : rpc === "listGuides" ? response.body.data[0] : response.body.data.guides[0];
+    assert.equal(row.readCount, 1200, rpc);
+    assert.equal(Number(row.score), 4.9, rpc);
+  }
+  const edited = await f.request("/api/collection/guides/guide", { category: "路线" }, "PUT");
+  assert.equal(edited.body.readCount, 1200);
+  assert.equal(Number(edited.body.score), 4.9);
+  const zero = await f.request("/api/collection/guides/guide", { readCount: 0, score: 0 }, "PUT");
+  assert.equal(zero.status, 200);
+  assert.equal(zero.body.readCount, 0);
+  assert.equal(zero.body.score, 0);
+  const boundary = await f.request("/api/collection/guides/guide", { readCount: 2147483647, score: 5 }, "PUT");
+  assert.equal(boundary.status, 200);
+  const draft = await f.request("/api/collection/guides", { id: "draft", title: "草稿" });
+  assert.equal(draft.status, 201);
+  assert.equal(draft.body.readCount, 0);
+  assert.equal(draft.body.score, 0);
+});
+
+test("invalid initial metrics cannot create or change guides, including legacy metadata updates", async (t) => {
+  const f = await fixture(t);
+  f.rows.guides.push({ id: "legacy", title: "历史文章", status: "已发布", readCount: 50, score: 4.8 });
+  for (const [field, values] of [
+    ["readCount", [-1, 1.5, 2147483648, "NaN", "Infinity", "", " ", null, true, [], {}]],
+    ["score", [-0.1, 5.1, 4.99, "NaN", "Infinity", "", " ", null, false, [], {}]]
+  ]) {
+    for (const value of values) {
+      const created = await f.request("/api/collection/guides", { id: "invalid", title: "草稿", [field]: value });
+      assert.equal(created.status, 400, `${field}=${JSON.stringify(value)} on create`);
+      const updated = await f.request("/api/collection/guides/legacy", { [field]: value }, "PUT");
+      assert.equal(updated.status, 400, `${field}=${JSON.stringify(value)} on update`);
+    }
+  }
+  assert.equal(f.rows.guides.length, 1);
+  assert.equal(f.rows.guides[0].readCount, 50);
+  assert.equal(f.rows.guides[0].score, 4.8);
+  const legacy = await f.request("/api/collection/guides/legacy", { readCount: "200", score: "4.9" }, "PUT");
+  assert.equal(legacy.status, 200, JSON.stringify(legacy.body));
+  assert.equal(legacy.body.readCount, 200);
+  assert.equal(legacy.body.score, 4.9);
+});
+
+test("public guide metric sorting is numeric, descending and preserves visibility and point scope", async (t) => {
+  const f = await fixture(t);
+  f.rows.guides.push(
+    guide({ id: "pin", isTop: true, readCount: 2, score: "4.8", updatedAt: "2020-01-01" }),
+    guide({ id: "popular", readCount: "100", score: "4.9" }),
+    guide({ id: "rated", readCount: 10, score: 5 }),
+    guide({ id: "views-only", readCount: undefined, views: "20", score: "bad" }),
+    guide({ id: "zero", readCount: 0, views: 999, score: 0 }),
+    guide({ id: "hidden", isShow: false, readCount: 10000, score: 5 }),
+    guide({ id: "draft", status: "草稿", readCount: 20000, score: 5 }),
+    guide({ id: "other", spotId: "other", readCount: 30000, score: 5 })
+  );
+  const ids = async (params) => (await f.request("/api/rpc/listGuides", { spotId: "spot", ...params }, "POST", false)).body.data.map((row) => row.id);
+  assert.deepEqual(await ids({ sortBy: "readCount" }), ["popular", "views-only", "rated", "pin", "zero"]);
+  assert.deepEqual(await ids({ sortBy: "score" }), ["rated", "popular", "pin", "views-only", "zero"]);
+  assert.equal((await ids({}))[0], "pin");
+  assert.deepEqual(await ids({ sortBy: "unsupported" }), await ids({}));
+});
+
 test("server rejects cross-point and mismatched target types and revalidates point changes on PUT", async (t) => {
   const f = await fixture(t);
   for (const input of [guide({ targetProductType: "package", targetProductId: "wrong" }), guide({ targetProductType: "video", targetProductId: "package" })]) {

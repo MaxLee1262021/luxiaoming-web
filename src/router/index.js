@@ -1,7 +1,7 @@
 window.LXM_PAGES = (() => {
   const manifest = [
   ...[
-    ['svcWorkbench', 'workbench'], ['svcIntake', 'intake'], ['svcFollowup', 'followup'], ['svcComplaints', 'complaints'],
+    ['svcGeneralWorkbench', 'general-workbench'], ['svcWorkbench', 'workbench'], ['productLinks', 'product-links'], ['svcIntake', 'intake'], ['svcFollowup', 'followup'], ['svcComplaints', 'complaints'],
     ['svcRules', 'rules'], ['svcLedger', 'ledger'], ['svcSettlements', 'settlements'], ['svcStaff', 'staff'], ['svcMine', 'mine']
   ].map(([key, slug]) => ({ key, folder: 'service/' + slug, slug, component: 'LxmPage' + key[0].toUpperCase() + key.slice(1) })),
   {

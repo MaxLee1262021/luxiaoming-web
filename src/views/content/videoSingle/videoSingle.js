@@ -9,6 +9,12 @@ window.LXM_PAGES.register({
   styleScope: "page-route-videoSingle",
   setup(ctx) {
     const Vue = window.Vue;
+    const {
+      contentPhotographerOptions = Vue.ref([]), contentPhotographersLoading = Vue.ref(false),
+      contentPhotographersError = Vue.ref(""), contentPhotographerName = () => "未设置",
+      loadContentPhotographers = () => {}
+    } = ctx;
+    loadContentPhotographers();
     const tip = (m) => { try { if (window.ElMessage) window.ElMessage(m); else if (ctx.toast) ctx.toast(m); else console.log(m); } catch (e) {} };
 
     // 模板用到的业务字段（ctx 上有的，单独解构出来；模板能直接访问 setup 内部 const）
@@ -85,6 +91,7 @@ window.LXM_PAGES.register({
     }
     function setVideoDraft(row) {
       const draft = clone(row);
+      draft.recommendedPhotographerId = String(draft.recommendedPhotographerId || "");
       if (ctx.hydrateProductSpot) ctx.hydrateProductSpot(draft);
       draft.title = draft.title || draft.name || "";
       draft.tags = Array.isArray(draft.tags) ? draft.tags : String(draft.tags || "").split(/[，,、|\n]/).map((tag) => tag.trim()).filter(Boolean);
@@ -101,7 +108,7 @@ window.LXM_PAGES.register({
     function openVideoEditor(row = null) {
       if (!canEditSource() || (!row && ctx.can && !ctx.can("contentEdit"))) return false;
       if (row) { selectVideoSingle(row); setVideoDraft(row); }
-      else videoDraft.value = { title: "", name: "", videoUrl: "", previewVideoUrl: "", type: "video", productKind: "video_single", isVideoSingle: true, seriesId: "", tags: [], spotId: "", spotIds: [], spotBindingExplicit: true, price: 0, depositRatioPercent: undefined, videoDuration: 30, durationText: "30秒", finishedVideoCount: 1, deliveryCycle: "1–3 个工作日", shootingNotes: "", makeupIncluded: false, hasAerial: false, fullEdit: false, isShow: true, status: "上架", isMainPush: false };
+      else videoDraft.value = { title: "", name: "", recommendedPhotographerId: "", videoUrl: "", previewVideoUrl: "", type: "video", productKind: "video_single", isVideoSingle: true, seriesId: "", tags: [], spotId: "", spotIds: [], spotBindingExplicit: true, price: 0, depositRatioPercent: undefined, videoDuration: 30, durationText: "30秒", finishedVideoCount: 1, deliveryCycle: "1–3 个工作日", shootingNotes: "", makeupIncluded: false, hasAerial: false, fullEdit: false, isShow: true, status: "上架", isMainPush: false };
       editorOpen.value = true;
       return true;
     }
@@ -187,7 +194,11 @@ window.LXM_PAGES.register({
         const draft = editorOpen.value ? videoDraft.value : selectedVideoSingle.value;
         if (!draft) return false;
         const s = clone(draft);
+        s.recommendedPhotographerId = String(s.recommendedPhotographerId || "");
         if (!s.title && !s.name) { tip("请填写短视频名称"); return false; }
+        s.tags = [...new Set((Array.isArray(s.tags) ? s.tags : typeof s.tags === "string" ? s.tags.split(/[，,、|\r\n]/) : [])
+          .filter((tag) => typeof tag === "string").map((tag) => tag.trim()).filter(Boolean))];
+        if (!s.tags.length) { tip("请至少添加一个标签"); return false; }
         if (editorOpen.value) {
           const value = draft.depositRatioPercent;
           if (!emptyDeposit(value) && (!["number", "string"].includes(typeof value) || !Number.isFinite(Number(value)) || Number(value) < 0 || Number(value) > 100)) {
@@ -244,6 +255,7 @@ window.LXM_PAGES.register({
       });
     }
     return {
+      contentPhotographerOptions, contentPhotographersLoading, contentPhotographersError, contentPhotographerName, loadContentPhotographers,
       selectedVideoSingleId,
       editorOpen, videoDraft, saving, openVideoEditor, closeEditor, resetVideoDraft, videoTagOptions, previewVisible,
       remoteOn,

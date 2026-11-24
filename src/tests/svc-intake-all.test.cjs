@@ -3,12 +3,12 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const script = fs.readFileSync(path.resolve(__dirname, "../api/svc-workbench-ui.js"), "utf8");
 function fixture(role = "super") {
   let mount, unmount;
-  const requests = [], timers = [], controls = { rows: [], confirmCount: 0 };
+  const requests = [], timers = [], controls = { rows: [], confirmCount: 0, afterSales: [] };
   const window = { LXM_HTTP: { async request(url, init = {}) {
     requests.push({ url, method: init.method || "GET", body: init.body && JSON.parse(init.body) });
     return { ok: true, json: async () => ({ code: 0, data: { list: controls.rows, total: controls.rows.length, reserved: { list: [] } } }) };
   } } };
-  const ctx = { state: { role, currentStaffId: "S1" }, ElMessage: { success() {}, warning() {}, error() {} }, ElMessageBox: { async confirm() { controls.confirmCount++; } }, switchMenu() {} };
+  const ctx = { state: { role, currentStaffId: "S1" }, ElMessage: { success() {}, warning() {}, error() {} }, ElMessageBox: { async confirm() { controls.confirmCount++; } }, switchMenu() {}, async openServiceAfterSale(orderNo) { controls.afterSales.push(orderNo); } };
   vm.runInNewContext(script, { window, Vue: { reactive: v => v, computed: fn => ({ get value() { return fn(); } }), onMounted: fn => { mount = fn; }, onUnmounted: fn => { unmount = fn; } }, URLSearchParams, AbortController, Intl, Date, setTimeout, clearTimeout, setInterval: (fn, interval) => { timers.push({ fn, interval }); return timers.length; }, clearInterval() {}, document: { visibilityState: "visible" } });
   return { ui: window.LXM_SVC_WORKBENCH_SETUP(ctx, "intake"), controls, requests, timers, mount: () => mount(), unmount: () => unmount() };
 }
@@ -76,4 +76,13 @@ test("ownership labels distinguish public claim candidates from missing historic
   assert.equal(ui.kfAssigneeLabel({service_status:"done",payment_status:"paid"}),"未记录客服归属");
   assert.equal(ui.kfAssigneeLabel({service_status:"reserved",reserve_staff_name:"客服甲"}),"客服甲");
   assert.equal(ui.kfAssigneeLabel({service_status:"confirmed",assignee_name:"客服乙"}),"客服乙");
+});
+
+test("live service after-sale entry resolves the real order number and ignores projection ids", async () => {
+  const f = fixture("service");
+  await f.ui.kfAftersale({ id: 44, order_no: "ACTUAL-ORDER", service_status: "done", can_complaint: true });
+  assert.deepEqual(f.controls.afterSales, ["ACTUAL-ORDER"]);
+  assert.equal(f.ui.kf.fromOrder, "", "the refund issue does not go to responsibility-only complaint registration");
+  assert.equal(f.requests.length, 0, "the app's authorized business-document adapter owns issue lookup");
+  assert.equal(f.ui.kf.busy, false);
 });

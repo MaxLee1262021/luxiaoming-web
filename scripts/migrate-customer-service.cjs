@@ -30,7 +30,7 @@ async function applyStatement(conn,statement) {
   } else await conn.query(statement.replace(/^CREATE TABLE (?!IF NOT EXISTS)/i,'CREATE TABLE IF NOT EXISTS ').replace(/^INSERT INTO svc_runtime_lock/i,'INSERT IGNORE INTO svc_runtime_lock'));
 }
 async function migrate(source,options={}) {
-  const files=['017_customer_service.sql','018_service_benefit.sql','020_service_confirmed.sql','021_svc_staff_settlement_cycle.sql','022_svc_staff_timing.sql'];
+  const files=['017_customer_service.sql','018_service_benefit.sql','020_service_confirmed.sql','021_svc_staff_settlement_cycle.sql','022_svc_staff_timing.sql','023_svc_staff_wecom.sql'];
   const approved = require('../server/lib/svcApproved.cjs');
   if (!options.apply) return {dryRun:true,migrations:files,storageCompatibility:{ordersTextColumns:['sourceName','seriesName']},menus:menus.map(([key])=>key),approvedInitialRates:approved.INITIAL_RATES,activationRequired:'SVC_ENABLE_AT (ISO8601 with +08:00)',historicalBindingsCreated:false};
   const B=require('../server/lib/svcBenefit.cjs'), c=require('../server/lib/svcCore.cjs');
