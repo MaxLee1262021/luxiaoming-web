@@ -2,7 +2,7 @@
   <header class="package-head">
     <div>
       <h2>旅拍套餐管理</h2>
-      <p>按城市与打卡点组合套餐。升序向前插一位，降序向后插一位，其余套餐依次调整。</p>
+      <p>按城市与打卡点组合套餐。可移到最前或指定位置，其他套餐自动顺延。</p>
     </div>
     <div class="package-head-actions">
       <div class="package-stats" aria-label="套餐数量统计">
@@ -33,7 +33,7 @@
   </div>
 
   <div class="package-grid" v-loading="loading">
-    <article v-for="row in tableRows" :key="row.id" class="package-card" :class="{'is-hidden':statusText(row)==='已下架'}">
+    <article v-for="row in tableRows" :key="row.id" class="package-card" data-content-order-key="packages" :data-content-order-id="row.id || row._id" :class="{'is-hidden':statusText(row)==='已下架', 'is-sort-highlighted':contentSortHighlighted('packages', row)}">
       <div class="package-card-top">
         <div class="package-card-title">
           <h3>{{ row.name || '未命名套餐' }}</h3>
@@ -63,7 +63,7 @@
       <p v-if="visibilityHint(row)" class="package-visibility-hint">{{ visibilityHint(row) }}</p>
       <footer class="package-card-footer">
         <span class="package-muted">{{ (row.includedItems || []).length }} 种商品</span>
-        <div class="package-card-actions"><div class="content-order-controls" v-if="can('contentEdit')" role="group" aria-label="展示排序"><span class="content-order-position">第 {{ contentSortPosition('packages', row) }} 位</span><el-button plain :disabled="contentSortDisabled('packages', row, -1)" @click="changeContentSort('packages', row, -1)">升序</el-button><el-button plain :disabled="contentSortDisabled('packages', row, 1)" @click="changeContentSort('packages', row, 1)">降序</el-button></div>
+        <div class="package-card-actions"><div class="content-order-controls" v-if="can('contentEdit')" role="group" aria-label="展示排序"><span class="content-order-position" title="全部同类内容的展示顺位，包含隐藏内容；筛选不改变总顺位">同类第 {{ contentSortPosition('packages', row) }} 位</span><el-button size="small" plain :disabled="contentSortMoveDisabled('packages', row, 1)" @click="moveContentToPosition('packages', row, 1)">移到最前</el-button><el-button size="small" plain :disabled="contentSortMoveDisabled('packages', row)" @click="promptContentSort('packages', row)">移动到…</el-button><el-button size="small" link class="content-order-step" :disabled="contentSortDisabled('packages', row, -1)" @click="changeContentSort('packages', row, -1)">上移</el-button><el-button size="small" link class="content-order-step" :disabled="contentSortDisabled('packages', row, 1)" @click="changeContentSort('packages', row, 1)">下移</el-button></div>
           <el-button plain size="small" :disabled="pendingIds.includes(row.id)" @click="openEdit(row)">{{ canEdit() ? '编辑' : '查看' }}</el-button>
           <el-tooltip v-if="canEdit()" :content="manualVisible(row) ? '点击隐藏套餐' : '点击显示套餐'" placement="top">
             <el-switch :model-value="manualVisible(row)" :loading="pendingIds.includes(row.id)" :disabled="pendingIds.includes(row.id)" :aria-label="'在小程序显示套餐：'+row.name" @change="toggleVisible(row)" />

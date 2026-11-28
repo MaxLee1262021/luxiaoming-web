@@ -38,12 +38,12 @@
     <div class="section-title-row compact">
       <div>
         <h3>打卡点清单</h3>
-        <p>排序按全局顺位插位重排；上升、下降或在编辑中指定顺位时，其他打卡点自动依次调整。未设置排序时从第 1 位插入。仅超级管理员可删除已隐藏点位。</p>
+        <p>支持移到最前或指定全局位置，其他打卡点自动顺延。排序跨城市且包含隐藏点位，筛选和分页不改变总顺位；未设置排序的点位可直接加入排序。仅超级管理员可删除已隐藏点位。</p>
       </div>
       <el-tag type="info">{{ spotTableRows.length }} 个打卡点</el-tag>
     </div>
-    <el-table :data="pagedList('spots', spotTableRows)" row-key="id" border stripe empty-text="暂无符合条件的打卡点，试试重置筛选或新增点位">
-      <el-table-column label="排序" width="76" align="center">
+    <el-table :data="pagedList('spots', spotTableRows)" :row-class-name="spotRowClassName" row-key="id" border stripe empty-text="暂无符合条件的打卡点，试试重置筛选或新增点位">
+      <el-table-column label="全局排序" width="90" align="center">
         <template #default="{row}"><span class="spot-rank">{{ spotRankText(row) }}</span></template>
       </el-table-column>
       <el-table-column label="打卡点" min-width="250">
@@ -86,8 +86,14 @@
       <el-table-column label="操作" width="340" fixed="right">
         <template #default="{row}">
           <div class="basic-content-actions">
-            <el-button link type="primary" v-if="can('contentEdit')" :disabled="spotSortDisabled(row, -1)" @click="changeSpotSort(row, -1)">上升</el-button>
-            <el-button link type="primary" v-if="can('contentEdit')" :disabled="spotSortDisabled(row, 1)" @click="changeSpotSort(row, 1)">下降</el-button>
+            <strong class="spot-sort-mobile-name">{{ row.name || '未命名打卡点' }}</strong>
+            <div class="content-order-controls" v-if="can('contentEdit')" role="group" aria-label="展示排序" data-content-order-key="spots" :data-content-order-id="row.id || row._id">
+              <span class="content-order-position">{{ spotSortPosition(row) ? '全局第 '+spotSortPosition(row)+' 位' : '未设置排序' }}</span>
+              <el-button size="small" plain :disabled="spotSortMoveDisabled(row, 1)" @click="moveSpotToPosition(row, 1)">移到最前</el-button>
+              <el-button size="small" plain :disabled="spotSortMoveDisabled(row)" @click="promptSpotSort(row)">移动到…</el-button>
+              <el-button size="small" link type="primary" class="content-order-step" :disabled="spotSortDisabled(row, -1)" @click="changeSpotSort(row, -1)">上移</el-button>
+              <el-button size="small" link type="primary" class="content-order-step" :disabled="spotSortDisabled(row, 1)" @click="changeSpotSort(row, 1)">下移</el-button>
+            </div>
             <el-button link type="primary" @click="openSpotRelation(row)">关系</el-button>
             <el-button link type="primary" v-if="can('contentEdit')" :disabled="isSpotSortSaving(row)" @click="openContent(row)">编辑</el-button>
             <el-button link v-if="can('contentEdit')" :disabled="isSpotSortSaving(row)" :type="isSpotVisible(row) ? 'warning' : 'success'" @click="toggleSpotVisible(row)">{{ isSpotVisible(row) ? '隐藏' : '展示' }}</el-button>

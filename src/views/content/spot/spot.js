@@ -9,6 +9,8 @@ window.LXM_PAGES.register({
     const { ref, computed, watch } = window.Vue;
     const spotCityFilter = ref("");
     const spotSortSavingIds = ref([]);
+    const spotSortHighlightId = ref("");
+    let spotSortPromptOpen = false;
 
     function idOf(row) {
       return String((row && (row.id || row._id)) || "");
@@ -68,8 +70,8 @@ window.LXM_PAGES.register({
       }, 0)
     }));
     function spotRankText(spot) {
-      const rank = window.LXM_SPOT_ORDER.rank(spot.sort);
-      return rank ? String(rank) : "—";
+      const position = spotSortPosition(spot);
+      return position ? String(position) : "—";
     }
 
     function isSpotSortSaving(spot) {
@@ -91,14 +93,84 @@ window.LXM_PAGES.register({
         || isSpotSortSaving(source) || (window.LXM_SPOT_ORDER.rank(source.sort) > 0
           && window.LXM_SPOT_ORDER.ordered(ctx.data.spots).findIndex(row => idOf(row) === idOf(source)) + 1 === nextSpotSort(source, direction));
     }
+    function spotSortPosition(spot) {
+      return window.LXM_SPOT_ORDER.ordered(ctx.data.spots).findIndex(row => idOf(row) === idOf(spot)) + 1;
+    }
+    function spotSortMoveLimit(spot) {
+      return window.LXM_SPOT_ORDER.ordered(ctx.data.spots).filter(row => idOf(row) !== idOf(spot)).length + 1;
+    }
+    function spotSortMoveDisabled(spot, targetPosition) {
+      const source = spotSource(spot);
+      const position = spotSortPosition(source);
+      const limit = spotSortMoveLimit(source);
+      return !ctx.can("contentEdit") || !source || source.deleted || source.isDeleted || isSpotSortSaving(source)
+        || (position === 1 && limit === 1)
+        || (targetPosition !== undefined && (!Number.isSafeInteger(targetPosition)
+          || targetPosition < 1 || targetPosition > limit || targetPosition === position));
+    }
+    function spotRowClassName({ row }) {
+      return idOf(row) === spotSortHighlightId.value ? "is-sort-highlighted" : "";
+    }
+    async function locateSortedSpot(source) {
+      spotSortHighlightId.value = idOf(source);
+      const index = spotTableRows.value.findIndex(row => idOf(row) === idOf(source));
+      if (index >= 0) {
+        const pager = ctx.pager("spots");
+        pager.page = Math.floor(index / (pager.size || 12)) + 1;
+      }
+      await window.Vue.nextTick?.();
+      if (typeof document !== "undefined") {
+        const control = Array.from(document.querySelectorAll('[data-content-order-key="spots"]')).find(element =>
+          element.dataset.contentOrderId === idOf(source) && element.getClientRects().length);
+        control?.closest("tr")?.scrollIntoView({ block: "center",
+          behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth" });
+      }
+    }
     async function changeSpotSort(spot, direction) {
       if (!ctx.can("contentEdit") || ![-1, 1].includes(direction)) return false;
-      const id = idOf(spot);
-      // Table rows include derived fields; persist only the canonical record.
-      const source = spotSource(spot);
       if (spotSortDisabled(spot, direction)) return false;
-      const previous = source.sort;
-      const next = nextSpotSort(source, direction);
+      const source = spotSource(spot);
+      return saveSpotPosition(source, nextSpotSort(source, direction));
+    }
+    async function moveSpotToPosition(spot, targetPosition) {
+      if (spotSortMoveDisabled(spot)) return false;
+      const limit = spotSortMoveLimit(spot);
+      if (!Number.isSafeInteger(targetPosition) || targetPosition < 1 || targetPosition > limit) {
+        ctx.ElMessage.warning(`请输入 1 到 ${limit} 之间的整数`);
+        return false;
+      }
+      if (targetPosition === spotSortPosition(spot)) return false;
+      return saveSpotPosition(spotSource(spot), targetPosition);
+    }
+    async function promptSpotSort(spot) {
+      if (spotSortPromptOpen || spotSortMoveDisabled(spot)) return false;
+      const position = spotSortPosition(spot);
+      const limit = spotSortMoveLimit(spot);
+      let value;
+      spotSortPromptOpen = true;
+      try {
+        ({ value } = await ctx.ElMessageBox.prompt(
+          `${position ? `当前全局第 ${position} 位` : "当前未设置排序"}。请输入 1 到 ${limit} 之间的目标位置。排序跨城市且包含隐藏点位，筛选和分页不改变总顺位；其他未设置排序的点位不占位。`,
+          "移动到指定位置", {
+            inputValue: String(position || 1), inputPlaceholder: `请输入 1 到 ${limit} 之间的整数`, inputType: "text",
+            confirmButtonText: "确定", cancelButtonText: "取消", closeOnClickModal: false,
+            confirmButtonClass: "lxm-action-confirm", cancelButtonClass: "lxm-action-cancel", customClass: "content-order-prompt",
+            inputValidator: input => /^[1-9]\d*$/.test(String(input ?? "").trim())
+              && Number.isSafeInteger(Number(input)) && Number(input) <= limit || `请输入 1 到 ${limit} 之间的整数`
+          }
+        ));
+      } catch (error) {
+        if (error !== "cancel" && error !== "close") ctx.ElMessage.error(error?.message || "无法打开排序设置，请稍后重试");
+        return false;
+      } finally {
+        spotSortPromptOpen = false;
+      }
+      return moveSpotToPosition(spot, Number(value));
+    }
+    async function saveSpotPosition(source, next) {
+      // Table rows include derived fields; persist only the canonical record.
+      const id = idOf(source);
+      const previous = spotSortPosition(source);
       spotSortSavingIds.value = [...spotSortSavingIds.value, id];
       try {
         if (!(await ctx.persistSpotSort(source, next))) return false;
@@ -108,8 +180,9 @@ window.LXM_PAGES.register({
       } finally {
         spotSortSavingIds.value = spotSortSavingIds.value.filter((item) => item !== id);
       }
-      if (typeof ctx.log === "function") ctx.log("调整打卡点排序", "打卡点设置", `${source.name || id} · ${previous ?? "未设置"} → ${source.sort}`);
-      if (ctx.ElMessage) ctx.ElMessage.success(`已插入第 ${source.sort} 位，其他打卡点已同步重排`);
+      if (typeof ctx.log === "function") ctx.log("调整打卡点排序", "打卡点设置", `${source.name || id} · ${previous || "未设置"} → ${source.sort}`);
+      if (ctx.ElMessage) ctx.ElMessage.success(`${previous ? `已从第 ${previous} 位移至` : "已插入"}第 ${source.sort} 位，其他打卡点已自动顺延`);
+      await locateSortedSpot(source);
       return true;
     }
 
@@ -170,6 +243,12 @@ window.LXM_PAGES.register({
       spotRankText,
       isSpotSortSaving,
       spotSortDisabled,
+      spotSortPosition,
+      spotSortMoveLimit,
+      spotSortMoveDisabled,
+      moveSpotToPosition,
+      promptSpotSort,
+      spotRowClassName,
       changeSpotSort,
       spotAssets,
       spotTags,

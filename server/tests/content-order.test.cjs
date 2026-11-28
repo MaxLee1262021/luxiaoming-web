@@ -67,6 +67,42 @@ test("升序/降序 insert one place, shift siblings, and persist the same order
   await restart.close();
 });
 
+test("target positions move directly from 30 to 3, to the front, and backwards with one persisted order", async t => {
+  const albums = Array.from({ length: 30 }, (_, index) => photo(`photo-${index + 1}`, index + 1));
+  const f = await fixture(t, { albums });
+  const move = await f.request("albums", "photo-30", { targetPosition: 3 }, "PUT", "editor");
+  assert.equal(move.status, 200, JSON.stringify(move.body));
+  assert.equal(move.body.sort, 3);
+  assert.equal(move.body.targetPosition, undefined);
+  const expected = ["photo-1", "photo-2", "photo-30", ...albums.slice(2, 29).map(row => row.id)];
+  assert.deepEqual(await f.ordered("albums"), expected.map((id, index) => [id, index + 1]));
+  assert.deepEqual(new Map(move.body.__contentOrder.map(row => [row.id, row.sort])), new Map(expected.map((id, index) => [id, index + 1])));
+  assert.equal((await f.request("albums", "photo-30", { targetPosition: 1 })).status, 200);
+  assert.deepEqual((await f.ordered("albums")).slice(0, 4), [["photo-30", 1], ["photo-1", 2], ["photo-2", 3], ["photo-3", 4]]);
+  assert.equal((await f.request("albums", "photo-30", { targetPosition: 30 })).status, 200);
+  assert.deepEqual(await f.ordered("albums"), albums.map(row => [row.id, row.sort]));
+  assert.equal((await f.request("albums", "photo-30", { targetPosition: 30 })).status, 200);
+  const stored = await f.source.list("albums");
+  assert.equal(stored.some(row => Object.hasOwn(row, "targetPosition")), false);
+  const restart = createSource({ backend: "json", jsonFile: f.file });
+  assert.deepEqual(order.ordered("albums", await restart.list("albums")).map(row => [row.id, row.sort]), albums.map(row => [row.id, row.sort]));
+  await restart.close();
+});
+
+test("target positions count hidden siblings globally, exclude deleted rows, and skip ordinary publication edits", async t => {
+  const f = await fixture(t, { albums: [photo("visible", 0, { isShow: true, tags: undefined, hotScore: 30 }),
+    photo("hidden", 0, { hotScore: 20 }), photo("moving", 0, { hotScore: 10 }), photo("deleted", 1, { deleted: true })] });
+  const result = await f.request("albums", "moving", { targetPosition: 1 });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.deepEqual(await f.ordered("albums"), [["moving", 1], ["visible", 2], ["hidden", 3]]);
+  assert.equal((await f.source.get("albums", "visible")).tags, undefined);
+  assert.equal((await f.source.get("albums", "visible")).isShow, true);
+  assert.equal((await f.source.get("albums", "hidden")).isShow, false);
+  assert.equal((await f.source.get("albums", "deleted")).sort, 1);
+  assert.equal((await f.request("albums", "moving", { targetPosition: 4 })).status, 400);
+  assert.equal((await f.request("albums", "deleted", { targetPosition: 1 })).status, 409);
+});
+
 test("video singles and bundles keep independent orders even when both are stored in packages", async t => {
   const f = await fixture(t);
   const beforeAlbums = await f.source.list("albums");
@@ -76,6 +112,51 @@ test("video singles and bundles keep independent orders even when both are store
   assert.equal((await f.request("packages", "p2", { sortDirection: -1 })).status, 200);
   assert.deepEqual(await f.ordered("packages", { productKind: "package" }), [["p2", 1], ["p1", 2]]);
   assert.deepEqual(await f.source.list("albums"), beforeAlbums);
+});
+
+test("direct positions isolate video singles, legacy videos, bundles and other collections", async t => {
+  const initial = defaults();
+  initial.packages.push(photo("legacy1", 1, { type: "video" }), photo("legacy2", 2, { type: "video" }));
+  const f = await fixture(t, initial);
+  const beforeAlbums = await f.source.list("albums");
+  const beforeGuides = await f.source.list("guides");
+  const beforePackages = await f.source.list("packages");
+  assert.equal((await f.request("packages", "v2", { targetPosition: 3 })).status, 400, "the bound is the video-single group size, not the shared table size");
+  assert.deepEqual(await f.source.list("packages"), beforePackages);
+  assert.equal((await f.request("packages", "v2", { targetPosition: 1 })).status, 200);
+  assert.deepEqual(await f.ordered("packages", { productKind: "video_single" }), [["v2", 1], ["v1", 2]]);
+  assert.deepEqual(await f.ordered("packages", { type: "video" }), [["legacy1", 1], ["legacy2", 2]]);
+  assert.deepEqual(await f.ordered("packages", { productKind: "package" }), [["p1", 1], ["p2", 2]]);
+  assert.equal((await f.request("packages", "legacy2", { targetPosition: 1 })).status, 200);
+  assert.equal((await f.request("packages", "p1", { targetPosition: 2 })).status, 200);
+  assert.deepEqual(await f.ordered("packages", { productKind: "video_single" }), [["v2", 1], ["v1", 2]]);
+  assert.deepEqual(await f.ordered("packages", { type: "video" }), [["legacy2", 1], ["legacy1", 2]]);
+  assert.deepEqual(await f.ordered("packages", { productKind: "package" }), [["p2", 1], ["p1", 2]]);
+  assert.deepEqual(await f.source.list("albums"), beforeAlbums);
+  assert.deepEqual(await f.source.list("guides"), beforeGuides);
+});
+
+test("target positions reject invalid values, mixed fields, unsupported collections, methods and viewers without writes", async t => {
+  const f = await fixture(t);
+  const before = await f.source.list("albums");
+  for (const targetPosition of [0, -1, 1.5, "2", null, true, {}, [], 5, Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER + 1]) {
+    const result = await f.request("albums", "d", { targetPosition });
+    assert.equal(result.status, 400, JSON.stringify({ targetPosition, result }));
+  }
+  for (const body of [{ targetPosition: 1, sortDirection: -1 }, { targetPosition: 1, name: "不能保存" },
+    { targetPosition: 1, sort: 2 }, { targetPosition: 1, __contentOrder: [] }, { targetPosition: 1, deleted: true }]) {
+    assert.equal((await f.request("albums", "d", body)).status, 400, JSON.stringify(body));
+  }
+  assert.equal((await f.request("albums", "", { targetPosition: 1 }, "POST")).status, 400);
+  assert.equal((await f.request("albums", "", { targetPosition: 1 })).status, 400);
+  assert.equal((await f.request("spots", "none", { targetPosition: 1 })).status, 400);
+  assert.equal((await f.request("albums", "d", { targetPosition: 1 }, "PUT", "viewer")).status, 403);
+  assert.deepEqual(await f.source.list("albums"), before);
+  assert.equal((await f.source.list("logs")).some(row => row.action === "调整商品排序"), false);
+  const plan = order.planContentMutation("albums", before, "d", { name: "普通编辑", targetPosition: 1 });
+  assert.equal(plan.saved.sort, 4, "ordinary mutation patches cannot become reorder commands");
+  assert.equal(plan.saved.targetPosition, undefined);
+  assert.equal(plan.saved.name, "普通编辑");
 });
 
 test("sorting legacy visible products skips publication repair and preserves fields; hidden records participate globally", async t => {
@@ -194,6 +275,24 @@ test("a sibling persistence failure or audit failure restores the complete catal
   assert.deepEqual(await f.source.list("albums"), before);
 });
 
+test("direct moves roll back every shifted sibling on persistence or audit failure", async t => {
+  const f = await fixture(t);
+  const before = await f.source.list("albums");
+  const update = f.source.update;
+  let writes = 0;
+  f.source.update = async (key, id, body) => {
+    if (key === "albums" && ++writes === 2) throw new Error("injected direct-move persistence failure");
+    return update(key, id, body);
+  };
+  assert.equal((await f.request("albums", "d", { targetPosition: 1 })).status, 503);
+  assert.deepEqual(await f.source.list("albums"), before);
+  f.source.update = update;
+  const create = f.source.create;
+  f.source.create = async (key, body) => { if (key === "logs") throw new Error("audit unavailable"); return create(key, body); };
+  assert.equal((await f.request("albums", "d", { targetPosition: 1 })).status, 503);
+  assert.deepEqual(await f.source.list("albums"), before);
+});
+
 test("shared video pools retain the existing public RPC and mini-program classification", () => {
   const miniProduct = require("../../../luxiaoming_交付包/miniprogram/utils/product.js");
   const rpcText = fs.readFileSync(path.resolve(__dirname, "../lib/rpc.cjs"), "utf8");
@@ -307,4 +406,35 @@ test("MySQL rolls back the entire order when a later sibling write fails", async
   assert.deepEqual(f.rows(), before);
   assert.equal(f.events.includes("rollback"), true);
   assert.equal(f.events.includes("commit"), false);
+});
+
+test("MySQL direct moves validate against locked rows and preserve atomic commits and rollback", async t => {
+  await t.test("direct insertion commits all ranks in the existing transaction", async t => {
+    const f = mysqlFixture();
+    t.after(() => f.source.close());
+    const result = await f.source.applyContentMutation("guides", "g2", {}, { targetPosition: 1 });
+    assert.equal(result.saved.sort, 1);
+    assert.deepEqual(order.ordered("guides", f.rows()).map(row => row.id), ["g2", "g1"]);
+    assert.deepEqual(f.events, ["begin", "lock", "write:g1", "write:g2", "commit"]);
+    assert.equal(f.rows().find(row => row.id === "g1").customNote, "保留");
+    assert.equal(f.rows().find(row => row.id === "g2").updatedAt, 2000);
+  });
+  await t.test("an out-of-range target is rejected before any write", async t => {
+    const f = mysqlFixture();
+    t.after(() => f.source.close());
+    const before = f.rows();
+    await assert.rejects(f.source.applyContentMutation("guides", "g2", {}, { targetPosition: 3 }), { code: "CONTENT_ORDER_INVALID", statusCode: 400 });
+    assert.deepEqual(f.rows(), before);
+    assert.deepEqual(f.events, ["begin", "lock", "rollback"]);
+  });
+  await t.test("a later write failure rolls back every rank", async t => {
+    const f = mysqlFixture();
+    t.after(() => f.source.close());
+    const before = f.rows();
+    f.failAt(2);
+    await assert.rejects(f.source.applyContentMutation("guides", "g2", {}, { targetPosition: 1 }), /injected SQL rank failure/);
+    assert.deepEqual(f.rows(), before);
+    assert.equal(f.events.includes("rollback"), true);
+    assert.equal(f.events.includes("commit"), false);
+  });
 });

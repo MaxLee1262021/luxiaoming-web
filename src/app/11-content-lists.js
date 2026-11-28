@@ -122,6 +122,17 @@ function contentSortDisabled(key, row, direction) {
   return !ctx.can("contentEdit") || !!state.contentSortSaving || ![-1, 1].includes(direction)
     || index < 0 || index + direction < 0 || index + direction >= rows.length;
 }
+function contentSortMoveDisabled(key, row, targetPosition) {
+  const rows = contentOrderRows(key, row);
+  const position = contentSortPosition(key, row);
+  return !ctx.can("contentEdit") || !!state.contentSortSaving || position < 1 || rows.length < 2
+    || (targetPosition !== undefined && (!Number.isSafeInteger(targetPosition)
+      || targetPosition < 1 || targetPosition > rows.length || targetPosition === position));
+}
+function contentSortHighlighted(key, row) {
+  return state.contentSortHighlight?.key === contentOrderCollection(key)
+    && state.contentSortHighlight?.id === window.LXM_CONTENT_ORDER.idOf(row);
+}
 function applyContentOrderResponse(key, response) {
   const { __contentOrder, ...saved } = response || {};
   const sources = new Map((data[contentOrderCollection(key)] || []).map((row) => [window.LXM_CONTENT_ORDER.idOf(row), row]));
@@ -133,19 +144,68 @@ function applyContentOrderResponse(key, response) {
 }
 async function changeContentSort(key, row, direction) {
   if (contentSortDisabled(key, row, direction)) return false;
+  return saveContentSort(key, row, { sortDirection: direction });
+}
+async function moveContentToPosition(key, row, targetPosition) {
+  if (contentSortMoveDisabled(key, row)) return false;
+  const count = contentOrderRows(key, row).length;
+  if (!Number.isSafeInteger(targetPosition) || targetPosition < 1 || targetPosition > count) {
+    ElMessage.warning(`请输入 1 到 ${count} 之间的整数`);
+    return false;
+  }
+  if (targetPosition === contentSortPosition(key, row)) return false;
+  return saveContentSort(key, row, { targetPosition });
+}
+let contentSortPromptOpen = false;
+async function promptContentSort(key, row) {
+  if (contentSortPromptOpen || contentSortMoveDisabled(key, row)) return false;
+  const position = contentSortPosition(key, row);
+  const count = contentOrderRows(key, row).length;
+  let value;
+  contentSortPromptOpen = true;
+  try {
+    ({ value } = await ElMessageBox.prompt(
+      `当前同类总排序第 ${position} 位，共 ${count} 项。输入目标位置，其他内容将自动顺延；筛选不改变总顺位。`,
+      "移动到指定位置", {
+        inputValue: String(position), inputPlaceholder: `请输入 1 到 ${count} 之间的整数`,
+        inputType: "text", confirmButtonText: "确定", cancelButtonText: "取消",
+        confirmButtonClass: "lxm-action-confirm", cancelButtonClass: "lxm-action-cancel",
+        customClass: "content-order-prompt", closeOnClickModal: false,
+        inputValidator: input => /^[1-9]\d*$/.test(String(input ?? "").trim())
+          && Number.isSafeInteger(Number(input)) && Number(input) <= count
+          || `请输入 1 到 ${count} 之间的整数`
+      }
+    ));
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") ElMessage.error(error?.message || "无法打开排序设置，请稍后重试");
+    return false;
+  } finally {
+    contentSortPromptOpen = false;
+  }
+  return moveContentToPosition(key, row, Number(value));
+}
+async function saveContentSort(key, row, patch) {
   if (!ctx.isServerConnected?.()) { ElMessage.error("真实后端连接不可用，排序未保存"); return false; }
   key = contentOrderCollection(key);
   const id = window.LXM_CONTENT_ORDER.idOf(row);
   const source = (data[key] || []).find((item) => window.LXM_CONTENT_ORDER.idOf(item) === id);
   if (!source) return false;
+  const previousPosition = contentSortPosition(key, source);
   state.contentSortSaving = true;
   try {
-    const result = await window.LXM_CLOUD.update(key, id, { sortDirection: direction });
+    const result = await window.LXM_CLOUD.update(key, id, patch);
     if (!result || result.error || !Array.isArray(result.__contentOrder)) throw new Error(result?.error || "服务端未确认排序保存");
     Object.assign(source, applyContentOrderResponse(key, result));
     const position = contentSortPosition(key, source);
     log("调整展示排序", { albums: "照片留影", packages: window.LXM_CONTENT_ORDER.isVideoSingle(source) ? "视频摄影" : "旅拍套餐", guides: "旅拍灵感" }[key], `${source.name || source.title || id} · 第 ${position} 位`);
-    ElMessage.success(`已插入第 ${position} 位，其他内容已依次调整`);
+    ElMessage.success(`已从第 ${previousPosition} 位移至第 ${position} 位，其他内容已自动顺延`);
+    state.contentSortHighlight = { key, id };
+    await window.Vue?.nextTick?.();
+    if (typeof document !== "undefined") {
+      const element = Array.from(document.querySelectorAll("[data-content-order-key]")).find(element =>
+        element.dataset.contentOrderKey === key && element.dataset.contentOrderId === id && element.getClientRects().length);
+      element?.scrollIntoView({ block: "center", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth" });
+    }
     return true;
   } catch (error) {
     ElMessage.error(error?.message || "排序保存失败，请稍后重试");
@@ -847,7 +907,11 @@ async function requestDeleteSpot(spot) {
     sortedContentRows,
     contentSortPosition,
     contentSortDisabled,
+    contentSortMoveDisabled,
+    contentSortHighlighted,
     changeContentSort,
+    moveContentToPosition,
+    promptContentSort,
     applyContentOrderResponse,
     contentEffectiveVisible,
     contentSpotIds,

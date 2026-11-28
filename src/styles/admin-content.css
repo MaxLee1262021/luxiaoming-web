@@ -38,11 +38,17 @@
    ============================================================ */
 
 /* 卡片与列表共用的展示顺位操作。筛选不改变同类内容的完整顺位。 */
-.content-order-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.content-order-controls { display: flex; flex: 0 1 100%; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
 .content-order-controls .el-button { margin: 0; }
-.content-order-position { color: var(--lxm-muted); font-size: 12px; white-space: nowrap; }
+.content-order-controls .content-order-step { padding-inline: 4px; }
+.content-order-position { flex-basis: 100%; color: var(--lxm-muted); font-size: 12px; white-space: nowrap; }
 .package-card-actions { flex-wrap: wrap; }
-.ig-list-actions .content-order-controls { justify-content: flex-end; }
+.ig-list-actions .content-order-controls { flex-basis: auto; max-width: 220px; justify-content: flex-end; text-align: right; }
+[data-content-order-key].is-sort-highlighted { outline: 2px solid var(--lxm-brand-vivid); outline-offset: -2px; scroll-margin-block: 90px; }
+.content-order-prompt { width: 440px; max-width: calc(100vw - 32px); }
+@media (max-width: 640px) {
+  .ig-list-actions .content-order-controls { flex-basis: 100%; max-width: none; justify-content: flex-start; text-align: left; }
+}
 /* ---------- 页面根容器 ---------- */
 .lxm-page {
   display: grid;

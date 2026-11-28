@@ -2409,12 +2409,18 @@ module.exports = function createApi(source, mode, options = {}) {
     const method = req.method;
     const raw = method === "DELETE" ? {} : await readBody(req);
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "请求体无效" });
+    const sortDirectionOnly = Object.prototype.hasOwnProperty.call(raw, "sortDirection");
+    const targetPositionOnly = Object.prototype.hasOwnProperty.call(raw, "targetPosition");
+    const sortOnly = sortDirectionOnly || targetPositionOnly;
+    if (sortOnly && (!CONTENT_ORDER_KEYS.has(key) || method !== "PUT" || Object.keys(raw).length !== 1)) {
+      return json(res, 400, { error: "排序操作须单独提交上移、下移或目标位置" });
+    }
+    if (sortDirectionOnly && ![-1, 1].includes(raw.sortDirection)) return json(res, 400, { error: "排序方向须为上移或下移" });
+    if (targetPositionOnly && (!Number.isSafeInteger(raw.targetPosition) || raw.targetPosition < 1)) {
+      return json(res, 400, { error: "目标位置必须为正整数" });
+    }
     delete raw.__spotOrder;
     delete raw.__contentOrder;
-    const sortOnly = Object.prototype.hasOwnProperty.call(raw, "sortDirection");
-    if (sortOnly && (!CONTENT_ORDER_KEYS.has(key) || method !== "PUT" || ![-1, 1].includes(raw.sortDirection) || Object.keys(raw).length !== 1)) {
-      return json(res, 400, { error: "排序操作须单独提交升序或降序" });
-    }
     if (["deleted", "isDeleted"].some((field) => Object.prototype.hasOwnProperty.call(raw, field) && typeof raw[field] !== "boolean")) return json(res, 400, { error: "删除状态必须为布尔值" });
     if ("deleted" in raw && "isDeleted" in raw && raw.deleted !== raw.isDeleted) return json(res, 400, { error: "删除状态不一致" });
     if (method === "POST" && key !== "tagLibrary" && !["isShow", "status", "enabled", "visible"].some((field) => Object.prototype.hasOwnProperty.call(raw, field))) {
@@ -2518,7 +2524,8 @@ module.exports = function createApi(source, mode, options = {}) {
             if (!saved) throw new Error("点位记录保存失败");
           }
         } else if (CONTENT_ORDER_KEYS.has(key)) {
-          const orderOptions = { create: !current, direction: sortOnly ? raw.sortDirection : 0 };
+          const orderOptions = { create: !current, direction: sortDirectionOnly ? raw.sortDirection : 0,
+            ...(targetPositionOnly ? { targetPosition: raw.targetPosition } : {}) };
           if (typeof source.applyContentMutation === "function") {
             const result = await source.applyContentMutation(key, recordId, patch, orderOptions);
             if (!result || !result.saved || !Array.isArray(result.changes)) throw new Error("商品排序保存失败");
@@ -2569,6 +2576,7 @@ module.exports = function createApi(source, mode, options = {}) {
             else await restoreChangedFields(source, entry.key, entry.id, entry.before, Object.keys(entry.patch));
           } catch (_) { rolledBack = false; }
         }
+        if (error.code === "CONTENT_ORDER_INVALID" && rolledBack) return json(res, 400, { error: error.message });
         return json(res, 503, { error: rolledBack ? "内容保存失败，变更已回滚，请稍后重试" : "内容保存失败，回滚未完成，请管理员检查后重试" });
       }
       if (boundFileIds.length) await files.markBound(boundFileIds);

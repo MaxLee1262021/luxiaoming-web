@@ -17,6 +17,7 @@ function planContentMutation(key, rows, id, patch = {}, options = {}) {
   const clean = clone(patch);
   delete clean.sort;
   delete clean.sortDirection;
+  delete clean.targetPosition;
   delete clean.__contentOrder;
   const saved = { ...clone(current || {}), ...clean, id, _id: id };
   const changes = new Map();
@@ -28,11 +29,18 @@ function planContentMutation(key, rows, id, patch = {}, options = {}) {
     if (idOf(row) === id) saved.sort = index + 1;
     else updateRank(row, index + 1);
   });
-  if (options.direction) {
-    if (![-1, 1].includes(options.direction) || !current || deleted(current)) throw new Error("排序操作无效");
+  const hasTargetPosition = Object.prototype.hasOwnProperty.call(options, "targetPosition");
+  if (hasTargetPosition || options.direction) {
+    const invalidOrder = message => Object.assign(new Error(message), { code: "CONTENT_ORDER_INVALID", statusCode: 400 });
+    if (!current || deleted(current) || hasTargetPosition && options.direction || !hasTargetPosition && ![-1, 1].includes(options.direction)) {
+      throw invalidOrder("排序操作无效");
+    }
     const list = ordered(key, rows, current);
+    if (hasTargetPosition && (!Number.isSafeInteger(options.targetPosition) || options.targetPosition < 1 || options.targetPosition > list.length)) {
+      throw invalidOrder(`目标位置须为 1 至 ${list.length} 之间的整数`);
+    }
     const index = list.findIndex(row => idOf(row) === id);
-    const target = Math.max(0, Math.min(list.length - 1, index + options.direction));
+    const target = hasTargetPosition ? options.targetPosition - 1 : Math.max(0, Math.min(list.length - 1, index + options.direction));
     list.splice(index, 1);
     list.splice(target, 0, saved);
     normalize(list);

@@ -13,7 +13,7 @@
   <div v-if="ui.loadError" class="ig-load-error" role="alert">{{ ui.loadError }}<button class="ig-btn" @click="loadGuideData">重新加载</button></div>
 
   <main class="ig-list-main" v-if="ui.mode==='list'">
-    <div class="ig-list-head"><div><h1>灵感管理</h1><p>共 <b>{{ guideTotal }}</b> 条旅拍灵感，升序向前插一位，降序向后插一位</p></div><button class="ig-btn primary" v-if="can('contentEdit')" @click="openEditor()">+ 新建灵感</button></div>
+    <div class="ig-list-head"><div><h1>灵感管理</h1><p>共 <b>{{ guideTotal }}</b> 条旅拍灵感，可移到最前或指定位置，其他灵感自动顺延</p></div><button class="ig-btn primary" v-if="can('contentEdit')" @click="openEditor()">+ 新建灵感</button></div>
     <div class="ig-filter-bar">
       <div class="ig-search"><span aria-hidden="true">⌕</span><input v-model="state.filters.keyword" placeholder="搜索标题 / 打卡点" aria-label="搜索标题或打卡点"></div>
       <div class="ig-segments" aria-label="发布状态筛选"><button v-for="tab in [{key:'all',label:'全部'},{key:'published',label:'已发布'},{key:'draft',label:'草稿'}]" :key="tab.key" :class="{active:ui.filter===tab.key}" @click="ui.filter=tab.key">{{ tab.label }}</button></div>
@@ -22,7 +22,7 @@
       <button class="ig-btn" v-if="state.filters.contentSpotId || state.filters.keyword || ui.filter!=='all' || ui.categoryFilter" @click="state.filters.contentSpotId='';state.filters.keyword='';ui.filter='all';ui.categoryFilter=''">重置</button>
     </div>
     <div class="ig-card-list">
-      <article class="ig-inspiration-card" v-for="item in guideRows" :key="idOf(item)" :class="{pinned:item.isTop,'front-hidden':!frontVisible(item)}">
+      <article class="ig-inspiration-card" data-content-order-key="guides" :data-content-order-id="item.id || item._id" v-for="item in guideRows" :key="idOf(item)" :class="{pinned:item.isTop,'front-hidden':!frontVisible(item),'is-sort-highlighted':contentSortHighlighted('guides', item)}">
         <button class="ig-list-cover" :aria-label="'预览 '+(item.title || item.name)" @click="openPreview(item)">
           <img v-if="item.cover || item.image" :src="item.cover || item.image" alt="灵感封面"><span class="ig-cover-placeholder" v-else>{{ (item.title || item.name || '灵').slice(0,1) }}</span>
           <span v-if="item.isTop" class="ig-pin-badge">置顶</span><span v-if="!frontVisible(item)" class="ig-hide-badge">前端隐藏</span>
@@ -32,7 +32,7 @@
           <p class="ig-description">{{ textOf(item.contentHtml || item.content || item.description) || '暂无正文内容' }}</p>
           <div class="ig-list-meta"><span class="ig-spot-chip" v-for="id in spotIdsOf(item).slice(0,2)" :key="id">{{ spotLabel(id) }}</span><span class="ig-spot-chip more" v-if="spotIdsOf(item).length>2">+{{ spotIdsOf(item).length-2 }}</span><span class="ig-product-meta">🛍 {{ productLabel(item) }}</span><span>👁 {{ item.readCount ?? item.views ?? 0 }}</span><span>★ {{ item.score ?? 0 }} 分</span><span>♡ {{ item.likeCount || item.likes || 0 }}</span><span>更新于 {{ timeLabel(item.updatedAt || item.createdAt) }}</span></div>
         </div>
-        <div class="ig-list-actions"><div class="content-order-controls" v-if="can('contentEdit')" role="group" aria-label="展示排序"><span class="content-order-position">第 {{ contentSortPosition('guides', item) }} 位</span><button class="ig-action" :disabled="ui.saving || contentSortDisabled('guides', item, -1)" @click="changeContentSort('guides', item, -1)">升序</button><button class="ig-action" :disabled="ui.saving || contentSortDisabled('guides', item, 1)" @click="changeContentSort('guides', item, 1)">降序</button></div>
+        <div class="ig-list-actions"><div class="content-order-controls" v-if="can('contentEdit')" role="group" aria-label="展示排序"><span class="content-order-position" title="全部同类内容的展示顺位，包含隐藏内容；筛选不改变总顺位">同类第 {{ contentSortPosition('guides', item) }} 位</span><button type="button" class="ig-action" :disabled="ui.saving || contentSortMoveDisabled('guides', item, 1)" @click="moveContentToPosition('guides', item, 1)">移到最前</button><button type="button" class="ig-action" :disabled="ui.saving || contentSortMoveDisabled('guides', item)" @click="promptContentSort('guides', item)">移动到…</button><button type="button" class="ig-action content-order-step" :disabled="ui.saving || contentSortDisabled('guides', item, -1)" @click="changeContentSort('guides', item, -1)">上移</button><button type="button" class="ig-action content-order-step" :disabled="ui.saving || contentSortDisabled('guides', item, 1)" @click="changeContentSort('guides', item, 1)">下移</button></div>
           <button class="ig-action" v-if="can('contentEdit')" @click="openEditor(item)">✎ 编辑</button>
           <button class="ig-action" :class="{'on-blue':frontVisible(item)}" v-if="can('contentEdit')" :disabled="ui.saving" @click="toggleGuide(item)">{{ frontVisible(item) ? '◉ 前端显示中' : '⊘ 前端已隐藏' }}</button>
           <button class="ig-action" :class="{on:item.isTop}" v-if="can('contentEdit')" :disabled="ui.saving" @click="pinGuide(item)">{{ item.isTop ? '★ 取消置顶' : '☆ 置顶' }}</button>
